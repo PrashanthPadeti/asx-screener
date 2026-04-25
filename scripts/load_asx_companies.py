@@ -119,15 +119,14 @@ def transform(df: pd.DataFrame) -> list[dict]:
         is_miner = gics in MINING_INDUSTRIES or "Mining" in gics or "Resources" in gics
 
         companies.append({
-            "asx_code":     asx_code,
-            "company_name": company_name,
-            "sector":       sector,
-            "industry":     gics if gics and gics != "Not Applic" else None,
-            "is_reit":      is_reit,
-            "is_miner":     is_miner,
-            "listing_date": None,   # Not in ASX CSV — enriched later
-            "is_active":    True,
-            "data_source":  "asx_csv",
+            "asx_code":           asx_code,
+            "company_name":       company_name,
+            "gics_sector":        sector,
+            "gics_industry_group": gics if gics and gics != "Not Applic" else None,
+            "is_reit":            is_reit,
+            "is_miner":           is_miner,
+            "listing_date":       None,   # Not in ASX CSV — enriched later
+            "status":             "active",
         })
 
     return companies
@@ -144,39 +143,37 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
         (
             c["asx_code"],
             c["company_name"],
-            c["sector"],
-            c["industry"],
+            c["gics_sector"],
+            c["gics_industry_group"],
             c["is_reit"],
             c["is_miner"],
             c["listing_date"],
-            c["is_active"],
-            c["data_source"],
+            c["status"],
         )
         for c in companies
     ]
 
     sql = """
         INSERT INTO market.companies (
-            asx_code, company_name, sector, industry,
-            is_reit, is_miner, listing_date, is_active, data_source
+            asx_code, company_name, gics_sector, gics_industry_group,
+            is_reit, is_miner, listing_date, status
         )
         VALUES %s
         ON CONFLICT (asx_code) DO UPDATE SET
-            company_name = EXCLUDED.company_name,
-            sector       = EXCLUDED.sector,
-            industry     = EXCLUDED.industry,
-            is_reit      = EXCLUDED.is_reit,
-            is_miner     = EXCLUDED.is_miner,
-            is_active    = EXCLUDED.is_active,
-            data_source  = EXCLUDED.data_source,
-            updated_at   = NOW()
+            company_name         = EXCLUDED.company_name,
+            gics_sector          = EXCLUDED.gics_sector,
+            gics_industry_group  = EXCLUDED.gics_industry_group,
+            is_reit              = EXCLUDED.is_reit,
+            is_miner             = EXCLUDED.is_miner,
+            status               = EXCLUDED.status,
+            updated_at           = NOW()
     """
 
     print(f"Upserting {len(rows)} companies ...")
     execute_values(cur, sql, rows, page_size=500)
     conn.commit()
 
-    cur.execute("SELECT COUNT(*) FROM market.companies WHERE is_active = TRUE")
+    cur.execute("SELECT COUNT(*) FROM market.companies WHERE status = 'active'")
     count = cur.fetchone()[0]
     print(f"  market.companies now has {count} active companies ✅")
 

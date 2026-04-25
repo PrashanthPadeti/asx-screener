@@ -29,6 +29,10 @@ email-validator==2.2.0
 # HTTP client (for fetching ASX data)
 httpx==0.28.1
 aiohttp==3.11.10
+requests==2.32.3         # Used by data loader scripts
+
+# Data providers
+eodhd                    # Official EODHD Python SDK (pip install eodhd -U)
 
 # Data processing
 pandas==2.2.3

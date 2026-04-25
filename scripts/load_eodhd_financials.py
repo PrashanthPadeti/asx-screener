@@ -155,11 +155,9 @@ def parse_income_statement(asx_code: str, data: dict) -> list[dict]:
         netIncome, interestExpense, incomeTaxExpense, depreciationAndAmortization
     """
     try:
-        annual = (
-            data.get("Financials", {})
-                .get("Income_Statement", {})
-                .get("annual", {})
-        )
+        is_section = data.get("Financials", {}).get("Income_Statement", {})
+        # EODHD uses 'yearly' key (not 'annual')
+        annual = is_section.get("yearly") or is_section.get("annual") or {}
     except AttributeError:
         return []
 
@@ -271,11 +269,9 @@ def parse_balance_sheet(asx_code: str, data: dict) -> list[dict]:
         netReceivables, inventory
     """
     try:
-        annual = (
-            data.get("Financials", {})
-                .get("Balance_Sheet", {})
-                .get("annual", {})
-        )
+        bs_section = data.get("Financials", {}).get("Balance_Sheet", {})
+        # EODHD uses 'yearly' key (not 'annual')
+        annual = bs_section.get("yearly") or bs_section.get("annual") or {}
     except AttributeError:
         return []
 
@@ -396,11 +392,9 @@ def parse_cash_flow(asx_code: str, data: dict) -> list[dict]:
         dividendsPaid, freeCashFlow, depreciation, changeToNetincome
     """
     try:
-        annual = (
-            data.get("Financials", {})
-                .get("Cash_Flow", {})
-                .get("annual", {})
-        )
+        cf_section = data.get("Financials", {}).get("Cash_Flow", {})
+        # EODHD uses 'yearly' key (not 'annual')
+        annual = cf_section.get("yearly") or cf_section.get("annual") or {}
     except AttributeError:
         return []
 

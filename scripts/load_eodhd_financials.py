@@ -98,6 +98,22 @@ def fiscal_year(d: date) -> int:
     return d.year
 
 
+def dedup_by_fiscal_year(rows: list[dict]) -> list[dict]:
+    """
+    Remove duplicate fiscal years — keep the row with the latest period_end_date.
+    EODHD sometimes returns multiple records mapping to the same fiscal year
+    (e.g. interim + full-year reports both mapping to FY2024).
+    The ON CONFLICT DO UPDATE batch upsert fails if duplicates exist in the same batch.
+    """
+    seen: dict[int, dict] = {}
+    for row in rows:
+        fy  = row["fiscal_year"]
+        ped = row["period_end_date"]
+        if fy not in seen or ped > seen[fy]["period_end_date"]:
+            seen[fy] = row
+    return list(seen.values())
+
+
 # ── EODHD Fetcher ─────────────────────────────────────────────────────────────
 
 def fetch_fundamentals(asx_code: str) -> Optional[dict]:
@@ -537,9 +553,9 @@ def load_stock(cur, asx_code: str) -> dict:
 
     counts = {"pnl": 0, "bs": 0, "cf": 0}
 
-    pnl_rows = parse_income_statement(asx_code, data)
-    bs_rows  = parse_balance_sheet(asx_code, data)
-    cf_rows  = parse_cash_flow(asx_code, data)
+    pnl_rows = dedup_by_fiscal_year(parse_income_statement(asx_code, data))
+    bs_rows  = dedup_by_fiscal_year(parse_balance_sheet(asx_code, data))
+    cf_rows  = dedup_by_fiscal_year(parse_cash_flow(asx_code, data))
     dps      = parse_dps(data)
 
     if pnl_rows:

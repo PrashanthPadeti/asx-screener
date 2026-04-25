@@ -59,9 +59,6 @@ async def root():
     return {"message": "ASX Screener API", "docs": "/docs"}
 
 
-# ── Routers (added as built) ──────────────────────────────────
-# from app.api.v1.routes import screener, companies, auth, watchlist
-# app.include_router(auth.router,      prefix="/api/v1/auth",      tags=["Auth"])
-# app.include_router(companies.router, prefix="/api/v1/companies", tags=["Companies"])
-# app.include_router(screener.router,  prefix="/api/v1/screener",  tags=["Screener"])
-# app.include_router(watchlist.router, prefix="/api/v1/watchlist", tags=["Watchlist"])
+# ── Routers ───────────────────────────────────────────────────
+from app.api.v1.router import api_router
+app.include_router(api_router, prefix="/api/v1")

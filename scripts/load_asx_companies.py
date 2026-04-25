@@ -185,7 +185,7 @@ def print_summary(companies: list[dict]) -> None:
     """Print a breakdown of what we loaded."""
     df = pd.DataFrame(companies)
     print("\n── Sector Breakdown ─────────────────────────────────────")
-    print(df["sector"].value_counts().to_string())
+    print(df["gics_sector"].value_counts().to_string())
     print(f"\n── REITs: {df['is_reit'].sum()}")
     print(f"── Miners: {df['is_miner'].sum()}")
     print(f"── Total: {len(df)}")

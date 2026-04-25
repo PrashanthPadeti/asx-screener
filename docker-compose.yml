@@ -1,0 +1,171 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────
+#  ASX Screener — Local Development Stack
+#  Start:  docker-compose up -d
+#  Stop:   docker-compose down
+#  Reset:  docker-compose down -v   (deletes all data volumes!)
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  # ── PostgreSQL 16 + TimescaleDB ──────────────────────────────
+  db:
+    image: timescale/timescaledb-ha:pg16-latest
+    container_name: asx_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB:-asx_screener}
+      POSTGRES_USER:     ${POSTGRES_USER:-asx_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/home/postgres/pgdata/data
+      - ./database/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-asx_user} -d ${POSTGRES_DB:-asx_screener}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    shm_size: 256mb
+
+  # ── Redis 7 (cache + task queue + pub/sub) ───────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: asx_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Elasticsearch 8 (screener search index) ──────────────────
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    container_name: asx_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - cluster.name=asx-screener
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\\|yellow\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  # ── FastAPI Backend ───────────────────────────────────────────
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: asx_api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-asx_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-asx_screener}
+      REDIS_URL:    redis://redis:6379/0
+      ES_URL:       http://elasticsearch:9200
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ── Next.js Frontend ──────────────────────────────────────────
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: asx_web
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/v1
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    command: npm run dev
+
+  # ── Airflow (pipeline orchestration) ─────────────────────────
+  airflow-db:
+    image: postgres:16-alpine
+    container_name: asx_airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       airflow
+      POSTGRES_USER:     airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+
+  airflow:
+    image: apache/airflow:2.9.0
+    container_name: asx_airflow
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR:                    LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:        postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY:                  ${AIRFLOW_FERNET_KEY}
+      AIRFLOW__WEBSERVER__SECRET_KEY:             ${AIRFLOW_SECRET_KEY}
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES:               "false"
+      ASX_DATABASE_URL: postgresql://${POSTGRES_USER:-asx_user}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-asx_screener}
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./pipeline/dags:/opt/airflow/dags
+      - ./pipeline/plugins:/opt/airflow/plugins
+      - airflow_logs:/opt/airflow/logs
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    command: >
+      bash -c "airflow db migrate &&
+               airflow users create --username admin --password admin
+                 --firstname Admin --lastname User --role Admin
+                 --email admin@asxscreener.local &&
+               airflow webserver & airflow scheduler"
+
+volumes:
+  db_data:
+  redis_data:
+  es_data:
+  airflow_db_data:
+  airflow_logs:

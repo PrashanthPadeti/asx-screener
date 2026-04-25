@@ -202,10 +202,17 @@ def parse_income_statement(asx_code: str, data: dict) -> list[dict]:
         eps_d = safe_float(r.get("epsDiluted") or r.get("dilutedEps"))
 
         # Derived margins
-        opm = round(ebit   / rev, 6) if ebit   and rev and rev != 0 else None
-        npm = round(ni     / rev, 6) if ni     and rev and rev != 0 else None
-        gpm = round(gp     / rev, 6) if gp     and rev and rev != 0 else None
-        ebitda_margin = round(ebitda / rev, 6) if ebitda and rev and rev != 0 else None
+        def safe_margin(num, denom):
+            """Calculate margin, return None if overflow or invalid."""
+            if not num or not denom or denom == 0:
+                return None
+            m = num / denom
+            return round(m, 6) if abs(m) < 9999 else None   # NUMERIC(10,6) max = 9999.999999
+
+        opm          = safe_margin(ebit,   rev)
+        npm          = safe_margin(ni,     rev)
+        gpm          = safe_margin(gp,     rev)
+        ebitda_margin = safe_margin(ebitda, rev)
 
         rows.append({
             "asx_code":       asx_code,

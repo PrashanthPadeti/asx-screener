@@ -56,6 +56,7 @@ docker-compose.override.yml
 
 # Logs
 logs/
+!logs/.gitkeep
 *.log
 
 # Data files (large CSVs, parquet — use S3 instead)

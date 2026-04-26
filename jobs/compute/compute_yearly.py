@@ -54,6 +54,12 @@ log = logging.getLogger(__name__)
 #  Safe math helpers
 # ─────────────────────────────────────────────────────────────
 
+def floatify(d: dict) -> dict:
+    """Convert Decimal values to float so standard arithmetic works."""
+    from decimal import Decimal
+    return {k: float(v) if isinstance(v, Decimal) else v
+            for k, v in (d or {}).items()}
+
 def safe_div(num, denom, scale=1):
     """Return num/denom*scale, None if denom is zero or either is None."""
     if num is None or denom is None or denom == 0:
@@ -276,7 +282,7 @@ def fetch_all_pnl(cur, asx_code: str) -> list[dict]:
         SELECT * FROM financials.annual_pnl
         WHERE asx_code = %s ORDER BY fiscal_year DESC
     """, (asx_code,))
-    return cur.fetchall()
+    return [floatify(r) for r in cur.fetchall()]
 
 
 def fetch_all_bs(cur, asx_code: str) -> list[dict]:
@@ -284,7 +290,7 @@ def fetch_all_bs(cur, asx_code: str) -> list[dict]:
         SELECT * FROM financials.annual_balance_sheet
         WHERE asx_code = %s ORDER BY fiscal_year DESC
     """, (asx_code,))
-    return cur.fetchall()
+    return [floatify(r) for r in cur.fetchall()]
 
 
 def fetch_all_cf(cur, asx_code: str) -> list[dict]:
@@ -292,7 +298,7 @@ def fetch_all_cf(cur, asx_code: str) -> list[dict]:
         SELECT * FROM financials.annual_cashflow
         WHERE asx_code = %s ORDER BY fiscal_year DESC
     """, (asx_code,))
-    return cur.fetchall()
+    return [floatify(r) for r in cur.fetchall()]
 
 
 def fetch_price_at_fy(cur, asx_code: str, fy_end_date: date) -> Optional[float]:

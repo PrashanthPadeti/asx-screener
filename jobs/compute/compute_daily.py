@@ -694,9 +694,9 @@ def compute_daily_for_stock(asx_code: str, rows: list[dict],
             "sma_200_prev":     round(s200_prev, 4) if s200_prev is not None else None,
 
             # DMA ratios
-            "dma_50_ratio":     dma_ratio(c, sma50_s[i]),
-            "dma_200_ratio":    dma_ratio(c, sma200_s[i]),
-            "price_to_sma20":   dma_ratio(c, sma20_s[i]),
+            "dma50_ratio":      dma_ratio(c, sma50_s[i]),
+            "dma200_ratio":     dma_ratio(c, sma200_s[i]),
+            "dma20_ratio":      dma_ratio(c, sma20_s[i]),
 
             # MACD
             "macd_line":        round(macd_l_s[i],    6) if macd_l_s[i]    is not None else None,
@@ -722,12 +722,12 @@ def compute_daily_for_stock(asx_code: str, rows: list[dict],
             "bb_width":         bb_w_s[i],
 
             # ADX
-            "adx":              adx_s[i],
-            "di_plus":          pdi_s[i],
-            "di_minus":         mdi_s[i],
+            "adx_14":           adx_s[i],
+            "plus_di":          pdi_s[i],
+            "minus_di":         mdi_s[i],
 
             # CCI
-            "cci":              cci_s[i],
+            "cci_20":           cci_s[i],
 
             # Williams %R
             "williams_r":       wpr_s[i],
@@ -743,7 +743,7 @@ def compute_daily_for_stock(asx_code: str, rows: list[dict],
             "obv":              obv_s[i],
 
             # VWAP
-            "vwap_20d":         vwap_s[i],
+            "vwap":             vwap_s[i],
 
             # CMF
             "cmf_20":           cmf_s[i],
@@ -762,8 +762,8 @@ def compute_daily_for_stock(asx_code: str, rows: list[dict],
             "pct_from_52w_low":  pct_from_52wl,
 
             # ATH / ATL
-            "all_time_high":    round(ath, 4) if ath else None,
-            "all_time_low":     round(atl, 4) if atl else None,
+            "ath_price":        round(ath, 4) if ath else None,
+            "atl_price":        round(atl, 4) if atl else None,
             "pct_from_ath":     pct_from_ath,
             "pct_from_atl":     pct_from_atl,
 

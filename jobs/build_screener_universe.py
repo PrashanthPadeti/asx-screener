@@ -208,40 +208,42 @@ def load_weekly(cur, asx_code: str) -> dict:
     return cur.fetchone() or {}
 
 
-def load_short_interest(cur, asx_code: str) -> dict:
+def _safe_query(cur, sql: str, params: tuple) -> dict:
+    """Run a query that might fail (table doesn't exist). Uses savepoint to avoid
+    aborting the whole transaction on error."""
+    cur.execute("SAVEPOINT safe_query")
     try:
-        cur.execute("""
-            SELECT short_position, short_pct_of_float,
-                   short_pct_change_1w, short_pct_change_4w
-            FROM market.short_interest
-            WHERE asx_code = %s
-            ORDER BY report_date DESC LIMIT 1
-        """, (asx_code,))
-        return cur.fetchone() or {}
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        cur.execute("RELEASE SAVEPOINT safe_query")
+        return row or {}
     except Exception:
+        cur.execute("ROLLBACK TO SAVEPOINT safe_query")
         return {}
+
+
+def load_short_interest(cur, asx_code: str) -> dict:
+    return _safe_query(cur, """
+        SELECT short_position, short_pct_of_float,
+               short_pct_change_1w, short_pct_change_4w
+        FROM market.short_interest
+        WHERE asx_code = %s
+        ORDER BY report_date DESC LIMIT 1
+    """, (asx_code,))
 
 
 def load_mining(cur, asx_code: str) -> dict:
-    try:
-        cur.execute("""
-            SELECT * FROM financials.mining_data
-            WHERE asx_code = %s LIMIT 1
-        """, (asx_code,))
-        return cur.fetchone() or {}
-    except Exception:
-        return {}
+    return _safe_query(cur, """
+        SELECT * FROM financials.mining_data
+        WHERE asx_code = %s LIMIT 1
+    """, (asx_code,))
 
 
 def load_reit(cur, asx_code: str) -> dict:
-    try:
-        cur.execute("""
-            SELECT * FROM financials.reit_data
-            WHERE asx_code = %s LIMIT 1
-        """, (asx_code,))
-        return cur.fetchone() or {}
-    except Exception:
-        return {}
+    return _safe_query(cur, """
+        SELECT * FROM financials.reit_data
+        WHERE asx_code = %s LIMIT 1
+    """, (asx_code,))
 
 
 # ─────────────────────────────────────────────────────────────

@@ -69,17 +69,20 @@ def safe_div(num, denom, scale=1):
 
 
 def safe_ratio(num, denom):
-    """Return num/denom rounded to 4dp, clamped for display."""
+    """Return num/denom rounded to 4dp, clamped to NUMERIC(8,4) range."""
     if num is None or denom is None or denom == 0:
         return None
     r = num / denom
-    return round(r, 4) if abs(r) < 99999 else None
+    # NUMERIC(8,4) max is 9999.9999 — return None for extreme values
+    return round(r, 4) if abs(r) < 9999 else None
 
 
 def safe_pct(num, denom):
-    """Return (num/denom)*100 as percentage, None on bad inputs."""
+    """Return (num/denom)*100 as percentage, clamped to NUMERIC(8,4) range."""
     v = safe_div(num, denom, 100)
-    return round(v, 4) if v is not None else None
+    if v is None or abs(v) >= 9999:
+        return None
+    return round(v, 4)
 
 
 def cagr(end_val, start_val, years):

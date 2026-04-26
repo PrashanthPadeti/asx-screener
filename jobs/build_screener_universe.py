@@ -122,43 +122,46 @@ def load_yearly(cur, asx_code: str) -> tuple[dict, dict, dict]:
 def load_annual_pnl_multi(cur, asx_code: str) -> dict:
     """Raw annual P&L rows keyed by fiscal_year — for N-year actual values."""
     cur.execute("""
-        SELECT fiscal_year, revenue, gross_profit, ebit, ebitda,
-               net_profit AS net_income, eps, dps, dps_franking_pct,
-               depreciation, interest_expense, tax,
-               material_cost, employee_cost, other_income, extraordinary_items
-        FROM financials.annual_pnl
-        WHERE asx_code = %s
-        ORDER BY fiscal_year DESC LIMIT 12
+        SELECT * FROM financials.annual_pnl
+        WHERE asx_code = %s ORDER BY fiscal_year DESC LIMIT 12
     """, (asx_code,))
-    return {r["fiscal_year"]: r for r in cur.fetchall()}
+    rows = cur.fetchall()
+    # annual_pnl stores net_profit; alias to net_income for consistency
+    result = {}
+    for r in rows:
+        d = dict(r)
+        if "net_profit" in d and "net_income" not in d:
+            d["net_income"] = d["net_profit"]
+        result[d["fiscal_year"]] = d
+    return result
 
 
 def load_annual_bs_multi(cur, asx_code: str) -> dict:
     cur.execute("""
-        SELECT fiscal_year,
-               total_assets, total_liabilities, total_equity,
-               current_assets, current_liabilities, cash_and_equivalents,
-               total_debt, long_term_debt, short_term_debt,
-               inventory, receivables, payables,
-               goodwill, intangibles, fixed_assets,
-               gross_block, net_block, accumulated_depreciation, capital_wip,
-               lease_liabilities, equity_capital, preference_capital, reserves,
-               trade_payables, advance_from_customers, contingent_liabilities,
-               face_value, investments, shares_outstanding
-        FROM financials.annual_balance_sheet
-        WHERE asx_code = %s
-        ORDER BY fiscal_year DESC LIMIT 12
+        SELECT * FROM financials.annual_balance_sheet
+        WHERE asx_code = %s ORDER BY fiscal_year DESC LIMIT 12
     """, (asx_code,))
-    return {r["fiscal_year"]: r for r in cur.fetchall()}
+    rows = cur.fetchall()
+    result = {}
+    for r in rows:
+        d = dict(r)
+        # cash_and_equivalents may be named differently
+        if "cash_and_equivalents" in d and "cash" not in d:
+            d["cash"] = d["cash_and_equivalents"]
+        if "capital_wip" not in d and "cwip" in d:
+            d["capital_wip"] = d["cwip"]
+        if "current_assets" not in d:
+            d["current_assets"] = None
+        if "current_liabilities" not in d:
+            d["current_liabilities"] = None
+        result[d["fiscal_year"]] = d
+    return result
 
 
 def load_annual_cf_multi(cur, asx_code: str) -> dict:
     cur.execute("""
-        SELECT fiscal_year, cfo, cfi, cff, fcf, closing_cash,
-               capex
-        FROM financials.annual_cashflow
-        WHERE asx_code = %s
-        ORDER BY fiscal_year DESC LIMIT 12
+        SELECT * FROM financials.annual_cashflow
+        WHERE asx_code = %s ORDER BY fiscal_year DESC LIMIT 12
     """, (asx_code,))
     return {r["fiscal_year"]: r for r in cur.fetchall()}
 

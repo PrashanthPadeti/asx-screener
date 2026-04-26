@@ -96,8 +96,7 @@ def load_latest_price(cur, asx_code: str) -> dict:
     cur.execute("""
         SELECT time::date AS last_price_date,
                adjusted_close AS close,
-               volume,
-               market_cap
+               volume
         FROM market.daily_prices
         WHERE asx_code = %s AND adjusted_close IS NOT NULL
         ORDER BY time DESC LIMIT 1

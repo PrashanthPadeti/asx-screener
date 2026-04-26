@@ -86,12 +86,13 @@ def cagr(end_val, start_val, years):
     """Compound Annual Growth Rate. Returns None if inputs invalid."""
     if not end_val or not start_val or years <= 0:
         return None
-    if start_val < 0 and end_val < 0:
-        return None          # both negative — CAGR meaningless
     if start_val <= 0:
         return None          # can't compute from zero/negative base
+    ratio = end_val / start_val
+    if ratio <= 0:
+        return None          # negative end value — CAGR undefined
     try:
-        rate = (end_val / start_val) ** (1 / years) - 1
+        rate = ratio ** (1.0 / years) - 1
         return round(rate * 100, 4)   # return as %
     except (ZeroDivisionError, ValueError):
         return None

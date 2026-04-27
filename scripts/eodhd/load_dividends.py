@@ -120,7 +120,7 @@ def upsert_dividends(cur, rows: list[dict]) -> int:
             currency         = EXCLUDED.currency
     """
     vals = [(r["asx_code"], r["ex_date"], r["pay_date"], r["record_date"],
-             r["declared_date"], r["amount"], r["unadjusted_value"],
+             r["declared_date"], r["amount_per_share"], r["unadjusted_value"],
              r["currency"], r["dividend_type"]) for r in rows]
     execute_values(cur, sql, vals, page_size=500)
     return len(rows)

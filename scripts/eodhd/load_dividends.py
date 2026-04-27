@@ -90,14 +90,13 @@ def parse_dividend_file(asx_code: str, data: list) -> tuple[list[dict], dict[int
         rows.append({
             "asx_code":         asx_code,
             "ex_date":          ex_date,
-            "payment_date":     None,    # not provided by /div endpoint
+            "pay_date":         None,    # not provided by /div endpoint
             "record_date":      None,
             "declared_date":    None,
-            "amount":           round(use_amount, 6),
+            "amount_per_share": round(use_amount, 6),
             "unadjusted_value": round(amount, 6) if amount else None,
             "currency":         currency,
-            "div_type":         "Cash Dividend",
-            "data_source":      "eodhd",
+            "dividend_type":    "Cash Dividend",
         })
 
         # Sum into annual DPS (use unadjusted value = what shareholders actually received)
@@ -112,18 +111,17 @@ def upsert_dividends(cur, rows: list[dict]) -> int:
         return 0
     sql = """
         INSERT INTO market.dividends
-            (asx_code, ex_date, payment_date, record_date, declared_date,
-             amount, unadjusted_value, currency, div_type, data_source)
+            (asx_code, ex_date, pay_date, record_date, declared_date,
+             amount_per_share, unadjusted_value, currency, dividend_type)
         VALUES %s
-        ON CONFLICT (asx_code, ex_date) DO UPDATE SET
-            amount           = EXCLUDED.amount,
+        ON CONFLICT (asx_code, ex_date, dividend_type) DO UPDATE SET
+            amount_per_share = EXCLUDED.amount_per_share,
             unadjusted_value = EXCLUDED.unadjusted_value,
-            currency         = EXCLUDED.currency,
-            div_type         = EXCLUDED.div_type
+            currency         = EXCLUDED.currency
     """
-    vals = [(r["asx_code"], r["ex_date"], r["payment_date"], r["record_date"],
+    vals = [(r["asx_code"], r["ex_date"], r["pay_date"], r["record_date"],
              r["declared_date"], r["amount"], r["unadjusted_value"],
-             r["currency"], r["div_type"], r["data_source"]) for r in rows]
+             r["currency"], r["dividend_type"]) for r in rows]
     execute_values(cur, sql, vals, page_size=500)
     return len(rows)
 

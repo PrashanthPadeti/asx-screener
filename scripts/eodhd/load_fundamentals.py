@@ -370,46 +370,11 @@ def parse_quarterly_pnl(asx_code: str, data: dict) -> list[dict]:
 # ── Dividends parser ──────────────────────────────────────────────────────────
 
 def parse_dividends(asx_code: str, data: dict) -> list[dict]:
-    divs = data.get("SplitsDividends", {}).get("Dividends", {})
-    if not divs or divs == "NA":
-        return []
-
-    rows = []
-    for date_str, d in divs.items():
-        if not isinstance(d, dict):
-            continue
-        ex_date = sd(date_str)
-        if not ex_date:
-            continue
-
-        amount   = sf(d.get("value") or d.get("dividend"))
-        unadj    = sf(d.get("unadjustedValue"))
-        currency = d.get("currency") or "AUD"
-        div_type = d.get("type") or d.get("declarationDate")  # EODHD uses 'type'
-        pmt_date = sd(d.get("paymentDate") or d.get("payDate"))
-        rec_date = sd(d.get("recordDate"))
-        dec_date = sd(d.get("declarationDate"))
-
-        # declarationDate is sometimes used for type by EODHD — guard it
-        if isinstance(div_type, date):
-            div_type = None
-
-        if amount is None:
-            continue
-
-        rows.append({
-            "asx_code":         asx_code,
-            "ex_date":          ex_date,
-            "payment_date":     pmt_date,
-            "record_date":      rec_date,
-            "declared_date":    dec_date,
-            "amount":           round(amount, 6),
-            "unadjusted_value": round(unadj, 6) if unadj else None,
-            "currency":         currency[:3] if currency else "AUD",
-            "div_type":         str(div_type)[:50] if div_type else None,
-            "data_source":      "eodhd",
-        })
-    return rows
+    # The fundamentals endpoint does NOT include per-dividend history.
+    # It only has summary fields (ForwardAnnualDividendRate, ExDividendDate, etc.)
+    # Full dividend history is fetched separately via /div/{ticker} endpoint.
+    # Use download_historical_dividends.py + load_dividends.py for that data.
+    return []
 
 
 # ── Splits parser ─────────────────────────────────────────────────────────────

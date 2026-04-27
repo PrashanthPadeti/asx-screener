@@ -110,7 +110,15 @@ def bollinger(prices: list, period: int = 20, std_mult: float = 2.0) -> tuple:
 def annualised_vol(daily_returns: list) -> Optional[float]:
     if len(daily_returns) < 10:
         return None
-    return round(statistics.stdev(daily_returns) * math.sqrt(252) * 100, 4)
+    v = statistics.stdev(daily_returns) * math.sqrt(252) * 100
+    return round(v, 4) if abs(v) < 9999 else None
+
+
+def clamp84(v) -> Optional[float]:
+    """Clamp to NUMERIC(8,4) safe range, return None for overflow."""
+    if v is None:
+        return None
+    return round(v, 4) if abs(v) < 9999 else None
 
 
 # ─────────────────────────────────────────────────────────────
@@ -292,15 +300,15 @@ def compute_monthly_for_stock(asx_code: str, daily_rows: list[dict],
             "close":              round(close, 4),
             "volume_avg":         avg_vol,
             "market_cap":         mcap,
-            "monthly_return":     monthly_ret,
-            "return_3m":          ret_3m,
-            "return_6m":          ret_6m,
-            "return_12m":         ret_12m,
-            "return_ytd":         ret_ytd,
-            "momentum_3m":        ret_3m,
-            "momentum_6m":        ret_6m,
-            "momentum_12m":       ret_12m,
-            "relative_strength_xjo": None,   # computed separately vs XJO
+            "monthly_return":     clamp84(monthly_ret),
+            "return_3m":          clamp84(ret_3m),
+            "return_6m":          clamp84(ret_6m),
+            "return_12m":         clamp84(ret_12m),
+            "return_ytd":         clamp84(ret_ytd),
+            "momentum_3m":        clamp84(ret_3m),
+            "momentum_6m":        clamp84(ret_6m),
+            "momentum_12m":       clamp84(ret_12m),
+            "relative_strength_xjo": None,
             "volatility_1m":      vol_1m,
             "volatility_3m":      vol_3m,
             "volatility_12m":     vol_12m,
@@ -308,11 +316,11 @@ def compute_monthly_for_stock(asx_code: str, daily_rows: list[dict],
             "macd_line":          ml,
             "macd_signal":        sl,
             "macd_hist":          mh,
-            "bb_pct":             bb_p,
-            "bb_width":           bb_w,
+            "bb_pct":             clamp84(bb_p),
+            "bb_width":           clamp84(bb_w),
             "sma_12m":            sma_12m,
-            "price_to_52w_high":  p_to_52wh,
-            "drawdown_from_ath":  drawdown,
+            "price_to_52w_high":  clamp84(p_to_52wh),
+            "drawdown_from_ath":  clamp84(drawdown),
             "compute_version":    COMPUTE_VERSION,
             "computed_at":        datetime.utcnow(),
         })

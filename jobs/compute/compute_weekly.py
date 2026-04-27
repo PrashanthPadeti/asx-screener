@@ -196,6 +196,13 @@ def obv_series(closes, volumes) -> int:
     return obv_val
 
 
+def clamp84(v) -> Optional[float]:
+    """Clamp to NUMERIC(8,4) safe range, return None for overflow."""
+    if v is None:
+        return None
+    return round(v, 4) if abs(v) < 9999 else None
+
+
 # ─────────────────────────────────────────────────────────────
 #  Weekly bar aggregation
 # ─────────────────────────────────────────────────────────────
@@ -383,10 +390,10 @@ def compute_weekly_for_stock(asx_code: str, daily_rows: list[dict],
             "close":          round(close, 4),
             "volume":         vol,
             "market_cap":     mcap,
-            "weekly_return":  weekly_ret,
-            "return_4w":      ret_4w,
-            "return_13w":     ret_13w,
-            "return_52w":     ret_52w,
+            "weekly_return":  clamp84(weekly_ret),
+            "return_4w":      clamp84(ret_4w),
+            "return_13w":     clamp84(ret_13w),
+            "return_52w":     clamp84(ret_52w),
             "adx_14":         adx_v,
             "plus_di":        pdi,
             "minus_di":       ndi,
@@ -409,10 +416,10 @@ def compute_weekly_for_stock(asx_code: str, daily_rows: list[dict],
             "atr_14":         atr_v,
             "bb_upper":       bb_u,
             "bb_lower":       bb_l,
-            "bb_pct":         bb_p,
-            "bb_width":       bb_w,
+            "bb_pct":         clamp84(bb_p),
+            "bb_width":       clamp84(bb_w),
             "volume_avg_4w":  vol_avg_4w,
-            "relative_volume": rel_vol,
+            "relative_volume": clamp84(rel_vol),
             "obv":            obv_v,
             "golden_cross":   bool(golden_cross),
             "death_cross":    bool(death_cross),

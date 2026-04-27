@@ -390,11 +390,25 @@ One JSON file per dataset per run date, written to `audit/`:
 
 ## 6. Staging Layer Design
 
-The staging layer loads raw files with minimal transformation. Column names follow EODHD's naming conventions (or a direct snake_case conversion). Every row is append-only with `loaded_at`, `source_file`, `is_latest`, and `is_archived` columns.
+The staging layer loads raw files with zero transformation. Column names follow EODHD's naming conventions (snake_case conversion only). Each load run **truncates** the target tables and reloads from the latest raw files — staging always holds the current snapshot, never historical rows.
 
-### 6.1 Core Rule
+### 6.1 Core Rules
 
 **No business logic in staging.** No calculations, no renaming of values, no unit conversions, no nullability coercion beyond what the DB requires. The staging layer is a faithful DB representation of what EODHD returned.
+
+**Truncate and Reload — not append-only.** History is preserved in the Raw Zone (the immutable gzipped files on disk). The DB does not need to store every historical snapshot — that would duplicate the Raw Zone and add `is_latest`/`is_archived` complexity for zero benefit in a screener. Staging is a transient landing pad for the Transform layer.
+
+**Reload strategy by dataset:**
+
+| Dataset | Strategy | Reason |
+|---------|----------|--------|
+| `staging.fundamentals` and all derived tables | `TRUNCATE … RESTART IDENTITY` (full run) | Weekly full refresh replaces all ~2,000 rows |
+| `staging.eod_prices` (historical) | `TRUNCATE` (full run) | One-time historical load; incremental takes over |
+| `staging.eod_prices` (incremental) | `DELETE WHERE date = target_date` then insert | Idempotent daily re-run without wiping all prices |
+| `staging.dividends` | `TRUNCATE` (full run) | Dividend history is loaded as one full refresh |
+| `staging.exchange_symbols` | `TRUNCATE` | Symbol list replaced on each sync |
+
+**Partial runs** (`--codes`, `--date`, `--from-code`) do **not** truncate — they upsert into the live table. This allows refreshing a single stock without affecting others.
 
 ### 6.2 Table Definitions
 
@@ -413,12 +427,10 @@ Source: `/eod/{ticker}.AU` (historical) and `/eod/bulk-download/AU` (incremental
 | close | NUMERIC(12,4) | |
 | adjusted_close | NUMERIC(12,4) | |
 | volume | BIGINT | |
-| source_file | TEXT | path of raw file |
+| source_file | TEXT | filename of raw file |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
-| is_archived | BOOLEAN DEFAULT FALSE | |
 
-Unique constraint: `(asx_code, date, source_file)` — allows same date from different runs.
+Unique constraint: `(asx_code, date)` — one row per stock per day.
 
 #### staging.fundamentals
 
@@ -438,8 +450,8 @@ Source: `/fundamentals/{ticker}.AU` — stores the full raw JSON blob plus key e
 | source_file | TEXT | |
 | loaded_at | TIMESTAMPTZ | |
 | checksum | VARCHAR(64) | SHA-256 of raw JSON |
-| is_latest | BOOLEAN DEFAULT TRUE | |
-| is_archived | BOOLEAN DEFAULT FALSE | |
+
+Unique constraint: `(asx_code)` — one row per stock (truncate-and-reload means only the latest snapshot is kept).
 
 Note: The `raw_json` JSONB column means all sub-sections (Financials, Highlights, Valuation, etc.) are accessible. Downstream extract tables (`staging.income_statement` etc.) are populated by parsing this blob.
 
@@ -466,9 +478,9 @@ Source: parsed from `staging.fundamentals.raw_json → Financials.Income_Stateme
 | eps | NUMERIC(12,6) | |
 | eps_diluted | NUMERIC(12,6) | |
 | depreciation_amortization | NUMERIC(20,4) | |
-| source_fundamentals_id | BIGINT FK | → staging.fundamentals.id |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
+
+Unique constraint: `(asx_code, date, period_type)`
 
 #### staging.balance_sheet
 
@@ -496,9 +508,9 @@ Source: parsed from `staging.fundamentals.raw_json → Financials.Balance_Sheet.
 | total_stockholder_equity | NUMERIC(20,4) | |
 | retained_earnings | NUMERIC(20,4) | |
 | common_stock | NUMERIC(20,4) | |
-| source_fundamentals_id | BIGINT FK | |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
+
+Unique constraint: `(asx_code, date, period_type)`
 
 #### staging.cash_flow
 
@@ -517,9 +529,9 @@ Source: parsed from `staging.fundamentals.raw_json → Financials.Cash_Flow.year
 | dividends_paid | NUMERIC(20,4) | |
 | change_to_cash | NUMERIC(20,4) | |
 | free_cash_flow | NUMERIC(20,4) | |
-| source_fundamentals_id | BIGINT FK | |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
+
+Unique constraint: `(asx_code, date, period_type)`
 
 #### staging.earnings
 
@@ -535,8 +547,9 @@ Source: parsed from `staging.fundamentals.raw_json → Earnings`
 | eps_estimate | NUMERIC(12,6) | |
 | eps_difference | NUMERIC(12,6) | |
 | surprise_percent | NUMERIC(8,4) | |
-| source_fundamentals_id | BIGINT FK | |
 | loaded_at | TIMESTAMPTZ | |
+
+Unique constraint: `(asx_code, date, period_type)`
 
 #### staging.dividends
 
@@ -547,13 +560,13 @@ Source: `/div/{ticker}.AU`
 | id | BIGSERIAL PK | |
 | asx_code | VARCHAR(10) | |
 | date | DATE | ex-dividend date |
-| dividend | NUMERIC(12,6) | AUD per share |
-| period | VARCHAR(20) | EODHD period field |
+| dividend | NUMERIC(12,6) | adjusted amount (EODHD "dividends" field) |
 | unadjusted_value | NUMERIC(12,6) | |
 | currency | VARCHAR(5) | |
 | source_file | TEXT | |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
+
+Unique constraint: `(asx_code, date)`
 
 #### staging.splits
 
@@ -568,6 +581,8 @@ Source: `/splits/{ticker}.AU`
 | source_file | TEXT | |
 | loaded_at | TIMESTAMPTZ | |
 
+Unique constraint: `(asx_code, date)`
+
 #### staging.exchange_symbols
 
 Source: `/exchange-symbol-list/AU`
@@ -580,11 +595,13 @@ Source: `/exchange-symbol-list/AU`
 | country | VARCHAR(5) | |
 | exchange | VARCHAR(10) | |
 | currency | VARCHAR(5) | |
-| type | VARCHAR(20) | 'Common Stock', 'ETF', etc. |
+| type | VARCHAR(30) | 'Common Stock', 'ETF', etc. |
 | isin | VARCHAR(20) | |
 | snapshot_date | DATE | |
+| source_file | TEXT | |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
+
+Unique constraint: `(code)`
 
 #### staging.company_profile
 
@@ -619,9 +636,10 @@ Source: parsed from `staging.fundamentals.raw_json → General`
 | web_url | TEXT | |
 | full_time_employees | INTEGER | |
 | updated_at | DATE | EODHD field |
-| source_fundamentals_id | BIGINT FK | |
+| source_file | TEXT | |
 | loaded_at | TIMESTAMPTZ | |
-| is_latest | BOOLEAN DEFAULT TRUE | |
+
+Unique constraint: `(asx_code)` — one current row per stock.
 
 #### staging.highlights
 
@@ -629,27 +647,34 @@ Source: parsed from `staging.fundamentals.raw_json → Highlights`
 
 Key EODHD fields stored as-is: `MarketCapitalization`, `EBITDA`, `PERatio`, `PEGRatio`, `WallStreetTargetPrice`, `BookValue`, `DividendShare`, `DividendYield`, `EarningsShare`, `EPSEstimateCurrentYear`, `RevenuePerShareTTM`, `ProfitMargin`, `OperatingMarginTTM`, `ReturnOnAssetsTTM`, `ReturnOnEquityTTM`, `RevenueTTM`, `GrossProfitTTM`, `DilutedEpsTTM`, `QuarterlyEarningsGrowthYOY`, `QuarterlyRevenueGrowthYOY`.
 
+Unique constraint: `(asx_code)` — one row per stock.
+
 #### staging.valuation
 
 Source: parsed from `staging.fundamentals.raw_json → Valuation`
 
 Key fields: `TrailingPE`, `ForwardPE`, `PriceSalesTTM`, `PriceBookMRQ`, `EnterpriseValue`, `EnterpriseValueRevenue`, `EnterpriseValueEbitda`.
 
+Unique constraint: `(asx_code)` — one row per stock.
+
 #### staging.analyst_ratings
 
 Source: parsed from `staging.fundamentals.raw_json → AnalystRatings`
 
-| Column | Type |
-|--------|------|
-| asx_code | VARCHAR(10) |
-| snapshot_date | DATE |
-| rating | NUMERIC(4,2) |
-| target_price | NUMERIC(12,4) |
-| strong_buy | INTEGER |
-| buy | INTEGER |
-| hold | INTEGER |
-| sell | INTEGER |
-| strong_sell | INTEGER |
+| Column | Type | Notes |
+|--------|------|-------|
+| asx_code | VARCHAR(10) | |
+| snapshot_date | DATE | |
+| rating | NUMERIC(4,2) | |
+| target_price | NUMERIC(12,4) | |
+| strong_buy | INTEGER | |
+| buy | INTEGER | |
+| hold | INTEGER | |
+| sell | INTEGER | |
+| strong_sell | INTEGER | |
+| loaded_at | TIMESTAMPTZ | |
+
+Unique constraint: `(asx_code)` — one row per stock.
 
 ---
 
@@ -658,47 +683,89 @@ Source: parsed from `staging.fundamentals.raw_json → AnalystRatings`
 ### 7.1 Design Principles
 
 - Transform scripts read from `staging.*` and write to `market.*` or `financials.*`
-- Every table has a natural key; writes use `INSERT ... ON CONFLICT DO UPDATE` (upsert)
 - Field names use our standard snake_case naming (not EODHD's mixed case)
 - Units are standardised: financial values in **AUD millions**, ratios as **decimals or percentages explicitly named**
 - Currency: all values converted to AUD at load time (EODHD returns AUD for ASX)
+- `market.companies` uses **SCD Type 2** to track company attribute changes over time
+- All other transform tables use **UPSERT** on natural key (asx_code + date/fiscal_year)
+- Financials tables carry a `data_as_of TIMESTAMPTZ` column for lightweight restatement tracking
 
 ### 7.2 Market Schema Tables
 
-#### market.companies
+#### market.companies — SCD Type 2
 
-One row per ASX-listed stock. The authoritative company reference table.
+The authoritative company reference table. Uses Slowly Changing Dimension Type 2 to capture changes to sector classification, stock type, fiscal year end, and status over time.
+
+**Why SCD Type 2?** ASX companies frequently change GICS sector (reclassification), convert stock type (equity → REIT or stapled security), change fiscal year end, or transition to delisted/suspended. Without history, a sector change would silently corrupt all historical screener results.
+
+**SCD Type 2 columns:**
 
 | Column | Type | Notes |
 |--------|------|-------|
-| asx_code | VARCHAR(10) PK | |
+| id | BIGSERIAL PK | surrogate key |
+| asx_code | VARCHAR(10) | natural key — NOT unique alone |
+| valid_from | DATE NOT NULL | date this version became active |
+| valid_to | DATE | NULL = currently active version |
+| is_current | BOOLEAN | TRUE for the active version only |
+
+**Partial unique index:** `UNIQUE (asx_code) WHERE is_current = TRUE` — only one current row per stock, DB-enforced.
+
+**Tracked fields** (a change in any of these creates a new version):
+
+| Field | Why tracked |
+|-------|-------------|
+| `gics_sector` | Sector reclassifications are common |
+| `gics_industry_group` | |
+| `gics_industry` | |
+| `gics_sub_industry` | |
+| `stock_type` | equity → REIT conversions, stapling events |
+| `status` | active → suspended → delisted |
+| `fiscal_year_end_month` | Changes affect how financials are dated |
+| `is_reit` | |
+| `is_miner` | |
+
+**Non-tracked fields** (updated in-place on the current row, no new version):
+
+`company_name`, `short_name`, `isin`, `website`, `employee_count`, `description`, `is_asx20/50/100/200/300/all_ords` (index membership changes too frequently to version).
+
+**Convenience view:** `market.companies_current` — `SELECT * FROM market.companies WHERE is_current = TRUE`. Use this for all screener queries.
+
+**All columns:**
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | BIGSERIAL PK | surrogate key |
+| asx_code | VARCHAR(10) | |
 | company_name | TEXT | |
 | short_name | TEXT | |
 | isin | VARCHAR(20) | |
 | abn | VARCHAR(20) | |
 | asx_sector | TEXT | ASX GICS sector |
-| gics_sector | TEXT | |
-| gics_industry_group | TEXT | |
-| gics_industry | TEXT | |
-| gics_sub_industry | TEXT | |
-| stock_type | TEXT | 'equity', 'reit', 'lic', 'etf', 'stapled' |
+| gics_sector | TEXT | **SCD2-tracked** |
+| gics_industry_group | TEXT | **SCD2-tracked** |
+| gics_industry | TEXT | **SCD2-tracked** |
+| gics_sub_industry | TEXT | **SCD2-tracked** |
+| stock_type | TEXT | 'equity', 'reit', 'lic', 'etf', 'stapled' — **SCD2-tracked** |
 | listing_date | DATE | |
-| status | TEXT | 'active', 'suspended', 'delisted' |
-| fiscal_year_end_month | SMALLINT | 6=June, 12=December |
+| status | TEXT | 'active', 'suspended', 'delisted' — **SCD2-tracked** |
+| fiscal_year_end_month | SMALLINT | 6=June, 12=December — **SCD2-tracked** |
 | website | TEXT | |
 | employee_count | INTEGER | |
 | description | TEXT | |
 | country_of_incorporation | VARCHAR(50) | |
-| is_reit | BOOLEAN DEFAULT FALSE | |
-| is_miner | BOOLEAN DEFAULT FALSE | |
-| is_asx20 | BOOLEAN DEFAULT FALSE | |
-| is_asx50 | BOOLEAN DEFAULT FALSE | |
-| is_asx100 | BOOLEAN DEFAULT FALSE | |
-| is_asx200 | BOOLEAN DEFAULT FALSE | |
-| is_asx300 | BOOLEAN DEFAULT FALSE | |
-| is_all_ords | BOOLEAN DEFAULT FALSE | |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | |
+| is_reit | BOOLEAN DEFAULT FALSE | **SCD2-tracked** |
+| is_miner | BOOLEAN DEFAULT FALSE | **SCD2-tracked** |
+| is_asx20 | BOOLEAN DEFAULT FALSE | updated in-place |
+| is_asx50 | BOOLEAN DEFAULT FALSE | updated in-place |
+| is_asx100 | BOOLEAN DEFAULT FALSE | updated in-place |
+| is_asx200 | BOOLEAN DEFAULT FALSE | updated in-place |
+| is_asx300 | BOOLEAN DEFAULT FALSE | updated in-place |
+| is_all_ords | BOOLEAN DEFAULT FALSE | updated in-place |
+| valid_from | DATE NOT NULL | SCD2: date this version became active |
+| valid_to | DATE | SCD2: NULL = currently active |
+| is_current | BOOLEAN NOT NULL | SCD2: TRUE for active version |
+| created_at | TIMESTAMPTZ | first time this stock was loaded |
+| updated_at | TIMESTAMPTZ | last in-place update timestamp |
 
 #### market.daily_prices
 
@@ -776,6 +843,8 @@ Reference tables for exchange metadata. Rarely updated (monthly).
 
 All financial values in **AUD millions**. Fiscal year = calendar year of June 30 end (ASX standard: FY2024 = July 2023 – June 2024).
 
+**Restatement tracking:** Financial tables use UPSERT — a restatement from EODHD overwrites the prior value for that fiscal year. The `data_as_of TIMESTAMPTZ` column records when the row was last loaded, providing a lightweight audit trail. Full SCD Type 2 is not applied to financial tables because: (1) the fiscal year is already a natural point-in-time key; (2) financial restatements are uncommon; (3) the screener does not backtest on historical financial data.
+
 #### financials.annual_pnl
 
 One row per stock per fiscal year. Source of truth for P&L.
@@ -803,7 +872,8 @@ One row per stock per fiscal year. Source of truth for P&L.
 | dps | NUMERIC(10,4) | dividends per share AUD |
 | dps_franking_pct | NUMERIC(5,2) | 0–100 |
 | shares_outstanding | BIGINT | |
-| updated_at | TIMESTAMPTZ | |
+| updated_at | TIMESTAMPTZ | last upsert timestamp |
+| data_as_of | TIMESTAMPTZ | when row was last loaded from EODHD |
 
 Unique constraint: `(asx_code, fiscal_year)`
 
@@ -839,6 +909,7 @@ Unique constraint: `(asx_code, fiscal_year)`
 | book_value_per_share | NUMERIC(10,4) | |
 | shares_outstanding | BIGINT | |
 | updated_at | TIMESTAMPTZ | |
+| data_as_of | TIMESTAMPTZ | when row was last loaded from EODHD |
 
 Unique constraint: `(asx_code, fiscal_year)`
 
@@ -858,6 +929,7 @@ Unique constraint: `(asx_code, fiscal_year)`
 | net_change_in_cash | NUMERIC(18,2) | |
 | cash_end | NUMERIC(18,2) | |
 | updated_at | TIMESTAMPTZ | |
+| data_as_of | TIMESTAMPTZ | when row was last loaded from EODHD |
 
 Unique constraint: `(asx_code, fiscal_year)`
 

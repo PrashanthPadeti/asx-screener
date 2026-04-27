@@ -92,22 +92,16 @@ def load_file(cur, path: Path) -> int:
     if not rows:
         return 0
 
-    # Mark older rows for this code as not-latest
-    cur.execute("""
-        UPDATE staging.dividends SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE AND source_file != %s
-    """, (asx_code, path.name))
-
     execute_values(cur, """
         INSERT INTO staging.dividends
-            (asx_code, date, dividend, unadjusted_value, currency,
-             source_file, is_latest)
+            (asx_code, date, dividend, unadjusted_value, currency, source_file)
         VALUES %s
-        ON CONFLICT (asx_code, date, source_file) DO UPDATE SET
-            dividend          = EXCLUDED.dividend,
-            unadjusted_value  = EXCLUDED.unadjusted_value,
-            currency          = EXCLUDED.currency,
-            is_latest         = TRUE
+        ON CONFLICT (asx_code, date) DO UPDATE SET
+            dividend         = EXCLUDED.dividend,
+            unadjusted_value = EXCLUDED.unadjusted_value,
+            currency         = EXCLUDED.currency,
+            source_file      = EXCLUDED.source_file,
+            loaded_at        = NOW()
     """, rows, page_size=500)
     return len(rows)
 
@@ -136,10 +130,17 @@ def main():
         files = files[:args.limit]
 
     total = len(files)
+    is_full_run = not args.codes and not args.from_code
     log.info(f"Loading {total} dividend files → staging.dividends")
 
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
+
+    if is_full_run:
+        cur.execute("TRUNCATE TABLE staging.dividends RESTART IDENTITY")
+        conn.commit()
+        log.info("staging.dividends truncated.")
+
     done = failed = total_rows = stocks_with_divs = 0
 
     for i, path in enumerate(files, 1):

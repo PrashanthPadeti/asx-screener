@@ -13,13 +13,25 @@ Reads raw fundamentals files from the Raw Zone and loads them into:
   staging.analyst_ratings    (AnalystRatings)
   staging.shares_stats       (SharesStats)
 
+Design: TRUNCATE AND RELOAD
+  A full run truncates all fundamentals-derived staging tables before loading.
+  Staging always holds the latest snapshot only — history lives in Raw Zone files.
+  Partial runs (--codes / --date) do NOT truncate; they upsert into the live table.
+
 NO business logic. Column names match EODHD fields (snake_case only).
 All NULLs are passed through. No unit conversion.
 
 Usage:
+    # Full reload (truncates first)
     python scripts/eodhd/v2/load_to_staging_fundamentals.py
+
+    # Partial — specific stocks (no truncate)
     python scripts/eodhd/v2/load_to_staging_fundamentals.py --codes BHP CBA
+
+    # Partial — specific date snapshot (no truncate)
     python scripts/eodhd/v2/load_to_staging_fundamentals.py --date 2026-04-27
+
+    # Resume from code (no truncate)
     python scripts/eodhd/v2/load_to_staging_fundamentals.py --from-code WBC
 """
 
@@ -85,29 +97,23 @@ def st(v) -> Optional[str]:
 def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
                          source_file: str, checksum: str) -> int:
     general = raw_json.get("General", {})
-
-    # Mark previous rows for this code as not-latest
-    cur.execute("""
-        UPDATE staging.fundamentals SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE
-          AND snapshot_date < %s
-    """, (asx_code, snapshot_date))
-
     cur.execute("""
         INSERT INTO staging.fundamentals
             (asx_code, snapshot_date, raw_json, general_code, general_name,
              general_sector, general_industry, updated_at_eodhd,
-             source_file, checksum, is_latest, is_archived)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE,FALSE)
-        ON CONFLICT (asx_code, snapshot_date, source_file) DO UPDATE SET
+             source_file, checksum)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (asx_code) DO UPDATE SET
+            snapshot_date    = EXCLUDED.snapshot_date,
             raw_json         = EXCLUDED.raw_json,
             general_code     = EXCLUDED.general_code,
             general_name     = EXCLUDED.general_name,
             general_sector   = EXCLUDED.general_sector,
             general_industry = EXCLUDED.general_industry,
             updated_at_eodhd = EXCLUDED.updated_at_eodhd,
+            source_file      = EXCLUDED.source_file,
             checksum         = EXCLUDED.checksum,
-            is_latest        = TRUE
+            loaded_at        = NOW()
         RETURNING id
     """, (
         asx_code, snapshot_date, json.dumps(raw_json),
@@ -125,22 +131,18 @@ def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
 def upsert_company_profile(cur, asx_code: str, snapshot_date: date,
                             general: dict, fund_id: int) -> None:
     cur.execute("""
-        UPDATE staging.company_profile SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE AND snapshot_date < %s
-    """, (asx_code, snapshot_date))
-
-    cur.execute("""
         INSERT INTO staging.company_profile
             (asx_code, snapshot_date, code, type, name, exchange, currency_code,
              country_name, isin, cusip, cik, employer_id_number, fiscal_year_end,
              ipo_date, sector, industry, gic_sector, gic_group, gic_industry,
              gic_sub_industry, description, address, phone, web_url,
-             full_time_employees, updated_at, source_fundamentals_id, is_latest)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-        ON CONFLICT (asx_code, snapshot_date) DO UPDATE SET
+             full_time_employees, updated_at, source_file)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (asx_code) DO UPDATE SET
+            snapshot_date = EXCLUDED.snapshot_date,
             code = EXCLUDED.code, name = EXCLUDED.name, type = EXCLUDED.type,
             sector = EXCLUDED.sector, industry = EXCLUDED.industry,
-            updated_at = EXCLUDED.updated_at, is_latest = TRUE
+            updated_at = EXCLUDED.updated_at, loaded_at = NOW()
     """, (
         asx_code, snapshot_date,
         st(general.get("Code")), st(general.get("Type")), st(general.get("Name")),
@@ -164,11 +166,6 @@ def upsert_company_profile(cur, asx_code: str, snapshot_date: date,
 def upsert_highlights(cur, asx_code: str, snapshot_date: date,
                        h: dict, fund_id: int) -> None:
     cur.execute("""
-        UPDATE staging.highlights SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE AND snapshot_date < %s
-    """, (asx_code, snapshot_date))
-
-    cur.execute("""
         INSERT INTO staging.highlights
             (asx_code, snapshot_date,
              market_capitalization, ebitda, pe_ratio, peg_ratio,
@@ -178,12 +175,13 @@ def upsert_highlights(cur, asx_code: str, snapshot_date: date,
              operating_margin_ttm, return_on_assets_ttm, return_on_equity_ttm,
              revenue_ttm, gross_profit_ttm, diluted_eps_ttm,
              quarterly_earnings_growth_yoy, quarterly_revenue_growth_yoy,
-             most_recent_quarter, source_fundamentals_id, is_latest)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-        ON CONFLICT (asx_code, snapshot_date) DO UPDATE SET
+             most_recent_quarter, source_file)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (asx_code) DO UPDATE SET
+            snapshot_date = EXCLUDED.snapshot_date,
             market_capitalization = EXCLUDED.market_capitalization,
             pe_ratio = EXCLUDED.pe_ratio, dividend_yield = EXCLUDED.dividend_yield,
-            is_latest = TRUE
+            loaded_at = NOW()
     """, (
         asx_code, snapshot_date,
         sf(h.get("MarketCapitalization")), sf(h.get("EBITDA")),
@@ -206,24 +204,22 @@ def upsert_highlights(cur, asx_code: str, snapshot_date: date,
 def upsert_valuation(cur, asx_code: str, snapshot_date: date,
                       v: dict, fund_id: int) -> None:
     cur.execute("""
-        UPDATE staging.valuation SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE AND snapshot_date < %s
-    """, (asx_code, snapshot_date))
-
-    cur.execute("""
         INSERT INTO staging.valuation
             (asx_code, snapshot_date, trailing_pe, forward_pe, price_sales_ttm,
              price_book_mrq, enterprise_value, enterprise_value_revenue,
-             enterprise_value_ebitda, source_fundamentals_id, is_latest)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-        ON CONFLICT (asx_code, snapshot_date) DO UPDATE SET
-            trailing_pe = EXCLUDED.trailing_pe, is_latest = TRUE
+             enterprise_value_ebitda, source_file)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (asx_code) DO UPDATE SET
+            snapshot_date = EXCLUDED.snapshot_date,
+            trailing_pe = EXCLUDED.trailing_pe,
+            enterprise_value = EXCLUDED.enterprise_value,
+            loaded_at = NOW()
     """, (
         asx_code, snapshot_date,
         sf(v.get("TrailingPE")), sf(v.get("ForwardPE")),
         sf(v.get("PriceSalesTTM")), sf(v.get("PriceBookMRQ")),
         sf(v.get("EnterpriseValue")), sf(v.get("EnterpriseValueRevenue")),
-        sf(v.get("EnterpriseValueEbitda")), fund_id,
+        sf(v.get("EnterpriseValueEbitda")), None,
     ))
 
 
@@ -232,25 +228,20 @@ def upsert_valuation(cur, asx_code: str, snapshot_date: date,
 def upsert_analyst_ratings(cur, asx_code: str, snapshot_date: date,
                              ar: dict, fund_id: int) -> None:
     cur.execute("""
-        UPDATE staging.analyst_ratings SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE AND snapshot_date < %s
-    """, (asx_code, snapshot_date))
-
-    cur.execute("""
         INSERT INTO staging.analyst_ratings
             (asx_code, snapshot_date, rating, target_price,
-             strong_buy, buy, hold, sell, strong_sell,
-             source_fundamentals_id, is_latest)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-        ON CONFLICT (asx_code, snapshot_date) DO UPDATE SET
+             strong_buy, buy, hold, sell, strong_sell, source_file)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (asx_code) DO UPDATE SET
+            snapshot_date = EXCLUDED.snapshot_date,
             rating = EXCLUDED.rating, target_price = EXCLUDED.target_price,
-            is_latest = TRUE
+            loaded_at = NOW()
     """, (
         asx_code, snapshot_date,
         sf(ar.get("Rating")), sf(ar.get("TargetPrice")),
         si(ar.get("StrongBuy")), si(ar.get("Buy")),
         si(ar.get("Hold")), si(ar.get("Sell")), si(ar.get("StrongSell")),
-        fund_id,
+        None,
     ))
 
 
@@ -259,26 +250,23 @@ def upsert_analyst_ratings(cur, asx_code: str, snapshot_date: date,
 def upsert_shares_stats(cur, asx_code: str, snapshot_date: date,
                          ss: dict, fund_id: int) -> None:
     cur.execute("""
-        UPDATE staging.shares_stats SET is_latest = FALSE
-        WHERE asx_code = %s AND is_latest = TRUE AND snapshot_date < %s
-    """, (asx_code, snapshot_date))
-
-    cur.execute("""
         INSERT INTO staging.shares_stats
             (asx_code, snapshot_date, shares_outstanding, shares_float,
              percent_insiders, percent_institutions, shares_short,
              short_ratio, short_percent_outstanding, short_percent_float,
-             source_fundamentals_id, is_latest)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,TRUE)
-        ON CONFLICT (asx_code, snapshot_date) DO UPDATE SET
-            shares_outstanding = EXCLUDED.shares_outstanding, is_latest = TRUE
+             source_file)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (asx_code) DO UPDATE SET
+            snapshot_date = EXCLUDED.snapshot_date,
+            shares_outstanding = EXCLUDED.shares_outstanding,
+            loaded_at = NOW()
     """, (
         asx_code, snapshot_date,
         sf(ss.get("SharesOutstanding")), sf(ss.get("SharesFloat")),
         sf(ss.get("PercentInsiders")), sf(ss.get("PercentInstitutions")),
         sf(ss.get("SharesShort")), sf(ss.get("ShortRatio")),
         sf(ss.get("ShortPercentOutstanding")), sf(ss.get("ShortPercentFloat")),
-        fund_id,
+        None,
     ))
 
 
@@ -302,7 +290,6 @@ def upsert_income_statement(cur, asx_code: str, periods: dict,
             sf(rec.get("incomeTaxExpense")), sf(rec.get("netIncome")),
             sf(rec.get("eps")), sf(rec.get("epsDiluted")),
             sf(rec.get("depreciationAndAmortization")),
-            fund_id,
         ))
     if not rows:
         return 0
@@ -312,13 +299,11 @@ def upsert_income_statement(cur, asx_code: str, periods: dict,
              total_revenue, cost_of_revenue, gross_profit,
              total_operating_expenses, operating_income, ebitda,
              interest_expense, income_before_tax, income_tax_expense,
-             net_income, eps, eps_diluted, depreciation_amortization,
-             source_fundamentals_id)
+             net_income, eps, eps_diluted, depreciation_amortization)
         VALUES %s
         ON CONFLICT (asx_code, date, period_type) DO UPDATE SET
             total_revenue = EXCLUDED.total_revenue,
-            net_income    = EXCLUDED.net_income,
-            is_latest     = TRUE
+            net_income    = EXCLUDED.net_income
     """, rows, page_size=200)
     return len(rows)
 
@@ -345,7 +330,6 @@ def upsert_balance_sheet(cur, asx_code: str, periods: dict,
             sf(rec.get("shortLongTermDebtTotal")), sf(rec.get("longTermDebt")),
             sf(rec.get("totalStockholderEquity")), sf(rec.get("retainedEarnings")),
             sf(rec.get("commonStock")),
-            fund_id,
         ))
     if not rows:
         return 0
@@ -358,8 +342,7 @@ def upsert_balance_sheet(cur, asx_code: str, periods: dict,
              goodwill, intangible_assets,
              total_liabilities, total_current_liabilities,
              short_long_term_debt_total, long_term_debt,
-             total_stockholder_equity, retained_earnings, common_stock,
-             source_fundamentals_id)
+             total_stockholder_equity, retained_earnings, common_stock)
         VALUES %s
         ON CONFLICT (asx_code, date, period_type) DO UPDATE SET
             total_assets = EXCLUDED.total_assets,
@@ -388,7 +371,6 @@ def upsert_cash_flow(cur, asx_code: str, periods: dict,
             sf(rec.get("dividendsPaid")),
             sf(rec.get("changeInCash")),
             sf(rec.get("freeCashFlow")),
-            fund_id,
         ))
     if not rows:
         return 0
@@ -398,8 +380,7 @@ def upsert_cash_flow(cur, asx_code: str, periods: dict,
              total_cash_from_operating_activities, capital_expenditures,
              total_cash_from_investing_activities,
              total_cash_from_financing_activities,
-             dividends_paid, change_to_cash, free_cash_flow,
-             source_fundamentals_id)
+             dividends_paid, change_to_cash, free_cash_flow)
         VALUES %s
         ON CONFLICT (asx_code, date, period_type) DO UPDATE SET
             total_cash_from_operating_activities =
@@ -423,15 +404,13 @@ def upsert_earnings(cur, asx_code: str, history: dict, fund_id: int) -> int:
             asx_code, dt, "actual",
             sf(rec.get("epsActual")), sf(rec.get("epsEstimate")),
             sf(rec.get("epsDifference")), sf(rec.get("surprisePercent")),
-            fund_id,
         ))
     if not rows:
         return 0
     execute_values(cur, """
         INSERT INTO staging.earnings
             (asx_code, date, period_type,
-             eps_actual, eps_estimate, eps_difference, surprise_percent,
-             source_fundamentals_id)
+             eps_actual, eps_estimate, eps_difference, surprise_percent)
         VALUES %s
         ON CONFLICT (asx_code, date, period_type) DO UPDATE SET
             eps_actual = EXCLUDED.eps_actual,
@@ -561,10 +540,32 @@ def main():
         files = files[:args.limit]
 
     total = len(files)
+    is_full_run = not args.codes and not args.date and not args.from_code
     log.info(f"Loading {total} fundamentals files from {FUND_DIR}")
+    if is_full_run:
+        log.info("Full run — will TRUNCATE all fundamentals staging tables before loading")
 
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
+
+    if is_full_run:
+        cur.execute("""
+            TRUNCATE TABLE
+                staging.income_statement,
+                staging.balance_sheet,
+                staging.cash_flow,
+                staging.earnings,
+                staging.company_profile,
+                staging.highlights,
+                staging.valuation,
+                staging.analyst_ratings,
+                staging.shares_stats,
+                staging.fundamentals
+            RESTART IDENTITY
+        """)
+        conn.commit()
+        log.info("Staging tables truncated.")
+
     done = failed = 0
 
     for i, path in enumerate(files, 1):

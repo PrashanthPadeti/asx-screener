@@ -105,13 +105,15 @@ def upsert_prices(cur, rows: list[tuple]) -> int:
             (asx_code, date, open, high, low, close, adjusted_close,
              volume, source_file)
         VALUES %s
-        ON CONFLICT (asx_code, date, source_file) DO UPDATE SET
+        ON CONFLICT (asx_code, date) DO UPDATE SET
             open           = EXCLUDED.open,
             high           = EXCLUDED.high,
             low            = EXCLUDED.low,
             close          = EXCLUDED.close,
             adjusted_close = EXCLUDED.adjusted_close,
-            volume         = EXCLUDED.volume
+            volume         = EXCLUDED.volume,
+            source_file    = EXCLUDED.source_file,
+            loaded_at      = NOW()
     """, rows, page_size=2000)
     return len(rows)
 
@@ -174,6 +176,9 @@ def main():
                 failed += 1
                 continue
             try:
+                # Delete-by-date for incremental (idempotent re-run)
+                cur.execute("DELETE FROM staging.eod_prices WHERE date = %s",
+                            (target_date,))
                 n = load_bulk_file(cur, path)
                 conn.commit()
                 log.info(f"  {target_date}: {n:,} rows")
@@ -201,7 +206,13 @@ def main():
             files = files[:args.limit]
 
         total = len(files)
+        is_full_run = not args.codes and not args.from_code
         log.info(f"Loading {total} historical price files from {HIST_DIR}")
+
+        if is_full_run:
+            cur.execute("TRUNCATE TABLE staging.eod_prices RESTART IDENTITY")
+            conn.commit()
+            log.info("staging.eod_prices truncated.")
 
         for i, path in enumerate(files, 1):
             try:

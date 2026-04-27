@@ -85,6 +85,16 @@ def safe_pct(num, denom):
     return round(v, 4)
 
 
+def clamp84(v) -> Optional[float]:
+    """Clamp to NUMERIC(8,4) safe range, return None for overflow."""
+    if v is None:
+        return None
+    try:
+        return round(float(v), 4) if abs(float(v)) < 9999 else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def cagr(end_val, start_val, years):
     """Compound Annual Growth Rate. Returns None if inputs invalid."""
     if not end_val or not start_val or years <= 0:
@@ -96,7 +106,7 @@ def cagr(end_val, start_val, years):
         return None          # negative end value — CAGR undefined
     try:
         rate = ratio ** (1.0 / years) - 1
-        return round(rate * 100, 4)   # return as %
+        return clamp84(rate * 100)
     except (ZeroDivisionError, ValueError):
         return None
 
@@ -112,7 +122,7 @@ def median_growth(values: list) -> Optional[float]:
         curr = sorted_vals[i][1]
         if prev and prev > 0 and curr is not None:
             rates.append((curr - prev) / prev * 100)
-    return round(statistics.median(rates), 4) if len(rates) >= 2 else None
+    return clamp84(statistics.median(rates)) if len(rates) >= 2 else None
 
 
 def piotroski_score(pnl0, pnl1, bs0, bs1, cf0) -> Optional[int]:
@@ -355,7 +365,7 @@ def annualised_vol(history: list[tuple], years: int) -> Optional[float]:
     if len(log_rets) < 10:
         return None
     std = statistics.stdev(log_rets)
-    return round(std * math.sqrt(252) * 100, 4)   # annualised %
+    return clamp84(std * math.sqrt(252) * 100)
 
 
 def compute_beta(cur, asx_code: str, xjo_history: list[tuple], years: int) -> Optional[float]:
@@ -569,7 +579,7 @@ def compute_for_fy(asx_code: str, fiscal_year: int,
     def yoy(curr, prev):
         if curr is None or prev is None or prev == 0:
             return None
-        return round((curr - prev) / abs(prev) * 100, 4)
+        return clamp84((curr - prev) / abs(prev) * 100)
 
     rev_g1   = yoy(rev,      pnl1.get("revenue")     if pnl1 else None)
     gp_g1    = yoy(gp,       pnl1.get("gross_profit") if pnl1 else None)
@@ -745,11 +755,11 @@ def compute_for_fy(asx_code: str, fiscal_year: int,
 
     # Sharpe: (annual return - RFR) / volatility
     ann_ret_1y = p_c1 / 100 if p_c1 else None
-    sharpe_1y_v = round((ann_ret_1y - RFR) / (vol_1y / 100), 4) \
+    sharpe_1y_v = clamp84((ann_ret_1y - RFR) / (vol_1y / 100)) \
         if ann_ret_1y is not None and vol_1y else None
 
     ann_ret_3y = ((p_c3 / 100 + 1) ** (1/3) - 1) if p_c3 else None
-    sharpe_3y_v = round((ann_ret_3y - RFR) / (vol_3y / 100), 4) \
+    sharpe_3y_v = clamp84((ann_ret_3y - RFR) / (vol_3y / 100)) \
         if ann_ret_3y is not None and vol_3y else None
 
     # ── PEG ratio ─────────────────────────────────────────────

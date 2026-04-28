@@ -106,6 +106,14 @@ def transform_pnl(cur, codes, fiscal_year) -> int:
             "eodhd",
         ))
 
+    # Deduplicate: keep latest period_end_date per (asx_code, fiscal_year)
+    deduped = {}
+    for row in transformed:
+        key = (row[0], row[1])
+        if key not in deduped or row[2] > deduped[key][2]:
+            deduped[key] = row
+    transformed = list(deduped.values())
+
     execute_values(cur, """
         INSERT INTO financials.annual_pnl (
             asx_code, fiscal_year, period_end_date,
@@ -222,6 +230,14 @@ def transform_balance_sheet(cur, codes, fiscal_year) -> int:
             "eodhd",
         ))
 
+    # Deduplicate: keep latest period_end_date per (asx_code, fiscal_year)
+    deduped = {}
+    for row in transformed:
+        key = (row[0], row[1])
+        if key not in deduped or row[2] > deduped[key][2]:
+            deduped[key] = row
+    transformed = list(deduped.values())
+
     execute_values(cur, """
         INSERT INTO financials.annual_balance_sheet (
             asx_code, fiscal_year, period_end_date,
@@ -332,6 +348,14 @@ def transform_cashflow(cur, codes, fiscal_year) -> int:
             fcf_m,
             "eodhd",
         ))
+
+    # Deduplicate: keep latest period_end_date per (asx_code, fiscal_year)
+    deduped = {}
+    for row in transformed:
+        key = (row[0], row[1])
+        if key not in deduped or row[2] > deduped[key][2]:
+            deduped[key] = row
+    transformed = list(deduped.values())
 
     execute_values(cur, """
         INSERT INTO financials.annual_cashflow (

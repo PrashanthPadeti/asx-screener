@@ -28,10 +28,21 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg2
+import psycopg2.extensions
 from psycopg2.extras import execute_values
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
+
+# Auto-cast PostgreSQL NUMERIC/DECIMAL → Python float on read.
+# Prevents "unsupported operand type(s) for +: decimal.Decimal and float" errors
+# throughout all metric calculations.
+_DEC2FLOAT = psycopg2.extensions.new_type(
+    psycopg2.extensions.DECIMAL.values,
+    "DEC2FLOAT",
+    lambda value, curs: float(value) if value is not None else None,
+)
+psycopg2.extensions.register_type(_DEC2FLOAT)
 
 load_dotenv()
 

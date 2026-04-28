@@ -77,7 +77,7 @@ def main():
     args = parser.parse_args()
 
     path          = find_latest_file(args.date)
-    snapshot_date = date.fromisoformat(path.stem)   # filename = YYYY-MM-DD
+    snapshot_date = date.fromisoformat(path.name[:-len(".json.gz")])  # strip .json.gz
 
     log.info(f"Loading exchange symbols from {path.name}")
 

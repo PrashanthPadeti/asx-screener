@@ -23,6 +23,7 @@
 12. [Infrastructure Design](#12-infrastructure-design)
 13. [Development Roadmap](#13-development-roadmap)
 14. [Build Status — What Exists vs What Needs Building](#14-build-status)
+15. [User Portal & RBAC](13_User_Portal_and_RBAC.md) — Free vs Paid access, saved screens, watchlists, Stripe
 
 ---
 

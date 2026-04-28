@@ -202,10 +202,10 @@ CREATE TABLE IF NOT EXISTS staging.exchange_symbols (
     id            BIGSERIAL       PRIMARY KEY,
     code          VARCHAR(10)     NOT NULL,
     name          TEXT,
-    country       VARCHAR(5),
-    exchange      VARCHAR(10),
-    currency      VARCHAR(5),
-    type          VARCHAR(30),                  -- 'Common Stock', 'ETF', etc.
+    country       VARCHAR(50),
+    exchange      VARCHAR(20),
+    currency      VARCHAR(10),
+    type          VARCHAR(50),                  -- 'Common Stock', 'ETF', etc.
     isin          VARCHAR(20),
     snapshot_date DATE            NOT NULL,
     source_file   TEXT            NOT NULL,

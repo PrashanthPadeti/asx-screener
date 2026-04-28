@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS staging.earnings (
     eps_actual          NUMERIC(12,6),
     eps_estimate        NUMERIC(12,6),
     eps_difference      NUMERIC(12,6),
-    surprise_percent    NUMERIC(8,4),
+    surprise_percent    NUMERIC(18,4),
     source_file         TEXT,
     loaded_at           TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     UNIQUE (asx_code, date, period_type)

@@ -37,36 +37,42 @@ BATCH_COMMIT = 100
 CLOSE_TIME = "16:00:00+10"
 
 
-def transform_prices(cur, codes: list[str] | None, from_date: str | None, to_date: str | None) -> int:
-    filters = []
-    params = []
+INSERT_SQL = """
+    INSERT INTO market.daily_prices
+        (time, asx_code, open, high, low, close, adjusted_close, volume, data_source)
+    VALUES %s
+    ON CONFLICT (time, asx_code) DO UPDATE SET
+        open           = EXCLUDED.open,
+        high           = EXCLUDED.high,
+        low            = EXCLUDED.low,
+        close          = EXCLUDED.close,
+        adjusted_close = EXCLUDED.adjusted_close,
+        volume         = EXCLUDED.volume,
+        data_source    = EXCLUDED.data_source
+"""
 
-    if codes:
-        placeholders = ",".join(["%s"] * len(codes))
-        filters.append(f"asx_code IN ({placeholders})")
-        params.extend([c.upper() for c in codes])
+
+def transform_prices_for_code(cur, code: str, from_date: str | None, to_date: str | None) -> int:
+    """Fetch, transform and insert rows for a single ASX code. Returns row count."""
+    filters = ["asx_code = %s"]
+    params  = [code]
     if from_date:
-        filters.append("date >= %s")
-        params.append(from_date)
+        filters.append("date >= %s"); params.append(from_date)
     if to_date:
-        filters.append("date <= %s")
-        params.append(to_date)
+        filters.append("date <= %s"); params.append(to_date)
 
-    where = ("WHERE " + " AND ".join(filters)) if filters else ""
-
+    where = "WHERE " + " AND ".join(filters)
     cur.execute(f"""
         SELECT asx_code, date, open, high, low, close, adjusted_close, volume
         FROM staging.eod_prices
         {where}
-        ORDER BY asx_code, date
+        ORDER BY date
     """, params)
 
     rows = cur.fetchall()
     if not rows:
-        log.info("No rows in staging.eod_prices matching filters.")
         return 0
 
-    # Convert date → TIMESTAMPTZ at ASX market close
     transformed = [
         (
             f"{r[1]} {CLOSE_TIME}",  # time
@@ -80,20 +86,7 @@ def transform_prices(cur, codes: list[str] | None, from_date: str | None, to_dat
         for r in rows
     ]
 
-    execute_values(cur, """
-        INSERT INTO market.daily_prices
-            (time, asx_code, open, high, low, close, adjusted_close, volume, data_source)
-        VALUES %s
-        ON CONFLICT (time, asx_code) DO UPDATE SET
-            open           = EXCLUDED.open,
-            high           = EXCLUDED.high,
-            low            = EXCLUDED.low,
-            close          = EXCLUDED.close,
-            adjusted_close = EXCLUDED.adjusted_close,
-            volume         = EXCLUDED.volume,
-            data_source    = EXCLUDED.data_source
-    """, transformed, page_size=2000)
-
+    execute_values(cur, INSERT_SQL, transformed, page_size=2000)
     return len(transformed)
 
 
@@ -115,13 +108,37 @@ def main():
         conn.commit()
         log.info("Truncated.")
 
-    log.info("Transforming staging.eod_prices → market.daily_prices …")
-    n = transform_prices(cur, args.codes, args.from_date, args.to_date)
-    conn.commit()
+    # Get list of codes to process
+    # Use company_profile (1878 rows) instead of DISTINCT on 6.7M row eod_prices table
+    if args.codes:
+        all_codes = [c.upper() for c in args.codes]
+    else:
+        cur.execute("SELECT asx_code FROM staging.company_profile ORDER BY asx_code")
+        all_codes = [r[0] for r in cur.fetchall()]
 
+    total_codes = len(all_codes)
+    log.info(f"Transforming {total_codes:,} codes from staging.eod_prices → market.daily_prices …")
+
+    total_rows = done = failed = 0
+    for i, code in enumerate(all_codes, 1):
+        try:
+            n = transform_prices_for_code(cur, code, args.from_date, args.to_date)
+            total_rows += n
+            done += 1
+        except Exception as e:
+            conn.rollback()
+            failed += 1
+            log.warning(f"  {code}: {e}")
+            continue
+
+        if i % BATCH_COMMIT == 0:
+            conn.commit()
+            log.info(f"  [{i:4d}/{total_codes}]  ok={done}  err={failed}  rows={total_rows:,}")
+
+    conn.commit()
     cur.close()
     conn.close()
-    log.info(f"DONE — {n:,} rows upserted into market.daily_prices")
+    log.info(f"DONE — {done} codes  |  {total_rows:,} rows upserted  |  {failed} errors")
 
 
 if __name__ == "__main__":

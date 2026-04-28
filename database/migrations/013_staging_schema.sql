@@ -188,7 +188,7 @@ CREATE TABLE IF NOT EXISTS staging.splits (
     id          BIGSERIAL       PRIMARY KEY,
     asx_code    VARCHAR(10)     NOT NULL,
     date        DATE            NOT NULL,
-    split       VARCHAR(20),                    -- e.g. '2:1'
+    split       TEXT,                           -- e.g. '2:1' (TEXT — EODHD can return long strings)
     source_file TEXT            NOT NULL,
     loaded_at   TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
     UNIQUE (asx_code, date)

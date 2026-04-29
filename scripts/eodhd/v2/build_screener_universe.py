@@ -1,21 +1,30 @@
 """
 Build Screener Universe — Golden Record
 ========================================
-Builds screener.universe from all transform-layer tables.
+Builds screener.universe from all transform-layer and compute-layer tables.
 
 One denormalised row per stock, covering:
-  - Identity & classification (from market.companies_current)
-  - Price & market cap       (from market.daily_prices latest close +
-                               market.valuation_snapshot)
-  - Valuation ratios         (from market.valuation_snapshot)
-  - Dividends                (from market.dividends latest + valuation_snapshot)
-  - Profitability / margins  (from market.valuation_snapshot)
-  - Financials FY0/FY1       (from financials.annual_pnl + balance_sheet + cashflow)
-  - Analyst ratings          (from market.analyst_ratings)
-  - Shares / ownership       (from market.companies + shares_stats staging)
-  - EPS                      (from financials.earnings_quarterly + annual_pnl)
+  - Identity & classification  (market.companies_current)
+  - Price & market cap         (market.daily_prices latest close +
+                                market.valuation_snapshot)
+  - Valuation ratios           (market.valuation_snapshot)
+  - Dividends                  (market.dividends latest + valuation_snapshot)
+  - Profitability / margins    (market.computed_metrics preferred,
+                                market.valuation_snapshot fallback)
+  - Financials FY0/FY1         (financials.annual_pnl + balance_sheet + cashflow)
+  - Returns / momentum         (market.monthly_metrics — latest month)
+  - Technicals                 (market.monthly_metrics — latest month)
+  - Multi-year metrics         (market.yearly_metrics  — latest FY)
+  - Latest-quarter growth      (market.quarterly_metrics — latest quarter)
+  - Analyst ratings            (market.analyst_ratings)
+  - Shares / ownership         (staging.shares_stats)
 
-Run nightly after all transforms complete.
+COALESCE priority for overlapping fields:
+  market.computed_metrics  (daily, freshest)
+  market.yearly_metrics    (annual compute, thorough)
+  market.valuation_snapshot (EODHD snapshot, weekly refresh)
+
+Run after all compute engines complete.
 
 Usage:
     python scripts/eodhd/v2/build_screener_universe.py
@@ -42,59 +51,81 @@ log = logging.getLogger(__name__)
 
 UPSERT_SQL = """
 INSERT INTO screener.universe (
-    -- Identity
+    -- ── Identity ─────────────────────────────────────────────────────────────
     asx_code, company_name, sector, industry_group, industry, sub_industry,
     stock_type, status, fiscal_year_end_month,
     is_reit, is_miner,
     is_asx20, is_asx50, is_asx100, is_asx200, is_asx300, is_all_ords,
     isin, website, description,
 
-    -- Price
+    -- ── Price ────────────────────────────────────────────────────────────────
     price, price_date, market_cap,
     high_52w, low_52w,
 
-    -- Valuation (from valuation_snapshot)
+    -- ── Valuation ratios (from valuation_snapshot) ───────────────────────────
     pe_ratio, forward_pe, peg_ratio, price_to_book, price_to_sales,
     ev, ev_to_ebitda, ev_to_revenue,
 
-    -- Dividends
+    -- ── Dividends ────────────────────────────────────────────────────────────
     dividend_yield, dps_ttm, ex_div_date,
 
-    -- Profitability (computed_metrics preferred, valuation_snapshot fallback)
+    -- ── Profitability (computed_metrics → yearly_metrics → valuation_snapshot)
     revenue_ttm, gross_profit_ttm, ebitda_ttm,
     gross_margin, ebitda_margin, net_margin, operating_margin,
     roe, roa, roce,
     grossed_up_yield, fcf_yield,
 
-    -- EPS
+    -- ── EPS ──────────────────────────────────────────────────────────────────
     eps_fy0, eps_fy1,
 
-    -- Income Statement FY0 / FY1 (from annual_pnl)
+    -- ── Income Statement FY0 / FY1 ───────────────────────────────────────────
     revenue_fy0, revenue_fy1,
     ebitda_fy0, ebitda_fy1,
     net_profit_fy0, net_profit_fy1,
 
-    -- Balance Sheet (latest FY)
+    -- ── Balance Sheet (latest FY) ─────────────────────────────────────────────
     total_assets, total_equity, total_debt, net_debt, cash,
     book_value_per_share, debt_to_equity, current_ratio,
 
-    -- Cash Flow (latest FY)
+    -- ── Cash Flow (latest FY) ────────────────────────────────────────────────
     cfo_fy0, capex_fy0, fcf_fy0,
 
-    -- Growth rates (from computed_metrics)
+    -- ── Growth rates (computed_metrics → yearly_metrics) ─────────────────────
     revenue_growth_1y, revenue_growth_3y_cagr,
     earnings_growth_1y, earnings_growth_3y_cagr,
 
-    -- Analyst
+    -- ── Returns & momentum (from monthly_metrics — latest month) ─────────────
+    return_1m, return_3m, return_6m, return_1y, return_ytd,
+    momentum_3m, momentum_6m, momentum_12m,
+
+    -- ── Volatility & risk ────────────────────────────────────────────────────
+    volatility_20d, volatility_60d,
+    sharpe_1y, drawdown_from_ath,
+    beta_1y,
+
+    -- ── Technicals (from monthly_metrics — latest month) ─────────────────────
+    rsi_14, macd, macd_signal,
+
+    -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
+    piotroski_f_score, altman_z_score,
+    revenue_cagr_5y, eps_growth_3y_cagr,
+    avg_roe_3y,
+    dividend_cagr_3y, dividend_consecutive_yrs,
+
+    -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
+    revenue_growth_yoy_q, eps_growth_yoy_q, net_income_growth_yoy_q,
+
+    -- ── Analyst ──────────────────────────────────────────────────────────────
     analyst_rating, analyst_target_price,
     analyst_strong_buy, analyst_buy, analyst_hold, analyst_sell, analyst_strong_sell,
 
-    -- Shares
+    -- ── Shares ───────────────────────────────────────────────────────────────
     shares_outstanding,
 
     universe_built_at
 )
 SELECT
+    -- ── Identity ─────────────────────────────────────────────────────────────
     c.asx_code,
     c.company_name,
     c.gics_sector,
@@ -112,47 +143,48 @@ SELECT
     c.website,
     c.description,
 
-    -- Latest close price
+    -- ── Price (latest close + 52w range) ─────────────────────────────────────
     dp.close        AS price,
     dp.price_date   AS price_date,
     vs.market_cap,
     dp.high_52w,
     dp.low_52w,
 
-    -- Valuation
+    -- ── Valuation ratios ─────────────────────────────────────────────────────
     vs.pe_ratio,
     vs.forward_pe,
     vs.peg_ratio,
     vs.price_to_book,
     vs.price_to_sales,
-    vs.enterprise_value,
+    vs.enterprise_value     AS ev,
     vs.ev_to_ebitda,
     vs.ev_to_revenue,
 
-    -- Dividends
+    -- ── Dividends ────────────────────────────────────────────────────────────
     vs.dividend_yield,
-    vs.dividend_per_share,
+    vs.dividend_per_share   AS dps_ttm,
     div_latest.ex_date,
 
-    -- Profitability TTM (computed_metrics preferred, valuation_snapshot fallback)
+    -- ── Profitability TTM ─────────────────────────────────────────────────────
+    -- Priority: computed_metrics (daily) → valuation_snapshot (weekly)
     vs.revenue_ttm,
     vs.gross_profit_ttm,
     vs.ebitda_ttm,
-    COALESCE(cm.gpm,          NULL)                    AS gross_margin,
-    COALESCE(cm.ebitda_margin, NULL)                   AS ebitda_margin,
-    COALESCE(cm.npm,          vs.profit_margin)        AS net_margin,
-    COALESCE(cm.opm,          vs.operating_margin)     AS operating_margin,
-    COALESCE(cm.roe,          vs.roe_ttm)              AS roe,
-    COALESCE(cm.roa,          vs.roa_ttm)              AS roa,
-    cm.roce                                            AS roce,
-    cm.grossed_up_yield                                AS grossed_up_yield,
-    cm.fcf_yield                                       AS fcf_yield,
+    COALESCE(cm.gpm,           NULL)                         AS gross_margin,
+    COALESCE(cm.ebitda_margin, NULL)                         AS ebitda_margin,
+    COALESCE(cm.npm,           vs.profit_margin)             AS net_margin,
+    COALESCE(cm.opm,           vs.operating_margin)          AS operating_margin,
+    COALESCE(cm.roe,  ym.roe,  vs.roe_ttm)                  AS roe,
+    COALESCE(cm.roa,  ym.roa,  vs.roa_ttm)                  AS roa,
+    COALESCE(cm.roce, ym.roce)                               AS roce,
+    COALESCE(cm.grossed_up_yield, ym.franked_yield)          AS grossed_up_yield,
+    COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield,
 
-    -- EPS (FY0 = most recent, FY1 = one year prior)
-    pnl0.eps    AS eps_fy0,
-    pnl1.eps    AS eps_fy1,
+    -- ── EPS ──────────────────────────────────────────────────────────────────
+    pnl0.eps        AS eps_fy0,
+    pnl1.eps        AS eps_fy1,
 
-    -- Revenue / EBITDA / Net Profit FY0, FY1
+    -- ── Income Statement FY0 / FY1 ───────────────────────────────────────────
     pnl0.revenue    AS revenue_fy0,
     pnl1.revenue    AS revenue_fy1,
     pnl0.ebitda     AS ebitda_fy0,
@@ -160,42 +192,80 @@ SELECT
     pnl0.net_profit AS net_profit_fy0,
     pnl1.net_profit AS net_profit_fy1,
 
-    -- Balance Sheet (latest FY)
+    -- ── Balance Sheet ────────────────────────────────────────────────────────
     bs0.total_assets,
     bs0.total_equity,
     bs0.total_debt,
     bs0.net_debt,
-    bs0.cash_equivalents,
+    bs0.cash_equivalents    AS cash,
     bs0.book_value_per_share,
     CASE WHEN bs0.total_equity <> 0 AND bs0.total_equity IS NOT NULL
-         THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END,
+         THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END AS debt_to_equity,
     CASE WHEN bs0.total_current_liab <> 0 AND bs0.total_current_liab IS NOT NULL
-         THEN ROUND(bs0.total_current_assets / bs0.total_current_liab, 4) END,
+         THEN ROUND(bs0.total_current_assets / bs0.total_current_liab, 4) END AS current_ratio,
 
-    -- Cash Flow latest FY
-    cf0.cfo     AS cfo_fy0,
-    cf0.capex   AS capex_fy0,
-    cf0.fcf     AS fcf_fy0,
+    -- ── Cash Flow ────────────────────────────────────────────────────────────
+    cf0.cfo         AS cfo_fy0,
+    cf0.capex       AS capex_fy0,
+    cf0.fcf         AS fcf_fy0,
 
-    -- Growth rates from computed_metrics
-    cm.revenue_growth_1y,
-    cm.revenue_growth_3y   AS revenue_growth_3y_cagr,
-    cm.profit_growth_1y    AS earnings_growth_1y,
-    cm.profit_growth_3y    AS earnings_growth_3y_cagr,
+    -- ── Growth rates ─────────────────────────────────────────────────────────
+    -- Priority: computed_metrics (uses latest price + last 5 annual rows)
+    --           yearly_metrics  (more thorough historical CAGR)
+    COALESCE(cm.revenue_growth_1y,  ym.revenue_growth_1y)        AS revenue_growth_1y,
+    COALESCE(cm.revenue_growth_3y,  ym.revenue_cagr_3y)          AS revenue_growth_3y_cagr,
+    COALESCE(cm.profit_growth_1y,   ym.net_income_growth_1y)     AS earnings_growth_1y,
+    COALESCE(cm.profit_growth_3y,   ym.net_income_cagr_3y)       AS earnings_growth_3y_cagr,
 
-    -- Analyst
-    ar.rating,
-    ar.target_price,
+    -- ── Returns & momentum (from monthly_metrics — latest month) ─────────────
+    mm.monthly_return   AS return_1m,
+    mm.return_3m        AS return_3m,
+    mm.return_6m        AS return_6m,
+    mm.return_12m       AS return_1y,
+    mm.return_ytd       AS return_ytd,
+    mm.momentum_3m      AS momentum_3m,
+    mm.momentum_6m      AS momentum_6m,
+    mm.momentum_12m     AS momentum_12m,
+
+    -- ── Volatility & risk ────────────────────────────────────────────────────
+    mm.volatility_1m    AS volatility_20d,   -- 1-month vol ≈ 20 trading days
+    mm.volatility_3m    AS volatility_60d,   -- 3-month vol ≈ 60 trading days
+    ym.sharpe_1y        AS sharpe_1y,
+    COALESCE(mm.drawdown_from_ath, ym.max_drawdown_1y) AS drawdown_from_ath,
+    ym.beta_1y          AS beta_1y,
+
+    -- ── Technicals (from monthly_metrics) ────────────────────────────────────
+    mm.rsi_14           AS rsi_14,
+    mm.macd_line        AS macd,
+    mm.macd_signal      AS macd_signal,
+
+    -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
+    ym.piotroski_f_score,
+    ym.altman_z_score,
+    ym.revenue_cagr_5y,
+    ym.eps_cagr_3y          AS eps_growth_3y_cagr,
+    ym.avg_roe_3y,
+    ym.dividend_cagr_3y,
+    ym.dividend_consecutive_yrs,
+
+    -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
+    qm.revenue_growth_yoy   AS revenue_growth_yoy_q,
+    qm.eps_growth_yoy       AS eps_growth_yoy_q,
+    qm.net_income_growth_yoy AS net_income_growth_yoy_q,
+
+    -- ── Analyst ──────────────────────────────────────────────────────────────
+    ar.rating           AS analyst_rating,
+    ar.target_price     AS analyst_target_price,
     ar.strong_buy, ar.buy, ar.hold, ar.sell, ar.strong_sell,
 
-    -- Shares
+    -- ── Shares ───────────────────────────────────────────────────────────────
     ss.shares_outstanding,
 
     NOW()
 
 FROM market.companies_current c
 
--- Latest close price + 52w high/low via subquery
+-- ── Latest close price + 52w high/low ────────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT
         close,
@@ -210,9 +280,10 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) dp ON TRUE
 
+-- ── Valuation snapshot (EODHD weekly refresh) ─────────────────────────────────
 LEFT JOIN market.valuation_snapshot vs ON vs.asx_code = c.asx_code
 
--- Latest ex-dividend date
+-- ── Latest ex-dividend date ───────────────────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT ex_date FROM market.dividends
     WHERE asx_code = c.asx_code
@@ -220,7 +291,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) div_latest ON TRUE
 
--- FY0 = most recent full year P&L
+-- ── Annual P&L FY0 (most recent) ─────────────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT fiscal_year, revenue, ebitda, net_profit, eps
     FROM financials.annual_pnl
@@ -229,7 +300,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) pnl0 ON TRUE
 
--- FY1 = second most recent
+-- ── Annual P&L FY1 (second most recent) ──────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT fiscal_year, revenue, ebitda, net_profit, eps
     FROM financials.annual_pnl
@@ -238,7 +309,7 @@ LEFT JOIN LATERAL (
     LIMIT 1 OFFSET 1
 ) pnl1 ON TRUE
 
--- Balance Sheet latest FY
+-- ── Balance Sheet (latest FY) ─────────────────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT total_assets, total_equity, total_debt, net_debt,
            cash_equivalents, book_value_per_share,
@@ -249,7 +320,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) bs0 ON TRUE
 
--- Cash Flow latest FY
+-- ── Cash Flow (latest FY) ─────────────────────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT cfo, capex, fcf
     FROM financials.annual_cashflow
@@ -258,21 +329,62 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) cf0 ON TRUE
 
--- Latest computed metrics (margins, ROE, growth, grossed-up yield, Piotroski)
+-- ── Computed metrics (daily compute — freshest ratios & margins) ──────────────
 LEFT JOIN LATERAL (
     SELECT roe, roa, roce, opm, npm, gpm, ebitda_margin,
            grossed_up_yield, fcf_yield,
            revenue_growth_1y, revenue_growth_3y,
-           profit_growth_1y, profit_growth_3y
+           profit_growth_1y,  profit_growth_3y
     FROM market.computed_metrics
     WHERE asx_code = c.asx_code
     ORDER BY time DESC
     LIMIT 1
 ) cm ON TRUE
 
+-- ── Monthly metrics (latest month — returns, momentum, volatility, technicals)
+LEFT JOIN LATERAL (
+    SELECT monthly_return, return_3m, return_6m, return_12m, return_ytd,
+           momentum_3m, momentum_6m, momentum_12m,
+           volatility_1m, volatility_3m,
+           drawdown_from_ath,
+           rsi_14, macd_line, macd_signal
+    FROM market.monthly_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY month_date DESC
+    LIMIT 1
+) mm ON TRUE
+
+-- ── Yearly metrics (latest FY — CAGRs, quality scores, risk) ─────────────────
+LEFT JOIN LATERAL (
+    SELECT roe, roa, roce,
+           fcf_yield, franked_yield,
+           revenue_growth_1y, revenue_cagr_3y, revenue_cagr_5y,
+           net_income_growth_1y, net_income_cagr_3y,
+           eps_cagr_3y,
+           avg_roe_3y,
+           piotroski_f_score, altman_z_score,
+           sharpe_1y, max_drawdown_1y,
+           beta_1y,
+           dividend_cagr_3y, dividend_consecutive_yrs
+    FROM market.yearly_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY fiscal_year DESC
+    LIMIT 1
+) ym ON TRUE
+
+-- ── Quarterly metrics (latest quarter — QoQ and YoY growth) ──────────────────
+LEFT JOIN LATERAL (
+    SELECT revenue_growth_yoy, eps_growth_yoy, net_income_growth_yoy
+    FROM market.quarterly_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY fiscal_year DESC, quarter DESC
+    LIMIT 1
+) qm ON TRUE
+
+-- ── Analyst ratings ───────────────────────────────────────────────────────────
 LEFT JOIN market.analyst_ratings ar ON ar.asx_code = c.asx_code
 
--- Shares outstanding from staging (most recently loaded)
+-- ── Shares outstanding (staging — most recently loaded) ───────────────────────
 LEFT JOIN LATERAL (
     SELECT shares_outstanding::BIGINT
     FROM staging.shares_stats
@@ -283,6 +395,7 @@ LEFT JOIN LATERAL (
 {code_filter}
 
 ON CONFLICT (asx_code) DO UPDATE SET
+    -- Identity
     company_name            = EXCLUDED.company_name,
     sector                  = EXCLUDED.sector,
     industry_group          = EXCLUDED.industry_group,
@@ -302,11 +415,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     isin                    = EXCLUDED.isin,
     website                 = EXCLUDED.website,
     description             = EXCLUDED.description,
+    -- Price
     price                   = EXCLUDED.price,
     price_date              = EXCLUDED.price_date,
     market_cap              = EXCLUDED.market_cap,
     high_52w                = EXCLUDED.high_52w,
     low_52w                 = EXCLUDED.low_52w,
+    -- Valuation
     pe_ratio                = EXCLUDED.pe_ratio,
     forward_pe              = EXCLUDED.forward_pe,
     peg_ratio               = EXCLUDED.peg_ratio,
@@ -315,9 +430,11 @@ ON CONFLICT (asx_code) DO UPDATE SET
     ev                      = EXCLUDED.ev,
     ev_to_ebitda            = EXCLUDED.ev_to_ebitda,
     ev_to_revenue           = EXCLUDED.ev_to_revenue,
+    -- Dividends
     dividend_yield          = EXCLUDED.dividend_yield,
     dps_ttm                 = EXCLUDED.dps_ttm,
     ex_div_date             = EXCLUDED.ex_div_date,
+    -- Profitability
     revenue_ttm             = EXCLUDED.revenue_ttm,
     gross_profit_ttm        = EXCLUDED.gross_profit_ttm,
     ebitda_ttm              = EXCLUDED.ebitda_ttm,
@@ -330,18 +447,17 @@ ON CONFLICT (asx_code) DO UPDATE SET
     roce                    = EXCLUDED.roce,
     grossed_up_yield        = EXCLUDED.grossed_up_yield,
     fcf_yield               = EXCLUDED.fcf_yield,
-    revenue_growth_1y       = EXCLUDED.revenue_growth_1y,
-    revenue_growth_3y_cagr  = EXCLUDED.revenue_growth_3y_cagr,
-    earnings_growth_1y      = EXCLUDED.earnings_growth_1y,
-    earnings_growth_3y_cagr = EXCLUDED.earnings_growth_3y_cagr,
+    -- EPS
     eps_fy0                 = EXCLUDED.eps_fy0,
     eps_fy1                 = EXCLUDED.eps_fy1,
+    -- Income Statement
     revenue_fy0             = EXCLUDED.revenue_fy0,
     revenue_fy1             = EXCLUDED.revenue_fy1,
     ebitda_fy0              = EXCLUDED.ebitda_fy0,
     ebitda_fy1              = EXCLUDED.ebitda_fy1,
     net_profit_fy0          = EXCLUDED.net_profit_fy0,
     net_profit_fy1          = EXCLUDED.net_profit_fy1,
+    -- Balance Sheet
     total_assets            = EXCLUDED.total_assets,
     total_equity            = EXCLUDED.total_equity,
     total_debt              = EXCLUDED.total_debt,
@@ -350,9 +466,47 @@ ON CONFLICT (asx_code) DO UPDATE SET
     book_value_per_share    = EXCLUDED.book_value_per_share,
     debt_to_equity          = EXCLUDED.debt_to_equity,
     current_ratio           = EXCLUDED.current_ratio,
+    -- Cash Flow
     cfo_fy0                 = EXCLUDED.cfo_fy0,
     capex_fy0               = EXCLUDED.capex_fy0,
     fcf_fy0                 = EXCLUDED.fcf_fy0,
+    -- Growth rates
+    revenue_growth_1y       = EXCLUDED.revenue_growth_1y,
+    revenue_growth_3y_cagr  = EXCLUDED.revenue_growth_3y_cagr,
+    earnings_growth_1y      = EXCLUDED.earnings_growth_1y,
+    earnings_growth_3y_cagr = EXCLUDED.earnings_growth_3y_cagr,
+    -- Returns & momentum
+    return_1m               = EXCLUDED.return_1m,
+    return_3m               = EXCLUDED.return_3m,
+    return_6m               = EXCLUDED.return_6m,
+    return_1y               = EXCLUDED.return_1y,
+    return_ytd              = EXCLUDED.return_ytd,
+    momentum_3m             = EXCLUDED.momentum_3m,
+    momentum_6m             = EXCLUDED.momentum_6m,
+    momentum_12m            = EXCLUDED.momentum_12m,
+    -- Volatility & risk
+    volatility_20d          = EXCLUDED.volatility_20d,
+    volatility_60d          = EXCLUDED.volatility_60d,
+    sharpe_1y               = EXCLUDED.sharpe_1y,
+    drawdown_from_ath       = EXCLUDED.drawdown_from_ath,
+    beta_1y                 = EXCLUDED.beta_1y,
+    -- Technicals
+    rsi_14                  = EXCLUDED.rsi_14,
+    macd                    = EXCLUDED.macd,
+    macd_signal             = EXCLUDED.macd_signal,
+    -- Multi-year quality & CAGR
+    piotroski_f_score       = EXCLUDED.piotroski_f_score,
+    altman_z_score          = EXCLUDED.altman_z_score,
+    revenue_cagr_5y         = EXCLUDED.revenue_cagr_5y,
+    eps_growth_3y_cagr      = EXCLUDED.eps_growth_3y_cagr,
+    avg_roe_3y              = EXCLUDED.avg_roe_3y,
+    dividend_cagr_3y        = EXCLUDED.dividend_cagr_3y,
+    dividend_consecutive_yrs = EXCLUDED.dividend_consecutive_yrs,
+    -- Latest-quarter growth
+    revenue_growth_yoy_q    = EXCLUDED.revenue_growth_yoy_q,
+    eps_growth_yoy_q        = EXCLUDED.eps_growth_yoy_q,
+    net_income_growth_yoy_q = EXCLUDED.net_income_growth_yoy_q,
+    -- Analyst
     analyst_rating          = EXCLUDED.analyst_rating,
     analyst_target_price    = EXCLUDED.analyst_target_price,
     analyst_strong_buy      = EXCLUDED.analyst_strong_buy,
@@ -360,6 +514,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     analyst_hold            = EXCLUDED.analyst_hold,
     analyst_sell            = EXCLUDED.analyst_sell,
     analyst_strong_sell     = EXCLUDED.analyst_strong_sell,
+    -- Shares
     shares_outstanding      = EXCLUDED.shares_outstanding,
     universe_built_at       = NOW()
 """

@@ -434,10 +434,11 @@ CREATE TABLE market.weekly_metrics (
     market_cap              NUMERIC(18,2),
 
     -- ── Returns ───────────────────────────────────────────────
-    weekly_return           NUMERIC(8,4),
-    return_4w               NUMERIC(8,4),            -- 4-week return
-    return_13w              NUMERIC(8,4),            -- 13-week (quarter) return
-    return_52w              NUMERIC(8,4),            -- 52-week return
+    -- NUMERIC(18,6): ASX small-caps can have extreme multi-year returns (>9999%)
+    weekly_return           NUMERIC(18,6),
+    return_4w               NUMERIC(18,6),           -- 4-week return
+    return_13w              NUMERIC(18,6),           -- 13-week (quarter) return
+    return_52w              NUMERIC(18,6),           -- 52-week return
 
     -- ── Trend ─────────────────────────────────────────────────
     adx_14                  NUMERIC(6,2),
@@ -468,12 +469,12 @@ CREATE TABLE market.weekly_metrics (
     atr_14                  NUMERIC(10,4),
     bb_upper                NUMERIC(12,4),
     bb_lower                NUMERIC(12,4),
-    bb_pct                  NUMERIC(8,4),
-    bb_width                NUMERIC(8,4),
+    bb_pct                  NUMERIC(18,6),
+    bb_width                NUMERIC(18,6),
 
     -- ── Volume ────────────────────────────────────────────────
     volume_avg_4w           BIGINT,
-    relative_volume         NUMERIC(8,4),
+    relative_volume         NUMERIC(18,6),
     obv                     BIGINT,
 
     -- ── Signals ───────────────────────────────────────────────

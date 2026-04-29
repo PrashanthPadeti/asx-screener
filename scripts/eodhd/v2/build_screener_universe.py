@@ -60,9 +60,11 @@ INSERT INTO screener.universe (
     -- Dividends
     dividend_yield, dps_ttm, ex_div_date,
 
-    -- Profitability (TTM from valuation_snapshot)
+    -- Profitability (computed_metrics preferred, valuation_snapshot fallback)
     revenue_ttm, gross_profit_ttm, ebitda_ttm,
-    net_margin, operating_margin, roe, roa,
+    gross_margin, ebitda_margin, net_margin, operating_margin,
+    roe, roa, roce,
+    grossed_up_yield, fcf_yield,
 
     -- EPS
     eps_fy0, eps_fy1,
@@ -78,6 +80,10 @@ INSERT INTO screener.universe (
 
     -- Cash Flow (latest FY)
     cfo_fy0, capex_fy0, fcf_fy0,
+
+    -- Growth rates (from computed_metrics)
+    revenue_growth_1y, revenue_growth_3y_cagr,
+    earnings_growth_1y, earnings_growth_3y_cagr,
 
     -- Analyst
     analyst_rating, analyst_target_price,
@@ -128,14 +134,19 @@ SELECT
     vs.dividend_per_share,
     div_latest.ex_date,
 
-    -- Profitability TTM
+    -- Profitability TTM (computed_metrics preferred, valuation_snapshot fallback)
     vs.revenue_ttm,
     vs.gross_profit_ttm,
     vs.ebitda_ttm,
-    vs.profit_margin    AS net_margin,
-    vs.operating_margin,
-    vs.roe_ttm,
-    vs.roa_ttm,
+    COALESCE(cm.gpm,          NULL)                    AS gross_margin,
+    COALESCE(cm.ebitda_margin, NULL)                   AS ebitda_margin,
+    COALESCE(cm.npm,          vs.profit_margin)        AS net_margin,
+    COALESCE(cm.opm,          vs.operating_margin)     AS operating_margin,
+    COALESCE(cm.roe,          vs.roe_ttm)              AS roe,
+    COALESCE(cm.roa,          vs.roa_ttm)              AS roa,
+    cm.roce                                            AS roce,
+    cm.grossed_up_yield                                AS grossed_up_yield,
+    cm.fcf_yield                                       AS fcf_yield,
 
     -- EPS (FY0 = most recent, FY1 = one year prior)
     pnl0.eps    AS eps_fy0,
@@ -165,6 +176,12 @@ SELECT
     cf0.cfo     AS cfo_fy0,
     cf0.capex   AS capex_fy0,
     cf0.fcf     AS fcf_fy0,
+
+    -- Growth rates from computed_metrics
+    cm.revenue_growth_1y,
+    cm.revenue_growth_3y   AS revenue_growth_3y_cagr,
+    cm.profit_growth_1y    AS earnings_growth_1y,
+    cm.profit_growth_3y    AS earnings_growth_3y_cagr,
 
     -- Analyst
     ar.rating,
@@ -241,6 +258,18 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) cf0 ON TRUE
 
+-- Latest computed metrics (margins, ROE, growth, grossed-up yield, Piotroski)
+LEFT JOIN LATERAL (
+    SELECT roe, roa, roce, opm, npm, gpm, ebitda_margin,
+           grossed_up_yield, fcf_yield,
+           revenue_growth_1y, revenue_growth_3y,
+           profit_growth_1y, profit_growth_3y
+    FROM market.computed_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY time DESC
+    LIMIT 1
+) cm ON TRUE
+
 LEFT JOIN market.analyst_ratings ar ON ar.asx_code = c.asx_code
 
 -- Shares outstanding from staging (most recently loaded)
@@ -292,10 +321,19 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_ttm             = EXCLUDED.revenue_ttm,
     gross_profit_ttm        = EXCLUDED.gross_profit_ttm,
     ebitda_ttm              = EXCLUDED.ebitda_ttm,
+    gross_margin            = EXCLUDED.gross_margin,
+    ebitda_margin           = EXCLUDED.ebitda_margin,
     net_margin              = EXCLUDED.net_margin,
     operating_margin        = EXCLUDED.operating_margin,
     roe                     = EXCLUDED.roe,
     roa                     = EXCLUDED.roa,
+    roce                    = EXCLUDED.roce,
+    grossed_up_yield        = EXCLUDED.grossed_up_yield,
+    fcf_yield               = EXCLUDED.fcf_yield,
+    revenue_growth_1y       = EXCLUDED.revenue_growth_1y,
+    revenue_growth_3y_cagr  = EXCLUDED.revenue_growth_3y_cagr,
+    earnings_growth_1y      = EXCLUDED.earnings_growth_1y,
+    earnings_growth_3y_cagr = EXCLUDED.earnings_growth_3y_cagr,
     eps_fy0                 = EXCLUDED.eps_fy0,
     eps_fy1                 = EXCLUDED.eps_fy1,
     revenue_fy0             = EXCLUDED.revenue_fy0,

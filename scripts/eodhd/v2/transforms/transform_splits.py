@@ -35,11 +35,18 @@ log = logging.getLogger(__name__)
 
 
 def parse_ratio(split_str: str | None) -> float | None:
+    """Parse split ratio string to decimal.
+    Handles: '2:1', '1:10', '1.000000/5.000000', '2.0/1.0', '2.0'
+    '2:1'              → 2.0  (2-for-1 forward split)
+    '1:10'             → 0.1  (reverse split)
+    '1.000000/5.000000'→ 0.2  (1-for-5 reverse split, EODHD format)
+    """
     if not split_str:
         return None
     s = str(split_str).strip()
-    if ":" in s:
-        parts = s.split(":")
+    sep = ":" if ":" in s else "/" if "/" in s else None
+    if sep:
+        parts = s.split(sep)
         try:
             num, den = float(parts[0]), float(parts[1])
             return round(num / den, 6) if den != 0 else None

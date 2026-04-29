@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS financials.earnings_quarterly (
     eps_actual          NUMERIC(12,6),
     eps_estimate        NUMERIC(12,6),
     eps_difference      NUMERIC(12,6),
-    surprise_pct        NUMERIC(8,4),               -- % beat/miss
+    surprise_pct        NUMERIC(18,4),              -- % beat/miss
     beat_miss           VARCHAR(10),                 -- 'beat', 'miss', 'met', NULL
     data_source         VARCHAR(20)     DEFAULT 'eodhd',
     loaded_at           TIMESTAMPTZ     DEFAULT NOW(),

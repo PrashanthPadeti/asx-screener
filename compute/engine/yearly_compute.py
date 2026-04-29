@@ -8,35 +8,35 @@ Sources (no API calls — pure computation):
   financials.annual_balance_sheet → assets / liabilities / equity
   financials.annual_cashflow      → CFO / capex / FCF
   market.daily_prices             → price at period_end for PE/PB,
-                                    Sharpe ratio (1y), max drawdown
+                                    Sharpe 1y, max drawdown
+                                    (fetched ONCE per stock, all lookups in-memory)
 
 Output: market.yearly_metrics (one row per asx_code per fiscal_year)
 
 Metrics computed:
   - Profitability         ROE, ROA, ROCE, ROIC, margins (gross/EBITDA/EBIT/net/OCF/FCF)
-  - Efficiency            asset turnover, receivables/inventory/payable days
+  - Efficiency            asset turnover, receivables days, capex intensity
   - Leverage & liquidity  D/E, current ratio, net debt/EBITDA, interest coverage
-  - Per share             EPS, DPS, BVPS, FCF/share, OCF/share
-  - Valuation ratios      PE, PB, PS, EV/EBITDA (using price at period_end_date)
-  - Dividend              yield, payout ratio, CAGR 3y, consecutive uninterrupted years
+  - Per share             EPS, DPS, BVPS, FCF/share; valuation: PE, PB, PS, EV/EBITDA
+  - Dividend              yield, payout ratio, CAGR 3y/5y, consecutive uninterrupted years
   - YoY growth            revenue, gross profit, EBITDA, net income, EPS, FCF, BVPS
-  - Multi-year CAGRs      revenue/EPS/net income/EBITDA/FCF — 3y, 5y, 7y, 10y
+  - Multi-year CAGRs      revenue/EPS/NI/EBITDA/FCF — 3y, 5y, 7y, 10y
   - Rolling averages      ROE, ROA, ROCE, margins — 3y, 5y
   - Quality scores        Piotroski F-score (0–9), Altman Z-score
-  - Risk & performance    Sharpe 1y, max drawdown 1y, annualised volatility 1y
-                          (beta/alpha skipped — need market index)
+  - Risk & performance    Sharpe 1y, max drawdown 1y, annualised vol 1y
+                          (beta skipped — needs market index)
 
 Usage:
-    python compute/engine/yearly_compute.py               # all stocks
+    python compute/engine/yearly_compute.py
     python compute/engine/yearly_compute.py --codes BHP CBA
     python compute/engine/yearly_compute.py --limit 20
-    python compute/engine/yearly_compute.py --min-year 2020  # only recompute recent FYs
+    python compute/engine/yearly_compute.py --min-year 2020
 """
 
 import os
 import logging
 import argparse
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import Optional
 
 import psycopg2
@@ -68,67 +68,70 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-COMPUTE_VERSION  = "1.0.0"
-BATCH_COMMIT     = 50
-RISK_FREE_RATE   = 0.04   # 4% — approximate Australian cash rate for Sharpe calc
+COMPUTE_VERSION = "1.0.0"
+BATCH_COMMIT    = 50
+RISK_FREE_RATE  = 0.04    # 4% — approximate Australian cash rate for Sharpe
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Safe helpers ──────────────────────────────────────────────────────────────
 
-def _nan_to_none(val):
+def _v(val):
+    """Return Python float/int/None; coerce numpy scalars and NaN to None."""
     if val is None:
         return None
     if isinstance(val, (bool, np.bool_)):
         return bool(val)
-    if isinstance(val, float) and np.isnan(val):
-        return None
     if isinstance(val, (np.integer,)):
         return int(val)
     if isinstance(val, (np.floating,)):
         return None if np.isnan(val) else float(val)
+    if isinstance(val, float):
+        return None if np.isnan(val) else val
     return val
 
 
-def _safe_div(num, den, round_dp=4):
-    """Return num/den rounded, or None if denominator is zero/None."""
+def _f(val) -> Optional[float]:
+    """Safe float: returns None for None/NaN, float otherwise."""
+    v = _v(val)
+    return float(v) if v is not None else None
+
+
+def _div(num, den, dp=4) -> Optional[float]:
+    """num / den, rounded. Returns None on zero/None/NaN denominator."""
+    n, d = _f(num), _f(den)
+    if n is None or d is None or d == 0:
+        return None
     try:
-        if den is None or den == 0 or np.isnan(float(den)):
-            return None
-        result = float(num) / float(den)
-        return round(result, round_dp) if not np.isnan(result) and not np.isinf(result) else None
+        result = n / d
+        return round(result, dp) if np.isfinite(result) else None
     except Exception:
         return None
 
 
-def _cagr(end_val, start_val, years: int):
+def _cagr(end_val, start_val, years: int) -> Optional[float]:
     """Compound Annual Growth Rate. Returns None on invalid inputs."""
-    try:
-        if years <= 0 or start_val is None or end_val is None:
-            return None
-        s, e = float(start_val), float(end_val)
-        if s == 0 or np.isnan(s) or np.isnan(e):
-            return None
-        if s < 0 and e < 0:
-            # Both negative — flip sign convention: growth = improvement
-            result = (abs(e) / abs(s)) ** (1 / years) - 1
-        elif s < 0 or e < 0:
-            return None   # sign change — CAGR undefined
-        else:
-            result = (e / s) ** (1 / years) - 1
-        return round(result, 6) if not np.isinf(result) else None
-    except Exception:
+    e, s = _f(end_val), _f(start_val)
+    if e is None or s is None or years <= 0 or s == 0:
         return None
+    if s < 0 and e < 0:
+        result = (abs(e) / abs(s)) ** (1 / years) - 1
+    elif s < 0 or e < 0:
+        return None
+    else:
+        result = (e / s) ** (1 / years) - 1
+    return round(result, 6) if np.isfinite(result) else None
 
 
-def _rolling_avg(series: list, n: int):
-    """Mean of last n non-None values."""
-    vals = [v for v in series[-n:] if v is not None]
+def _avg(values: list, n: int) -> Optional[float]:
+    """Mean of last n non-None values from a list."""
+    vals = [_f(v) for v in values[-n:]]
+    vals = [v for v in vals if v is not None]
     return round(sum(vals) / len(vals), 4) if vals else None
 
 
 # ── Data Fetchers ─────────────────────────────────────────────────────────────
 
-def fetch_codes(cur, codes=None, limit=None):
+def fetch_codes(cur, codes=None, limit=None) -> list:
     if codes:
         return [c.upper() for c in codes]
     sql = """
@@ -145,29 +148,23 @@ def fetch_codes(cur, codes=None, limit=None):
 
 
 def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
-    """
-    Returns one row per fiscal_year joining pnl + balance_sheet + cashflow.
-    Sorted ascending by fiscal_year.
-    """
+    """One row per fiscal_year — pnl + balance_sheet + cashflow joined."""
     cur.execute("""
         SELECT
             p.fiscal_year,
             p.period_end_date,
-            -- P&L
             p.revenue,      p.gross_profit,  p.ebitda,
             p.ebit,         p.interest_expense,
             p.net_profit,   p.eps,           p.eps_diluted,
             p.dps,          p.dps_franking_pct,
             p.gpm,          p.opm,           p.npm,   p.ebitda_margin,
-            -- Balance Sheet
             b.total_assets,       b.total_equity,
             b.total_current_assets, b.total_current_liab,
             b.total_debt,         b.net_debt,
             b.cash_equivalents,   b.long_term_debt,
             b.retained_earnings,  b.working_capital,
             b.book_value_per_share, b.shares_outstanding,
-            b.trade_receivables,  b.inventory,  b.trade_payables,
-            -- Cash Flow
+            b.trade_receivables,  b.inventory,
             cf.cfo,   cf.capex,  cf.fcf,
             cf.equity_raised
         FROM financials.annual_pnl p
@@ -194,7 +191,7 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
         "total_debt", "net_debt", "cash_equivalents", "long_term_debt",
         "retained_earnings", "working_capital",
         "book_value_per_share", "shares_outstanding",
-        "trade_receivables", "inventory", "trade_payables",
+        "trade_receivables", "inventory",
         "cfo", "capex", "fcf", "equity_raised",
     ]
     df = pd.DataFrame(rows, columns=cols)
@@ -202,162 +199,141 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
     return df
 
 
-def fetch_price_at_date(cur, asx_code: str, target_date) -> Optional[float]:
-    """Closest closing price on or before target_date."""
+def fetch_all_prices(cur, asx_code: str) -> pd.Series:
+    """
+    Fetch ALL daily closing prices for a stock in a SINGLE query.
+    Returns pd.Series indexed by date (pd.Timestamp).
+    Used for all price lookups per fiscal year without re-querying.
+    """
     cur.execute("""
-        SELECT close
+        SELECT
+            DATE(time AT TIME ZONE 'Australia/Sydney') AS day,
+            close
         FROM market.daily_prices
         WHERE asx_code = %s
-          AND DATE(time AT TIME ZONE 'Australia/Sydney') <= %s
-        ORDER BY time DESC
-        LIMIT 1
-    """, [asx_code, target_date])
-    row = cur.fetchone()
-    return float(row[0]) if row and row[0] is not None else None
-
-
-def fetch_daily_prices_for_year(cur, asx_code: str,
-                                 period_end: pd.Timestamp) -> pd.Series:
-    """Daily closes for the 12 months ending at period_end."""
-    start = (period_end - pd.DateOffset(years=1)).date()
-    cur.execute("""
-        SELECT DATE(time AT TIME ZONE 'Australia/Sydney') AS day, close
-        FROM market.daily_prices
-        WHERE asx_code = %s
-          AND DATE(time AT TIME ZONE 'Australia/Sydney') BETWEEN %s AND %s
         ORDER BY time ASC
-    """, [asx_code, start, period_end.date()])
+    """, [asx_code])
     rows = cur.fetchall()
     if not rows:
         return pd.Series(dtype=float)
-    return pd.Series(
-        [float(r[1]) for r in rows if r[1] is not None],
-        index=pd.to_datetime([r[0] for r in rows if r[1] is not None]),
-    )
+
+    dates  = pd.to_datetime([r[0] for r in rows])
+    closes = [float(r[1]) if r[1] is not None else np.nan for r in rows]
+    return pd.Series(closes, index=dates, name="close").dropna()
 
 
-# ── Ratio Calculations ────────────────────────────────────────────────────────
-
-def piotroski_f_score(cur_yr: dict, prev_yr: Optional[dict]) -> Optional[int]:
-    """
-    Piotroski F-Score: 9 binary signals (0 or 1 each).
-    Returns 0–9 or None if insufficient data.
-    """
-    if not cur_yr or cur_yr.get("total_assets") in (None, 0):
+def price_at(prices: pd.Series, target_date) -> Optional[float]:
+    """Last close on or before target_date from pre-fetched Series."""
+    if prices.empty:
         return None
-
-    score = 0
-    ta   = cur_yr["total_assets"]
-    prev = prev_yr or {}
-
-    # ── Profitability ──
-    roa_cur  = _safe_div(cur_yr.get("net_profit"),  ta)
-    roa_prev = _safe_div(prev.get("net_profit"),    prev.get("total_assets")) if prev else None
-    cfo_cur  = cur_yr.get("cfo")
-
-    if roa_cur  is not None and roa_cur > 0:   score += 1   # F1 ROA > 0
-    if cfo_cur  is not None and cfo_cur > 0:   score += 1   # F2 CFO > 0
-    if roa_cur  is not None and roa_prev is not None and roa_cur > roa_prev:
-        score += 1                                           # F3 ΔROa > 0
-    # F4 Accruals: CFO/Assets > ROA
-    cfo_assets = _safe_div(cfo_cur, ta)
-    if cfo_assets is not None and roa_cur is not None and cfo_assets > roa_cur:
-        score += 1
-
-    # ── Leverage / Liquidity ──
-    ltd_ratio_cur  = _safe_div(cur_yr.get("long_term_debt"),  ta)
-    ltd_ratio_prev = _safe_div(prev.get("long_term_debt"),    prev.get("total_assets")) if prev else None
-    cr_cur  = _safe_div(cur_yr.get("total_current_assets"), cur_yr.get("total_current_liab"))
-    cr_prev = _safe_div(prev.get("total_current_assets"),   prev.get("total_current_liab")) if prev else None
-
-    if ltd_ratio_cur is not None and ltd_ratio_prev is not None and ltd_ratio_cur < ltd_ratio_prev:
-        score += 1                                           # F5 Δleverage < 0
-    if cr_cur is not None and cr_prev is not None and cr_cur > cr_prev:
-        score += 1                                           # F6 Δcurrent ratio > 0
-    # F7 No new dilution: equity_raised ≤ 0 (no net new shares issued)
-    eq_raised = cur_yr.get("equity_raised")
-    if eq_raised is not None and eq_raised <= 0:
-        score += 1
-
-    # ── Efficiency ──
-    gm_cur  = cur_yr.get("gpm")
-    gm_prev = prev.get("gpm") if prev else None
-    at_cur  = _safe_div(cur_yr.get("revenue"),  ta)
-    at_prev = _safe_div(prev.get("revenue"),    prev.get("total_assets")) if prev else None
-
-    if gm_cur is not None and gm_prev is not None and gm_cur > gm_prev:
-        score += 1                                           # F8 Δgross margin > 0
-    if at_cur is not None and at_prev is not None and at_cur > at_prev:
-        score += 1                                           # F9 Δasset turnover > 0
-
-    return score
+    tgt = pd.Timestamp(target_date)
+    subset = prices[prices.index <= tgt]
+    return float(subset.iloc[-1]) if not subset.empty else None
 
 
-def altman_z_score(cur_yr: dict, market_cap: Optional[float]) -> Optional[float]:
-    """
-    Altman Z-Score (modified for non-manufacturers):
-    Z = 1.2*X1 + 1.4*X2 + 3.3*X3 + 0.6*X4 + 1.0*X5
-    """
-    ta    = cur_yr.get("total_assets")
+def price_window(prices: pd.Series, period_end) -> pd.Series:
+    """Daily closes for 12 months ending period_end."""
+    end   = pd.Timestamp(period_end)
+    start = end - pd.DateOffset(years=1)
+    return prices[(prices.index >= start) & (prices.index <= end)]
+
+
+# ── Quality Scores ────────────────────────────────────────────────────────────
+
+def piotroski_f_score(row: dict, prev: Optional[dict]) -> Optional[int]:
+    ta = _f(row.get("total_assets"))
     if ta is None or ta == 0:
         return None
 
-    wc    = cur_yr.get("working_capital")
-    re    = cur_yr.get("retained_earnings")
-    ebit  = cur_yr.get("ebit")
-    rev   = cur_yr.get("revenue")
-    tliab = cur_yr.get("total_debt")   # proxy for total liabilities
+    score = 0
+    p = prev or {}
 
-    if any(v is None for v in [wc, re, ebit, rev]):
+    roa_cur  = _div(row.get("net_profit"), ta)
+    roa_prev = _div(p.get("net_profit"),   p.get("total_assets"))
+    cfo_cur  = _f(row.get("cfo"))
+
+    if roa_cur  is not None and roa_cur > 0:                    score += 1  # F1
+    if cfo_cur  is not None and cfo_cur > 0:                    score += 1  # F2
+    if roa_cur  is not None and roa_prev is not None and roa_cur > roa_prev:
+                                                                 score += 1  # F3
+    cfo_assets = _div(cfo_cur, ta)
+    if cfo_assets is not None and roa_cur is not None and cfo_assets > roa_cur:
+                                                                 score += 1  # F4
+
+    ltd_cur  = _div(row.get("long_term_debt"), ta)
+    ltd_prev = _div(p.get("long_term_debt"),   p.get("total_assets"))
+    cr_cur   = _div(row.get("total_current_assets"), row.get("total_current_liab"))
+    cr_prev  = _div(p.get("total_current_assets"),   p.get("total_current_liab"))
+    eq_raised = _f(row.get("equity_raised"))
+
+    if ltd_cur is not None and ltd_prev is not None and ltd_cur < ltd_prev:
+                                                                 score += 1  # F5
+    if cr_cur is not None and cr_prev is not None and cr_cur > cr_prev:
+                                                                 score += 1  # F6
+    if eq_raised is not None and eq_raised <= 0:                 score += 1  # F7
+
+    gm_cur  = _f(row.get("gpm"))
+    gm_prev = _f(p.get("gpm"))
+    at_cur  = _div(row.get("revenue"), ta)
+    at_prev = _div(p.get("revenue"),   p.get("total_assets"))
+
+    if gm_cur is not None and gm_prev is not None and gm_cur > gm_prev:
+                                                                 score += 1  # F8
+    if at_cur is not None and at_prev is not None and at_cur > at_prev:
+                                                                 score += 1  # F9
+    return score
+
+
+def altman_z_score(row: dict, market_cap: Optional[float]) -> Optional[float]:
+    ta   = _f(row.get("total_assets"))
+    wc   = _f(row.get("working_capital"))
+    re   = _f(row.get("retained_earnings"))
+    ebit = _f(row.get("ebit"))
+    rev  = _f(row.get("revenue"))
+    td   = _f(row.get("total_debt"))
+    te   = _f(row.get("total_equity"))
+
+    if any(v is None for v in [ta, wc, re, ebit, rev]) or ta == 0:
         return None
 
-    x1 = float(wc)   / float(ta)
-    x2 = float(re)   / float(ta)
-    x3 = float(ebit) / float(ta)
-    x5 = float(rev)  / float(ta)
+    x1 = wc   / ta
+    x2 = re   / ta
+    x3 = ebit / ta
+    x5 = rev  / ta
 
-    # X4: market cap / total liabilities (use total_equity as fallback if no market cap)
-    if market_cap is not None and tliab is not None and float(tliab) > 0:
-        x4 = float(market_cap) / float(tliab)
-    elif cur_yr.get("total_equity") is not None and tliab is not None and float(tliab) > 0:
-        x4 = float(cur_yr["total_equity"]) / float(tliab)
+    if market_cap is not None and td is not None and td > 0:
+        x4 = market_cap / td
+    elif te is not None and td is not None and td > 0:
+        x4 = te / td
     else:
         x4 = 0.0
 
     z = 1.2*x1 + 1.4*x2 + 3.3*x3 + 0.6*x4 + 1.0*x5
-    return round(z, 4) if not np.isnan(z) and not np.isinf(z) else None
+    return round(z, 4) if np.isfinite(z) else None
 
 
-def sharpe_max_drawdown(prices: pd.Series):
-    """
-    Sharpe ratio and max drawdown from a 1-year daily close series.
-    Returns (sharpe_1y, max_drawdown_1y, volatility_1y).
-    """
+def sharpe_drawdown_vol(prices: pd.Series):
+    """Returns (sharpe_1y, max_drawdown_1y, volatility_1y) or (None, None, None)."""
     if len(prices) < 20:
         return None, None, None
-
-    returns = prices.pct_change().dropna()
-    if returns.empty:
+    rets = prices.pct_change().dropna()
+    if rets.empty:
         return None, None, None
 
-    ann_vol = returns.std() * np.sqrt(252)
-    ann_ret = (prices.iloc[-1] / prices.iloc[0]) - 1
+    ann_vol = float(rets.std() * np.sqrt(252))
+    ann_ret = float(prices.iloc[-1] / prices.iloc[0]) - 1
+    sharpe  = round((ann_ret - RISK_FREE_RATE) / ann_vol, 4) if ann_vol > 0 else None
 
-    sharpe = round((ann_ret - RISK_FREE_RATE) / ann_vol, 4) if ann_vol > 0 else None
-
-    cum_max   = prices.cummax()
-    drawdowns = (prices - cum_max) / cum_max
-    max_dd    = round(float(drawdowns.min()), 4)  # negative value
-
-    return sharpe, max_dd, round(float(ann_vol), 4)
+    cum_max = prices.cummax()
+    max_dd  = round(float(((prices - cum_max) / cum_max).min()), 4)
+    return sharpe, max_dd, round(ann_vol, 4)
 
 
-def consecutive_dividend_years(df: pd.DataFrame) -> int:
-    """Count years with DPS > 0, starting from the most recent year going back."""
-    years = df.sort_values("fiscal_year", ascending=False)
+def consecutive_div_years(df: pd.DataFrame) -> int:
     count = 0
-    for _, row in years.iterrows():
-        if row["dps"] is not None and float(row["dps"]) > 0:
+    for _, row in df.sort_values("fiscal_year", ascending=False).iterrows():
+        d = _f(row.get("dps"))
+        if d is not None and d > 0:
             count += 1
         else:
             break
@@ -366,281 +342,207 @@ def consecutive_dividend_years(df: pd.DataFrame) -> int:
 
 # ── Row Builder ───────────────────────────────────────────────────────────────
 
-def build_yearly_rows(asx_code: str, df: pd.DataFrame, cur) -> list[tuple]:
+def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
+                      prices: pd.Series) -> list[tuple]:
     """
     For each fiscal_year row, compute all metrics.
-    Returns list of tuples ready for execute_values INSERT.
+    prices: full daily close history fetched once by caller.
     """
-    if df.empty:
+    if fin.empty:
         return []
 
-    df = df.reset_index(drop=True)
-    rows = []
-    now  = datetime.now(tz=timezone.utc)
+    fin    = fin.reset_index(drop=True)
+    yearly = fin.to_dict("records")
+    now    = datetime.now(tz=timezone.utc)
+    rows   = []
 
-    # Pre-compute rolling lists (in chronological order)
-    roe_list  = []
-    roa_list  = []
-    roce_list = []
-    gm_list   = []
-    em_list   = []   # EBITDA margin
-    om_list   = []   # EBIT margin
-    nm_list   = []   # net margin
-    eps_growth_list = []
-
-    # Build per-year dict list for multi-year lookups
-    yearly = df.to_dict("records")
+    # Rolling lists (chronological order)
+    roe_l = []; roa_l  = []; roce_l = []
+    gm_l  = []; em_l   = []; om_l   = []; nm_l = []
+    epsg_l = []
 
     for i, row in enumerate(yearly):
-        fy   = row["fiscal_year"]
-        ped  = row["period_end_date"]
+        fy  = int(row["fiscal_year"])
+        ped = row["period_end_date"]
+
+        # Ensure ped is a valid Timestamp
+        if pd.isna(ped):
+            continue
+        ped = pd.Timestamp(ped)
+
         prev = yearly[i - 1] if i > 0 else None
 
-        ta = row.get("total_assets")
-        te = row.get("total_equity")
-        rev  = row.get("revenue")
-        ebit = row.get("ebit")
-        ni   = row.get("net_profit")
-        cfo  = row.get("cfo")
-        fcf  = row.get("fcf")
-        dps  = row.get("dps")
-        eps  = row.get("eps")
-        bvps = row.get("book_value_per_share")
-        td   = row.get("total_debt")
-        nd   = row.get("net_debt")
-        ebitda = row.get("ebitda")
-        shares = row.get("shares_outstanding")
-        gpm    = row.get("gpm")
-        opm    = row.get("opm")
-        npm    = row.get("npm")
-        ebm    = row.get("ebitda_margin")
+        # ── Raw values (safe floats) ───────────────────────────────────────
+        ta     = _f(row.get("total_assets"))
+        te     = _f(row.get("total_equity"))
+        rev    = _f(row.get("revenue"))
+        ebit   = _f(row.get("ebit"))
+        ebitda = _f(row.get("ebitda"))
+        ni     = _f(row.get("net_profit"))
+        cfo    = _f(row.get("cfo"))
+        capex  = _f(row.get("capex"))
+        fcf    = _f(row.get("fcf"))
+        dps    = _f(row.get("dps"))
+        eps    = _f(row.get("eps"))
+        bvps   = _f(row.get("book_value_per_share"))
+        td     = _f(row.get("total_debt"))
+        nd     = _f(row.get("net_debt"))
+        shares = _f(row.get("shares_outstanding"))
+        tca    = _f(row.get("total_current_assets"))
+        tcl    = _f(row.get("total_current_liab"))
+        ltd    = _f(row.get("long_term_debt"))
+        rec    = _f(row.get("trade_receivables"))
+        inv    = _f(row.get("inventory"))
+        fpc    = _f(row.get("dps_franking_pct"))
 
-        # ── Price at period end ────────────────────────────────────────────
-        price = fetch_price_at_date(cur, asx_code, ped.date() if hasattr(ped, "date") else ped)
-        market_cap = (float(price) * float(shares) / 1e6) if (price and shares) else None
+        # Stored margins (preferred) or compute from P&L
+        gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)
+        ebitda_margin = _f(row.get("ebitda_margin")) or _div(ebitda, rev)
+        ebit_margin   = _f(row.get("opm"))   or _div(ebit, rev)
+        net_margin    = _f(row.get("npm"))   or _div(ni, rev)
+        ocf_margin    = _div(cfo, rev)
+        fcf_margin    = _div(fcf, rev)
 
-        # ── Profitability ratios ───────────────────────────────────────────
-        # Use stored margins if available, else recompute
-        gross_margin  = float(gpm) if gpm is not None else _safe_div(row.get("gross_profit"), rev)
-        ebitda_margin = float(ebm) if ebm is not None else _safe_div(ebitda, rev)
-        ebit_margin   = float(opm) if opm is not None else _safe_div(ebit, rev)
-        net_margin    = float(npm) if npm is not None else _safe_div(ni, rev)
-        ocf_margin    = _safe_div(cfo, rev)
-        fcf_margin    = _safe_div(fcf, rev)
+        # ── Price at fiscal year end (in-memory lookup) ────────────────────
+        px = price_at(prices, ped)
+        mc = round(px * shares / 1e6, 2) if (px and shares) else None
 
-        # Average equity/assets for ROE/ROA
-        avg_equity = ((float(te) + float(prev["total_equity"])) / 2
-                      if te and prev and prev.get("total_equity") else te)
-        avg_assets = ((float(ta) + float(prev["total_assets"])) / 2
-                      if ta and prev and prev.get("total_assets") else ta)
+        # ── Profitability ──────────────────────────────────────────────────
+        p_ta = _f(prev.get("total_assets")) if prev else None
+        p_te = _f(prev.get("total_equity")) if prev else None
+        avg_assets = ((ta + p_ta) / 2 if (ta is not None and p_ta is not None) else ta)
+        avg_equity = ((te + p_te) / 2 if (te is not None and p_te is not None) else te)
 
-        roe  = _safe_div(ni, avg_equity)
-        roa  = _safe_div(ni, avg_assets)
-        # ROCE = EBIT / Capital Employed; Capital Employed = Total Assets - Current Liab
-        cap_emp = ((float(ta) - float(row["total_current_liab"]))
-                   if ta and row.get("total_current_liab") else None)
-        roce = _safe_div(ebit, cap_emp)
-        # ROIC = NOPAT / Invested Capital; NOPAT = EBIT*(1-t); IC ≈ Total Equity + Net Debt
-        ic   = ((float(te) + float(nd)) if te and nd else None)
-        roic = _safe_div(ni, ic)   # simplified: use NI as NOPAT proxy
+        roe  = _div(ni, avg_equity)
+        roa  = _div(ni, avg_assets)
+        cap_emp = ((ta - tcl) if (ta is not None and tcl is not None) else None)
+        roce = _div(ebit, cap_emp)
+        ic   = ((te + nd) if (te is not None and nd is not None) else None)
+        roic = _div(ni, ic)
 
         # ── Efficiency ────────────────────────────────────────────────────
-        asset_turnover    = _safe_div(rev, avg_assets)
-        rec_turnover      = _safe_div(rev, row.get("trade_receivables"))
-        inv_turnover      = _safe_div(row.get("ebit"),  row.get("inventory")) if row.get("inventory") else None
-        rec_days          = (round(365 / rec_turnover, 2) if rec_turnover and rec_turnover > 0 else None)
-        inv_days          = _safe_div(row.get("inventory"), _safe_div(row.get("ebit"), 365)) if row.get("inventory") else None
-        pay_days_val      = _safe_div(row.get("trade_payables"), _safe_div(row.get("ebit"), 365))
-        capex_intensity   = _safe_div(row.get("capex"), rev) if row.get("capex") else None
+        asset_turn = _div(rev, avg_assets)
+        rec_turn   = _div(rev, rec)
+        rec_days   = round(365 / rec_turn, 2) if (rec_turn and rec_turn > 0) else None
+        capex_int  = _div(abs(capex) if capex is not None else None, rev)
 
         # ── Leverage & liquidity ──────────────────────────────────────────
-        cr     = _safe_div(row.get("total_current_assets"), row.get("total_current_liab"))
-        de     = _safe_div(td, te)
-        da     = _safe_div(td, ta)
-        nd_ebitda = _safe_div(nd, ebitda)
-        int_cov   = _safe_div(ebit, row.get("interest_expense"))
-        lt_debt_cap = _safe_div(row.get("long_term_debt"),
-                                ((float(row.get("long_term_debt", 0)) + float(te)) if te else None))
+        cr       = _div(tca, tcl)
+        de       = _div(td, te)
+        da       = _div(td, ta)
+        nd_eb    = _div(nd, ebitda)
+        int_cov  = _div(ebit, row.get("interest_expense"))
+        ltd_plus_te = ((ltd + te) if (ltd is not None and te is not None) else None)
+        lt_d_cap = _div(ltd, ltd_plus_te)
 
-        # ── Per share ─────────────────────────────────────────────────────
-        fcf_ps = _safe_div(fcf, shares / 1e6 if shares else None)   # AUD per share
-        ocf_ps = _safe_div(cfo, shares / 1e6 if shares else None)
+        # ── Per share & valuation ─────────────────────────────────────────
+        ev = round(mc + nd, 2) if (mc is not None and nd is not None) else None
+        pe        = _div(px,  eps)
+        pb        = _div(px,  bvps)
+        ps        = _div(mc,  rev)
+        ev_eb     = _div(ev,  ebitda)
+        ev_ebit   = _div(ev,  ebit)
+        ev_rev    = _div(ev,  rev)
+        fcf_yield = _div(_div(fcf, shares / 1e6 if shares else None), px)
+        earn_yld  = _div(eps, px)
+        div_yld   = _div(dps, px)
+        payout    = _div(dps, eps) if (eps and eps > 0) else None
+        graham    = None
+        if eps and bvps and eps > 0 and bvps > 0:
+            graham = round(np.sqrt(22.5 * eps * bvps), 4)
 
-        # ── Valuation ratios ──────────────────────────────────────────────
-        pe_ratio  = _safe_div(price, eps)             if price and eps  else None
-        pb_ratio  = _safe_div(price, bvps)            if price and bvps else None
-        ps_ratio  = _safe_div(market_cap, rev)        if market_cap and rev else None
-        ev        = (float(market_cap) + float(nd)) if (market_cap and nd) else None
-        ev_ebitda = _safe_div(ev, ebitda)
-        ev_ebit   = _safe_div(ev, ebit)
-        ev_rev    = _safe_div(ev, rev)
-        fcf_yield = _safe_div(fcf_ps, price)          if fcf_ps and price else None
-        div_yield = _safe_div(dps, price)             if dps and price else None
-        payout_r  = _safe_div(dps, eps)               if eps and eps > 0 else None
-        earnings_yield = _safe_div(eps, price)        if price and eps else None
+        fr_yld = None
+        if div_yld is not None and fpc is not None:
+            fr_yld = round(div_yld * (1 + (fpc / 100) * 0.4286), 4)
 
-        # Graham number: √(22.5 × EPS × BVPS)
-        graham = None
-        if eps and bvps and float(eps) > 0 and float(bvps) > 0:
-            graham = round(np.sqrt(22.5 * float(eps) * float(bvps)), 4)
+        # ── YoY growth ────────────────────────────────────────────────────
+        def yoy(f1, f2):
+            return _cagr(row.get(f1), prev.get(f2) if prev else None, 1)
 
-        # Franked yield
-        fpc = row.get("dps_franking_pct")
-        franked_yield = None
-        if div_yield and fpc is not None:
-            gross_up = float(div_yield) * (1 + (float(fpc) / 100) * 0.4286)  # 30% corp tax grossup
-            franked_yield = round(gross_up, 4)
-
-        # ── YoY Growth ────────────────────────────────────────────────────
-        rev_g1    = _cagr(rev,  prev.get("revenue"),       1) if prev else None
-        gp_g1     = _cagr(row.get("gross_profit"), prev.get("gross_profit"), 1) if prev else None
-        ebitda_g1 = _cagr(ebitda, prev.get("ebitda"),      1) if prev else None
-        ni_g1     = _cagr(ni,   prev.get("net_profit"),    1) if prev else None
-        eps_g1    = _cagr(eps,  prev.get("eps"),           1) if prev else None
-        cfo_g1    = _cagr(cfo,  prev.get("cfo"),           1) if prev else None
-        fcf_g1    = _cagr(fcf,  prev.get("fcf"),           1) if prev else None
-        bvps_g1   = _cagr(bvps, prev.get("book_value_per_share"), 1) if prev else None
+        rev_g1   = yoy("revenue",      "revenue")
+        gp_g1    = yoy("gross_profit", "gross_profit")
+        eb_g1    = yoy("ebitda",       "ebitda")
+        ni_g1    = yoy("net_profit",   "net_profit")
+        eps_g1   = yoy("eps",          "eps")
+        cfo_g1   = yoy("cfo",          "cfo")
+        fcf_g1   = yoy("fcf",          "fcf")
+        bvps_g1  = yoy("book_value_per_share", "book_value_per_share")
 
         # ── Multi-year CAGRs ─────────────────────────────────────────────
-        def fy_n_ago(n):
-            return yearly[i - n] if i >= n else None
-
-        def cagr_n(field, n):
-            prior = fy_n_ago(n)
-            return _cagr(row.get(field), prior.get(field), n) if prior else None
-
-        rev_cagr3  = cagr_n("revenue",    3)
-        rev_cagr5  = cagr_n("revenue",    5)
-        rev_cagr7  = cagr_n("revenue",    7)
-        rev_cagr10 = cagr_n("revenue",   10)
-        ni_cagr3   = cagr_n("net_profit", 3)
-        ni_cagr5   = cagr_n("net_profit", 5)
-        eps_cagr3  = cagr_n("eps",        3)
-        eps_cagr5  = cagr_n("eps",        5)
-        eb_cagr3   = cagr_n("ebitda",     3)
-        eb_cagr5   = cagr_n("ebitda",     5)
-        fcf_cagr3  = cagr_n("fcf",        3)
-        fcf_cagr5  = cagr_n("fcf",        5)
-        gp_cagr3   = cagr_n("gross_profit", 3)
-        gp_cagr5   = cagr_n("gross_profit", 5)
-        bvps_cagr3 = cagr_n("book_value_per_share", 3)
-        bvps_cagr5 = cagr_n("book_value_per_share", 5)
+        def cn(field, n):
+            prior = yearly[i - n] if i >= n else None
+            return _cagr(row.get(field), prior.get(field) if prior else None, n)
 
         # ── Rolling averages ──────────────────────────────────────────────
-        roe_list .append(roe);  roa_list .append(roa)
-        roce_list.append(roce); gm_list  .append(gross_margin)
-        em_list  .append(ebitda_margin);  om_list.append(ebit_margin)
-        nm_list  .append(net_margin);     eps_growth_list.append(eps_g1)
+        roe_l .append(roe);   roa_l .append(roa)
+        roce_l.append(roce);  gm_l  .append(gross_margin)
+        em_l  .append(ebitda_margin); om_l.append(ebit_margin)
+        nm_l  .append(net_margin);    epsg_l.append(eps_g1)
 
-        avg_roe3  = _rolling_avg(roe_list,  3)
-        avg_roe5  = _rolling_avg(roe_list,  5)
-        avg_roa3  = _rolling_avg(roa_list,  3)
-        avg_roa5  = _rolling_avg(roa_list,  5)
-        avg_roce3 = _rolling_avg(roce_list, 3)
-        avg_roce5 = _rolling_avg(roce_list, 5)
-        avg_gm3   = _rolling_avg(gm_list,   3)
-        avg_gm5   = _rolling_avg(gm_list,   5)
-        avg_em3   = _rolling_avg(em_list,   3)
-        avg_em5   = _rolling_avg(em_list,   5)
-        avg_om3   = _rolling_avg(om_list,   3)
-        avg_om5   = _rolling_avg(om_list,   5)
-        avg_nm3   = _rolling_avg(nm_list,   3)
-        avg_nm5   = _rolling_avg(nm_list,   5)
-        avg_epsg3 = _rolling_avg(eps_growth_list, 3)
-        avg_epsg5 = _rolling_avg(eps_growth_list, 5)
-
-        # ── Quality scores ────────────────────────────────────────────────
+        # ── Quality ───────────────────────────────────────────────────────
         f_score = piotroski_f_score(row, prev)
-        z_score = altman_z_score(row, market_cap)
+        z_score = altman_z_score(row, mc)
 
-        # ── Dividend: consecutive years ───────────────────────────────────
-        # Only compute for the most recent FY (expensive); for historic FYs use None
-        div_consec = consecutive_dividend_years(df) if i == len(yearly) - 1 else None
+        # ── Div consecutive (only for latest FY — expensive) ─────────────
+        div_consec = consecutive_div_years(fin) if i == len(yearly) - 1 else None
 
-        # Dividend CAGR 3y
-        dps_prev3  = fy_n_ago(3)
-        div_cagr3  = _cagr(dps, dps_prev3.get("dps"), 3) if dps_prev3 else None
-        div_cagr5  = _cagr(dps, fy_n_ago(5).get("dps"), 5) if fy_n_ago(5) else None
+        dps_prev3  = yearly[i - 3] if i >= 3 else None
+        dps_prev5  = yearly[i - 5] if i >= 5 else None
+        div_cagr3  = _cagr(dps, dps_prev3.get("dps") if dps_prev3 else None, 3)
+        div_cagr5  = _cagr(dps, dps_prev5.get("dps") if dps_prev5 else None, 5)
 
-        # ── Risk & performance (price-based) ─────────────────────────────
-        price_series = fetch_daily_prices_for_year(cur, asx_code, ped)
-        sharpe, max_dd, vol_1y = sharpe_max_drawdown(price_series)
+        # ── Price-based risk metrics (in-memory window) ───────────────────
+        pw      = price_window(prices, ped)
+        sharpe, max_dd, vol_1y = sharpe_drawdown_vol(pw)
 
-        # ── Build tuple ───────────────────────────────────────────────────
         rows.append((
-            asx_code, fy,
-            ped.date() if hasattr(ped, "date") else ped,
-            _nan_to_none(price),
-            _nan_to_none(market_cap),
-            int(shares) if shares else None,
+            asx_code, fy, ped.date(),
+            px, mc,
+            int(shares) if shares and np.isfinite(shares) else None,
             # Valuation
-            _nan_to_none(pe_ratio), _nan_to_none(pb_ratio),
-            _nan_to_none(ps_ratio),
-            _nan_to_none(ev), _nan_to_none(ev_ebitda),
-            _nan_to_none(ev_ebit), _nan_to_none(ev_rev),
-            _nan_to_none(earnings_yield), _nan_to_none(fcf_yield),
-            _nan_to_none(graham),
+            pe, pb, ps, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield, graham,
             # Per share
-            _nan_to_none(eps), _nan_to_none(row.get("eps_diluted")),
-            _nan_to_none(bvps), _nan_to_none(dps),
-            _nan_to_none(row.get("dps_franking_pct")),
+            eps, _f(row.get("eps_diluted")), bvps, dps, fpc,
             # Dividend
-            _nan_to_none(div_yield), _nan_to_none(franked_yield),
-            _nan_to_none(payout_r),
-            _nan_to_none(div_cagr3), _nan_to_none(div_cagr5),
-            div_consec,
+            div_yld, fr_yld, payout, div_cagr3, div_cagr5, div_consec,
             # Returns on capital
-            _nan_to_none(roe), _nan_to_none(roa),
-            _nan_to_none(roce), _nan_to_none(roic),
+            roe, roa, roce, roic,
             # Margins
-            _nan_to_none(gross_margin), _nan_to_none(ebitda_margin),
-            _nan_to_none(ebit_margin), _nan_to_none(net_margin),
-            _nan_to_none(ocf_margin),  _nan_to_none(fcf_margin),
+            gross_margin, ebitda_margin, ebit_margin, net_margin,
+            ocf_margin, fcf_margin,
             # Efficiency
-            _nan_to_none(asset_turnover), _nan_to_none(rec_turnover),
-            _nan_to_none(rec_days), _nan_to_none(capex_intensity),
+            asset_turn, rec_turn, rec_days, capex_int,
             # Leverage & liquidity
-            _nan_to_none(cr), _nan_to_none(de), _nan_to_none(da),
-            _nan_to_none(nd_ebitda), _nan_to_none(int_cov),
-            _nan_to_none(lt_debt_cap),
-            # Quality scores
-            f_score, _nan_to_none(z_score),
+            cr, de, da, nd_eb, int_cov, lt_d_cap,
+            # Quality
+            f_score, z_score,
             # YoY growth
-            _nan_to_none(rev_g1), _nan_to_none(gp_g1),
-            _nan_to_none(ebitda_g1), _nan_to_none(ni_g1),
-            _nan_to_none(eps_g1), _nan_to_none(cfo_g1),
-            _nan_to_none(fcf_g1), _nan_to_none(bvps_g1),
+            rev_g1, gp_g1, eb_g1, ni_g1, eps_g1, cfo_g1, fcf_g1, bvps_g1,
             # Revenue CAGR
-            _nan_to_none(rev_cagr3), _nan_to_none(rev_cagr5),
-            _nan_to_none(rev_cagr7), _nan_to_none(rev_cagr10),
+            cn("revenue", 3), cn("revenue", 5), cn("revenue", 7), cn("revenue", 10),
             # Net income CAGR
-            _nan_to_none(ni_cagr3), _nan_to_none(ni_cagr5),
+            cn("net_profit", 3), cn("net_profit", 5),
             # EPS CAGR
-            _nan_to_none(eps_cagr3), _nan_to_none(eps_cagr5),
+            cn("eps", 3), cn("eps", 5),
             # EBITDA CAGR
-            _nan_to_none(eb_cagr3), _nan_to_none(eb_cagr5),
+            cn("ebitda", 3), cn("ebitda", 5),
             # FCF CAGR
-            _nan_to_none(fcf_cagr3), _nan_to_none(fcf_cagr5),
+            cn("fcf", 3), cn("fcf", 5),
             # Gross profit CAGR
-            _nan_to_none(gp_cagr3), _nan_to_none(gp_cagr5),
+            cn("gross_profit", 3), cn("gross_profit", 5),
             # BVPS CAGR
-            _nan_to_none(bvps_cagr3), _nan_to_none(bvps_cagr5),
-            # Rolling averages — ROE
-            _nan_to_none(avg_roe3), _nan_to_none(avg_roe5),
-            # Rolling averages — ROA
-            _nan_to_none(avg_roa3), _nan_to_none(avg_roa5),
-            # Rolling averages — ROCE
-            _nan_to_none(avg_roce3), _nan_to_none(avg_roce5),
-            # Rolling averages — Margins
-            _nan_to_none(avg_gm3),  _nan_to_none(avg_gm5),
-            _nan_to_none(avg_em3),  _nan_to_none(avg_em5),
-            _nan_to_none(avg_om3),  _nan_to_none(avg_om5),
-            _nan_to_none(avg_nm3),  _nan_to_none(avg_nm5),
-            # Rolling averages — EPS growth
-            _nan_to_none(avg_epsg3), _nan_to_none(avg_epsg5),
-            # Risk & performance
-            _nan_to_none(vol_1y), _nan_to_none(sharpe),
-            _nan_to_none(max_dd),
+            cn("book_value_per_share", 3), cn("book_value_per_share", 5),
+            # Rolling averages
+            _avg(roe_l, 3),  _avg(roe_l, 5),
+            _avg(roa_l, 3),  _avg(roa_l, 5),
+            _avg(roce_l, 3), _avg(roce_l, 5),
+            _avg(gm_l, 3),   _avg(gm_l, 5),
+            _avg(em_l, 3),   _avg(em_l, 5),
+            _avg(om_l, 3),   _avg(om_l, 5),
+            _avg(nm_l, 3),   _avg(nm_l, 5),
+            _avg(epsg_l, 3), _avg(epsg_l, 5),
+            # Risk
+            vol_1y, sharpe, max_dd,
             COMPUTE_VERSION, now,
         ))
 
@@ -653,57 +555,37 @@ INSERT_SQL = """
     INSERT INTO market.yearly_metrics (
         asx_code, fiscal_year, period_end_date, price_at_compute,
         market_cap, shares_outstanding,
-        -- Valuation
         pe_ratio, pb_ratio, ps_ratio,
         enterprise_value, ev_ebitda, ev_ebit, ev_revenue,
         earnings_yield, fcf_yield, graham_number,
-        -- Per share
         eps, eps_diluted, bvps, dps, franking_pct,
-        -- Dividend
         dividend_yield, franked_yield, payout_ratio,
         dividend_cagr_3y, dividend_cagr_5y, dividend_consecutive_yrs,
-        -- Returns on capital
         roe, roa, roce, roic,
-        -- Margins
         gross_margin, ebitda_margin, ebit_margin, net_margin,
         ocf_margin, fcf_margin,
-        -- Efficiency
         asset_turnover, receivables_turnover, receivables_days, capex_intensity,
-        -- Leverage & liquidity
         current_ratio, debt_to_equity, debt_to_assets,
         net_debt_to_ebitda, interest_coverage, lt_debt_to_capital,
-        -- Quality scores
         piotroski_f_score, altman_z_score,
-        -- YoY growth
         revenue_growth_1y, gross_profit_growth_1y, ebitda_growth_1y,
         net_income_growth_1y, eps_growth_1y, ocf_growth_1y,
         fcf_growth_1y, bvps_growth_1y,
-        -- Revenue CAGR
         revenue_cagr_3y, revenue_cagr_5y, revenue_cagr_7y, revenue_cagr_10y,
-        -- Net income CAGR
         net_income_cagr_3y, net_income_cagr_5y,
-        -- EPS CAGR
         eps_cagr_3y, eps_cagr_5y,
-        -- EBITDA CAGR
         ebitda_cagr_3y, ebitda_cagr_5y,
-        -- FCF CAGR
         fcf_cagr_3y, fcf_cagr_5y,
-        -- Gross profit CAGR
         gross_profit_cagr_3y, gross_profit_cagr_5y,
-        -- BVPS CAGR
         bvps_cagr_3y, bvps_cagr_5y,
-        -- Rolling averages ROE / ROA / ROCE
         avg_roe_3y, avg_roe_5y,
         avg_roa_3y, avg_roa_5y,
         avg_roce_3y, avg_roce_5y,
-        -- Rolling averages margins
         avg_gross_margin_3y, avg_gross_margin_5y,
         avg_ebitda_margin_3y, avg_ebitda_margin_5y,
         avg_operating_margin_3y, avg_operating_margin_5y,
         avg_net_margin_3y, avg_net_margin_5y,
-        -- Rolling averages EPS growth
         avg_eps_growth_3y, avg_eps_growth_5y,
-        -- Risk & performance
         volatility_1y, sharpe_1y, max_drawdown_1y,
         compute_version, computed_at
     ) VALUES %s
@@ -832,17 +714,15 @@ def main():
 
     for i, asx_code in enumerate(codes, 1):
         try:
-            df = fetch_annual_financials(cur, asx_code)
-            if df.empty:
+            fin = fetch_annual_financials(cur, asx_code)
+            if fin.empty:
                 skipped += 1
                 continue
 
-            if args.min_year:
-                # Still pass full history so CAGRs compute correctly;
-                # filter output rows afterwards
-                pass
+            # ── Fetch ALL prices ONCE per stock (not per fiscal year) ──────
+            prices = fetch_all_prices(cur, asx_code)
 
-            rows = build_yearly_rows(asx_code, df, cur)
+            rows = build_yearly_rows(asx_code, fin, prices)
             if not rows:
                 skipped += 1
                 continue

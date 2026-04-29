@@ -267,7 +267,7 @@ def build_weekly_rows(asx_code: str, daily: pd.DataFrame,
             g(high),
             g(low),
             g(close),
-            g(volume),
+            int(g(volume)) if g(volume) is not None else None,
             g(ret_1w),
             g(ret_4w),
             g(ret_13w),
@@ -287,9 +287,9 @@ def build_weekly_rows(asx_code: str, daily: pd.DataFrame,
             g(bb_lower),
             g(bb_pct),
             g(bb_width),
-            int(g(vol_avg_4w) or 0) or None,
+            int(g(vol_avg_4w)) if g(vol_avg_4w) is not None else None,
             g(rel_vol),
-            int(g(obv) or 0) or None,
+            int(g(obv)) if g(obv) is not None else None,
             bool(g(golden_cross, False)),
             bool(g(death_cross,  False)),
             bool(g(above_sma10,  False)),
@@ -406,6 +406,7 @@ def main():
         except Exception as e:
             errors += 1
             log.warning(f"  {asx_code}: {e}")
+            conn.rollback()   # prevent "transaction aborted" cascade to next stock
 
     conn.commit()
     cur.close()

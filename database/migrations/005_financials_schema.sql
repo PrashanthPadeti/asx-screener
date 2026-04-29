@@ -36,14 +36,14 @@ CREATE TABLE financials.annual_pnl (
     employee_cost           NUMERIC(18,2),
 
     -- Derived margins (stored for fast screener access)
-    opm                     NUMERIC(10,6),
-    npm                     NUMERIC(10,6),
-    gpm                     NUMERIC(10,6),
-    ebitda_margin           NUMERIC(10,6),
+    opm                     NUMERIC(18,6),
+    npm                     NUMERIC(18,6),
+    gpm                     NUMERIC(18,6),
+    ebitda_margin           NUMERIC(18,6),
 
     -- Per share
-    eps                     NUMERIC(12,4),
-    eps_diluted             NUMERIC(12,4),
+    eps                     NUMERIC(18,4),
+    eps_diluted             NUMERIC(18,4),
     shares_used             BIGINT,
 
     -- Dividend
@@ -187,12 +187,12 @@ CREATE TABLE financials.half_year_pnl (
     net_profit              NUMERIC(18,2),
     extraordinary_items     NUMERIC(18,2),
     equity_capital          NUMERIC(18,2),
-    eps                     NUMERIC(12,4),
+    eps                     NUMERIC(18,4),
     dps                     NUMERIC(12,4),
     dps_franking_pct        NUMERIC(6,2) DEFAULT 0,
-    opm                     NUMERIC(10,6),
-    npm                     NUMERIC(10,6),
-    gpm                     NUMERIC(10,6),
+    opm                     NUMERIC(18,6),
+    npm                     NUMERIC(18,6),
+    gpm                     NUMERIC(18,6),
 
     data_source             VARCHAR(50),
 

@@ -66,21 +66,24 @@ def main():
     log.info(f"Processing {len(rows):,} dividend records …")
 
     if rows:
+        # Filter out rows where dividend amount is NULL (amount_per_share is NOT NULL)
         transformed = [
-            (r[0], r[1], r[2], r[3], r[4] or "AUD", "eodhd")
-            for r in rows
+            (r[0], r[1], float(r[2]), r[4] or "AUD")
+            for r in rows if r[2] is not None
         ]
-        execute_values(cur, """
-            INSERT INTO market.dividends
-                (asx_code, ex_date, amount, unadjusted_value, currency, data_source)
-            VALUES %s
-            ON CONFLICT (asx_code, ex_date) DO UPDATE SET
-                amount           = EXCLUDED.amount,
-                unadjusted_value = EXCLUDED.unadjusted_value,
-                currency         = EXCLUDED.currency,
-                data_source      = EXCLUDED.data_source,
-                loaded_at        = NOW()
-        """, transformed, page_size=2000)
+        skipped = len(rows) - len(transformed)
+        if skipped:
+            log.info(f"  Skipped {skipped} rows with NULL dividend amount")
+
+        if transformed:
+            execute_values(cur, """
+                INSERT INTO market.dividends
+                    (asx_code, ex_date, amount_per_share, currency)
+                VALUES %s
+                ON CONFLICT (asx_code, ex_date, dividend_type) DO UPDATE SET
+                    amount_per_share = EXCLUDED.amount_per_share,
+                    currency         = EXCLUDED.currency
+            """, transformed, page_size=2000)
 
     conn.commit()
     cur.close()

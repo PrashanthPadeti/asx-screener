@@ -80,12 +80,25 @@ def load_file(cur, path: Path) -> int:
         ex_date = sd(item.get("date"))
         if not ex_date:
             continue
+
+        # Parse franking: "100%" → 100.0, None → None
+        franking_raw = item.get("franking") or ""
+        try:
+            franking_pct = float(franking_raw.replace("%", "").strip()) if "%" in franking_raw else None
+        except (ValueError, AttributeError):
+            franking_pct = None
+
         rows.append((
             asx_code,
             ex_date,
-            sf(item.get("dividends")),
+            sf(item.get("value")),          # EODHD field is "value", not "dividends"
             sf(item.get("unadjustedValue")),
             (item.get("currency") or "AUD")[:5],
+            item.get("period"),              # "Final", "Interim", "Special", etc.
+            sd(item.get("declarationDate")),
+            sd(item.get("recordDate")),
+            sd(item.get("paymentDate")),
+            franking_pct,
             path.name,
         ))
 
@@ -94,12 +107,19 @@ def load_file(cur, path: Path) -> int:
 
     execute_values(cur, """
         INSERT INTO staging.dividends
-            (asx_code, date, dividend, unadjusted_value, currency, source_file)
+            (asx_code, date, dividend, unadjusted_value, currency,
+             period, declaration_date, record_date, payment_date, franking_pct,
+             source_file)
         VALUES %s
         ON CONFLICT (asx_code, date) DO UPDATE SET
             dividend         = EXCLUDED.dividend,
             unadjusted_value = EXCLUDED.unadjusted_value,
             currency         = EXCLUDED.currency,
+            period           = EXCLUDED.period,
+            declaration_date = EXCLUDED.declaration_date,
+            record_date      = EXCLUDED.record_date,
+            payment_date     = EXCLUDED.payment_date,
+            franking_pct     = EXCLUDED.franking_pct,
             source_file      = EXCLUDED.source_file,
             loaded_at        = NOW()
     """, rows, page_size=500)

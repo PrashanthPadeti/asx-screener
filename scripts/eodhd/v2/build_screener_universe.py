@@ -59,7 +59,7 @@ INSERT INTO screener.universe (
     isin, website, description,
 
     -- ── Price ────────────────────────────────────────────────────────────────
-    price, price_date, market_cap,
+    price, price_date, open, volume, avg_volume_20d, market_cap,
     high_52w, low_52w,
 
     -- ── Valuation ratios (from valuation_snapshot) ───────────────────────────
@@ -94,7 +94,8 @@ INSERT INTO screener.universe (
     revenue_growth_1y, revenue_growth_3y_cagr,
     earnings_growth_1y, earnings_growth_3y_cagr,
 
-    -- ── Returns & momentum (from monthly_metrics — latest month) ─────────────
+    -- ── Returns (weekly + monthly) ───────────────────────────────────────────
+    return_1w,
     return_1m, return_3m, return_6m, return_1y, return_ytd,
     momentum_3m, momentum_6m, momentum_12m,
 
@@ -103,8 +104,10 @@ INSERT INTO screener.universe (
     sharpe_1y, drawdown_from_ath,
     beta_1y,
 
-    -- ── Technicals (from monthly_metrics — latest month) ─────────────────────
+    -- ── Technicals (weekly bars → screener SMAs; monthly bars → oscillators) ─
     rsi_14, macd, macd_signal,
+    sma_20, sma_50, sma_200, ema_20,
+    bb_upper, bb_lower, atr_14, obv,
 
     -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
     piotroski_f_score, altman_z_score,
@@ -144,8 +147,11 @@ SELECT
     c.description,
 
     -- ── Price (latest close + 52w range) ─────────────────────────────────────
-    dp.close        AS price,
-    dp.price_date   AS price_date,
+    dp.close          AS price,
+    dp.price_date     AS price_date,
+    dp.open           AS open,
+    dp.volume         AS volume,
+    dp.avg_volume_20d AS avg_volume_20d,
     vs.market_cap,
     dp.high_52w,
     dp.low_52w,
@@ -217,7 +223,8 @@ SELECT
     COALESCE(cm.profit_growth_1y,   ym.net_income_growth_1y)     AS earnings_growth_1y,
     COALESCE(cm.profit_growth_3y,   ym.net_income_cagr_3y)       AS earnings_growth_3y_cagr,
 
-    -- ── Returns & momentum (from monthly_metrics — latest month) ─────────────
+    -- ── Returns (weekly metrics → 1w; monthly metrics → 1m+) ────────────────
+    wm.weekly_return    AS return_1w,
     mm.monthly_return   AS return_1m,
     mm.return_3m        AS return_3m,
     mm.return_6m        AS return_6m,
@@ -234,10 +241,20 @@ SELECT
     COALESCE(mm.drawdown_from_ath, ym.max_drawdown_1y) AS drawdown_from_ath,
     ym.beta_1y          AS beta_1y,
 
-    -- ── Technicals (from monthly_metrics) ────────────────────────────────────
+    -- ── Technicals: oscillators from monthly bars; SMAs/BB/ATR from weekly ───
     mm.rsi_14           AS rsi_14,
     mm.macd_line        AS macd,
     mm.macd_signal      AS macd_signal,
+    -- SMAs: weekly bars ≈ daily equivalents (10w≈50d, 20w≈100d, 40w≈200d)
+    wm.sma_10w          AS sma_50,
+    wm.sma_20w          AS sma_20,
+    wm.sma_40w          AS sma_200,
+    wm.ema_13w          AS ema_20,
+    -- Bollinger & volatility from weekly bars
+    wm.bb_upper         AS bb_upper,
+    wm.bb_lower         AS bb_lower,
+    wm.atr_14           AS atr_14,
+    wm.obv              AS obv,
 
     -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
     ym.piotroski_f_score,
@@ -265,15 +282,19 @@ SELECT
 
 FROM market.companies_current c
 
--- ── Latest close price + 52w high/low ────────────────────────────────────────
+-- ── Latest close price + open/volume + 52w high/low + 20d avg volume ────────
 LEFT JOIN LATERAL (
     SELECT
         close,
+        open,
+        volume,
         DATE(time AT TIME ZONE 'Australia/Sydney') AS price_date,
-        MAX(high) OVER (PARTITION BY asx_code ORDER BY time
+        MAX(high)   OVER (PARTITION BY asx_code ORDER BY time
             ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS high_52w,
-        MIN(low)  OVER (PARTITION BY asx_code ORDER BY time
-            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS low_52w
+        MIN(low)    OVER (PARTITION BY asx_code ORDER BY time
+            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS low_52w,
+        AVG(volume) OVER (PARTITION BY asx_code ORDER BY time
+            ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)  AS avg_volume_20d
     FROM market.daily_prices
     WHERE asx_code = c.asx_code
     ORDER BY time DESC
@@ -340,6 +361,18 @@ LEFT JOIN LATERAL (
     ORDER BY time DESC
     LIMIT 1
 ) cm ON TRUE
+
+-- ── Weekly metrics (latest week — return_1w, SMAs, BB, ATR, OBV) ─────────────
+LEFT JOIN LATERAL (
+    SELECT weekly_return,
+           sma_10w, sma_20w, sma_40w, ema_13w,
+           bb_upper, bb_lower, atr_14, obv,
+           above_sma10w, above_sma40w, golden_cross, death_cross
+    FROM market.weekly_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY week_date DESC
+    LIMIT 1
+) wm ON TRUE
 
 -- ── Monthly metrics (latest month — returns, momentum, volatility, technicals)
 LEFT JOIN LATERAL (
@@ -418,6 +451,9 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- Price
     price                   = EXCLUDED.price,
     price_date              = EXCLUDED.price_date,
+    open                    = EXCLUDED.open,
+    volume                  = EXCLUDED.volume,
+    avg_volume_20d          = EXCLUDED.avg_volume_20d,
     market_cap              = EXCLUDED.market_cap,
     high_52w                = EXCLUDED.high_52w,
     low_52w                 = EXCLUDED.low_52w,
@@ -476,6 +512,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     earnings_growth_1y      = EXCLUDED.earnings_growth_1y,
     earnings_growth_3y_cagr = EXCLUDED.earnings_growth_3y_cagr,
     -- Returns & momentum
+    return_1w               = EXCLUDED.return_1w,
     return_1m               = EXCLUDED.return_1m,
     return_3m               = EXCLUDED.return_3m,
     return_6m               = EXCLUDED.return_6m,
@@ -494,6 +531,14 @@ ON CONFLICT (asx_code) DO UPDATE SET
     rsi_14                  = EXCLUDED.rsi_14,
     macd                    = EXCLUDED.macd,
     macd_signal             = EXCLUDED.macd_signal,
+    sma_20                  = EXCLUDED.sma_20,
+    sma_50                  = EXCLUDED.sma_50,
+    sma_200                 = EXCLUDED.sma_200,
+    ema_20                  = EXCLUDED.ema_20,
+    bb_upper                = EXCLUDED.bb_upper,
+    bb_lower                = EXCLUDED.bb_lower,
+    atr_14                  = EXCLUDED.atr_14,
+    obv                     = EXCLUDED.obv,
     -- Multi-year quality & CAGR
     piotroski_f_score       = EXCLUDED.piotroski_f_score,
     altman_z_score          = EXCLUDED.altman_z_score,

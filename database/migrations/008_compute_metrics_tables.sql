@@ -335,20 +335,21 @@ CREATE TABLE market.quarterly_metrics (
     eps                     NUMERIC(10,4),
 
     -- ── Margins ───────────────────────────────────────────────
-    gross_margin            NUMERIC(8,4),            -- GPM
-    ebit_margin             NUMERIC(8,4),            -- OPM
-    net_margin              NUMERIC(8,4),            -- NPM
+    -- NUMERIC(18,6): small-caps can have extreme margin swings
+    gross_margin            NUMERIC(18,6),           -- GPM
+    ebit_margin             NUMERIC(18,6),           -- OPM
+    net_margin              NUMERIC(18,6),           -- NPM
 
     -- ── QoQ Growth (vs previous quarter) ─────────────────────
-    revenue_growth_qoq      NUMERIC(8,4),
-    net_income_growth_qoq   NUMERIC(8,4),
-    ebit_growth_qoq         NUMERIC(8,4),
+    revenue_growth_qoq      NUMERIC(18,6),
+    net_income_growth_qoq   NUMERIC(18,6),
+    ebit_growth_qoq         NUMERIC(18,6),
 
     -- ── YoY Growth (vs same quarter prior year) ───────────────
-    revenue_growth_yoy      NUMERIC(8,4),
-    net_income_growth_yoy   NUMERIC(8,4),
-    ebit_growth_yoy         NUMERIC(8,4),
-    eps_growth_yoy          NUMERIC(8,4),
+    revenue_growth_yoy      NUMERIC(18,6),
+    net_income_growth_yoy   NUMERIC(18,6),
+    ebit_growth_yoy         NUMERIC(18,6),
+    eps_growth_yoy          NUMERIC(18,6),
 
     -- ── Metadata ──────────────────────────────────────────────
     compute_version         VARCHAR(20),

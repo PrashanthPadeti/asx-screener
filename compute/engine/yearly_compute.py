@@ -191,7 +191,7 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
             WHERE d.asx_code = p.asx_code
               AND d.ex_date >  p.period_end_date - INTERVAL '1 year'
               AND d.ex_date <= p.period_end_date
-              AND d.dividend_type = 'Dividend'
+              AND LOWER(d.dividend_type) NOT LIKE '%special%'
         ) div ON TRUE
         WHERE p.asx_code = %s
         ORDER BY p.fiscal_year ASC
@@ -441,6 +441,9 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # which is NULL in EODHD's ASX income statement feed
         dps    = _f(row.get("derived_dps")) or _f(row.get("dps"))
         fpc_raw = _f(row.get("derived_franking_pct")) or _f(row.get("dps_franking_pct"))
+        # Write back derived dps so div_cagr can find prior year values
+        if dps is not None:
+            yearly[i]["dps"] = dps
         eps    = _f(row.get("eps"))
         bvps   = _f(row.get("book_value_per_share"))
         td     = _f(row.get("total_debt"))
@@ -463,6 +466,9 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # approximate but enables EPS CAGR for most stable-cap stocks.
         if eps is None and ni is not None and shares is not None and shares > 0:
             eps = round(ni / (shares / 1_000_000), 4)
+        # Write back so cn("eps", N) can find derived value for prior rows
+        if eps is not None:
+            yearly[i]["eps"] = eps
 
         # Stored margins (preferred) or compute from P&L
         gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)

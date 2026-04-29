@@ -114,6 +114,7 @@ INSERT INTO screener.universe (
     revenue_cagr_5y, eps_growth_3y_cagr,
     avg_roe_3y,
     dividend_cagr_3y, dividend_consecutive_yrs,
+    return_3y, return_5y, return_7y, return_10y, return_15y,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     revenue_growth_yoy_q, eps_growth_yoy_q, net_income_growth_yoy_q,
@@ -264,6 +265,11 @@ SELECT
     ym.avg_roe_3y,
     ym.dividend_cagr_3y,
     ym.dividend_consecutive_yrs,
+    ym.return_3y,
+    ym.return_5y,
+    ym.return_7y,
+    ym.return_10y,
+    ym.return_15y,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     qm.revenue_growth_yoy   AS revenue_growth_yoy_q,
@@ -398,7 +404,8 @@ LEFT JOIN LATERAL (
            piotroski_f_score, altman_z_score,
            sharpe_1y, max_drawdown_1y,
            beta_1y,
-           dividend_cagr_3y, dividend_consecutive_yrs
+           dividend_cagr_3y, dividend_consecutive_yrs,
+           return_3y, return_5y, return_7y, return_10y, return_15y
     FROM market.yearly_metrics
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -547,6 +554,11 @@ ON CONFLICT (asx_code) DO UPDATE SET
     avg_roe_3y              = EXCLUDED.avg_roe_3y,
     dividend_cagr_3y        = EXCLUDED.dividend_cagr_3y,
     dividend_consecutive_yrs = EXCLUDED.dividend_consecutive_yrs,
+    return_3y               = EXCLUDED.return_3y,
+    return_5y               = EXCLUDED.return_5y,
+    return_7y               = EXCLUDED.return_7y,
+    return_10y              = EXCLUDED.return_10y,
+    return_15y              = EXCLUDED.return_15y,
     -- Latest-quarter growth
     revenue_growth_yoy_q    = EXCLUDED.revenue_growth_yoy_q,
     eps_growth_yoy_q        = EXCLUDED.eps_growth_yoy_q,

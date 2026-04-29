@@ -148,7 +148,15 @@ def fetch_codes(cur, codes=None, limit=None) -> list:
 
 
 def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
-    """One row per fiscal_year — pnl + balance_sheet + cashflow joined."""
+    """One row per fiscal_year — pnl + balance_sheet + cashflow joined.
+
+    Notes on data gaps (EODHD ASX feed):
+      - annual_pnl.eps / dps / shares_outstanding are NULL for all stocks —
+        EODHD does not provide per-share data in the income statement endpoint.
+      - DPS is derived here by summing market.dividends for the 12-month
+        window ending on period_end_date (ex_date basis).
+      - EPS is derived later in build_yearly_rows using current_shares proxy.
+    """
     cur.execute("""
         SELECT
             p.fiscal_year,
@@ -166,12 +174,25 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
             b.book_value_per_share, b.shares_outstanding,
             b.trade_receivables,  b.inventory,
             cf.cfo,   cf.capex,  cf.fcf,
-            cf.equity_raised
+            cf.equity_raised, cf.cfi,
+            -- Derive DPS from market.dividends (12-month window per FY)
+            COALESCE(div.total_dps, p.dps)  AS derived_dps,
+            div.avg_franking_pct            AS derived_franking_pct
         FROM financials.annual_pnl p
         LEFT JOIN financials.annual_balance_sheet b
                ON b.asx_code = p.asx_code AND b.fiscal_year = p.fiscal_year
         LEFT JOIN financials.annual_cashflow cf
                ON cf.asx_code = p.asx_code AND cf.fiscal_year = p.fiscal_year
+        LEFT JOIN LATERAL (
+            SELECT
+                SUM(d.amount_per_share)           AS total_dps,
+                AVG(d.franking_pct)               AS avg_franking_pct
+            FROM market.dividends d
+            WHERE d.asx_code = p.asx_code
+              AND d.ex_date >  p.period_end_date - INTERVAL '1 year'
+              AND d.ex_date <= p.period_end_date
+              AND d.dividend_type = 'Dividend'
+        ) div ON TRUE
         WHERE p.asx_code = %s
         ORDER BY p.fiscal_year ASC
     """, [asx_code])
@@ -192,11 +213,28 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
         "retained_earnings", "working_capital",
         "book_value_per_share", "shares_outstanding",
         "trade_receivables", "inventory",
-        "cfo", "capex", "fcf", "equity_raised",
+        "cfo", "capex", "fcf", "equity_raised", "cfi",
+        "derived_dps", "derived_franking_pct",
     ]
     df = pd.DataFrame(rows, columns=cols)
     df["period_end_date"] = pd.to_datetime(df["period_end_date"])
     return df
+
+
+def fetch_current_shares(cur, asx_code: str) -> Optional[float]:
+    """
+    Fetch current shares outstanding from staging.shares_stats.
+    Used as a proxy for historical per-share calculations when
+    EODHD does not provide per-share data in the income statement.
+    """
+    cur.execute("""
+        SELECT shares_outstanding
+        FROM staging.shares_stats
+        WHERE asx_code = %s
+        LIMIT 1
+    """, [asx_code])
+    row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else None
 
 
 def fetch_all_prices(cur, asx_code: str) -> pd.Series:
@@ -236,6 +274,18 @@ def price_window(prices: pd.Series, period_end) -> pd.Series:
     end   = pd.Timestamp(period_end)
     start = end - pd.DateOffset(years=1)
     return prices[(prices.index >= start) & (prices.index <= end)]
+
+
+def price_return(prices: pd.Series, end_date, years: int) -> Optional[float]:
+    """Total price return over N years ending at end_date.
+    Uses pre-fetched prices Series — no DB query."""
+    p_end   = price_at(prices, end_date)
+    start   = pd.Timestamp(end_date) - pd.DateOffset(years=years)
+    p_start = price_at(prices, start)
+    if p_end is None or p_start is None or p_start == 0:
+        return None
+    result = (p_end - p_start) / abs(p_start)
+    return round(result, 6) if np.isfinite(result) else None
 
 
 # ── Quality Scores ────────────────────────────────────────────────────────────
@@ -343,10 +393,15 @@ def consecutive_div_years(df: pd.DataFrame) -> int:
 # ── Row Builder ───────────────────────────────────────────────────────────────
 
 def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
-                      prices: pd.Series) -> list[tuple]:
+                      prices: pd.Series,
+                      current_shares: Optional[float] = None) -> list[tuple]:
     """
     For each fiscal_year row, compute all metrics.
-    prices: full daily close history fetched once by caller.
+    prices:         full daily close history fetched once by caller.
+    current_shares: fallback shares count (from staging.shares_stats) used
+                    when annual_balance_sheet.shares_outstanding is NULL —
+                    EODHD does not provide per-share data for ASX income
+                    statements, so we approximate EPS from net_profit / shares.
     """
     if fin.empty:
         return []
@@ -382,7 +437,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         cfo    = _f(row.get("cfo"))
         capex  = _f(row.get("capex"))
         fcf    = _f(row.get("fcf"))
-        dps    = _f(row.get("dps"))
+        # Prefer derived_dps (summed from market.dividends) over raw dps
+        # which is NULL in EODHD's ASX income statement feed
+        dps    = _f(row.get("derived_dps")) or _f(row.get("dps"))
+        fpc_raw = _f(row.get("derived_franking_pct")) or _f(row.get("dps_franking_pct"))
         eps    = _f(row.get("eps"))
         bvps   = _f(row.get("book_value_per_share"))
         td     = _f(row.get("total_debt"))
@@ -393,7 +451,18 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         ltd    = _f(row.get("long_term_debt"))
         rec    = _f(row.get("trade_receivables"))
         inv    = _f(row.get("inventory"))
-        fpc    = _f(row.get("dps_franking_pct"))
+        fpc    = fpc_raw  # already set above from derived_franking_pct or dps_franking_pct
+
+        # ── Shares fallback (EODHD omits shares from balance sheet) ──────
+        if shares is None and current_shares is not None:
+            shares = current_shares
+
+        # ── Derive EPS from net income / shares ───────────────────────────
+        # ni in AUD millions; shares in actual count → EPS in AUD per share.
+        # Uses current_shares as proxy when historical shares unavailable —
+        # approximate but enables EPS CAGR for most stable-cap stocks.
+        if eps is None and ni is not None and shares is not None and shares > 0:
+            eps = round(ni / (shares / 1_000_000), 4)
 
         # Stored margins (preferred) or compute from P&L
         gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)
@@ -495,6 +564,16 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         pw      = price_window(prices, ped)
         sharpe, max_dd, vol_1y = sharpe_drawdown_vol(pw)
 
+        # ── Multi-year price returns (in-memory lookups) ──────────────────
+        ret_3y  = price_return(prices, ped, 3)
+        ret_5y  = price_return(prices, ped, 5)
+        ret_7y  = price_return(prices, ped, 7)
+        ret_10y = price_return(prices, ped, 10)
+        ret_15y = price_return(prices, ped, 15)
+
+        # ── Raw financial values (denormalised for history queries) ───────
+        wc = round(tca - tcl, 2) if (tca is not None and tcl is not None) else None
+
         rows.append((
             asx_code, fy, ped.date(),
             px, mc,
@@ -543,6 +622,13 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             _avg(epsg_l, 3), _avg(epsg_l, 5),
             # Risk
             vol_1y, sharpe, max_dd,
+            # Raw financials (for history tables)
+            rev, ebitda, ni, cfo, capex, _f(row.get("cfi")), fcf,
+            _f(row.get("total_debt")), wc,
+            _f(row.get("cash_equivalents")), _f(row.get("total_equity")),
+            _f(row.get("inventory")),
+            # Multi-year price returns
+            ret_3y, ret_5y, ret_7y, ret_10y, ret_15y,
             COMPUTE_VERSION, now,
         ))
 
@@ -587,6 +673,10 @@ INSERT_SQL = """
         avg_net_margin_3y, avg_net_margin_5y,
         avg_eps_growth_3y, avg_eps_growth_5y,
         volatility_1y, sharpe_1y, max_drawdown_1y,
+        revenue, ebitda, net_profit,
+        cfo, capex, cfi, fcf,
+        total_debt, working_capital, cash, total_equity, inventory,
+        return_3y, return_5y, return_7y, return_10y, return_15y,
         compute_version, computed_at
     ) VALUES %s
     ON CONFLICT (asx_code, fiscal_year) DO UPDATE SET
@@ -680,6 +770,23 @@ INSERT_SQL = """
         volatility_1y           = EXCLUDED.volatility_1y,
         sharpe_1y               = EXCLUDED.sharpe_1y,
         max_drawdown_1y         = EXCLUDED.max_drawdown_1y,
+        revenue                 = EXCLUDED.revenue,
+        ebitda                  = EXCLUDED.ebitda,
+        net_profit              = EXCLUDED.net_profit,
+        cfo                     = EXCLUDED.cfo,
+        capex                   = EXCLUDED.capex,
+        cfi                     = EXCLUDED.cfi,
+        fcf                     = EXCLUDED.fcf,
+        total_debt              = EXCLUDED.total_debt,
+        working_capital         = EXCLUDED.working_capital,
+        cash                    = EXCLUDED.cash,
+        total_equity            = EXCLUDED.total_equity,
+        inventory               = EXCLUDED.inventory,
+        return_3y               = EXCLUDED.return_3y,
+        return_5y               = EXCLUDED.return_5y,
+        return_7y               = EXCLUDED.return_7y,
+        return_10y              = EXCLUDED.return_10y,
+        return_15y              = EXCLUDED.return_15y,
         compute_version         = EXCLUDED.compute_version,
         computed_at             = EXCLUDED.computed_at
 """
@@ -722,7 +829,10 @@ def main():
             # ── Fetch ALL prices ONCE per stock (not per fiscal year) ──────
             prices = fetch_all_prices(cur, asx_code)
 
-            rows = build_yearly_rows(asx_code, fin, prices)
+            # ── Current shares (proxy for historical EPS derivation) ───────
+            current_shares = fetch_current_shares(cur, asx_code)
+
+            rows = build_yearly_rows(asx_code, fin, prices, current_shares)
             if not rows:
                 skipped += 1
                 continue

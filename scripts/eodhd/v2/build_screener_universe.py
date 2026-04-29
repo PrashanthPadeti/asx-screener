@@ -62,7 +62,7 @@ INSERT INTO screener.universe (
 
     -- Profitability (TTM from valuation_snapshot)
     revenue_ttm, gross_profit_ttm, ebitda_ttm,
-    profit_margin, operating_margin, roe, roa,
+    net_margin, operating_margin, roe, roa,
 
     -- EPS
     eps_fy0, eps_fy1,
@@ -132,7 +132,7 @@ SELECT
     vs.revenue_ttm,
     vs.gross_profit_ttm,
     vs.ebitda_ttm,
-    vs.profit_margin,
+    vs.profit_margin    AS net_margin,
     vs.operating_margin,
     vs.roe_ttm,
     vs.roa_ttm,
@@ -292,7 +292,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_ttm             = EXCLUDED.revenue_ttm,
     gross_profit_ttm        = EXCLUDED.gross_profit_ttm,
     ebitda_ttm              = EXCLUDED.ebitda_ttm,
-    profit_margin           = EXCLUDED.profit_margin,
+    net_margin              = EXCLUDED.net_margin,
     operating_margin        = EXCLUDED.operating_margin,
     roe                     = EXCLUDED.roe,
     roa                     = EXCLUDED.roa,

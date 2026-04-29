@@ -20,20 +20,20 @@ CREATE TABLE IF NOT EXISTS market.valuation_snapshot (
     peg_ratio                       NUMERIC(12,4),
     price_to_book                   NUMERIC(12,4),              -- PriceBookMRQ
     price_to_sales                  NUMERIC(12,4),              -- PriceSalesTTM
-    dividend_yield                  NUMERIC(8,6),               -- 0.0412 = 4.12%
-    dividend_per_share              NUMERIC(12,6),
-    eps_ttm                         NUMERIC(12,6),
-    eps_est_current_year            NUMERIC(12,6),
-    eps_est_next_year               NUMERIC(12,6),
+    dividend_yield                  NUMERIC(18,6),              -- 0.0412 = 4.12%
+    dividend_per_share              NUMERIC(18,6),
+    eps_ttm                         NUMERIC(18,6),
+    eps_est_current_year            NUMERIC(18,6),
+    eps_est_next_year               NUMERIC(18,6),
     revenue_ttm                     NUMERIC(20,2),
     gross_profit_ttm                NUMERIC(20,2),
     ebitda_ttm                      NUMERIC(20,2),
-    profit_margin                   NUMERIC(8,6),               -- decimal: 0.15 = 15%
-    operating_margin                NUMERIC(8,6),
-    roe_ttm                         NUMERIC(8,6),
-    roa_ttm                         NUMERIC(8,6),
-    quarterly_earnings_growth_yoy   NUMERIC(8,6),
-    quarterly_revenue_growth_yoy    NUMERIC(8,6),
+    profit_margin                   NUMERIC(18,6),              -- decimal: 0.15 = 15%
+    operating_margin                NUMERIC(18,6),
+    roe_ttm                         NUMERIC(18,6),
+    roa_ttm                         NUMERIC(18,6),
+    quarterly_earnings_growth_yoy   NUMERIC(18,6),
+    quarterly_revenue_growth_yoy    NUMERIC(18,6),
     most_recent_quarter             DATE,
     wall_street_target_price        NUMERIC(12,4),
     book_value_per_share            NUMERIC(12,4),

@@ -79,162 +79,163 @@ CREATE TABLE market.yearly_metrics (
     dividend_consecutive_yrs SMALLINT,               -- years of uninterrupted dividends
 
     -- ── Return on Capital ─────────────────────────────────────
-    roe                     NUMERIC(8,4),            -- net_income / avg_equity
-    roa                     NUMERIC(8,4),            -- net_income / avg_assets
-    roic                    NUMERIC(8,4),            -- EBIT(1-t) / invested_capital
-    roce                    NUMERIC(8,4),            -- EBIT / capital_employed
-    roae                    NUMERIC(8,4),            -- return on average equity
-    roaa                    NUMERIC(8,4),            -- return on average assets
-    croic                   NUMERIC(8,4),            -- cash ROIC (FCF / invested_capital)
+    -- NUMERIC(18,6): ASX small-caps can have extreme ratios — use wide type throughout
+    roe                     NUMERIC(18,6),           -- net_income / avg_equity
+    roa                     NUMERIC(18,6),           -- net_income / avg_assets
+    roic                    NUMERIC(18,6),           -- EBIT(1-t) / invested_capital
+    roce                    NUMERIC(18,6),           -- EBIT / capital_employed
+    roae                    NUMERIC(18,6),           -- return on average equity
+    roaa                    NUMERIC(18,6),           -- return on average assets
+    croic                   NUMERIC(18,6),           -- cash ROIC (FCF / invested_capital)
 
     -- ── Margin Ratios ─────────────────────────────────────────
-    gross_margin            NUMERIC(8,4),
-    ebitda_margin           NUMERIC(8,4),
-    ebit_margin             NUMERIC(8,4),            -- operating profit margin (OPM)
-    pretax_margin           NUMERIC(8,4),
-    net_margin              NUMERIC(8,4),
-    ocf_margin              NUMERIC(8,4),
-    fcf_margin              NUMERIC(8,4),
-    tax_rate_effective      NUMERIC(8,4),
+    gross_margin            NUMERIC(18,6),
+    ebitda_margin           NUMERIC(18,6),
+    ebit_margin             NUMERIC(18,6),           -- operating profit margin (OPM)
+    pretax_margin           NUMERIC(18,6),
+    net_margin              NUMERIC(18,6),
+    ocf_margin              NUMERIC(18,6),
+    fcf_margin              NUMERIC(18,6),
+    tax_rate_effective      NUMERIC(18,6),
 
     -- ── Efficiency ────────────────────────────────────────────
-    asset_turnover          NUMERIC(8,4),
-    inventory_turnover      NUMERIC(8,4),
-    receivables_turnover    NUMERIC(8,4),
-    receivables_days        NUMERIC(8,2),            -- DSO
-    inventory_days          NUMERIC(8,2),            -- DIO
-    payables_days           NUMERIC(8,2),            -- DPO
-    cash_conversion_cycle   NUMERIC(8,2),
-    capex_intensity         NUMERIC(8,4),            -- capex / revenue
-    revenue_per_employee    NUMERIC(14,2),
+    asset_turnover          NUMERIC(18,6),
+    inventory_turnover      NUMERIC(18,6),
+    receivables_turnover    NUMERIC(18,6),
+    receivables_days        NUMERIC(18,6),           -- DSO
+    inventory_days          NUMERIC(18,6),           -- DIO
+    payables_days           NUMERIC(18,6),           -- DPO
+    cash_conversion_cycle   NUMERIC(18,6),
+    capex_intensity         NUMERIC(18,6),           -- capex / revenue
+    revenue_per_employee    NUMERIC(18,2),
 
     -- ── Leverage & Liquidity ──────────────────────────────────
-    current_ratio           NUMERIC(8,4),
-    quick_ratio             NUMERIC(8,4),
-    cash_ratio              NUMERIC(8,4),
-    debt_to_equity          NUMERIC(10,4),
-    debt_to_assets          NUMERIC(8,4),
-    debt_to_ebitda          NUMERIC(10,4),
-    net_debt_to_ebitda      NUMERIC(10,4),
-    net_debt_to_equity      NUMERIC(10,4),
-    interest_coverage       NUMERIC(10,4),
-    equity_multiplier       NUMERIC(10,4),
-    lt_debt_to_capital      NUMERIC(8,4),
+    current_ratio           NUMERIC(18,6),
+    quick_ratio             NUMERIC(18,6),
+    cash_ratio              NUMERIC(18,6),
+    debt_to_equity          NUMERIC(18,6),
+    debt_to_assets          NUMERIC(18,6),
+    debt_to_ebitda          NUMERIC(18,6),
+    net_debt_to_ebitda      NUMERIC(18,6),
+    net_debt_to_equity      NUMERIC(18,6),
+    interest_coverage       NUMERIC(18,6),
+    equity_multiplier       NUMERIC(18,6),
+    lt_debt_to_capital      NUMERIC(18,6),
 
     -- ── Quality Scores ────────────────────────────────────────
     piotroski_f_score       SMALLINT,               -- 0–9
-    altman_z_score          NUMERIC(8,4),
-    beneish_m_score         NUMERIC(8,4),
+    altman_z_score          NUMERIC(18,6),
+    beneish_m_score         NUMERIC(18,6),
 
     -- ── 1-Year Growth (YoY) ───────────────────────────────────
-    revenue_growth_1y       NUMERIC(8,4),
-    gross_profit_growth_1y  NUMERIC(8,4),
-    ebitda_growth_1y        NUMERIC(8,4),
-    ebit_growth_1y          NUMERIC(8,4),
-    net_income_growth_1y    NUMERIC(8,4),
-    eps_growth_1y           NUMERIC(8,4),
-    ocf_growth_1y           NUMERIC(8,4),
-    fcf_growth_1y           NUMERIC(8,4),
-    bvps_growth_1y          NUMERIC(8,4),
+    revenue_growth_1y       NUMERIC(18,6),
+    gross_profit_growth_1y  NUMERIC(18,6),
+    ebitda_growth_1y        NUMERIC(18,6),
+    ebit_growth_1y          NUMERIC(18,6),
+    net_income_growth_1y    NUMERIC(18,6),
+    eps_growth_1y           NUMERIC(18,6),
+    ocf_growth_1y           NUMERIC(18,6),
+    fcf_growth_1y           NUMERIC(18,6),
+    bvps_growth_1y          NUMERIC(18,6),
 
     -- ── Multi-Year Revenue CAGR ───────────────────────────────
-    revenue_cagr_3y         NUMERIC(8,4),
-    revenue_cagr_5y         NUMERIC(8,4),
-    revenue_cagr_7y         NUMERIC(8,4),
-    revenue_cagr_10y        NUMERIC(8,4),
-    revenue_growth_median_5y  NUMERIC(8,4),         -- median annual growth over 5Y
-    revenue_growth_median_10y NUMERIC(8,4),
+    revenue_cagr_3y         NUMERIC(18,6),
+    revenue_cagr_5y         NUMERIC(18,6),
+    revenue_cagr_7y         NUMERIC(18,6),
+    revenue_cagr_10y        NUMERIC(18,6),
+    revenue_growth_median_5y  NUMERIC(18,6),        -- median annual growth over 5Y
+    revenue_growth_median_10y NUMERIC(18,6),
 
     -- ── Multi-Year Net Income CAGR ────────────────────────────
-    net_income_cagr_3y      NUMERIC(8,4),
-    net_income_cagr_5y      NUMERIC(8,4),
-    net_income_cagr_7y      NUMERIC(8,4),
-    net_income_cagr_10y     NUMERIC(8,4),
+    net_income_cagr_3y      NUMERIC(18,6),
+    net_income_cagr_5y      NUMERIC(18,6),
+    net_income_cagr_7y      NUMERIC(18,6),
+    net_income_cagr_10y     NUMERIC(18,6),
 
     -- ── Multi-Year EPS CAGR ───────────────────────────────────
-    eps_cagr_3y             NUMERIC(8,4),
-    eps_cagr_5y             NUMERIC(8,4),
-    eps_cagr_7y             NUMERIC(8,4),
-    eps_cagr_10y            NUMERIC(8,4),
+    eps_cagr_3y             NUMERIC(18,6),
+    eps_cagr_5y             NUMERIC(18,6),
+    eps_cagr_7y             NUMERIC(18,6),
+    eps_cagr_10y            NUMERIC(18,6),
 
     -- ── Multi-Year EBITDA CAGR ────────────────────────────────
-    ebitda_cagr_3y          NUMERIC(8,4),
-    ebitda_cagr_5y          NUMERIC(8,4),
-    ebitda_cagr_7y          NUMERIC(8,4),
-    ebitda_cagr_10y         NUMERIC(8,4),
+    ebitda_cagr_3y          NUMERIC(18,6),
+    ebitda_cagr_5y          NUMERIC(18,6),
+    ebitda_cagr_7y          NUMERIC(18,6),
+    ebitda_cagr_10y         NUMERIC(18,6),
 
     -- ── Multi-Year FCF & Other CAGRs ──────────────────────────
-    fcf_cagr_3y             NUMERIC(8,4),
-    fcf_cagr_5y             NUMERIC(8,4),
-    gross_profit_cagr_3y    NUMERIC(8,4),
-    gross_profit_cagr_5y    NUMERIC(8,4),
-    bvps_cagr_3y            NUMERIC(8,4),
-    bvps_cagr_5y            NUMERIC(8,4),
+    fcf_cagr_3y             NUMERIC(18,6),
+    fcf_cagr_5y             NUMERIC(18,6),
+    gross_profit_cagr_3y    NUMERIC(18,6),
+    gross_profit_cagr_5y    NUMERIC(18,6),
+    bvps_cagr_3y            NUMERIC(18,6),
+    bvps_cagr_5y            NUMERIC(18,6),
 
     -- ── Price Return CAGR (vs price at fiscal year end) ───────
-    price_cagr_1y           NUMERIC(8,4),
-    price_cagr_3y           NUMERIC(8,4),
-    price_cagr_5y           NUMERIC(8,4),
-    price_cagr_7y           NUMERIC(8,4),
-    price_cagr_10y          NUMERIC(8,4),
+    price_cagr_1y           NUMERIC(18,6),
+    price_cagr_3y           NUMERIC(18,6),
+    price_cagr_5y           NUMERIC(18,6),
+    price_cagr_7y           NUMERIC(18,6),
+    price_cagr_10y          NUMERIC(18,6),
 
     -- ── Multi-Year Averages: ROE ──────────────────────────────
-    avg_roe_3y              NUMERIC(8,4),
-    avg_roe_5y              NUMERIC(8,4),
-    avg_roe_7y              NUMERIC(8,4),
-    avg_roe_10y             NUMERIC(8,4),
+    avg_roe_3y              NUMERIC(18,6),
+    avg_roe_5y              NUMERIC(18,6),
+    avg_roe_7y              NUMERIC(18,6),
+    avg_roe_10y             NUMERIC(18,6),
 
     -- ── Multi-Year Averages: ROA ──────────────────────────────
-    avg_roa_3y              NUMERIC(8,4),
-    avg_roa_5y              NUMERIC(8,4),
+    avg_roa_3y              NUMERIC(18,6),
+    avg_roa_5y              NUMERIC(18,6),
 
     -- ── Multi-Year Averages: ROIC ─────────────────────────────
-    avg_roic_3y             NUMERIC(8,4),
-    avg_roic_5y             NUMERIC(8,4),
+    avg_roic_3y             NUMERIC(18,6),
+    avg_roic_5y             NUMERIC(18,6),
 
     -- ── Multi-Year Averages: ROCE ─────────────────────────────
-    avg_roce_3y             NUMERIC(8,4),
-    avg_roce_5y             NUMERIC(8,4),
-    avg_roce_7y             NUMERIC(8,4),
-    avg_roce_10y            NUMERIC(8,4),
+    avg_roce_3y             NUMERIC(18,6),
+    avg_roce_5y             NUMERIC(18,6),
+    avg_roce_7y             NUMERIC(18,6),
+    avg_roce_10y            NUMERIC(18,6),
 
     -- ── Multi-Year Averages: Margins ──────────────────────────
-    avg_gross_margin_3y         NUMERIC(8,4),
-    avg_gross_margin_5y         NUMERIC(8,4),
-    avg_ebitda_margin_3y        NUMERIC(8,4),
-    avg_ebitda_margin_5y        NUMERIC(8,4),
-    avg_operating_margin_3y     NUMERIC(8,4),    -- OPM 3Y
-    avg_operating_margin_5y     NUMERIC(8,4),    -- OPM 5Y
-    avg_operating_margin_10y    NUMERIC(8,4),    -- OPM 10Y
-    avg_net_margin_3y           NUMERIC(8,4),
-    avg_net_margin_5y           NUMERIC(8,4),
-    avg_net_margin_10y          NUMERIC(8,4),
-    avg_fcf_margin_3y           NUMERIC(8,4),
-    avg_fcf_margin_5y           NUMERIC(8,4),
+    avg_gross_margin_3y         NUMERIC(18,6),
+    avg_gross_margin_5y         NUMERIC(18,6),
+    avg_ebitda_margin_3y        NUMERIC(18,6),
+    avg_ebitda_margin_5y        NUMERIC(18,6),
+    avg_operating_margin_3y     NUMERIC(18,6),      -- OPM 3Y
+    avg_operating_margin_5y     NUMERIC(18,6),      -- OPM 5Y
+    avg_operating_margin_10y    NUMERIC(18,6),      -- OPM 10Y
+    avg_net_margin_3y           NUMERIC(18,6),
+    avg_net_margin_5y           NUMERIC(18,6),
+    avg_net_margin_10y          NUMERIC(18,6),
+    avg_fcf_margin_3y           NUMERIC(18,6),
+    avg_fcf_margin_5y           NUMERIC(18,6),
 
     -- ── Multi-Year Averages: EPS Growth ───────────────────────
-    avg_eps_growth_3y       NUMERIC(8,4),
-    avg_eps_growth_5y       NUMERIC(8,4),        -- "Average Earnings 5Year"
-    avg_eps_growth_10y      NUMERIC(8,4),        -- "Average Earnings 10Year"
+    avg_eps_growth_3y       NUMERIC(18,6),
+    avg_eps_growth_5y       NUMERIC(18,6),          -- "Average Earnings 5Year"
+    avg_eps_growth_10y      NUMERIC(18,6),          -- "Average Earnings 10Year"
 
     -- ── Multi-Year Averages: EBIT ─────────────────────────────
-    avg_ebit_5y             NUMERIC(18,2),       -- average EBIT value AUD millions
+    avg_ebit_5y             NUMERIC(18,2),          -- average EBIT value AUD millions
     avg_ebit_10y            NUMERIC(18,2),
 
     -- ── Risk & Performance ────────────────────────────────────
-    beta_1y                 NUMERIC(8,4),
-    beta_3y                 NUMERIC(8,4),
-    beta_5y                 NUMERIC(8,4),
-    volatility_1y           NUMERIC(8,4),        -- annualised historical vol
-    volatility_3y           NUMERIC(8,4),
-    sharpe_1y               NUMERIC(8,4),
-    sharpe_3y               NUMERIC(8,4),
-    sortino_1y              NUMERIC(8,4),
-    max_drawdown_1y         NUMERIC(8,4),
-    max_drawdown_3y         NUMERIC(8,4),
-    calmar_ratio            NUMERIC(8,4),
-    alpha_1y                NUMERIC(8,4),
-    alpha_3y                NUMERIC(8,4),
+    beta_1y                 NUMERIC(18,6),
+    beta_3y                 NUMERIC(18,6),
+    beta_5y                 NUMERIC(18,6),
+    volatility_1y           NUMERIC(18,6),          -- annualised historical vol
+    volatility_3y           NUMERIC(18,6),
+    sharpe_1y               NUMERIC(18,6),
+    sharpe_3y               NUMERIC(18,6),
+    sortino_1y              NUMERIC(18,6),
+    max_drawdown_1y         NUMERIC(18,6),
+    max_drawdown_3y         NUMERIC(18,6),
+    calmar_ratio            NUMERIC(18,6),
+    alpha_1y                NUMERIC(18,6),
+    alpha_3y                NUMERIC(18,6),
 
     -- ── Metadata ──────────────────────────────────────────────
     compute_version         VARCHAR(20),

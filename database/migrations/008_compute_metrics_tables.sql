@@ -376,35 +376,36 @@ CREATE TABLE market.monthly_metrics (
     market_cap              NUMERIC(18,2),
 
     -- ── Returns ───────────────────────────────────────────────
-    monthly_return          NUMERIC(8,4),
-    return_3m               NUMERIC(8,4),
-    return_6m               NUMERIC(8,4),
-    return_12m              NUMERIC(8,4),
-    return_ytd              NUMERIC(8,4),
+    -- NUMERIC(18,6): ASX small-caps can have extreme multi-year returns (>9999%)
+    monthly_return          NUMERIC(18,6),
+    return_3m               NUMERIC(18,6),
+    return_6m               NUMERIC(18,6),
+    return_12m              NUMERIC(18,6),
+    return_ytd              NUMERIC(18,6),
 
     -- ── Momentum ──────────────────────────────────────────────
-    momentum_3m             NUMERIC(8,4),            -- 3-month price change %
-    momentum_6m             NUMERIC(8,4),
-    momentum_12m            NUMERIC(8,4),
-    relative_strength_xjo   NUMERIC(8,4),            -- vs ASX 200
+    momentum_3m             NUMERIC(18,6),           -- 3-month price change %
+    momentum_6m             NUMERIC(18,6),
+    momentum_12m            NUMERIC(18,6),
+    relative_strength_xjo   NUMERIC(18,6),           -- vs ASX 200
 
     -- ── Volatility ────────────────────────────────────────────
-    volatility_1m           NUMERIC(8,4),            -- annualised, based on daily returns in month
-    volatility_3m           NUMERIC(8,4),
-    volatility_12m          NUMERIC(8,4),
+    volatility_1m           NUMERIC(18,6),           -- annualised, based on daily returns in month
+    volatility_3m           NUMERIC(18,6),
+    volatility_12m          NUMERIC(18,6),
 
     -- ── Technical (monthly bars) ──────────────────────────────
     rsi_14                  NUMERIC(6,2),
     macd_line               NUMERIC(10,4),
     macd_signal             NUMERIC(10,4),
     macd_hist               NUMERIC(10,4),
-    bb_pct                  NUMERIC(8,4),
-    bb_width                NUMERIC(8,4),
+    bb_pct                  NUMERIC(18,6),
+    bb_width                NUMERIC(18,6),
 
     -- ── Price Levels ──────────────────────────────────────────
     sma_12m                 NUMERIC(12,4),           -- 12-month SMA
-    price_to_52w_high       NUMERIC(8,4),
-    drawdown_from_ath       NUMERIC(8,4),
+    price_to_52w_high       NUMERIC(18,6),
+    drawdown_from_ath       NUMERIC(18,6),
 
     -- ── Metadata ──────────────────────────────────────────────
     compute_version         VARCHAR(20),

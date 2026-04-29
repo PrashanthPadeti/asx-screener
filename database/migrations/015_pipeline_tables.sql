@@ -61,10 +61,10 @@ CREATE INDEX IF NOT EXISTS idx_valsnap_yield ON market.valuation_snapshot (divid
 CREATE TABLE IF NOT EXISTS market.exchange_list (
     asx_code        VARCHAR(10)     PRIMARY KEY,
     company_name    TEXT,
-    country         VARCHAR(5),
-    exchange        VARCHAR(10),
-    currency        VARCHAR(5),
-    stock_type      VARCHAR(30),                -- 'Common Stock', 'ETF', 'Fund', etc.
+    country         VARCHAR(50),
+    exchange        VARCHAR(20),
+    currency        VARCHAR(10),
+    stock_type      VARCHAR(50),                -- 'Common Stock', 'ETF', 'Fund', etc.
     isin            VARCHAR(20),
     snapshot_date   DATE,
     updated_at      TIMESTAMPTZ     DEFAULT NOW()

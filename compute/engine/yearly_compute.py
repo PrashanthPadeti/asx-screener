@@ -861,7 +861,7 @@ def main():
 
         except Exception as e:
             errors += 1
-            log.warning(f"  {asx_code}: {e}")
+            log.warning(f"  {asx_code}: {e}", exc_info=(errors <= 3))
             conn.rollback()
 
     conn.commit()

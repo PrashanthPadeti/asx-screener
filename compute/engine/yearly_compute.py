@@ -191,7 +191,7 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
             WHERE d.asx_code = p.asx_code
               AND d.ex_date >  p.period_end_date - INTERVAL '1 year'
               AND d.ex_date <= p.period_end_date
-              AND LOWER(d.dividend_type) NOT LIKE '%special%'
+              AND LOWER(d.dividend_type) NOT LIKE '%%special%%'
         ) div ON TRUE
         WHERE p.asx_code = %s
         ORDER BY p.fiscal_year ASC

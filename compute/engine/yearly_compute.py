@@ -533,13 +533,16 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         lt_d_cap = _div(ltd, ltd_plus_te)
 
         # ── Per share & valuation ─────────────────────────────────────────
+        # Clamp all multiples at 9999 — NUMERIC(10,2) columns overflow when
+        # EPS/EBITDA/revenue is near-zero (e.g. VHL, DYL).  Ratios > 9999
+        # are meaningless for screening and should be stored as NULL.
         ev = round(mc + nd, 2) if (mc is not None and nd is not None) else None
-        pe        = _div(px,  eps)
-        pb        = _div(px,  bvps)
-        ps        = _div(mc,  rev)
-        ev_eb     = _div(ev,  ebitda)
-        ev_ebit   = _div(ev,  ebit)
-        ev_rev    = _div(ev,  rev)
+        pe        = _clamp(_div(px,  eps))
+        pb        = _clamp(_div(px,  bvps))
+        ps        = _clamp(_div(mc,  rev))
+        ev_eb     = _clamp(_div(ev,  ebitda))
+        ev_ebit   = _clamp(_div(ev,  ebit))
+        ev_rev    = _clamp(_div(ev,  rev))
         fcf_yield = _clamp(_div(_div(fcf, shares / 1e6 if shares else None), px))
         earn_yld  = _clamp(_div(eps, px))
         div_yld   = _clamp(_div(dps, px))

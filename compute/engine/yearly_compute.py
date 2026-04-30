@@ -122,6 +122,26 @@ def _cagr(end_val, start_val, years: int) -> Optional[float]:
     return round(result, 6) if np.isfinite(result) else None
 
 
+def _clamp(val: Optional[float], max_abs: float = 9_999.0) -> Optional[float]:
+    """
+    Return None if |val| exceeds max_abs.
+    Prevents NUMERIC column overflow for extreme ratios on near-zero-denominator
+    stocks (e.g. DSO = 365,000 days for a company with $1k revenue, or
+    PE = 10,000,000 for near-zero EPS).  Values that large are meaningless
+    for screening anyway.
+    Default cap of 9,999 suits NUMERIC(8,4) columns (max ±9,999.9999).
+    Pass max_abs=999_999 for NUMERIC(8,2) columns (max ±999,999.99).
+    """
+    if val is None:
+        return None
+    try:
+        if abs(float(val)) > max_abs:
+            return None
+    except Exception:
+        return None
+    return val
+
+
 def _avg(values: list, n: int) -> Optional[float]:
     """Mean of last n non-None values from a list."""
     vals = [_f(v) for v in values[-n:]]
@@ -498,7 +518,9 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # ── Efficiency ────────────────────────────────────────────────────
         asset_turn = _div(rev, avg_assets)
         rec_turn   = _div(rev, rec)
-        rec_days   = round(365 / rec_turn, 2) if (rec_turn and rec_turn > 0) else None
+        rec_days   = _clamp(
+            round(365 / rec_turn, 2) if (rec_turn and rec_turn > 0) else None,
+            max_abs=9_999)   # >9999 days (27y) is meaningless; was overflowing NUMERIC(8,2)
         capex_int  = _div(abs(capex) if capex is not None else None, rev)
 
         # ── Leverage & liquidity ──────────────────────────────────────────
@@ -518,17 +540,17 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         ev_eb     = _div(ev,  ebitda)
         ev_ebit   = _div(ev,  ebit)
         ev_rev    = _div(ev,  rev)
-        fcf_yield = _div(_div(fcf, shares / 1e6 if shares else None), px)
-        earn_yld  = _div(eps, px)
-        div_yld   = _div(dps, px)
-        payout    = _div(dps, eps) if (eps and eps > 0) else None
+        fcf_yield = _clamp(_div(_div(fcf, shares / 1e6 if shares else None), px))
+        earn_yld  = _clamp(_div(eps, px))
+        div_yld   = _clamp(_div(dps, px))
+        payout    = _clamp(_div(dps, eps) if (eps and eps > 0) else None)
         graham    = None
         if eps and bvps and eps > 0 and bvps > 0:
             graham = round(np.sqrt(22.5 * eps * bvps), 4)
 
         fr_yld = None
         if div_yld is not None and fpc is not None:
-            fr_yld = round(div_yld * (1 + (fpc / 100) * 0.4286), 4)
+            fr_yld = _clamp(round(div_yld * (1 + (fpc / 100) * 0.4286), 4))
 
         # ── YoY growth ────────────────────────────────────────────────────
         def yoy(f1, f2):

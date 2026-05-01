@@ -126,6 +126,9 @@ INSERT INTO screener.universe (
     analyst_rating, analyst_target_price,
     analyst_strong_buy, analyst_buy, analyst_hold, analyst_sell, analyst_strong_sell,
 
+    -- ── Short interest (ASIC) ────────────────────────────────────────────────
+    short_pct, short_position_shares,
+
     -- ── Shares ───────────────────────────────────────────────────────────────
     shares_outstanding,
 
@@ -289,6 +292,10 @@ SELECT
     ar.rating           AS analyst_rating,
     ar.target_price     AS analyst_target_price,
     ar.strong_buy, ar.buy, ar.hold, ar.sell, ar.strong_sell,
+
+    -- ── Short interest (ASIC — latest date per stock) ───────────────────────
+    si.total_product_short_pct AS short_pct,
+    si.gross_short_position    AS short_position_shares,
 
     -- ── Shares ───────────────────────────────────────────────────────────────
     ss.shares_outstanding,
@@ -463,6 +470,17 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) ss ON TRUE
 
+-- ── ASIC short interest (latest report date per stock) ──────────────────────
+LEFT JOIN LATERAL (
+    SELECT
+        total_product_short_pct,
+        gross_short_position
+    FROM market.short_interest
+    WHERE asx_code = c.asx_code
+    ORDER BY time DESC
+    LIMIT 1
+) si ON TRUE
+
 {code_filter}
 
 ON CONFLICT (asx_code) DO UPDATE SET
@@ -608,6 +626,9 @@ ON CONFLICT (asx_code) DO UPDATE SET
     analyst_hold            = EXCLUDED.analyst_hold,
     analyst_sell            = EXCLUDED.analyst_sell,
     analyst_strong_sell     = EXCLUDED.analyst_strong_sell,
+    -- Short interest (ASIC)
+    short_pct               = EXCLUDED.short_pct,
+    short_position_shares   = EXCLUDED.short_position_shares,
     -- Shares
     shares_outstanding      = EXCLUDED.shares_outstanding,
     universe_built_at       = NOW()

@@ -45,6 +45,7 @@ log = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[4]   # /opt/asx-screener
 SCRIPTS  = BASE_DIR / "scripts" / "eodhd" / "v2"
+ASIC     = BASE_DIR / "scripts" / "asic"
 COMPUTE  = BASE_DIR / "compute" / "engine"
 PYTHON   = sys.executable
 
@@ -89,6 +90,16 @@ def main():
     from_date   = args.from_date or last_monday.isoformat()
 
     log.info(f"Weekly pipeline starting — from_date: {from_date}")
+
+    # ── Step 0: ASIC short interest — download + load ─────────────────────────
+    # Downloads the most recent ASIC aggregate short position CSV (free, public).
+    # Published with ~2–3 business-day lag; idempotent if already cached.
+    run("Step 0a: ASIC download short positions", [
+        PYTHON, str(ASIC / "download_short_positions.py"),
+    ])
+    run("Step 0b: ASIC load → market.short_interest", [
+        PYTHON, str(ASIC / "load_short_positions.py"),
+    ])
 
     # ── Step 1: Load staging from raw fundamentals ────────────────────────────
     # Parses Sunday's downloaded JSON files → staging tables (highlights,

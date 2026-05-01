@@ -33,8 +33,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",       # Next.js dev
-        "https://asxscreener.com.au",  # Production
+        "http://localhost:3000",            # Next.js dev
+        "http://209.38.84.102:3000",        # Server IP (staging)
+        "https://asxscreener.com.au",       # Production
         "https://www.asxscreener.com.au",
     ],
     allow_credentials=True,

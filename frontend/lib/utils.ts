@@ -19,9 +19,12 @@ export function formatNumber(val: number | null | undefined, decimals = 2): stri
 
 export function formatMarketCap(val: number | null | undefined): string {
   if (val == null) return '—'
-  // val is in AUD millions
-  if (val >= 1_000) return `$${(val / 1_000).toFixed(2)}B`
-  return `$${val.toFixed(0)}M`
+  // val is in AUD (full dollars from EODHD)
+  if (val >= 1_000_000_000_000) return `$${(val / 1_000_000_000_000).toFixed(2)}T`
+  if (val >= 1_000_000_000)     return `$${(val / 1_000_000_000).toFixed(2)}B`
+  if (val >= 1_000_000)         return `$${(val / 1_000_000).toFixed(0)}M`
+  if (val >= 1_000)             return `$${(val / 1_000).toFixed(0)}K`
+  return `$${val.toFixed(0)}`
 }
 
 export function formatPct(val: number | null | undefined, decimals = 2): string {

@@ -47,7 +47,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
 
     # ── Price & Market ────────────────────────────────────────────────────────
     "price":           {"col": "u.price",           "scale": 1,    "type": "number",  "label": "Price (AUD)",          "unit": "AUD",  "cat": "Price"},
-    "market_cap":      {"col": "u.market_cap",      "scale": 1,    "type": "number",  "label": "Market Cap (AUD M)",   "unit": "AUD M","cat": "Price"},
+    "market_cap":      {"col": "u.market_cap",      "scale": 1_000_000, "type": "number",  "label": "Market Cap (AUD M)",   "unit": "AUD M","cat": "Price"},
     "volume":          {"col": "u.volume",          "scale": 1,    "type": "number",  "label": "Volume",               "unit": "",     "cat": "Price"},
     "avg_volume_20d":  {"col": "u.avg_volume_20d",  "scale": 1,    "type": "number",  "label": "Avg Volume 20D",       "unit": "",     "cat": "Price"},
     "high_52w":        {"col": "u.high_52w",        "scale": 1,    "type": "number",  "label": "52W High",             "unit": "AUD",  "cat": "Price"},

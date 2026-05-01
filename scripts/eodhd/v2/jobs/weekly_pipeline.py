@@ -4,12 +4,17 @@ Weekly Pipeline — ASX Screener
 Runs every Monday morning before ASX opens (~07:00 AEST).
 
 Steps:
-  1. Compute weekly metrics        → market.weekly_metrics   (incremental, last week)
-  2. Compute monthly metrics       → market.monthly_metrics  (incremental, only on 1st Mon of month)
-  3. Build screener.universe       → Golden Record (picks up fresh weekly + monthly data)
+  1. Load staging from raw fundamentals  → all staging tables (from Sunday's download)
+  2. Transform valuation snapshot        → market.valuation_snapshot
+  3. Transform analyst ratings           → market.analyst_ratings
+  4. Compute yearly metrics              → market.yearly_metrics
+  5. Compute half-yearly metrics         → market.halfyearly_metrics
+  6. Compute weekly metrics              → market.weekly_metrics (incremental, last week)
+  7. Compute monthly metrics             → market.monthly_metrics (1st Mon of month only)
+  8. Build screener.universe             → Golden Record
 
-This pipeline is additive — it never downloads from EODHD.
-Source data is market.daily_prices which was already loaded by daily_pipeline.py.
+weekly_refresh.py (Sunday 22:00 AEST) downloads raw files to disk first.
+This pipeline loads + computes from those files Monday morning.
 
 Schedule (cron — Monday 07:00 AEST = Sunday 21:00 UTC):
   0 21 * * 0  cd /opt/asx-screener && \\
@@ -85,31 +90,57 @@ def main():
 
     log.info(f"Weekly pipeline starting — from_date: {from_date}")
 
-    # ── Step 1: Weekly compute ─────────────────────────────────────────────────
-    run("Step 1: Weekly compute → market.weekly_metrics", [
+    # ── Step 1: Load staging from raw fundamentals ────────────────────────────
+    # Parses Sunday's downloaded JSON files → staging tables (highlights,
+    # valuation, income, balance_sheet, cashflow, analyst_ratings, shares_stats)
+    run("Step 1: Load staging fundamentals", [
+        PYTHON, str(SCRIPTS / "load_to_staging_fundamentals.py"),
+    ])
+
+    # ── Step 2: Transform valuation snapshot ──────────────────────────────────
+    run("Step 2: Transform → market.valuation_snapshot", [
+        PYTHON, str(SCRIPTS / "transforms" / "transform_valuation.py"),
+    ])
+
+    # ── Step 3: Transform analyst ratings ─────────────────────────────────────
+    run("Step 3: Transform → market.analyst_ratings", [
+        PYTHON, str(SCRIPTS / "transforms" / "transform_analyst_ratings.py"),
+    ])
+
+    # ── Step 4: Yearly compute ────────────────────────────────────────────────
+    run("Step 4: Yearly compute → market.yearly_metrics", [
+        PYTHON, str(COMPUTE / "yearly_compute.py"),
+    ])
+
+    # ── Step 5: Half-yearly compute ───────────────────────────────────────────
+    run("Step 5: Half-yearly compute → market.halfyearly_metrics", [
+        PYTHON, str(COMPUTE / "halfyearly_compute.py"),
+    ])
+
+    # ── Step 6: Weekly compute ────────────────────────────────────────────────
+    run("Step 6: Weekly compute → market.weekly_metrics", [
         PYTHON, str(COMPUTE / "weekly_compute.py"),
         "--from-date", from_date,
     ])
 
-    # ── Step 2: Monthly compute (only on 1st Monday of month, unless forced) ───
+    # ── Step 7: Monthly compute (only on 1st Monday of month, unless forced) ──
     run_monthly = (
         args.force_monthly or
         (not args.skip_monthly and is_first_monday_of_month(today))
     )
 
     if run_monthly:
-        # from-date for monthly: start of current month
         month_start = today.replace(day=1).isoformat()
-        run("Step 2: Monthly compute → market.monthly_metrics", [
+        run("Step 7: Monthly compute → market.monthly_metrics", [
             PYTHON, str(COMPUTE / "monthly_compute.py"),
             "--from-date", month_start,
         ])
     else:
-        log.info("Step 2: Monthly compute skipped "
+        log.info("Step 7: Monthly compute skipped "
                  "(not first Monday of month — use --force-monthly to override)")
 
-    # ── Step 3: Rebuild Golden Record ─────────────────────────────────────────
-    run("Step 3: Build screener.universe", [
+    # ── Step 8: Rebuild Golden Record ─────────────────────────────────────────
+    run("Step 8: Build screener.universe", [
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
     ])
 

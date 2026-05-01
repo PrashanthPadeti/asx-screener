@@ -80,6 +80,15 @@ def _v(val):
     return val
 
 
+def _vc(val, max_abs: float = 9_999_999.0):
+    """Like _v but also returns None if |value| exceeds max_abs.
+    Guards against NUMERIC column overflow for extreme penny-stock values."""
+    v = _v(val)
+    if v is None or not isinstance(v, float):
+        return v
+    return None if abs(v) > max_abs else v
+
+
 def _s(series: pd.Series, idx: int):
     """Safe scalar from Series at integer position — returns None on NaN/OOB."""
     try:
@@ -239,7 +248,7 @@ def compute_cci(high: pd.Series, low: pd.Series, close: pd.Series,
 
 def compute_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     sign = np.sign(close.diff()).fillna(0)
-    return (sign * volume).cumsum().astype("int64")
+    return (sign * volume).cumsum().astype("Int64")
 
 
 def compute_cmf(high: pd.Series, low: pd.Series, close: pd.Series,
@@ -372,9 +381,9 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["hv_60d"] = (log_ret.rolling(60).std() * np.sqrt(252)).round(4)
 
     # ── OBV ───────────────────────────────────────────────────────────────────
-    obv            = compute_obv(c, v.astype("int64"))
+    obv            = compute_obv(c, v.fillna(0).astype("int64"))
     df["obv"]      = obv
-    df["obv_ema"]  = _ema(obv.astype(float), 20).round(0).astype("int64")
+    df["obv_ema"]  = _ema(obv.astype(float), 20).round(0).astype("Int64")
 
     # ── CMF 20, MFI 14 ────────────────────────────────────────────────────────
     df["cmf_20"] = compute_cmf(h, l, c, v, 20)
@@ -425,8 +434,8 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["_year"] = df["date"].dt.year
     year_starts = df.groupby("_year")["date"].transform("min")
     idx_year_start = df["date"].searchsorted(year_starts) - 1
-    idx_year_start = idx_year_start.clip(lower=0)
-    prev_year_close = c.iloc[idx_year_start.values].values
+    idx_year_start = np.clip(idx_year_start, 0, None)
+    prev_year_close = c.iloc[idx_year_start].values
     df["return_ytd"] = ((c.values - prev_year_close) /
                         np.where(prev_year_close == 0, np.nan, prev_year_close)).round(4)
     df.drop(columns=["_year"], inplace=True)
@@ -514,37 +523,42 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None) ->
             except Exception:
                 return None
 
+        # _vc = _v + overflow guard (returns None if |val| > 9_999_999)
+        # Applied to ratio/return/volatility columns that were originally
+        # NUMERIC(8,4) and can blow up for near-zero-price penny stocks.
+        c = lambda col: _vc(row.get(col)) if col in row.index else None  # noqa: E731
+
         rows.append((
             asx_code,
             row["date"].date(),
             g("close"), g("adj_close"), gi("volume"),
             g("market_cap"),
-            g("daily_return"), g("log_return"), g("gap_pct"),
+            g("daily_return"), g("log_return"), c("gap_pct"),
             g("sma_5"),  g("sma_10"),  g("sma_20"),
             g("sma_50"), g("sma_100"), g("sma_200"),
             g("ema_9"),  g("ema_12"),  g("ema_20"),
             g("ema_26"), g("ema_50"),  g("ema_200"),
-            g("dma20_ratio"), g("dma50_ratio"), g("dma200_ratio"),
+            c("dma20_ratio"), c("dma50_ratio"), c("dma200_ratio"),
             g("sma_50_prev"), g("sma_200_prev"),
             g("macd_line"), g("macd_signal"), g("macd_hist"),
             g("macd_line_prev"), g("macd_signal_prev"),
             g("rsi_7"),  g("rsi_14"), g("rsi_21"),
             g("stoch_k"), g("stoch_d"),
-            g("bb_upper"), g("bb_mid"), g("bb_lower"), g("bb_pct"), g("bb_width"),
+            g("bb_upper"), g("bb_mid"), g("bb_lower"), c("bb_pct"), c("bb_width"),
             g("adx_14"), g("plus_di"), g("minus_di"),
-            g("cci_20"), g("williams_r"), g("roc_10"), g("roc_20"),
-            g("atr_14"), g("atr_pct"), g("true_range"),
-            g("hv_20d"), g("hv_60d"),
-            gi("obv"), gi("obv_ema"), g("vwap"), g("cmf_20"), g("mfi_14"),
+            g("cci_20"), g("williams_r"), c("roc_10"), c("roc_20"),
+            g("atr_14"), c("atr_pct"), g("true_range"),
+            c("hv_20d"), c("hv_60d"),
+            gi("obv"), gi("obv_ema"), g("vwap"), c("cmf_20"), g("mfi_14"),
             gi("volume_avg_5d"), gi("volume_avg_20d"), gi("volume_avg_50d"),
-            g("relative_volume"),
+            c("relative_volume"),
             g("high_52w"), g("low_52w"), g("ath_price"), g("atl_price"),
-            g("pct_from_52w_high"), g("pct_from_52w_low"), g("pct_from_ath"),
+            c("pct_from_52w_high"), c("pct_from_52w_low"), c("pct_from_ath"),
             g("above_sma20"), g("above_sma50"), g("above_sma100"), g("above_sma200"),
             g("golden_cross"), g("death_cross"),
             g("new_52w_high"), g("new_52w_low"), g("new_ath"),
-            g("return_1w"), g("return_1m"), g("return_3m"),
-            g("return_6m"), g("return_ytd"), g("return_1y"),
+            c("return_1w"), c("return_1m"), c("return_3m"),
+            c("return_6m"), c("return_ytd"), c("return_1y"),
             COMPUTE_VERSION, now,
         ))
     return rows

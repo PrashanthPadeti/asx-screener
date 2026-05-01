@@ -7,7 +7,8 @@ Steps:
   1. Download today's bulk EOD prices       → Raw Zone (.json.gz)
   2. Load prices to staging.eod_prices      → DELETE today + INSERT
   3. Transform to market.daily_prices       → upsert --from-date TODAY
-  4. Run compute engine                     → market.computed_metrics
+  4. Run daily compute engine               → market.computed_metrics
+  4b. Run technical compute engine          → market.daily_metrics (latest date)
   5. Build screener.universe                → Golden Record
 
 Usage:
@@ -60,15 +61,17 @@ def main():
     # ── Step 1: Download bulk EOD prices ──────────────────────────────────────
     if not args.skip_download:
         run("Step 1: Download bulk EOD prices", [
-            PYTHON, str(SCRIPTS / "download_eod_bulk.py"),
+            PYTHON, str(SCRIPTS / "download_eod_prices.py"),
+            "--mode", "incremental",
             "--date", target_date,
         ])
     else:
         log.info("Step 1: Skipped (--skip-download)")
 
-    # ── Step 2: Load staging.eod_prices ───────────────────────────────────────
-    run("Step 2: Load staging.eod_prices", [
-        PYTHON, str(SCRIPTS / "load_to_staging_eod_prices.py"),
+    # ── Step 2: Load staging prices ───────────────────────────────────────────
+    run("Step 2: Load staging prices", [
+        PYTHON, str(SCRIPTS / "load_to_staging_prices.py"),
+        "--mode", "incremental",
         "--date", target_date,
     ])
 
@@ -78,9 +81,24 @@ def main():
         "--from-date", target_date,
     ])
 
-    # ── Step 4: Compute engine ────────────────────────────────────────────────
-    run("Step 4: Compute engine → market.computed_metrics", [
+    # ── Step 4: Daily compute engine ──────────────────────────────────────────
+    run("Step 4: Daily compute engine → market.computed_metrics", [
         PYTHON, str(COMPUTE / "daily_compute.py"),
+    ])
+
+    # ── Step 4b: Technical compute engine ─────────────────────────────────────
+    # Writes latest-date indicators to market.daily_metrics for all stocks.
+    # Fetches full OHLCV history per stock for warm-up accuracy; writes only
+    # the latest row (~2-3 min for all stocks).
+    run("Step 4b: Technical compute engine → market.daily_metrics", [
+        PYTHON, str(COMPUTE / "technical_compute.py"),
+    ])
+
+    # ── Step 4c: Half-yearly compute engine ───────────────────────────────────
+    # Aggregates quarterly → half-yearly, computes margins + HoH/YoY growth.
+    # Fast (~30s) — runs weekly on Sunday but also daily to catch new quarters.
+    run("Step 4c: Half-yearly compute engine → market.halfyearly_metrics", [
+        PYTHON, str(COMPUTE / "halfyearly_compute.py"),
     ])
 
     # ── Step 5: Build screener.universe ───────────────────────────────────────

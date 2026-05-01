@@ -44,6 +44,33 @@ export function formatVolume(val: number | null | undefined): string {
   return val.toString()
 }
 
+/**
+ * Format a decimal ratio as a percentage string (0.15 → "15.00%").
+ * Use this for DB fields stored as ratios: ROE, margins, yields, returns, growth rates.
+ */
+export function formatRatio(val: number | null | undefined, decimals = 2): string {
+  if (val == null) return '—'
+  return `${(val * 100).toFixed(decimals)}%`
+}
+
+/**
+ * Format a decimal ratio as a signed percentage change (0.15 → "+15.0%").
+ */
+export function formatRatioChange(val: number | null | undefined, decimals = 1): string {
+  if (val == null) return '—'
+  const pct = val * 100
+  const sign = pct >= 0 ? '+' : ''
+  return `${sign}${pct.toFixed(decimals)}%`
+}
+
+/**
+ * Format a value already in 0-100 % range (e.g. franking_pct = 100 → "100%").
+ */
+export function formatPctRaw(val: number | null | undefined, decimals = 1): string {
+  if (val == null) return '—'
+  return `${val.toFixed(decimals)}%`
+}
+
 export const SECTORS = [
   'Materials',
   'Energy',

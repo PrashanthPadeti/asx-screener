@@ -104,10 +104,10 @@ INSERT INTO screener.universe (
     sharpe_1y, drawdown_from_ath,
     beta_1y,
 
-    -- ── Technicals (weekly bars → screener SMAs; monthly bars → oscillators) ─
+    -- ── Technicals (daily preferred; weekly/monthly fallback) ────────────────
     rsi_14, macd, macd_signal,
     sma_20, sma_50, sma_200, ema_20,
-    bb_upper, bb_lower, atr_14, obv,
+    bb_upper, bb_lower, atr_14, adx_14, obv,
 
     -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
     piotroski_f_score, altman_z_score,
@@ -118,6 +118,9 @@ INSERT INTO screener.universe (
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     revenue_growth_yoy_q, eps_growth_yoy_q, net_income_growth_yoy_q,
+
+    -- ── Half-yearly HoH growth (from halfyearly_metrics — latest half) ───────
+    revenue_growth_hoh, net_income_growth_hoh, eps_growth_hoh,
 
     -- ── Analyst ──────────────────────────────────────────────────────────────
     analyst_rating, analyst_target_price,
@@ -224,38 +227,38 @@ SELECT
     COALESCE(cm.profit_growth_1y,   ym.net_income_growth_1y)     AS earnings_growth_1y,
     COALESCE(cm.profit_growth_3y,   ym.net_income_cagr_3y)       AS earnings_growth_3y_cagr,
 
-    -- ── Returns (weekly metrics → 1w; monthly metrics → 1m+) ────────────────
-    wm.weekly_return    AS return_1w,
-    mm.monthly_return   AS return_1m,
-    mm.return_3m        AS return_3m,
-    mm.return_6m        AS return_6m,
-    mm.return_12m       AS return_1y,
-    mm.return_ytd       AS return_ytd,
+    -- ── Returns (daily → weekly/monthly fallback) ─────────────────────────────
+    COALESCE(dm.return_1w,  wm.weekly_return)  AS return_1w,
+    COALESCE(dm.return_1m,  mm.monthly_return) AS return_1m,
+    COALESCE(dm.return_3m,  mm.return_3m)      AS return_3m,
+    COALESCE(dm.return_6m,  mm.return_6m)      AS return_6m,
+    COALESCE(dm.return_1y,  mm.return_12m)     AS return_1y,
+    COALESCE(dm.return_ytd, mm.return_ytd)     AS return_ytd,
     mm.momentum_3m      AS momentum_3m,
     mm.momentum_6m      AS momentum_6m,
     mm.momentum_12m     AS momentum_12m,
 
     -- ── Volatility & risk ────────────────────────────────────────────────────
-    mm.volatility_1m    AS volatility_20d,   -- 1-month vol ≈ 20 trading days
-    mm.volatility_3m    AS volatility_60d,   -- 3-month vol ≈ 60 trading days
+    COALESCE(dm.hv_20d, mm.volatility_1m)      AS volatility_20d,
+    COALESCE(dm.hv_60d, mm.volatility_3m)      AS volatility_60d,
     ym.sharpe_1y        AS sharpe_1y,
-    COALESCE(mm.drawdown_from_ath, ym.max_drawdown_1y) AS drawdown_from_ath,
+    COALESCE(dm.pct_from_ath, mm.drawdown_from_ath, ym.max_drawdown_1y) AS drawdown_from_ath,
     ym.beta_1y          AS beta_1y,
 
-    -- ── Technicals: oscillators from monthly bars; SMAs/BB/ATR from weekly ───
-    mm.rsi_14           AS rsi_14,
-    mm.macd_line        AS macd,
-    mm.macd_signal      AS macd_signal,
-    -- SMAs: weekly bars ≈ daily equivalents (10w≈50d, 20w≈100d, 40w≈200d)
-    wm.sma_10w          AS sma_50,
-    wm.sma_20w          AS sma_20,
-    wm.sma_40w          AS sma_200,
-    wm.ema_13w          AS ema_20,
-    -- Bollinger & volatility from weekly bars
-    wm.bb_upper         AS bb_upper,
-    wm.bb_lower         AS bb_lower,
-    wm.atr_14           AS atr_14,
-    wm.obv              AS obv,
+    -- ── Technicals: daily metrics preferred; weekly/monthly as fallback ───────
+    COALESCE(dm.rsi_14,     mm.rsi_14)         AS rsi_14,
+    COALESCE(dm.macd_line,  mm.macd_line)      AS macd,
+    COALESCE(dm.macd_signal,mm.macd_signal)    AS macd_signal,
+    -- SMAs: exact daily values preferred over weekly approximations
+    COALESCE(dm.sma_20,  wm.sma_20w)           AS sma_20,
+    COALESCE(dm.sma_50,  wm.sma_10w)           AS sma_50,
+    COALESCE(dm.sma_200, wm.sma_40w)           AS sma_200,
+    COALESCE(dm.ema_20,  wm.ema_13w)           AS ema_20,
+    COALESCE(dm.bb_upper,wm.bb_upper)          AS bb_upper,
+    COALESCE(dm.bb_lower,wm.bb_lower)          AS bb_lower,
+    COALESCE(dm.atr_14,  wm.atr_14)            AS atr_14,
+    dm.adx_14,
+    COALESCE(dm.obv,     wm.obv)               AS obv,
 
     -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
     ym.piotroski_f_score,
@@ -272,9 +275,14 @@ SELECT
     ym.return_15y,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
-    qm.revenue_growth_yoy   AS revenue_growth_yoy_q,
-    qm.eps_growth_yoy       AS eps_growth_yoy_q,
+    qm.revenue_growth_yoy    AS revenue_growth_yoy_q,
+    qm.eps_growth_yoy        AS eps_growth_yoy_q,
     qm.net_income_growth_yoy AS net_income_growth_yoy_q,
+
+    -- ── Half-yearly HoH growth (from halfyearly_metrics — latest half) ────────
+    hym.revenue_growth_hoh,
+    hym.net_income_growth_hoh,
+    hym.eps_growth_hoh,
 
     -- ── Analyst ──────────────────────────────────────────────────────────────
     ar.rating           AS analyst_rating,
@@ -393,6 +401,19 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) mm ON TRUE
 
+-- ── Daily metrics (latest date — exact technical indicators) ──────────────────
+LEFT JOIN LATERAL (
+    SELECT rsi_14, macd_line, macd_signal,
+           sma_20, sma_50, sma_200, ema_20,
+           bb_upper, bb_lower, atr_14, adx_14, obv,
+           hv_20d, hv_60d, pct_from_ath,
+           return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y
+    FROM market.daily_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY date DESC
+    LIMIT 1
+) dm ON TRUE
+
 -- ── Yearly metrics (latest FY — CAGRs, quality scores, risk) ─────────────────
 LEFT JOIN LATERAL (
     SELECT roe, roa, roce,
@@ -420,6 +441,15 @@ LEFT JOIN LATERAL (
     ORDER BY fiscal_year DESC, quarter DESC
     LIMIT 1
 ) qm ON TRUE
+
+-- ── Half-yearly metrics (latest half — HoH growth) ───────────────────────────
+LEFT JOIN LATERAL (
+    SELECT revenue_growth_hoh, net_income_growth_hoh, eps_growth_hoh
+    FROM market.halfyearly_metrics
+    WHERE asx_code = c.asx_code
+    ORDER BY period_end_date DESC
+    LIMIT 1
+) hym ON TRUE
 
 -- ── Analyst ratings ───────────────────────────────────────────────────────────
 LEFT JOIN market.analyst_ratings ar ON ar.asx_code = c.asx_code
@@ -545,6 +575,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     bb_upper                = EXCLUDED.bb_upper,
     bb_lower                = EXCLUDED.bb_lower,
     atr_14                  = EXCLUDED.atr_14,
+    adx_14                  = EXCLUDED.adx_14,
     obv                     = EXCLUDED.obv,
     -- Multi-year quality & CAGR
     piotroski_f_score       = EXCLUDED.piotroski_f_score,
@@ -563,6 +594,10 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_growth_yoy_q    = EXCLUDED.revenue_growth_yoy_q,
     eps_growth_yoy_q        = EXCLUDED.eps_growth_yoy_q,
     net_income_growth_yoy_q = EXCLUDED.net_income_growth_yoy_q,
+    -- Half-yearly HoH growth
+    revenue_growth_hoh      = EXCLUDED.revenue_growth_hoh,
+    net_income_growth_hoh   = EXCLUDED.net_income_growth_hoh,
+    eps_growth_hoh          = EXCLUDED.eps_growth_hoh,
     -- Analyst
     analyst_rating          = EXCLUDED.analyst_rating,
     analyst_target_price    = EXCLUDED.analyst_target_price,

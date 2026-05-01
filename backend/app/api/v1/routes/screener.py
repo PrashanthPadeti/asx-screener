@@ -338,9 +338,26 @@ async def batch_screener(
 
     # Deduplicate while preserving order
     seen: set[str] = set()
-    unique_codes = [c.upper() for c in codes if c.upper() not in seen and not seen.add(c.upper())]  # type: ignore[func-returns-value]
+    unique: list[str] = []
+    for c in codes:
+        u = c.strip().upper()
+        if u and u not in seen:
+            seen.add(u)
+            unique.append(u)
 
-    sql = """
+    if not unique:
+        return []
+
+    # Build IN clause and CASE-based ORDER BY with individual named parameters.
+    # asyncpg does not reliably convert Python lists to PG arrays in text() queries,
+    # so we avoid ANY(:array) and array_position() entirely.
+    placeholders = ", ".join(f":c{i}" for i in range(len(unique)))
+    order_cases  = "\n            ".join(
+        f"WHEN :c{i} THEN {i}" for i in range(len(unique))
+    )
+    params = {f"c{i}": code for i, code in enumerate(unique)}
+
+    sql = f"""
         SELECT
             u.asx_code, u.company_name, u.sector, u.industry, u.stock_type, u.status,
             u.is_reit, u.is_miner, u.is_asx200, u.is_asx300,
@@ -369,10 +386,14 @@ async def batch_screener(
             u.drawdown_from_ath,
             u.price_date, u.universe_built_at
         FROM screener.universe u
-        WHERE u.asx_code = ANY(:codes)
-        ORDER BY array_position(:codes::varchar[], u.asx_code)
+        WHERE u.asx_code IN ({placeholders})
+        ORDER BY
+            CASE u.asx_code
+            {order_cases}
+            ELSE {len(unique)}
+            END
     """
-    result = await db.execute(text(sql), {"codes": unique_codes})
+    result = await db.execute(text(sql), params)
     rows = result.mappings().all()
     return [ScreenerRow(**dict(r)) for r in rows]
 

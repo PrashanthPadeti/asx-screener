@@ -67,7 +67,7 @@ INSERT INTO screener.universe (
     ev, ev_to_ebitda, ev_to_revenue,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
-    dividend_yield, dps_ttm, ex_div_date,
+    dividend_yield, dps_ttm, ex_div_date, franking_pct,
 
     -- ── Profitability (computed_metrics → yearly_metrics → valuation_snapshot)
     revenue_ttm, gross_profit_ttm, ebitda_ttm,
@@ -174,6 +174,7 @@ SELECT
     vs.dividend_yield,
     vs.dividend_per_share   AS dps_ttm,
     div_latest.ex_date,
+    div_latest.franking_pct,
 
     -- ── Profitability TTM ─────────────────────────────────────────────────────
     -- Priority: computed_metrics (daily) → valuation_snapshot (weekly)
@@ -320,7 +321,7 @@ LEFT JOIN market.valuation_snapshot vs ON vs.asx_code = c.asx_code
 
 -- ── Latest ex-dividend date ───────────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT ex_date FROM market.dividends
+    SELECT ex_date, franking_pct FROM market.dividends
     WHERE asx_code = c.asx_code
     ORDER BY ex_date DESC
     LIMIT 1
@@ -507,6 +508,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     dividend_yield          = EXCLUDED.dividend_yield,
     dps_ttm                 = EXCLUDED.dps_ttm,
     ex_div_date             = EXCLUDED.ex_div_date,
+    franking_pct            = EXCLUDED.franking_pct,
     -- Profitability
     revenue_ttm             = EXCLUDED.revenue_ttm,
     gross_profit_ttm        = EXCLUDED.gross_profit_ttm,

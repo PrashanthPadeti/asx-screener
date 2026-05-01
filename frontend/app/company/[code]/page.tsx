@@ -91,7 +91,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ code: 
             {company.shares_outstanding && (
               <div>
                 <div className="text-xs text-gray-500 uppercase tracking-wide mb-1">Shares Outstanding</div>
-                <div className="font-semibold text-gray-900">{formatNumber(company.shares_outstanding / 1_000_000, 1)}M</div>
+                <div className="font-semibold text-gray-900">{formatNumber(company.shares_outstanding)}</div>
               </div>
             )}
             {company.abn && (

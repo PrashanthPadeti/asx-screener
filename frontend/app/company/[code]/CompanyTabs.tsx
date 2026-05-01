@@ -34,7 +34,7 @@ function fmt(v: number | null | undefined, decimals = 2): string {
 }
 
 function fmtX(v: number | null | undefined): string {
-  if (v == null) return '—'
+  if (v == null || v === 0) return '—'   // 0 means not computed, not a real 0x ratio
   return `${v.toFixed(1)}x`
 }
 

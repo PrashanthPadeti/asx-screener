@@ -13,7 +13,9 @@ import math
 from app.db.session import get_db
 from app.schemas.company import (
     CompanyListItem, CompanyDetail,
-    CompanySearchResult, CompanyListResponse
+    CompanySearchResult, CompanyListResponse,
+    CompanyOverview, AnnualFinancialsRow, FinancialsResponse,
+    PricePoint, PricesResponse,
 )
 
 router = APIRouter()
@@ -146,3 +148,179 @@ async def get_company(
         raise HTTPException(status_code=404, detail=f"Company {asx_code.upper()} not found")
 
     return CompanyDetail(**dict(row))
+
+
+# ── Company Overview (screener.universe) ──────────────────────
+
+@router.get("/{asx_code}/overview", response_model=CompanyOverview)
+async def get_company_overview(
+    asx_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns all pre-computed screener.universe metrics for one company.
+    Used by the Overview and Technicals tabs on the company detail page.
+    """
+    sql = """
+        SELECT
+            price, price_date, market_cap, volume, avg_volume_20d, high_52w, low_52w,
+            pe_ratio, forward_pe, peg_ratio, price_to_book, price_to_sales, price_to_fcf,
+            ev, ev_to_ebitda, ev_to_ebit, ev_to_revenue, graham_number, fcf_yield,
+            dividend_yield, grossed_up_yield, franking_pct, dps_ttm, dps_fy0,
+            payout_ratio, ex_div_date, dividend_consecutive_yrs, dividend_cagr_3y,
+            gross_margin, ebitda_margin, net_margin, operating_margin,
+            roe, roa, roce, avg_roe_3y,
+            revenue_ttm, ebitda_ttm, net_profit_ttm,
+            revenue_fy0, revenue_fy1, revenue_fy2,
+            net_profit_fy0, net_profit_fy1,
+            eps_fy0, eps_fy1,
+            total_assets, total_equity, total_debt, net_debt, cash,
+            book_value_per_share, debt_to_equity, current_ratio,
+            cfo_fy0, capex_fy0, fcf_fy0,
+            revenue_growth_1y, revenue_growth_3y_cagr, revenue_cagr_5y,
+            earnings_growth_1y, eps_growth_3y_cagr,
+            revenue_growth_yoy_q, eps_growth_yoy_q,
+            revenue_growth_hoh, net_income_growth_hoh, eps_growth_hoh,
+            piotroski_f_score, altman_z_score,
+            short_pct, percent_insiders, percent_institutions,
+            analyst_rating, analyst_target_price, analyst_upside,
+            return_1w, return_1m, return_3m, return_6m, return_1y, return_ytd,
+            return_3y, return_5y, drawdown_from_ath,
+            rsi_14, adx_14, macd, macd_signal,
+            sma_20, sma_50, sma_200, ema_20,
+            bb_upper, bb_lower, atr_14, obv,
+            volatility_20d, volatility_60d, beta_1y, sharpe_1y,
+            momentum_3m, momentum_6m
+        FROM screener.universe
+        WHERE asx_code = :asx_code
+    """
+    result = await db.execute(text(sql), {"asx_code": asx_code.upper()})
+    row = result.mappings().first()
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No screener data found for {asx_code.upper()}. "
+                   "Company may not be in the active universe."
+        )
+
+    return CompanyOverview(**dict(row))
+
+
+# ── Company Financials (multi-year annual) ────────────────────
+
+@router.get("/{asx_code}/financials", response_model=FinancialsResponse)
+async def get_company_financials(
+    asx_code: str,
+    years: int = Query(7, ge=1, le=15, description="Number of fiscal years to return"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Multi-year annual financials from financials.annual_pnl + balance_sheet + cashflow.
+    Returns up to `years` fiscal years, most recent first.
+    """
+    sql = """
+        SELECT
+            p.fiscal_year,
+            p.period_end_date,
+            p.revenue,
+            p.gross_profit,
+            p.ebitda,
+            p.ebit,
+            p.net_profit,
+            p.eps,
+            p.dps,
+            p.gpm,
+            p.ebitda_margin,
+            p.npm,
+            b.total_assets,
+            b.total_equity,
+            b.total_debt,
+            b.net_debt,
+            b.cash_equivalents,
+            b.book_value_per_share,
+            CASE
+                WHEN b.total_equity IS NOT NULL AND b.total_equity != 0
+                THEN b.total_debt / b.total_equity
+                ELSE NULL
+            END AS debt_to_equity,
+            c.cfo,
+            c.capex,
+            c.fcf
+        FROM financials.annual_pnl p
+        LEFT JOIN financials.annual_balance_sheet b
+            ON b.asx_code = p.asx_code AND b.fiscal_year = p.fiscal_year
+        LEFT JOIN financials.annual_cashflow c
+            ON c.asx_code = p.asx_code AND c.fiscal_year = p.fiscal_year
+        WHERE p.asx_code = :asx_code
+        ORDER BY p.fiscal_year DESC
+        LIMIT :years
+    """
+    result = await db.execute(
+        text(sql), {"asx_code": asx_code.upper(), "years": years}
+    )
+    rows = result.mappings().all()
+
+    return FinancialsResponse(
+        asx_code=asx_code.upper(),
+        years=[AnnualFinancialsRow(**dict(r)) for r in rows],
+    )
+
+
+# ── Company Price History ─────────────────────────────────────
+
+@router.get("/{asx_code}/prices", response_model=PricesResponse)
+async def get_company_prices(
+    asx_code: str,
+    period: str = Query("1y", description="1m | 3m | 6m | 1y | 3y | 5y | max"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    OHLCV price history from market.daily_prices for a given period.
+    Returns ascending date order suitable for charting.
+    """
+    period_intervals: dict[str, str] = {
+        "1m":  "1 month",
+        "3m":  "3 months",
+        "6m":  "6 months",
+        "1y":  "1 year",
+        "3y":  "3 years",
+        "5y":  "5 years",
+        "max": "50 years",
+    }
+    interval = period_intervals.get(period, "1 year")
+
+    # interval comes from our own whitelist — safe to embed in SQL
+    sql = f"""
+        SELECT
+            time::date            AS date,
+            open::double precision,
+            high::double precision,
+            low::double precision,
+            close::double precision,
+            volume
+        FROM market.daily_prices
+        WHERE asx_code = :asx_code
+          AND time >= NOW() - INTERVAL '{interval}'
+        ORDER BY time ASC
+    """
+    result = await db.execute(text(sql), {"asx_code": asx_code.upper()})
+    rows = result.mappings().all()
+
+    price_points = [
+        PricePoint(
+            date=str(r["date"]),
+            open=float(r["open"])   if r["open"]   is not None else None,
+            high=float(r["high"])   if r["high"]   is not None else None,
+            low=float(r["low"])     if r["low"]    is not None else None,
+            close=float(r["close"]),
+            volume=int(r["volume"]) if r["volume"] is not None else None,
+        )
+        for r in rows
+    ]
+
+    return PricesResponse(
+        asx_code=asx_code.upper(),
+        period=period,
+        data=price_points,
+    )

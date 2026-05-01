@@ -271,3 +271,212 @@ export const getScreenerPresets = async (): Promise<ScreenerPresetsResponse> => 
   const { data } = await api.get('/api/v1/screener/presets')
   return data
 }
+
+// ── Company detail sub-resources ──────────────────────────────
+
+/**
+ * All pre-computed screener.universe metrics for one company.
+ *
+ * Decimal ratio fields (stored as 0.15 = 15%):
+ *   dividend_yield, grossed_up_yield, payout_ratio, dividend_cagr_3y,
+ *   gross_margin, ebitda_margin, net_margin, operating_margin,
+ *   roe, roa, roce, avg_roe_3y, fcf_yield,
+ *   revenue_growth_*, earnings_growth_*, eps_growth_*,
+ *   return_*, drawdown_from_ath, volatility_*, momentum_*,
+ *   analyst_upside
+ *
+ * Already 0-100 fields:
+ *   franking_pct, short_pct, percent_insiders, percent_institutions,
+ *   rsi_14, adx_14
+ */
+export interface CompanyOverview {
+  // Price
+  price: number | null
+  price_date: string | null
+  market_cap: number | null
+  volume: number | null
+  avg_volume_20d: number | null
+  high_52w: number | null
+  low_52w: number | null
+
+  // Valuation
+  pe_ratio: number | null
+  forward_pe: number | null
+  peg_ratio: number | null
+  price_to_book: number | null
+  price_to_sales: number | null
+  price_to_fcf: number | null
+  ev: number | null
+  ev_to_ebitda: number | null
+  ev_to_ebit: number | null
+  ev_to_revenue: number | null
+  graham_number: number | null
+  fcf_yield: number | null           // ratio
+
+  // Dividends
+  dividend_yield: number | null      // ratio
+  grossed_up_yield: number | null    // ratio
+  franking_pct: number | null        // 0-100
+  dps_ttm: number | null
+  dps_fy0: number | null
+  payout_ratio: number | null        // ratio
+  ex_div_date: string | null
+  dividend_consecutive_yrs: number | null
+  dividend_cagr_3y: number | null    // ratio
+
+  // Profitability (all ratios)
+  gross_margin: number | null
+  ebitda_margin: number | null
+  net_margin: number | null
+  operating_margin: number | null
+  roe: number | null
+  roa: number | null
+  roce: number | null
+  avg_roe_3y: number | null
+
+  // Income Statement snapshot
+  revenue_ttm: number | null
+  ebitda_ttm: number | null
+  net_profit_ttm: number | null
+  revenue_fy0: number | null
+  revenue_fy1: number | null
+  revenue_fy2: number | null
+  net_profit_fy0: number | null
+  net_profit_fy1: number | null
+  eps_fy0: number | null
+  eps_fy1: number | null
+
+  // Balance Sheet
+  total_assets: number | null
+  total_equity: number | null
+  total_debt: number | null
+  net_debt: number | null
+  cash: number | null
+  book_value_per_share: number | null
+  debt_to_equity: number | null
+  current_ratio: number | null
+
+  // Cash Flow
+  cfo_fy0: number | null
+  capex_fy0: number | null
+  fcf_fy0: number | null
+
+  // Growth (all ratios)
+  revenue_growth_1y: number | null
+  revenue_growth_3y_cagr: number | null
+  revenue_cagr_5y: number | null
+  earnings_growth_1y: number | null
+  eps_growth_3y_cagr: number | null
+  revenue_growth_yoy_q: number | null
+  eps_growth_yoy_q: number | null
+  revenue_growth_hoh: number | null
+  net_income_growth_hoh: number | null
+  eps_growth_hoh: number | null
+
+  // Quality
+  piotroski_f_score: number | null   // 0-9
+  altman_z_score: number | null
+  short_pct: number | null           // 0-100
+  percent_insiders: number | null    // 0-100
+  percent_institutions: number | null // 0-100
+
+  // Analyst
+  analyst_rating: string | null
+  analyst_target_price: number | null
+  analyst_upside: number | null      // ratio
+
+  // Returns (all ratios)
+  return_1w: number | null
+  return_1m: number | null
+  return_3m: number | null
+  return_6m: number | null
+  return_1y: number | null
+  return_ytd: number | null
+  return_3y: number | null
+  return_5y: number | null
+  drawdown_from_ath: number | null
+
+  // Technicals
+  rsi_14: number | null              // 0-100
+  adx_14: number | null
+  macd: number | null
+  macd_signal: number | null
+  sma_20: number | null
+  sma_50: number | null
+  sma_200: number | null
+  ema_20: number | null
+  bb_upper: number | null
+  bb_lower: number | null
+  atr_14: number | null
+  obv: number | null
+  volatility_20d: number | null      // ratio
+  volatility_60d: number | null      // ratio
+  beta_1y: number | null
+  sharpe_1y: number | null
+  momentum_3m: number | null
+  momentum_6m: number | null
+}
+
+export interface AnnualFinancialsRow {
+  fiscal_year: number
+  period_end_date: string | null
+  // P&L (AUD millions)
+  revenue: number | null
+  gross_profit: number | null
+  ebitda: number | null
+  ebit: number | null
+  net_profit: number | null
+  eps: number | null
+  dps: number | null
+  // Margins (decimal ratios)
+  gpm: number | null
+  ebitda_margin: number | null
+  npm: number | null
+  // Balance Sheet (AUD millions)
+  total_assets: number | null
+  total_equity: number | null
+  total_debt: number | null
+  net_debt: number | null
+  cash_equivalents: number | null
+  book_value_per_share: number | null
+  debt_to_equity: number | null
+  // Cash Flow (AUD millions)
+  cfo: number | null
+  capex: number | null
+  fcf: number | null
+}
+
+export interface FinancialsResponse {
+  asx_code: string
+  years: AnnualFinancialsRow[]
+}
+
+export interface PricePoint {
+  date: string
+  open: number | null
+  high: number | null
+  low: number | null
+  close: number
+  volume: number | null
+}
+
+export interface PricesResponse {
+  asx_code: string
+  period: string
+  data: PricePoint[]
+}
+
+export const getCompanyOverview = async (asxCode: string): Promise<CompanyOverview> => {
+  const { data } = await api.get(`/api/v1/companies/${asxCode}/overview`)
+  return data
+}
+
+export const getCompanyFinancials = async (asxCode: string, years = 7): Promise<FinancialsResponse> => {
+  const { data } = await api.get(`/api/v1/companies/${asxCode}/financials`, { params: { years } })
+  return data
+}
+
+export const getCompanyPrices = async (asxCode: string, period = '1y'): Promise<PricesResponse> => {
+  const { data } = await api.get(`/api/v1/companies/${asxCode}/prices`, { params: { period } })
+  return data
+}

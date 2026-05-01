@@ -1,8 +1,9 @@
 import { getCompany } from '@/lib/api'
-import { formatPrice, formatNumber, formatMarketCap, cn, SECTOR_COLORS } from '@/lib/utils'
+import { formatNumber, cn, SECTOR_COLORS } from '@/lib/utils'
 import { Globe, Building2, Users, Calendar, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import CompanyTabs from './CompanyTabs'
 
 export default async function CompanyPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
@@ -109,24 +110,8 @@ export default async function CompanyPage({ params }: { params: Promise<{ code: 
         </div>
       )}
 
-      {/* Placeholder tabs — financials, technicals coming soon */}
-      <div className="bg-white border border-gray-200 rounded-xl p-5">
-        <div className="flex gap-4 border-b border-gray-200 mb-4">
-          {['Overview', 'Financials', 'Technicals', 'Announcements', 'AI Insights'].map((tab, i) => (
-            <button key={tab}
-              className={cn('pb-3 text-sm font-medium border-b-2 -mb-px transition-colors',
-                i === 0
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700')}>
-              {tab}
-            </button>
-          ))}
-        </div>
-        <div className="text-center py-8 text-gray-400 text-sm">
-          <p>Financial data will appear here once the Compute Engine runs.</p>
-          <p className="mt-1">Price history, technical indicators, and AI insights coming soon.</p>
-        </div>
-      </div>
+      {/* Live tabs — Overview, Financials, Technicals */}
+      <CompanyTabs code={code} />
 
     </div>
   )

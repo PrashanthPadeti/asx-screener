@@ -3,12 +3,13 @@ API v1 — Main Router
 Registers all route modules under /api/v1
 """
 from fastapi import APIRouter
-from app.api.v1.routes import companies, screener
+from app.api.v1.routes import companies, screener, market
 
 api_router = APIRouter()
 
 api_router.include_router(companies.router, prefix="/companies", tags=["Companies"])
 api_router.include_router(screener.router,  prefix="/screener",  tags=["Screener"])
+api_router.include_router(market.router,    prefix="/market",    tags=["Market"])
 
 # Future routers (uncomment as built):
 # from app.api.v1.routes import auth, watchlist, portfolio, alerts

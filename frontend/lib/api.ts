@@ -476,6 +476,62 @@ export interface PricesResponse {
   data: PricePoint[]
 }
 
+// ── Market summary types ──────────────────────────────────────
+
+export interface MarketSummary {
+  total_stocks: number
+  asx200_stocks: number
+  stocks_with_dividends: number
+  avg_dividend_yield: number | null   // decimal ratio
+  median_pe: number | null
+  total_market_cap_bn: number | null  // AUD billions
+  universe_built_at: string | null
+}
+
+export interface MoverStock {
+  asx_code: string
+  company_name: string
+  sector: string | null
+  price: number | null
+  return_1w: number | null   // decimal ratio
+  return_1m: number | null   // decimal ratio
+  market_cap: number | null  // AUD millions
+}
+
+export interface MoversResponse {
+  gainers: MoverStock[]
+  losers: MoverStock[]
+  period: string
+}
+
+export interface SectorStat {
+  sector: string
+  stock_count: number
+  avg_pe: number | null
+  avg_dividend_yield: number | null   // decimal ratio
+  avg_return_1y: number | null        // decimal ratio
+  total_market_cap_bn: number | null  // AUD billions
+}
+
+export interface SectorsResponse {
+  sectors: SectorStat[]
+}
+
+export const getMarketSummary = async (): Promise<MarketSummary> => {
+  const { data } = await api.get('/api/v1/market/summary')
+  return data
+}
+
+export const getMarketMovers = async (): Promise<MoversResponse> => {
+  const { data } = await api.get('/api/v1/market/movers')
+  return data
+}
+
+export const getMarketSectors = async (): Promise<SectorsResponse> => {
+  const { data } = await api.get('/api/v1/market/sectors')
+  return data
+}
+
 export const getCompanyOverview = async (asxCode: string): Promise<CompanyOverview> => {
   const { data } = await api.get(`/api/v1/companies/${asxCode}/overview`)
   return data

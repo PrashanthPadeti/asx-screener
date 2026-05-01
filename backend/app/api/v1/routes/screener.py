@@ -10,7 +10,7 @@ Endpoints:
   GET  /api/v1/screener/presets   — Pre-built screen templates
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import math
@@ -312,6 +312,69 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
     """
 
     return count_sql, data_sql, params
+
+
+# ── POST /screener/batch ─────────────────────────────────────────────────────
+
+@router.post("/batch", response_model=list[ScreenerRow])
+async def batch_screener(
+    codes: list[str] = Body(
+        ...,
+        min_length=1,
+        max_length=50,
+        embed=True,
+        description="List of ASX codes (max 50) to fetch screener data for",
+        example=["CBA", "BHP", "ANZ"],
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns screener.universe rows for a specific list of ASX codes.
+    Used by the watchlist page to show live prices and key metrics.
+    Input order is preserved in the response.
+    """
+    if not codes:
+        return []
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_codes = [c.upper() for c in codes if c.upper() not in seen and not seen.add(c.upper())]  # type: ignore[func-returns-value]
+
+    sql = """
+        SELECT
+            u.asx_code, u.company_name, u.sector, u.industry, u.stock_type, u.status,
+            u.is_reit, u.is_miner, u.is_asx200, u.is_asx300,
+            u.price, u.high_52w, u.low_52w, u.volume, u.avg_volume_20d, u.market_cap,
+            u.pe_ratio, u.forward_pe, u.price_to_book, u.price_to_sales,
+            u.ev_to_ebitda, u.peg_ratio, u.price_to_fcf, u.fcf_yield,
+            u.dividend_yield, u.grossed_up_yield, u.franking_pct,
+            u.dps_ttm, u.payout_ratio, u.dividend_consecutive_yrs, u.dividend_cagr_3y,
+            u.gross_margin, u.ebitda_margin, u.net_margin, u.operating_margin,
+            u.roe, u.roa, u.roce, u.avg_roe_3y,
+            u.revenue_growth_1y, u.revenue_growth_3y_cagr, u.revenue_cagr_5y,
+            u.earnings_growth_1y, u.eps_growth_3y_cagr,
+            u.revenue_growth_yoy_q, u.eps_growth_yoy_q,
+            u.revenue_growth_hoh, u.net_income_growth_hoh, u.eps_growth_hoh,
+            u.debt_to_equity, u.current_ratio, u.net_debt, u.total_debt,
+            u.book_value_per_share, u.total_assets, u.total_equity,
+            u.fcf_fy0, u.cfo_fy0,
+            u.piotroski_f_score, u.altman_z_score,
+            u.percent_insiders, u.percent_institutions, u.short_pct,
+            u.rsi_14, u.adx_14, u.macd, u.macd_signal,
+            u.sma_20, u.sma_50, u.sma_200, u.ema_20,
+            u.bb_upper, u.bb_lower, u.atr_14, u.obv,
+            u.volatility_20d, u.volatility_60d, u.beta_1y, u.sharpe_1y,
+            u.return_1w, u.return_1m, u.return_3m, u.return_6m,
+            u.return_1y, u.return_ytd, u.return_3y, u.return_5y,
+            u.drawdown_from_ath,
+            u.price_date, u.universe_built_at
+        FROM screener.universe u
+        WHERE u.asx_code = ANY(:codes)
+        ORDER BY array_position(:codes::varchar[], u.asx_code)
+    """
+    result = await db.execute(text(sql), {"codes": unique_codes})
+    rows = result.mappings().all()
+    return [ScreenerRow(**dict(r)) for r in rows]
 
 
 # ── POST /screener ────────────────────────────────────────────────────────────

@@ -272,6 +272,16 @@ export const getScreenerPresets = async (): Promise<ScreenerPresetsResponse> => 
   return data
 }
 
+/**
+ * Fetch live screener data for a specific list of ASX codes.
+ * Used by the watchlist page. Input order is preserved.
+ */
+export const getScreenerBatch = async (codes: string[]): Promise<ScreenerRow[]> => {
+  if (codes.length === 0) return []
+  const { data } = await api.post('/api/v1/screener/batch', { codes })
+  return data
+}
+
 // ── Company detail sub-resources ──────────────────────────────
 
 /**

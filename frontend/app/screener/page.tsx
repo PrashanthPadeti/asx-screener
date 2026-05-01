@@ -14,6 +14,7 @@ import {
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X,
 } from 'lucide-react'
 import Link from 'next/link'
+import WatchlistButton from '@/components/WatchlistButton'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -33,10 +34,13 @@ const ALL_COLUMNS: ColDef[] = [
     key: 'asx_code', label: 'Code', sortKey: 'asx_code',
     always: true, default: true, align: 'left',
     render: r => (
-      <Link href={`/company/${r.asx_code}`}
-        className="font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline">
-        {r.asx_code}
-      </Link>
+      <div className="flex items-center gap-1.5">
+        <WatchlistButton code={r.asx_code} size="sm" />
+        <Link href={`/company/${r.asx_code}`}
+          className="font-mono font-bold text-blue-600 hover:text-blue-800 hover:underline">
+          {r.asx_code}
+        </Link>
+      </div>
     ),
   },
   {

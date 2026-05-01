@@ -4,6 +4,7 @@ import { Globe, Building2, Users, Calendar, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import CompanyTabs from './CompanyTabs'
+import WatchlistButton from '@/components/WatchlistButton'
 
 export default async function CompanyPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
@@ -32,6 +33,7 @@ export default async function CompanyPage({ params }: { params: Promise<{ code: 
           <div>
             <div className="flex items-center gap-3 mb-1">
               <span className="font-mono font-bold text-2xl text-blue-600">{company.asx_code}</span>
+              <WatchlistButton code={company.asx_code} size="md" />
               {company.is_reit  && <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-medium">REIT</span>}
               {company.is_miner && <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">Miner</span>}
               {company.is_asx200 && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">ASX 200</span>}

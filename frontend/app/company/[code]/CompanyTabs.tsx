@@ -973,7 +973,7 @@ function DividendsTab({ data }: { data: DividendsResponse | null }) {
         <div className="bg-gray-50 rounded-xl p-3 text-center">
           <div className="text-xs text-gray-400 mb-1">Consec. Div. Years</div>
           <div className="text-lg font-bold text-gray-900">
-            {summary.dividend_consecutive_yrs != null ? summary.dividend_consecutive_yrs : '—'}
+            {summary.dividend_consecutive_yrs != null && summary.dividend_consecutive_yrs > 0 ? summary.dividend_consecutive_yrs : '—'}
           </div>
         </div>
         <div className="bg-gray-50 rounded-xl p-3 text-center">

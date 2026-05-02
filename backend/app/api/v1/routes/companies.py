@@ -452,34 +452,13 @@ async def get_company_peers(
     gics_industry = meta["gics_industry_group"]
     gics_sector   = meta["gics_sector"]
 
-    # Try industry-level peers first
-    peers_sql = """
-        SELECT
-            u.asx_code, c.company_name,
-            u.market_cap, u.price,
-            u.pe_ratio, u.forward_pe, u.price_to_book, u.ev_to_ebitda,
-            u.dividend_yield, u.grossed_up_yield, u.franking_pct,
-            u.roe, u.net_margin, u.revenue_growth_1y,
-            u.return_1y, u.return_ytd,
-            u.piotroski_f_score, u.debt_to_equity
-        FROM screener.universe u
-        JOIN market.companies c ON c.asx_code = u.asx_code
-        WHERE u.asx_code != :code
-          AND c.gics_industry_group = :industry
-          AND u.status = 'active'
-        ORDER BY u.market_cap DESC NULLS LAST
-        LIMIT :limit
-    """
-    rows = (await db.execute(text(peers_sql), {
-        "code": code, "industry": gics_industry, "limit": limit
-    })).mappings().all()
-
-    # Fall back to sector if fewer than 3 industry peers
-    label = gics_industry
-    if len(rows) < 3 and gics_sector:
-        sector_sql = """
-            SELECT
-                u.asx_code, c.company_name,
+    # Reusable peer SELECT — DISTINCT ON asx_code prevents duplicates from
+    # companies that have multiple rows in market.companies (normalised + raw names)
+    def peer_select(filter_clause: str) -> str:
+        return f"""
+            SELECT DISTINCT ON (u.asx_code)
+                u.asx_code,
+                c.company_name,
                 u.market_cap, u.price,
                 u.pe_ratio, u.forward_pe, u.price_to_book, u.ev_to_ebitda,
                 u.dividend_yield, u.grossed_up_yield, u.franking_pct,
@@ -489,9 +468,27 @@ async def get_company_peers(
             FROM screener.universe u
             JOIN market.companies c ON c.asx_code = u.asx_code
             WHERE u.asx_code != :code
-              AND c.gics_sector = :sector
+              AND {filter_clause}
               AND u.status = 'active'
-            ORDER BY u.market_cap DESC NULLS LAST
+            ORDER BY u.asx_code, u.market_cap DESC NULLS LAST
+        """
+
+    # Try industry-level peers first
+    peers_sql = f"""
+        SELECT * FROM ({peer_select("c.gics_industry_group = :industry")}) sub
+        ORDER BY market_cap DESC NULLS LAST
+        LIMIT :limit
+    """
+    rows = (await db.execute(text(peers_sql), {
+        "code": code, "industry": gics_industry, "limit": limit
+    })).mappings().all()
+
+    # Fall back to sector if fewer than 3 industry peers
+    label = gics_industry
+    if len(rows) < 3 and gics_sector:
+        sector_sql = f"""
+            SELECT * FROM ({peer_select("c.gics_sector = :sector")}) sub
+            ORDER BY market_cap DESC NULLS LAST
             LIMIT :limit
         """
         rows = (await db.execute(text(sector_sql), {

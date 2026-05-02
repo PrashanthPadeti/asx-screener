@@ -379,15 +379,17 @@ async def get_company_dividends(
             summary = DividendsSummary()
 
         # ── Dividend history from market.dividends ────────────────────────────
+        # Actual columns (v2 transform): amount_per_share, pay_date, dividend_type
+        # (migration 012 used 'amount'/'payment_date'/'div_type' — v2 pipeline differs)
         history_sql = """
             SELECT
                 ex_date,
-                payment_date,
+                pay_date                            AS payment_date,
                 record_date,
-                amount::double precision,
-                unadjusted_value::double precision,
+                amount_per_share::double precision  AS amount,
+                NULL::double precision              AS unadjusted_value,
                 franking_pct::double precision,
-                div_type,
+                dividend_type                       AS div_type,
                 currency
             FROM market.dividends
             WHERE asx_code = :code

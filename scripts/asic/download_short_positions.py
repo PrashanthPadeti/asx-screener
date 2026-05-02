@@ -42,9 +42,20 @@ ASIC_URL = (
     "RR{yyyymmdd}-001-SSDailyAggShortPos.csv"
 )
 
+# Browser-like headers — ASIC returns HTML (not CSV) without a User-Agent
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/csv,text/plain,*/*",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Referer": "https://asic.gov.au/regulatory-resources/markets/short-selling/short-position-reports-table/",
+}
+
 # How many calendar days to look back when searching for the latest available file
 DEFAULT_LOOKBACK = 14
-SLEEP_BETWEEN_TRIES = 1.0   # seconds — be polite to ASIC servers
+SLEEP_BETWEEN_TRIES = 1.5   # seconds — be polite to ASIC servers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -91,7 +102,7 @@ def download_date(d: date, force: bool = False) -> bool:
     log.info(f"  Trying {d.isoformat()} → {url}")
 
     try:
-        resp = requests.get(url, timeout=30)
+        resp = requests.get(url, headers=HEADERS, timeout=30, allow_redirects=True)
     except requests.RequestException as e:
         log.warning(f"  Request error: {e}")
         return False
@@ -104,15 +115,25 @@ def download_date(d: date, force: bool = False) -> bool:
         log.warning(f"  HTTP {resp.status_code} for {d.isoformat()}")
         return False
 
-    # Sanity-check: the file should be a CSV with the expected header
+    # Sanity-check: the file should be a CSV (not an HTML error page)
     content = resp.content
     try:
         first_line = content[:500].decode("utf-8", errors="replace").splitlines()[0]
     except Exception:
         first_line = ""
 
-    if "Product" not in first_line and "Short Position" not in first_line:
-        log.warning(f"  Unexpected content (not a short positions CSV): {first_line[:80]}")
+    # ASIC CSV header contains "Date" and "Product" or "Short Position"
+    # If we get HTML back (User-Agent blocked, page moved etc.) detect it here
+    if first_line.lstrip().startswith("<"):
+        log.warning(f"  Got HTML instead of CSV for {d.isoformat()} — URL may have changed")
+        log.debug(f"  First 200 chars: {first_line[:200]}")
+        return False
+
+    # Accept any line that looks like a short-position CSV
+    # (ASIC has changed column names historically so we check loosely)
+    lower = first_line.lower()
+    if "date" not in lower and "product" not in lower and "short" not in lower:
+        log.warning(f"  Unexpected content for {d.isoformat()}: {first_line[:120]}")
         return False
 
     # Write gzipped to disk
@@ -142,7 +163,21 @@ def main():
         action="store_true",
         help="Re-download even if already cached locally",
     )
+    parser.add_argument(
+        "--debug-url",
+        help="Fetch a single URL and print the first 500 bytes (for diagnosing format changes)",
+    )
     args = parser.parse_args()
+
+    # Debug mode: just print what ASIC returns for one URL
+    if args.debug_url:
+        log.info(f"Fetching {args.debug_url} …")
+        r = requests.get(args.debug_url, headers=HEADERS, timeout=30, allow_redirects=True)
+        print(f"HTTP {r.status_code}")
+        print(f"Content-Type: {r.headers.get('Content-Type', 'unknown')}")
+        print("--- First 500 bytes ---")
+        print(r.content[:500].decode("utf-8", errors="replace"))
+        return
 
     if args.date:
         # Specific date requested — try just that one date

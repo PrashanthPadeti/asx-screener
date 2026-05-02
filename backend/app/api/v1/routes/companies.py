@@ -352,15 +352,14 @@ async def get_company_dividends(
         FROM screener.universe
         WHERE asx_code = :code
     """
-    summary_result = await db.execute(text(summary_sql), {"code": code})
-    summary_row = summary_result.mappings().first()
+    try:
+        summary_result = await db.execute(text(summary_sql), {"code": code})
+        summary_row = summary_result.mappings().first()
+        summary = DividendsSummary(**dict(summary_row)) if summary_row else DividendsSummary()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"summary query failed: {e}")
 
-    if summary_row:
-        summary = DividendsSummary(**dict(summary_row))
-    else:
-        summary = DividendsSummary()
-
-    # Dividend history
+    # Dividend history — market.dividends may be empty for many stocks
     history_sql = """
         SELECT
             ex_date, payment_date, record_date,
@@ -373,14 +372,14 @@ async def get_company_dividends(
         ORDER BY ex_date DESC
         LIMIT :limit
     """
-    history_result = await db.execute(text(history_sql), {"code": code, "limit": limit})
-    history_rows = history_result.mappings().all()
+    try:
+        history_result = await db.execute(text(history_sql), {"code": code, "limit": limit})
+        history_rows = history_result.mappings().all()
+        history = [DividendRecord(**dict(r)) for r in history_rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"history query failed: {e}")
 
-    return DividendsResponse(
-        asx_code=code,
-        summary=summary,
-        history=[DividendRecord(**dict(r)) for r in history_rows],
-    )
+    return DividendsResponse(asx_code=code, summary=summary, history=history)
 
 
 # ── Company Peers ─────────────────────────────────────────────
@@ -490,7 +489,7 @@ async def get_company_halfyearly(
             dps::double precision,
             dps_franking_pct::double precision,
             gpm::double precision,
-            ebitda_margin::double precision,
+            opm::double precision               AS ebitda_margin,
             npm::double precision
         FROM financials.half_year_pnl
         WHERE asx_code = :code

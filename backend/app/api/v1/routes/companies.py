@@ -343,43 +343,83 @@ async def get_company_dividends(
     """
     code = asx_code.upper()
 
-    # Summary stats from screener.universe
-    summary_sql = """
-        SELECT
-            dividend_yield, grossed_up_yield, franking_pct,
-            dps_ttm, dps_fy0, payout_ratio, ex_div_date,
-            dividend_consecutive_yrs, dividend_cagr_3y
-        FROM screener.universe
-        WHERE asx_code = :code
-    """
     try:
+        # ── Summary stats from screener.universe ──────────────────────────────
+        summary_sql = """
+            SELECT
+                dividend_yield::double precision,
+                grossed_up_yield::double precision,
+                franking_pct::double precision,
+                dps_ttm::double precision,
+                dps_fy0::double precision,
+                payout_ratio::double precision,
+                ex_div_date,
+                dividend_consecutive_yrs,
+                dividend_cagr_3y::double precision
+            FROM screener.universe
+            WHERE asx_code = :code
+        """
         summary_result = await db.execute(text(summary_sql), {"code": code})
         summary_row = summary_result.mappings().first()
-        summary = DividendsSummary(**dict(summary_row)) if summary_row else DividendsSummary()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"summary query failed: {e}")
 
-    # Dividend history — market.dividends may be empty for many stocks
-    history_sql = """
-        SELECT
-            ex_date, payment_date, record_date,
-            amount::double precision,
-            unadjusted_value::double precision,
-            franking_pct::double precision,
-            div_type, currency
-        FROM market.dividends
-        WHERE asx_code = :code
-        ORDER BY ex_date DESC
-        LIMIT :limit
-    """
-    try:
+        if summary_row:
+            row = dict(summary_row)
+            summary = DividendsSummary(
+                dividend_yield=row.get("dividend_yield"),
+                grossed_up_yield=row.get("grossed_up_yield"),
+                franking_pct=row.get("franking_pct"),
+                dps_ttm=row.get("dps_ttm"),
+                dps_fy0=row.get("dps_fy0"),
+                payout_ratio=row.get("payout_ratio"),
+                ex_div_date=row.get("ex_div_date"),
+                dividend_consecutive_yrs=row.get("dividend_consecutive_yrs"),
+                dividend_cagr_3y=row.get("dividend_cagr_3y"),
+            )
+        else:
+            summary = DividendsSummary()
+
+        # ── Dividend history from market.dividends ────────────────────────────
+        history_sql = """
+            SELECT
+                ex_date,
+                payment_date,
+                record_date,
+                amount::double precision,
+                unadjusted_value::double precision,
+                franking_pct::double precision,
+                div_type,
+                currency
+            FROM market.dividends
+            WHERE asx_code = :code
+            ORDER BY ex_date DESC
+            LIMIT :limit
+        """
         history_result = await db.execute(text(history_sql), {"code": code, "limit": limit})
         history_rows = history_result.mappings().all()
-        history = [DividendRecord(**dict(r)) for r in history_rows]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"history query failed: {e}")
+        history = [
+            DividendRecord(
+                ex_date=r["ex_date"],
+                payment_date=r["payment_date"],
+                record_date=r["record_date"],
+                amount=r["amount"],
+                unadjusted_value=r["unadjusted_value"],
+                franking_pct=r["franking_pct"],
+                div_type=r["div_type"],
+                currency=r["currency"],
+            )
+            for r in history_rows
+        ]
 
-    return DividendsResponse(asx_code=code, summary=summary, history=history)
+        return DividendsResponse(asx_code=code, summary=summary, history=history)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(e).__name__}: {e}\n{traceback.format_exc()}"
+        )
 
 
 # ── Company Peers ─────────────────────────────────────────────

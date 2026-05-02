@@ -45,7 +45,7 @@ _DEC2FLOAT = psycopg2.extensions.new_type(
 psycopg2.extensions.register_type(_DEC2FLOAT)
 
 COLS = [
-    "gics_sector",
+    "sector",
     "pe_ratio", "price_to_book", "ev_to_ebitda",
     "dividend_yield", "grossed_up_yield", "franking_pct",
     "roe", "net_margin", "gross_margin", "ebitda_margin",
@@ -74,13 +74,13 @@ def run(conn, dry_run: bool = False) -> int:
         FROM screener.universe
         WHERE status = 'active'
           AND price IS NOT NULL
-          AND gics_sector IS NOT NULL
+          AND sector IS NOT NULL
     """)
     rows = cur.fetchall()
     cur.close()
 
     df = pd.DataFrame(rows, columns=COLS)
-    log.info(f"Loaded {len(df):,} stocks across {df['gics_sector'].nunique()} sectors")
+    log.info(f"Loaded {len(df):,} stocks across {df['sector'].nunique()} sectors")
 
     for col in COLS[1:]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -92,7 +92,7 @@ def run(conn, dry_run: bool = False) -> int:
     now = datetime.now(tz=timezone.utc)
     upsert_rows = []
 
-    for sector, grp in df.groupby("gics_sector"):
+    for sector, grp in df.groupby("sector"):
         n = len(grp)
         if n < 2:
             continue

@@ -380,11 +380,40 @@ export default function ScreenerPage() {
   const [sortBy, setSortBy]         = useState('market_cap')
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
 
-  // Column visibility
+  // Column visibility — persisted to localStorage
+  const STORAGE_KEY = 'screener_visible_columns_v1'
   const defaultVisible = new Set(
     ALL_COLUMNS.filter(c => c.default || c.always).map(c => c.key as string)
   )
-  const [visibleKeys, setVisibleKeys] = useState<Set<string>>(defaultVisible)
+  const [visibleKeys, setVisibleKeysState] = useState<Set<string>>(defaultVisible)
+
+  // Restore from localStorage on mount (client-only)
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        const parsed: string[] = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Always include 'always' columns
+          const alwaysKeys = ALL_COLUMNS.filter(c => c.always).map(c => c.key as string)
+          setVisibleKeysState(new Set([...alwaysKeys, ...parsed]))
+        }
+      }
+    } catch { /* ignore */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Persist + update state
+  const setVisibleKeys = (keys: Set<string>) => {
+    setVisibleKeysState(keys)
+    try {
+      // Save only optional keys (always-visible are implicit)
+      const optional = [...keys].filter(k =>
+        ALL_COLUMNS.find(c => c.key === k && !c.always)
+      )
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(optional))
+    } catch { /* ignore */ }
+  }
 
   // Load fields and presets on mount
   useEffect(() => {

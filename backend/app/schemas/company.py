@@ -283,3 +283,96 @@ class PricesResponse(BaseModel):
     asx_code: str
     period: str
     data: list[PricePoint]
+
+
+# ── Dividends schemas ─────────────────────────────────────────────────────────
+
+class DividendRecord(BaseModel):
+    """One dividend payment from market.dividends."""
+    ex_date: date
+    payment_date: Optional[date] = None
+    record_date: Optional[date] = None
+    amount: Optional[float] = None          # AUD per share
+    unadjusted_value: Optional[float] = None
+    franking_pct: Optional[float] = None    # 0-100
+    div_type: Optional[str] = None
+    currency: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class DividendsSummary(BaseModel):
+    """Key dividend metrics from screener.universe for the summary card."""
+    dividend_yield: Optional[float] = None      # decimal ratio
+    grossed_up_yield: Optional[float] = None    # decimal ratio
+    franking_pct: Optional[float] = None        # 0-100
+    dps_ttm: Optional[float] = None
+    dps_fy0: Optional[float] = None
+    payout_ratio: Optional[float] = None        # decimal ratio
+    ex_div_date: Optional[date] = None
+    dividend_consecutive_yrs: Optional[int] = None
+    dividend_cagr_3y: Optional[float] = None    # decimal ratio
+
+
+class DividendsResponse(BaseModel):
+    asx_code: str
+    summary: DividendsSummary
+    history: list[DividendRecord]
+
+
+# ── Peers schemas ─────────────────────────────────────────────────────────────
+
+class PeerStock(BaseModel):
+    """One peer company row from screener.universe."""
+    asx_code: str
+    company_name: str
+    market_cap: Optional[float] = None      # AUD millions
+    price: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    forward_pe: Optional[float] = None
+    price_to_book: Optional[float] = None
+    ev_to_ebitda: Optional[float] = None
+    dividend_yield: Optional[float] = None  # decimal ratio
+    grossed_up_yield: Optional[float] = None
+    franking_pct: Optional[float] = None    # 0-100
+    roe: Optional[float] = None             # decimal ratio
+    net_margin: Optional[float] = None      # decimal ratio
+    revenue_growth_1y: Optional[float] = None
+    return_1y: Optional[float] = None       # decimal ratio
+    return_ytd: Optional[float] = None
+    piotroski_f_score: Optional[int] = None
+    debt_to_equity: Optional[float] = None
+
+    model_config = {"from_attributes": True}
+
+
+class PeersResponse(BaseModel):
+    asx_code: str
+    gics_industry: Optional[str] = None
+    peers: list[PeerStock]
+
+
+# ── Half-yearly financials schemas ────────────────────────────────────────────
+
+class HalfYearlyRow(BaseModel):
+    """One half-yearly period from financials.half_year_pnl."""
+    period_label: str                       # e.g. '1H FY2024'
+    period_end_date: Optional[date] = None
+    revenue: Optional[float] = None         # AUD millions (note: stored as full dollars)
+    gross_profit: Optional[float] = None
+    ebitda: Optional[float] = None
+    ebit: Optional[float] = None
+    net_profit: Optional[float] = None
+    eps: Optional[float] = None
+    dps: Optional[float] = None
+    dps_franking_pct: Optional[float] = None  # 0-100
+    gpm: Optional[float] = None             # decimal ratio
+    ebitda_margin: Optional[float] = None   # decimal ratio
+    npm: Optional[float] = None             # decimal ratio
+
+    model_config = {"from_attributes": True}
+
+
+class HalfYearlyResponse(BaseModel):
+    asx_code: str
+    periods: list[HalfYearlyRow]

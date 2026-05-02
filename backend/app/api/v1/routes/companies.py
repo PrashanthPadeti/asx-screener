@@ -16,6 +16,9 @@ from app.schemas.company import (
     CompanySearchResult, CompanyListResponse,
     CompanyOverview, AnnualFinancialsRow, FinancialsResponse,
     PricePoint, PricesResponse,
+    DividendRecord, DividendsSummary, DividendsResponse,
+    PeerStock, PeersResponse,
+    HalfYearlyRow, HalfYearlyResponse,
 )
 
 router = APIRouter()
@@ -323,4 +326,183 @@ async def get_company_prices(
         asx_code=asx_code.upper(),
         period=period,
         data=price_points,
+    )
+
+
+# ── Company Dividends ─────────────────────────────────────────
+
+@router.get("/{asx_code}/dividends", response_model=DividendsResponse)
+async def get_company_dividends(
+    asx_code: str,
+    limit: int = Query(40, ge=1, le=200, description="Max dividend records to return"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Dividend history from market.dividends + summary stats from screener.universe.
+    Returns most recent `limit` dividend payments, newest first.
+    """
+    code = asx_code.upper()
+
+    # Summary stats from screener.universe
+    summary_sql = """
+        SELECT
+            dividend_yield, grossed_up_yield, franking_pct,
+            dps_ttm, dps_fy0, payout_ratio, ex_div_date,
+            dividend_consecutive_yrs, dividend_cagr_3y
+        FROM screener.universe
+        WHERE asx_code = :code
+    """
+    summary_result = await db.execute(text(summary_sql), {"code": code})
+    summary_row = summary_result.mappings().first()
+
+    if summary_row:
+        summary = DividendsSummary(**dict(summary_row))
+    else:
+        summary = DividendsSummary()
+
+    # Dividend history
+    history_sql = """
+        SELECT
+            ex_date, payment_date, record_date,
+            amount::double precision,
+            unadjusted_value::double precision,
+            franking_pct::double precision,
+            div_type, currency
+        FROM market.dividends
+        WHERE asx_code = :code
+        ORDER BY ex_date DESC
+        LIMIT :limit
+    """
+    history_result = await db.execute(text(history_sql), {"code": code, "limit": limit})
+    history_rows = history_result.mappings().all()
+
+    return DividendsResponse(
+        asx_code=code,
+        summary=summary,
+        history=[DividendRecord(**dict(r)) for r in history_rows],
+    )
+
+
+# ── Company Peers ─────────────────────────────────────────────
+
+@router.get("/{asx_code}/peers", response_model=PeersResponse)
+async def get_company_peers(
+    asx_code: str,
+    limit: int = Query(15, ge=5, le=30, description="Max peers to return"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Peer companies from screener.universe sharing the same GICS industry group.
+    Falls back to GICS sector if industry group returns fewer than 3 results.
+    Returns up to `limit` peers sorted by market cap descending.
+    """
+    code = asx_code.upper()
+
+    # Resolve GICS industry for this stock
+    meta_sql = """
+        SELECT gics_industry_group, gics_sector
+        FROM market.companies
+        WHERE asx_code = :code
+    """
+    meta = (await db.execute(text(meta_sql), {"code": code})).mappings().first()
+    if not meta:
+        raise HTTPException(status_code=404, detail=f"Company {code} not found")
+
+    gics_industry = meta["gics_industry_group"]
+    gics_sector   = meta["gics_sector"]
+
+    # Try industry-level peers first
+    peers_sql = """
+        SELECT
+            u.asx_code, c.company_name,
+            u.market_cap, u.price,
+            u.pe_ratio, u.forward_pe, u.price_to_book, u.ev_to_ebitda,
+            u.dividend_yield, u.grossed_up_yield, u.franking_pct,
+            u.roe, u.net_margin, u.revenue_growth_1y,
+            u.return_1y, u.return_ytd,
+            u.piotroski_f_score, u.debt_to_equity
+        FROM screener.universe u
+        JOIN market.companies c ON c.asx_code = u.asx_code
+        WHERE u.asx_code != :code
+          AND c.gics_industry_group = :industry
+          AND u.status = 'active'
+        ORDER BY u.market_cap DESC NULLS LAST
+        LIMIT :limit
+    """
+    rows = (await db.execute(text(peers_sql), {
+        "code": code, "industry": gics_industry, "limit": limit
+    })).mappings().all()
+
+    # Fall back to sector if fewer than 3 industry peers
+    label = gics_industry
+    if len(rows) < 3 and gics_sector:
+        sector_sql = """
+            SELECT
+                u.asx_code, c.company_name,
+                u.market_cap, u.price,
+                u.pe_ratio, u.forward_pe, u.price_to_book, u.ev_to_ebitda,
+                u.dividend_yield, u.grossed_up_yield, u.franking_pct,
+                u.roe, u.net_margin, u.revenue_growth_1y,
+                u.return_1y, u.return_ytd,
+                u.piotroski_f_score, u.debt_to_equity
+            FROM screener.universe u
+            JOIN market.companies c ON c.asx_code = u.asx_code
+            WHERE u.asx_code != :code
+              AND c.gics_sector = :sector
+              AND u.status = 'active'
+            ORDER BY u.market_cap DESC NULLS LAST
+            LIMIT :limit
+        """
+        rows = (await db.execute(text(sector_sql), {
+            "code": code, "sector": gics_sector, "limit": limit
+        })).mappings().all()
+        label = gics_sector
+
+    return PeersResponse(
+        asx_code=code,
+        gics_industry=label,
+        peers=[PeerStock(**dict(r)) for r in rows],
+    )
+
+
+# ── Company Half-Yearly Financials ────────────────────────────
+
+@router.get("/{asx_code}/halfyearly", response_model=HalfYearlyResponse)
+async def get_company_halfyearly(
+    asx_code: str,
+    periods: int = Query(8, ge=2, le=20, description="Number of half-yearly periods to return"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Half-yearly P&L from financials.half_year_pnl.
+    Returns most recent `periods` half-years (e.g. 8 = 4 years), newest first.
+    """
+    sql = """
+        SELECT
+            period_label,
+            period_end_date,
+            (revenue / 1000000)::double precision           AS revenue,
+            (gross_profit / 1000000)::double precision      AS gross_profit,
+            (ebitda / 1000000)::double precision            AS ebitda,
+            (ebit / 1000000)::double precision              AS ebit,
+            (net_profit / 1000000)::double precision        AS net_profit,
+            eps::double precision,
+            dps::double precision,
+            dps_franking_pct::double precision,
+            gpm::double precision,
+            ebitda_margin::double precision,
+            npm::double precision
+        FROM financials.half_year_pnl
+        WHERE asx_code = :code
+        ORDER BY period_end_date DESC
+        LIMIT :periods
+    """
+    result = await db.execute(
+        text(sql), {"code": asx_code.upper(), "periods": periods}
+    )
+    rows = result.mappings().all()
+
+    return HalfYearlyResponse(
+        asx_code=asx_code.upper(),
+        periods=[HalfYearlyRow(**dict(r)) for r in rows],
     )

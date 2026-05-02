@@ -546,3 +546,101 @@ export const getCompanyPrices = async (asxCode: string, period = '1y'): Promise<
   const { data } = await api.get(`/api/v1/companies/${asxCode}/prices`, { params: { period } })
   return data
 }
+
+// ── Dividends ─────────────────────────────────────────────────
+
+export interface DividendRecord {
+  ex_date: string             // ISO date
+  payment_date: string | null
+  record_date: string | null
+  amount: number | null       // AUD per share
+  unadjusted_value: number | null
+  franking_pct: number | null // 0-100
+  div_type: string | null
+  currency: string | null
+}
+
+export interface DividendsSummary {
+  dividend_yield: number | null      // decimal ratio
+  grossed_up_yield: number | null    // decimal ratio
+  franking_pct: number | null        // 0-100
+  dps_ttm: number | null
+  dps_fy0: number | null
+  payout_ratio: number | null        // decimal ratio
+  ex_div_date: string | null
+  dividend_consecutive_yrs: number | null
+  dividend_cagr_3y: number | null    // decimal ratio
+}
+
+export interface DividendsResponse {
+  asx_code: string
+  summary: DividendsSummary
+  history: DividendRecord[]
+}
+
+export const getCompanyDividends = async (asxCode: string, limit = 40): Promise<DividendsResponse> => {
+  const { data } = await api.get(`/api/v1/companies/${asxCode}/dividends`, { params: { limit } })
+  return data
+}
+
+// ── Peers ─────────────────────────────────────────────────────
+
+export interface PeerStock {
+  asx_code: string
+  company_name: string
+  market_cap: number | null      // AUD millions
+  price: number | null
+  pe_ratio: number | null
+  forward_pe: number | null
+  price_to_book: number | null
+  ev_to_ebitda: number | null
+  dividend_yield: number | null  // decimal ratio
+  grossed_up_yield: number | null
+  franking_pct: number | null    // 0-100
+  roe: number | null             // decimal ratio
+  net_margin: number | null      // decimal ratio
+  revenue_growth_1y: number | null
+  return_1y: number | null       // decimal ratio
+  return_ytd: number | null
+  piotroski_f_score: number | null
+  debt_to_equity: number | null
+}
+
+export interface PeersResponse {
+  asx_code: string
+  gics_industry: string | null
+  peers: PeerStock[]
+}
+
+export const getCompanyPeers = async (asxCode: string, limit = 15): Promise<PeersResponse> => {
+  const { data } = await api.get(`/api/v1/companies/${asxCode}/peers`, { params: { limit } })
+  return data
+}
+
+// ── Half-Yearly Financials ────────────────────────────────────
+
+export interface HalfYearlyRow {
+  period_label: string           // e.g. '1H FY2024'
+  period_end_date: string | null
+  revenue: number | null         // AUD millions
+  gross_profit: number | null
+  ebitda: number | null
+  ebit: number | null
+  net_profit: number | null
+  eps: number | null
+  dps: number | null
+  dps_franking_pct: number | null  // 0-100
+  gpm: number | null             // decimal ratio
+  ebitda_margin: number | null   // decimal ratio
+  npm: number | null             // decimal ratio
+}
+
+export interface HalfYearlyResponse {
+  asx_code: string
+  periods: HalfYearlyRow[]
+}
+
+export const getCompanyHalfYearly = async (asxCode: string, periods = 8): Promise<HalfYearlyResponse> => {
+  const { data } = await api.get(`/api/v1/companies/${asxCode}/halfyearly`, { params: { periods } })
+  return data
+}

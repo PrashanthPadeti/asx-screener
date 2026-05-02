@@ -7,7 +7,9 @@ import {
 } from 'recharts'
 import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
+  getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
   type CompanyOverview, type FinancialsResponse, type PricesResponse,
+  type DividendsResponse, type PeersResponse, type HalfYearlyResponse,
 } from '@/lib/api'
 import {
   formatPrice, formatMarketCap, formatVolume,
@@ -17,7 +19,8 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'financials' | 'technicals'
+type Tab = 'overview' | 'financials' | 'technicals' | 'dividends' | 'peers' | 'ai' | 'documents'
+type FinancialPeriod = 'annual' | 'halfyearly'
 
 interface MetricRowProps {
   label: string
@@ -456,19 +459,12 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
 
 // ── Financials Tab ────────────────────────────────────────────
 
-function FinancialsTab({ financials }: { financials: FinancialsResponse | null; loading: boolean }) {
-  if (!financials || financials.years.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-400 text-sm">
-        <p className="font-medium text-gray-500 mb-1">Detailed historical financials not yet loaded</p>
-        <p>Annual financial statements are sourced from company filings and loaded periodically.</p>
-      </div>
-    )
-  }
+function AnnualTable({ financials }: { financials: FinancialsResponse }) {
+  const years = [...financials.years].reverse()
 
-  const years = [...financials.years].reverse() // chronological order for table
+  type ARow = { label: string; key: string; fmt: (v: number | null) => string }
 
-  const pnlRows: { label: string; key: keyof typeof years[0]; fmt: (v: number | null) => string }[] = [
+  const pnlRows: ARow[] = [
     { label: 'Revenue',       key: 'revenue',      fmt: fmtM },
     { label: 'Gross Profit',  key: 'gross_profit', fmt: fmtM },
     { label: 'EBITDA',        key: 'ebitda',       fmt: fmtM },
@@ -477,36 +473,27 @@ function FinancialsTab({ financials }: { financials: FinancialsResponse | null; 
     { label: 'EPS',           key: 'eps',          fmt: v => v != null ? `$${v.toFixed(3)}` : '—' },
     { label: 'DPS',           key: 'dps',          fmt: v => v != null ? `$${v.toFixed(3)}` : '—' },
   ]
-
-  const marginRows: { label: string; key: keyof typeof years[0]; fmt: (v: number | null) => string }[] = [
-    { label: 'Gross Margin',  key: 'gpm',          fmt: v => formatRatio(v) },
-    { label: 'EBITDA Margin', key: 'ebitda_margin',fmt: v => formatRatio(v) },
-    { label: 'Net Margin',    key: 'npm',          fmt: v => formatRatio(v) },
+  const marginRows: ARow[] = [
+    { label: 'Gross Margin',  key: 'gpm',          fmt: formatRatio },
+    { label: 'EBITDA Margin', key: 'ebitda_margin',fmt: formatRatio },
+    { label: 'Net Margin',    key: 'npm',          fmt: formatRatio },
   ]
-
-  const bsRows: { label: string; key: keyof typeof years[0]; fmt: (v: number | null) => string }[] = [
-    { label: 'Total Assets',       key: 'total_assets',        fmt: fmtM },
-    { label: 'Total Equity',       key: 'total_equity',        fmt: fmtM },
-    { label: 'Total Debt',         key: 'total_debt',          fmt: fmtM },
-    { label: 'Net Debt',           key: 'net_debt',            fmt: fmtM },
-    { label: 'Cash',               key: 'cash_equivalents',    fmt: fmtM },
-    { label: 'Book Value / Sh',    key: 'book_value_per_share',fmt: v => v != null ? `$${v.toFixed(2)}` : '—' },
-    { label: 'Debt / Equity',      key: 'debt_to_equity',      fmt: fmtX },
+  const bsRows: ARow[] = [
+    { label: 'Total Assets',    key: 'total_assets',        fmt: fmtM },
+    { label: 'Total Equity',    key: 'total_equity',        fmt: fmtM },
+    { label: 'Total Debt',      key: 'total_debt',          fmt: fmtM },
+    { label: 'Net Debt',        key: 'net_debt',            fmt: fmtM },
+    { label: 'Cash',            key: 'cash_equivalents',    fmt: fmtM },
+    { label: 'Book Value / Sh', key: 'book_value_per_share',fmt: v => v != null ? `$${v.toFixed(2)}` : '—' },
+    { label: 'Debt / Equity',   key: 'debt_to_equity',      fmt: fmtX },
   ]
-
-  const cfRows: { label: string; key: keyof typeof years[0]; fmt: (v: number | null) => string }[] = [
+  const cfRows: ARow[] = [
     { label: 'Cash From Ops',  key: 'cfo',   fmt: fmtM },
     { label: 'Capex',          key: 'capex', fmt: fmtM },
     { label: 'Free Cash Flow', key: 'fcf',   fmt: fmtM },
   ]
 
-  const TableSection = ({
-    title,
-    rows,
-  }: {
-    title: string
-    rows: { label: string; key: string; fmt: (v: number | null) => string }[]
-  }) => (
+  const TableSection = ({ title, rows }: { title: string; rows: ARow[] }) => (
     <>
       <tr>
         <td colSpan={years.length + 1} className="pt-4 pb-1">
@@ -555,6 +542,129 @@ function FinancialsTab({ financials }: { financials: FinancialsResponse | null; 
   )
 }
 
+function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
+  const periods = [...halfYearly.periods].reverse()  // chronological
+
+  type HRow = { label: string; key: string; fmt: (v: number | null) => string }
+  const pnlRows: HRow[] = [
+    { label: 'Revenue',       key: 'revenue',      fmt: fmtM },
+    { label: 'Gross Profit',  key: 'gross_profit', fmt: fmtM },
+    { label: 'EBITDA',        key: 'ebitda',       fmt: fmtM },
+    { label: 'EBIT',          key: 'ebit',         fmt: fmtM },
+    { label: 'Net Profit',    key: 'net_profit',   fmt: fmtM },
+    { label: 'EPS',           key: 'eps',          fmt: v => v != null ? `$${v.toFixed(3)}` : '—' },
+    { label: 'DPS',           key: 'dps',          fmt: v => v != null ? `$${v.toFixed(3)}` : '—' },
+    { label: 'DPS Franking',  key: 'dps_franking_pct', fmt: v => v != null ? `${v.toFixed(0)}%` : '—' },
+  ]
+  const marginRows: HRow[] = [
+    { label: 'Gross Margin',  key: 'gpm',          fmt: formatRatio },
+    { label: 'EBITDA Margin', key: 'ebitda_margin',fmt: formatRatio },
+    { label: 'Net Margin',    key: 'npm',          fmt: formatRatio },
+  ]
+
+  const TableSection = ({ title, rows }: { title: string; rows: HRow[] }) => (
+    <>
+      <tr>
+        <td colSpan={periods.length + 1} className="pt-4 pb-1">
+          <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{title}</span>
+        </td>
+      </tr>
+      {rows.map(row => (
+        <tr key={row.label} className="hover:bg-gray-50">
+          <td className="py-1.5 pr-4 text-sm text-gray-600 whitespace-nowrap">{row.label}</td>
+          {periods.map(p => (
+            <td key={p.period_label} className="py-1.5 text-sm text-right font-medium text-gray-900 pl-4">
+              {row.fmt((p as unknown as Record<string, number | null>)[row.key])}
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  )
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-left min-w-[500px]">
+        <thead>
+          <tr className="border-b border-gray-200">
+            <th className="text-xs text-gray-400 font-medium pb-2 pr-4">Metric</th>
+            {periods.map(p => (
+              <th key={p.period_label} className="text-xs text-gray-700 font-semibold pb-2 pl-4 text-right">
+                {p.period_label}
+                {p.period_end_date && (
+                  <span className="block font-normal text-gray-400">
+                    {p.period_end_date.slice(0, 7)}
+                  </span>
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-50">
+          <TableSection title="Income Statement (AUD)" rows={pnlRows} />
+          <TableSection title="Margins" rows={marginRows} />
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function FinancialsTab({
+  financials,
+  halfYearly,
+  period,
+  onPeriodChange,
+}: {
+  financials: FinancialsResponse | null
+  halfYearly: HalfYearlyResponse | null
+  period: FinancialPeriod
+  onPeriodChange: (p: FinancialPeriod) => void
+}) {
+  const empty = period === 'annual'
+    ? (!financials || financials.years.length === 0)
+    : (!halfYearly || halfYearly.periods.length === 0)
+
+  return (
+    <div className="space-y-3">
+      {/* Period toggle */}
+      <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
+        {([
+          { id: 'annual',     label: 'Annual' },
+          { id: 'halfyearly', label: 'Half-Yearly ★' },
+        ] as { id: FinancialPeriod; label: string }[]).map(opt => (
+          <button
+            key={opt.id}
+            onClick={() => onPeriodChange(opt.id)}
+            className={[
+              'px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+              period === opt.id
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700',
+            ].join(' ')}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {empty ? (
+        <div className="text-center py-12 text-gray-400 text-sm">
+          <p className="font-medium text-gray-500 mb-1">
+            {period === 'annual'
+              ? 'Annual financial statements not yet loaded'
+              : 'Half-yearly data not available for this company'}
+          </p>
+          <p>Financial statements are sourced from company filings and loaded periodically.</p>
+        </div>
+      ) : period === 'annual' && financials ? (
+        <AnnualTable financials={financials} />
+      ) : halfYearly ? (
+        <HalfYearlyTable halfYearly={halfYearly} />
+      ) : null}
+    </div>
+  )
+}
+
 // ── Technicals Tab ────────────────────────────────────────────
 
 function TechnicalsTab({
@@ -587,8 +697,57 @@ function TechnicalsTab({
     return ((o.price - sma) / sma) * 100
   }
 
+  // ── Signal badges ───────────────────────────────────────────
+  const signals: { label: string; type: 'bull' | 'bear' | 'neutral' }[] = []
+
+  if (o.rsi_14 != null) {
+    if (o.rsi_14 < 30)
+      signals.push({ label: `RSI Oversold (${o.rsi_14.toFixed(0)})`, type: 'bull' })
+    else if (o.rsi_14 > 70)
+      signals.push({ label: `RSI Overbought (${o.rsi_14.toFixed(0)})`, type: 'bear' })
+  }
+  if (o.price != null && o.sma_200 != null) {
+    if (o.price > o.sma_200)
+      signals.push({ label: 'Above 200-MA', type: 'bull' })
+    else
+      signals.push({ label: 'Below 200-MA', type: 'bear' })
+  }
+  if (o.price != null && o.sma_50 != null) {
+    if (o.price > o.sma_50)
+      signals.push({ label: 'Above 50-MA', type: 'bull' })
+    else
+      signals.push({ label: 'Below 50-MA', type: 'bear' })
+  }
+  if (o.macd != null && o.macd_signal != null) {
+    if (o.macd > o.macd_signal)
+      signals.push({ label: 'MACD Bullish Cross', type: 'bull' })
+    else
+      signals.push({ label: 'MACD Bearish Cross', type: 'bear' })
+  }
+  if (o.adx_14 != null && o.adx_14 > 25)
+    signals.push({ label: `ADX Trending (${o.adx_14.toFixed(0)})`, type: 'neutral' })
+
   return (
     <div className="space-y-4">
+
+      {/* Signal badges */}
+      {signals.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {signals.map(s => (
+            <span
+              key={s.label}
+              className={[
+                'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium',
+                s.type === 'bull'    ? 'bg-green-100 text-green-700' :
+                s.type === 'bear'    ? 'bg-red-100 text-red-700' :
+                                       'bg-yellow-100 text-yellow-700',
+              ].join(' ')}
+            >
+              {s.type === 'bull' ? '▲' : s.type === 'bear' ? '▼' : '◆'} {s.label}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Price chart */}
       <Card title="Price History (1 Year)">
@@ -742,19 +901,338 @@ function TechnicalsTab({
   )
 }
 
+// ── Dividends Tab ─────────────────────────────────────────────
+
+function DividendsTab({ data }: { data: DividendsResponse | null }) {
+  if (!data) {
+    return (
+      <div className="text-center py-12 text-gray-400 text-sm">
+        <p className="font-medium text-gray-500 mb-1">Loading dividend data…</p>
+      </div>
+    )
+  }
+
+  const { summary, history } = data
+
+  if (history.length === 0 && summary.dps_ttm == null) {
+    return (
+      <div className="text-center py-12 text-gray-400 text-sm">
+        <p className="font-medium text-gray-500 mb-1">No dividend history available</p>
+        <p>This company has not paid dividends or data is not yet loaded.</p>
+      </div>
+    )
+  }
+
+  // Build bar chart data from history (most recent 10, oldest first for chart)
+  const chartData = [...history]
+    .slice(0, 16)
+    .reverse()
+    .map(d => ({
+      label: d.ex_date.slice(0, 7),
+      amount: d.amount ?? 0,
+      franking: d.franking_pct ?? 0,
+    }))
+
+  // Max for scaling bars
+  const maxAmount = Math.max(...chartData.map(d => d.amount), 0.001)
+
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Dividend Yield</div>
+          <div className="text-lg font-bold text-gray-900">
+            {summary.dividend_yield != null ? formatRatio(summary.dividend_yield) : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Grossed-Up Yield</div>
+          <div className="text-lg font-bold text-green-700">
+            {summary.grossed_up_yield != null ? formatRatio(summary.grossed_up_yield) : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Franking</div>
+          <div className={`text-lg font-bold ${summary.franking_pct === 100 ? 'text-green-700' : 'text-gray-900'}`}>
+            {summary.franking_pct != null ? `${summary.franking_pct.toFixed(0)}%` : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">DPS (TTM)</div>
+          <div className="text-lg font-bold text-gray-900">
+            {summary.dps_ttm != null ? `$${summary.dps_ttm.toFixed(3)}` : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Payout Ratio</div>
+          <div className="text-lg font-bold text-gray-900">
+            {summary.payout_ratio != null ? formatRatio(summary.payout_ratio) : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Consec. Div. Years</div>
+          <div className="text-lg font-bold text-gray-900">
+            {summary.dividend_consecutive_yrs != null ? summary.dividend_consecutive_yrs : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Div CAGR (3Y)</div>
+          <div className="text-lg font-bold text-gray-900">
+            {summary.dividend_cagr_3y != null ? formatRatio(summary.dividend_cagr_3y) : '—'}
+          </div>
+        </div>
+        <div className="bg-gray-50 rounded-xl p-3 text-center">
+          <div className="text-xs text-gray-400 mb-1">Ex-Div Date</div>
+          <div className="text-base font-bold text-gray-900">
+            {summary.ex_div_date ?? '—'}
+          </div>
+        </div>
+      </div>
+
+      {/* DPS bar chart */}
+      {chartData.length > 0 && (
+        <Card title="Dividend Per Share History (AUD)">
+          <div className="flex items-end gap-1 h-32 mt-2">
+            {chartData.map(d => (
+              <div key={d.label} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                <div className="text-xs text-gray-500 font-medium" style={{ fontSize: '10px' }}>
+                  {d.amount > 0 ? `$${d.amount.toFixed(3)}` : ''}
+                </div>
+                <div className="w-full relative">
+                  <div
+                    className="w-full rounded-t transition-all"
+                    style={{
+                      height: `${Math.max(4, (d.amount / maxAmount) * 80)}px`,
+                      background: d.franking >= 100 ? '#16a34a' : d.franking > 0 ? '#ca8a04' : '#6b7280',
+                    }}
+                  />
+                </div>
+                <div className="text-gray-400 whitespace-nowrap overflow-hidden text-center"
+                  style={{ fontSize: '9px', maxWidth: '100%' }}>
+                  {d.label.slice(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-4 mt-3 text-xs text-gray-500">
+            <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-600 mr-1" />Fully Franked</span>
+            <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-yellow-600 mr-1" />Partially Franked</span>
+            <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-gray-500 mr-1" />Unfranked</span>
+          </div>
+        </Card>
+      )}
+
+      {/* Dividend history table */}
+      {history.length > 0 && (
+        <Card title="Payment History">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100">
+                  <th className="text-xs text-gray-400 font-medium pb-2 text-left">Ex-Date</th>
+                  <th className="text-xs text-gray-400 font-medium pb-2 text-left">Pay Date</th>
+                  <th className="text-xs text-gray-400 font-medium pb-2 text-right">Amount</th>
+                  <th className="text-xs text-gray-400 font-medium pb-2 text-right">Franking</th>
+                  <th className="text-xs text-gray-400 font-medium pb-2 text-left">Type</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {history.slice(0, 20).map(d => (
+                  <tr key={d.ex_date} className="hover:bg-gray-50">
+                    <td className="py-1.5 text-gray-900 font-medium">{d.ex_date}</td>
+                    <td className="py-1.5 text-gray-500">{d.payment_date ?? '—'}</td>
+                    <td className="py-1.5 text-right font-medium text-gray-900">
+                      {d.amount != null ? `$${d.amount.toFixed(4)}` : '—'}
+                    </td>
+                    <td className="py-1.5 text-right">
+                      {d.franking_pct != null ? (
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                          d.franking_pct === 100 ? 'bg-green-100 text-green-700' :
+                          d.franking_pct > 0 ? 'bg-yellow-100 text-yellow-700' :
+                          'bg-gray-100 text-gray-500'
+                        }`}>
+                          {d.franking_pct.toFixed(0)}%
+                        </span>
+                      ) : '—'}
+                    </td>
+                    <td className="py-1.5 text-gray-400 text-xs">{d.div_type ?? 'Dividend'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+
+// ── Peers Tab ─────────────────────────────────────────────────
+
+function PeersTab({
+  data,
+  currentCode,
+}: {
+  data: PeersResponse | null
+  currentCode: string
+}) {
+  if (!data) {
+    return (
+      <div className="text-center py-12 text-gray-400 text-sm">
+        <p className="font-medium text-gray-500 mb-1">Loading peer data…</p>
+      </div>
+    )
+  }
+
+  if (data.peers.length === 0) {
+    return (
+      <div className="text-center py-12 text-gray-400 text-sm">
+        <p className="font-medium text-gray-500 mb-1">No peer data available</p>
+        <p>No other companies found in the same industry group.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.gics_industry && (
+        <p className="text-sm text-gray-500">
+          Showing {data.peers.length} peers in <span className="font-medium text-gray-700">{data.gics_industry}</span>
+        </p>
+      )}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
+          <thead className="border-b border-gray-200">
+            <tr>
+              <th className="text-xs text-gray-400 font-medium pb-2 pr-4 text-left">Company</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">Mkt Cap</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">P/E</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">P/B</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">Div Yld</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">Gross-Up</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">Frank</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">ROE</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">1Y Rtn</th>
+              <th className="text-xs text-gray-400 font-medium pb-2 pl-3 text-right">F-Score</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {data.peers.map(p => {
+              const isSelected = p.asx_code === currentCode
+              return (
+                <tr
+                  key={p.asx_code}
+                  className={isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'}
+                >
+                  <td className="py-2 pr-4">
+                    <div className="flex items-center gap-2">
+                      {isSelected && (
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-600 shrink-0" />
+                      )}
+                      <a
+                        href={`/company/${p.asx_code}`}
+                        className={`font-mono font-bold ${isSelected ? 'text-blue-600' : 'text-blue-500 hover:text-blue-700 hover:underline'}`}
+                      >
+                        {p.asx_code}
+                      </a>
+                      <span className="text-gray-600 text-xs truncate max-w-[120px]">{p.company_name}</span>
+                    </div>
+                  </td>
+                  <td className="py-2 pl-3 text-right text-gray-700">{formatMarketCap(p.market_cap)}</td>
+                  <td className="py-2 pl-3 text-right text-gray-700">{p.pe_ratio != null ? `${p.pe_ratio.toFixed(1)}x` : '—'}</td>
+                  <td className="py-2 pl-3 text-right text-gray-700">{p.price_to_book != null ? `${p.price_to_book.toFixed(2)}x` : '—'}</td>
+                  <td className="py-2 pl-3 text-right text-gray-700">{formatRatio(p.dividend_yield)}</td>
+                  <td className="py-2 pl-3 text-right">
+                    <span className={p.grossed_up_yield != null && p.grossed_up_yield >= 0.06 ? 'text-green-600 font-medium' : 'text-gray-700'}>
+                      {formatRatio(p.grossed_up_yield)}
+                    </span>
+                  </td>
+                  <td className="py-2 pl-3 text-right">
+                    {p.franking_pct != null ? (
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                        p.franking_pct === 100 ? 'bg-green-100 text-green-700' :
+                        p.franking_pct > 0    ? 'bg-yellow-100 text-yellow-700' :
+                                                'bg-gray-100 text-gray-500'
+                      }`}>
+                        {p.franking_pct.toFixed(0)}%
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="py-2 pl-3 text-right">
+                    <span className={p.roe != null && p.roe >= 0.15 ? 'text-green-600 font-medium' : 'text-gray-700'}>
+                      {formatRatio(p.roe)}
+                    </span>
+                  </td>
+                  <td className="py-2 pl-3 text-right">
+                    <span className={p.return_1y != null ? (p.return_1y >= 0 ? 'text-green-600 font-medium' : 'text-red-600') : 'text-gray-300'}>
+                      {p.return_1y != null ? `${p.return_1y >= 0 ? '+' : ''}${(p.return_1y * 100).toFixed(1)}%` : '—'}
+                    </span>
+                  </td>
+                  <td className="py-2 pl-3 text-right">
+                    {p.piotroski_f_score != null ? (
+                      <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${
+                        p.piotroski_f_score >= 7 ? 'bg-green-100 text-green-700' :
+                        p.piotroski_f_score >= 4 ? 'bg-yellow-100 text-yellow-700' :
+                                                    'bg-red-100 text-red-700'
+                      }`}>
+                        {p.piotroski_f_score}/9
+                      </span>
+                    ) : '—'}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+
+// ── Coming Soon Tab ───────────────────────────────────────────
+
+function ComingSoonTab({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="text-center py-16">
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-50 mb-4">
+        <span className="text-2xl">🚀</span>
+      </div>
+      <h3 className="text-base font-semibold text-gray-700 mb-2">{title}</h3>
+      <p className="text-sm text-gray-400 max-w-xs mx-auto">{description}</p>
+      <span className="inline-block mt-3 px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full">
+        Coming Soon
+      </span>
+    </div>
+  )
+}
+
+
 // ── Main Component ────────────────────────────────────────────
 
 export default function CompanyTabs({ code }: { code: string }) {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
-  const [overview, setOverview] = useState<CompanyOverview | null>(null)
+  const [overview, setOverview]   = useState<CompanyOverview | null>(null)
   const [financials, setFinancials] = useState<FinancialsResponse | null>(null)
-  const [prices, setPrices] = useState<PricesResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [financialsLoading, setFinancialsLoading] = useState(false)
-  const [pricesLoading, setPricesLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [halfYearly, setHalfYearly] = useState<HalfYearlyResponse | null>(null)
+  const [prices, setPrices]         = useState<PricesResponse | null>(null)
+  const [dividends, setDividends]   = useState<DividendsResponse | null>(null)
+  const [peers, setPeers]           = useState<PeersResponse | null>(null)
 
-  // Fetch overview immediately
+  const [loading, setLoading]               = useState(true)
+  const [financialsLoading, setFinancialsLoading] = useState(false)
+  const [halfYearlyLoading, setHalfYearlyLoading] = useState(false)
+  const [pricesLoading, setPricesLoading]   = useState(false)
+  const [dividendsLoading, setDividendsLoading] = useState(false)
+  const [peersLoading, setPeersLoading]     = useState(false)
+  const [error, setError]                   = useState<string | null>(null)
+
+  // Financial period toggle (annual vs half-yearly)
+  const [financialPeriod, setFinancialPeriod] = useState<FinancialPeriod>('annual')
+
+  // Fetch overview immediately on mount
   useEffect(() => {
     setLoading(true)
     setError(null)
@@ -764,7 +1242,7 @@ export default function CompanyTabs({ code }: { code: string }) {
       .finally(() => setLoading(false))
   }, [code])
 
-  // Fetch prices for the chart when technicals tab is active
+  // Lazy-load per tab
   useEffect(() => {
     if (activeTab === 'technicals' && !prices) {
       setPricesLoading(true)
@@ -775,7 +1253,6 @@ export default function CompanyTabs({ code }: { code: string }) {
     }
   }, [activeTab, code, prices])
 
-  // Fetch financials lazily
   useEffect(() => {
     if (activeTab === 'financials' && !financials) {
       setFinancialsLoading(true)
@@ -786,36 +1263,83 @@ export default function CompanyTabs({ code }: { code: string }) {
     }
   }, [activeTab, code, financials])
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'overview',    label: 'Overview' },
-    { id: 'financials',  label: 'Financials' },
-    { id: 'technicals',  label: 'Technicals' },
+  // Fetch half-yearly when period toggle changes to halfyearly
+  useEffect(() => {
+    if (activeTab === 'financials' && financialPeriod === 'halfyearly' && !halfYearly) {
+      setHalfYearlyLoading(true)
+      getCompanyHalfYearly(code)
+        .then(setHalfYearly)
+        .catch(() => setHalfYearly({ asx_code: code, periods: [] }))
+        .finally(() => setHalfYearlyLoading(false))
+    }
+  }, [activeTab, financialPeriod, code, halfYearly])
+
+  useEffect(() => {
+    if (activeTab === 'dividends' && !dividends) {
+      setDividendsLoading(true)
+      getCompanyDividends(code)
+        .then(setDividends)
+        .catch(() => setDividends({ asx_code: code, summary: {
+          dividend_yield: null, grossed_up_yield: null, franking_pct: null,
+          dps_ttm: null, dps_fy0: null, payout_ratio: null,
+          ex_div_date: null, dividend_consecutive_yrs: null, dividend_cagr_3y: null,
+        }, history: [] }))
+        .finally(() => setDividendsLoading(false))
+    }
+  }, [activeTab, code, dividends])
+
+  useEffect(() => {
+    if (activeTab === 'peers' && !peers) {
+      setPeersLoading(true)
+      getCompanyPeers(code)
+        .then(setPeers)
+        .catch(() => setPeers({ asx_code: code, gics_industry: null, peers: [] }))
+        .finally(() => setPeersLoading(false))
+    }
+  }, [activeTab, code, peers])
+
+  // Tab definitions
+  const tabs: { id: Tab; label: string; comingSoon?: boolean }[] = [
+    { id: 'overview',   label: 'Overview'    },
+    { id: 'financials', label: 'Financials'  },
+    { id: 'technicals', label: 'Technicals'  },
+    { id: 'dividends',  label: 'Dividends'   },
+    { id: 'peers',      label: 'Peers'       },
+    { id: 'ai',         label: 'AI Insights', comingSoon: true },
+    { id: 'documents',  label: 'Documents',   comingSoon: true },
   ]
+
+  const isLoading = (tab: Tab) => {
+    if (tab === 'financials') return financialsLoading || (financialPeriod === 'halfyearly' && halfYearlyLoading)
+    if (tab === 'technicals') return pricesLoading
+    if (tab === 'dividends')  return dividendsLoading
+    if (tab === 'peers')      return peersLoading
+    return false
+  }
 
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5">
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-gray-200 mb-5 -mx-5 px-5 overflow-x-auto">
+      <div className="flex gap-0.5 border-b border-gray-200 mb-5 -mx-5 px-5 overflow-x-auto">
         {tabs.map(t => (
           <button
             key={t.id}
-            onClick={() => setActiveTab(t.id)}
+            onClick={() => !t.comingSoon && setActiveTab(t.id)}
             className={[
               'pb-3 px-3 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors',
-              activeTab === t.id
-                ? 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700',
+              t.comingSoon
+                ? 'border-transparent text-gray-300 cursor-not-allowed'
+                : activeTab === t.id
+                  ? 'border-blue-600 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700',
             ].join(' ')}
           >
             {t.label}
+            {t.comingSoon && (
+              <span className="ml-1 text-xs text-gray-300">(soon)</span>
+            )}
           </button>
         ))}
-        <button className="pb-3 px-3 text-sm font-medium border-b-2 -mb-px border-transparent text-gray-300 cursor-not-allowed whitespace-nowrap">
-          Announcements
-        </button>
-        <button className="pb-3 px-3 text-sm font-medium border-b-2 -mb-px border-transparent text-gray-300 cursor-not-allowed whitespace-nowrap">
-          AI Insights
-        </button>
       </div>
 
       {/* Content */}
@@ -831,13 +1355,46 @@ export default function CompanyTabs({ code }: { code: string }) {
       ) : overview ? (
         <>
           {activeTab === 'overview' && <OverviewTab o={overview} />}
+
           {activeTab === 'financials' && (
-            financialsLoading
+            isLoading('financials')
               ? <div className="grid grid-cols-1 gap-4">{[1,2,3].map(i=><LoadingCard key={i}/>)}</div>
-              : <FinancialsTab financials={financials} loading={financialsLoading} />
+              : <FinancialsTab
+                  financials={financials}
+                  halfYearly={halfYearly}
+                  period={financialPeriod}
+                  onPeriodChange={setFinancialPeriod}
+                />
           )}
+
           {activeTab === 'technicals' && (
             <TechnicalsTab o={overview} prices={prices} pricesLoading={pricesLoading} />
+          )}
+
+          {activeTab === 'dividends' && (
+            isLoading('dividends')
+              ? <div className="grid grid-cols-1 gap-4">{[1,2].map(i=><LoadingCard key={i}/>)}</div>
+              : <DividendsTab data={dividends} />
+          )}
+
+          {activeTab === 'peers' && (
+            isLoading('peers')
+              ? <div className="grid grid-cols-1 gap-4">{[1,2].map(i=><LoadingCard key={i}/>)}</div>
+              : <PeersTab data={peers} currentCode={code} />
+          )}
+
+          {activeTab === 'ai' && (
+            <ComingSoonTab
+              title="AI Insights"
+              description="AI-powered analysis of fundamentals, news sentiment, and earnings call transcripts. Powered by Claude."
+            />
+          )}
+
+          {activeTab === 'documents' && (
+            <ComingSoonTab
+              title="Company Documents"
+              description="ASX announcements, annual reports, investor presentations, and half-year results in one place."
+            />
           )}
         </>
       ) : null}

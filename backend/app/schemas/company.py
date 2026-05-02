@@ -226,6 +226,21 @@ class CompanyOverview(BaseModel):
     momentum_3m: Optional[float] = None
     momentum_6m: Optional[float] = None
 
+    # ── Short Interest ─────────────────────────────────────────────────────────
+    short_interest_chg_1w: Optional[float] = None  # pp change WoW (absolute, not ratio)
+
+    # ── Composite Factor Scores (0-100 percentile ranks) ───────────────────────
+    composite_score: Optional[int] = None
+    value_score:     Optional[int] = None
+    quality_score:   Optional[int] = None
+    growth_score:    Optional[int] = None
+    momentum_score:  Optional[int] = None
+    income_score:    Optional[int] = None
+
+    # ── Pros / Cons (DB-computed signal lists) ─────────────────────────────────
+    pros: list[str] = []
+    cons: list[str] = []
+
     model_config = {"from_attributes": True}
 
 

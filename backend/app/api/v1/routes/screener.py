@@ -11,9 +11,13 @@ Endpoints:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+import csv
+import io
 import math
+from datetime import date as date_type
 from typing import Any
 
 from app.db.session import get_db
@@ -436,6 +440,223 @@ async def run_screener(
         page_size=req.page_size,
         total_pages=math.ceil(total / req.page_size) if total else 0,
         filters_applied=len(req.filters),
+    )
+
+
+# ── POST /screener/export ─────────────────────────────────────────────────────
+
+# Fields stored as decimal ratios (0.15 = 15%) that should be rendered as % in CSV
+_PCT_COLS = {
+    "fcf_yield", "dividend_yield", "grossed_up_yield", "payout_ratio",
+    "dividend_cagr_3y", "gross_margin", "ebitda_margin", "net_margin",
+    "operating_margin", "roe", "roa", "roce", "avg_roe_3y",
+    "revenue_growth_1y", "revenue_growth_3y_cagr", "revenue_cagr_5y",
+    "earnings_growth_1y", "eps_growth_3y_cagr",
+    "revenue_growth_yoy_q", "eps_growth_yoy_q",
+    "revenue_growth_hoh", "net_income_growth_hoh", "eps_growth_hoh",
+    "return_1w", "return_1m", "return_3m", "return_6m",
+    "return_1y", "return_ytd", "return_3y", "return_5y",
+    "drawdown_from_ath", "volatility_20d", "volatility_60d",
+}
+
+# Human-readable header overrides
+_HEADER_LABELS: dict[str, str] = {
+    "asx_code":               "ASX Code",
+    "company_name":           "Company Name",
+    "sector":                 "Sector",
+    "industry":               "Industry",
+    "stock_type":             "Stock Type",
+    "status":                 "Status",
+    "is_reit":                "REIT",
+    "is_miner":               "Miner",
+    "is_asx200":              "ASX 200",
+    "is_asx300":              "ASX 300",
+    "price":                  "Price (AUD)",
+    "high_52w":               "52W High",
+    "low_52w":                "52W Low",
+    "volume":                 "Volume",
+    "avg_volume_20d":         "Avg Vol 20D",
+    "market_cap":             "Market Cap (AUD M)",
+    "pe_ratio":               "P/E",
+    "forward_pe":             "Fwd P/E",
+    "price_to_book":          "P/B",
+    "price_to_sales":         "P/S",
+    "ev_to_ebitda":           "EV/EBITDA",
+    "peg_ratio":              "PEG",
+    "price_to_fcf":           "P/FCF",
+    "fcf_yield":              "FCF Yield %",
+    "dividend_yield":         "Div Yield %",
+    "grossed_up_yield":       "Grossed-Up Yield %",
+    "franking_pct":           "Franking %",
+    "dps_ttm":                "DPS TTM (AUD)",
+    "payout_ratio":           "Payout Ratio %",
+    "dividend_consecutive_yrs": "Consec. Div Yrs",
+    "dividend_cagr_3y":       "Div CAGR 3Y %",
+    "gross_margin":           "Gross Margin %",
+    "ebitda_margin":          "EBITDA Margin %",
+    "net_margin":             "Net Margin %",
+    "operating_margin":       "Op. Margin %",
+    "roe":                    "ROE %",
+    "roa":                    "ROA %",
+    "roce":                   "ROCE %",
+    "avg_roe_3y":             "Avg ROE 3Y %",
+    "revenue_growth_1y":      "Rev Growth 1Y %",
+    "revenue_growth_3y_cagr": "Rev CAGR 3Y %",
+    "revenue_cagr_5y":        "Rev CAGR 5Y %",
+    "earnings_growth_1y":     "Earnings Growth 1Y %",
+    "eps_growth_3y_cagr":     "EPS CAGR 3Y %",
+    "revenue_growth_yoy_q":   "Rev Growth YoY Q %",
+    "eps_growth_yoy_q":       "EPS Growth YoY Q %",
+    "revenue_growth_hoh":     "Rev Growth HoH % ★",
+    "net_income_growth_hoh":  "NI Growth HoH % ★",
+    "eps_growth_hoh":         "EPS Growth HoH % ★",
+    "debt_to_equity":         "D/E",
+    "current_ratio":          "Current Ratio",
+    "net_debt":               "Net Debt (AUD M)",
+    "total_debt":             "Total Debt (AUD M)",
+    "book_value_per_share":   "BVPS (AUD)",
+    "total_assets":           "Total Assets (AUD M)",
+    "total_equity":           "Total Equity (AUD M)",
+    "fcf_fy0":                "FCF FY0 (AUD M)",
+    "cfo_fy0":                "CFO FY0 (AUD M)",
+    "piotroski_f_score":      "Piotroski F",
+    "altman_z_score":         "Altman Z",
+    "percent_insiders":       "Insider %",
+    "percent_institutions":   "Institutional %",
+    "short_pct":              "Short %",
+    "rsi_14":                 "RSI(14)",
+    "adx_14":                 "ADX(14)",
+    "macd":                   "MACD",
+    "macd_signal":            "MACD Signal",
+    "sma_20":                 "SMA 20",
+    "sma_50":                 "SMA 50",
+    "sma_200":                "SMA 200",
+    "ema_20":                 "EMA 20",
+    "bb_upper":               "BB Upper",
+    "bb_lower":               "BB Lower",
+    "atr_14":                 "ATR(14)",
+    "obv":                    "OBV",
+    "volatility_20d":         "Volatility 20D %",
+    "volatility_60d":         "Volatility 60D %",
+    "beta_1y":                "Beta (1Y)",
+    "sharpe_1y":              "Sharpe (1Y)",
+    "return_1w":              "Return 1W %",
+    "return_1m":              "Return 1M %",
+    "return_3m":              "Return 3M %",
+    "return_6m":              "Return 6M %",
+    "return_1y":              "Return 1Y %",
+    "return_ytd":             "Return YTD %",
+    "return_3y":              "Return 3Y %",
+    "return_5y":              "Return 5Y %",
+    "drawdown_from_ath":      "Drawdown from ATH %",
+    "price_date":             "Price Date",
+    "universe_built_at":      "Data Updated At",
+}
+
+# Ordered export columns (subset of ScreenerRow — skip noisy technicals by default)
+_EXPORT_COLS: list[str] = [
+    "asx_code", "company_name", "sector", "industry", "stock_type",
+    "is_reit", "is_miner", "is_asx200", "is_asx300",
+    # Price
+    "price", "market_cap", "volume", "high_52w", "low_52w",
+    # Valuation
+    "pe_ratio", "forward_pe", "price_to_book", "price_to_sales",
+    "ev_to_ebitda", "peg_ratio", "fcf_yield",
+    # Dividends
+    "dividend_yield", "grossed_up_yield", "franking_pct",
+    "dps_ttm", "payout_ratio", "dividend_consecutive_yrs", "dividend_cagr_3y",
+    # Profitability
+    "gross_margin", "ebitda_margin", "net_margin", "operating_margin",
+    "roe", "roa", "roce", "avg_roe_3y",
+    # Growth
+    "revenue_growth_1y", "revenue_growth_3y_cagr", "revenue_cagr_5y",
+    "earnings_growth_1y", "eps_growth_3y_cagr",
+    "revenue_growth_hoh", "net_income_growth_hoh", "eps_growth_hoh",
+    # Balance Sheet
+    "debt_to_equity", "current_ratio", "net_debt", "total_debt",
+    "book_value_per_share", "total_assets", "total_equity",
+    "fcf_fy0", "cfo_fy0",
+    # Quality
+    "piotroski_f_score", "altman_z_score",
+    "percent_insiders", "percent_institutions", "short_pct",
+    # Technicals
+    "rsi_14", "adx_14", "sma_50", "sma_200",
+    "volatility_20d", "beta_1y", "sharpe_1y",
+    # Returns
+    "return_1w", "return_1m", "return_3m", "return_6m",
+    "return_1y", "return_ytd", "return_3y", "return_5y",
+    "drawdown_from_ath",
+    # Meta
+    "price_date",
+]
+
+_EXPORT_MAX_ROWS = 5_000
+
+
+def _fmt_val(col: str, val: Any) -> str:
+    """Format a value for CSV output. Converts decimal ratios → percentage strings."""
+    if val is None:
+        return ""
+    if col in _PCT_COLS and isinstance(val, (int, float)):
+        return f"{val * 100:.2f}"
+    if isinstance(val, float):
+        # Round to 4 dp for cleanliness
+        return f"{val:.4f}".rstrip("0").rstrip(".")
+    return str(val)
+
+
+@router.post("/export")
+async def export_screener(
+    req: ScreenerRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Stream screener results as a CSV file download (max 5,000 rows).
+
+    Takes the same request body as POST /screener (filters + sort),
+    ignores page/page_size, and returns all matching rows up to the cap.
+
+    Percentage fields (ROE, yields, margins, returns) are scaled to human-
+    readable % values in the CSV (e.g. 0.15 → 15.00).
+
+    Response: Content-Disposition: attachment; filename="asx_screener_YYYY-MM-DD.csv"
+    """
+    try:
+        _, data_sql, params = build_screener_sql(req)
+    except HTTPException:
+        raise
+
+    # Strip pagination and apply hard cap
+    export_sql = data_sql.replace(
+        "LIMIT :_limit OFFSET :_offset",
+        f"LIMIT {_EXPORT_MAX_ROWS}"
+    )
+    # Remove pagination params if present
+    params.pop("_limit",  None)
+    params.pop("_offset", None)
+
+    result = await db.execute(text(export_sql), params)
+    rows = result.mappings().all()
+
+    def generate() -> Any:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+
+        # Header row
+        writer.writerow([_HEADER_LABELS.get(c, c) for c in _EXPORT_COLS])
+        yield buf.getvalue()
+
+        for row in rows:
+            buf.truncate(0)
+            buf.seek(0)
+            writer.writerow([_fmt_val(col, row.get(col)) for col in _EXPORT_COLS])
+            yield buf.getvalue()
+
+    filename = f"asx_screener_{date_type.today().isoformat()}.csv"
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

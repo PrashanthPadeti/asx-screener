@@ -1,7 +1,7 @@
 'use client'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
-  runScreener, getScreenerFields, getScreenerPresets,
+  runScreener, getScreenerFields, getScreenerPresets, exportScreener,
   type ScreenerFilter, type ScreenerRow, type ScreenerFieldMeta,
   type ScreenerPreset,
 } from '@/lib/api'
@@ -11,7 +11,7 @@ import {
 } from '@/lib/utils'
 import {
   Plus, Trash2, Play, ChevronUp, ChevronDown,
-  ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X,
+  ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
@@ -377,6 +377,7 @@ export default function ScreenerPage() {
   const [totalPages, setTotalPages] = useState(0)
   const [loading, setLoading]       = useState(false)
   const [ran, setRan]               = useState(false)
+  const [exporting, setExporting]   = useState(false)
   const [sortBy, setSortBy]         = useState('market_cap')
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
 
@@ -528,6 +529,18 @@ export default function ScreenerPage() {
     setSortDir(newDir)
     fetchResults(1, newBy, newDir, buildApiFilters())
   }, [sortBy, sortDir, fetchResults, buildApiFilters])
+
+  // Export current screen as CSV
+  const handleExport = useCallback(async () => {
+    setExporting(true)
+    try {
+      await exportScreener(buildApiFilters(), { sort_by: sortBy, sort_dir: sortDir })
+    } catch (e) {
+      console.error('Export failed', e)
+    } finally {
+      setExporting(false)
+    }
+  }, [buildApiFilters, sortBy, sortDir])
 
   // Resolve visible columns in order
   const visibleCols = ALL_COLUMNS.filter(c => c.always || visibleKeys.has(c.key as string))
@@ -692,7 +705,19 @@ export default function ScreenerPage() {
                 <span className="text-gray-400 font-normal"> · {filters.length} filter{filters.length > 1 ? 's' : ''}</span>
               )}
             </span>
-            <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                title="Download CSV (max 5,000 rows)"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300
+                           text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50
+                           transition-colors font-medium bg-white">
+                <Download className="w-3.5 h-3.5" />
+                {exporting ? 'Exporting…' : 'Export CSV'}
+              </button>
+              <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
+            </div>
           </div>
 
           <div className="overflow-x-auto">

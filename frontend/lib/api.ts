@@ -273,6 +273,39 @@ export const getScreenerPresets = async (): Promise<ScreenerPresetsResponse> => 
 }
 
 /**
+ * Trigger a CSV export download of the current screen (max 5,000 rows).
+ * Uses window.location / fetch + blob to trigger browser download.
+ */
+export const exportScreener = async (
+  filters: ScreenerFilter[],
+  options: { sort_by?: string; sort_dir?: string } = {}
+): Promise<void> => {
+  const response = await fetch(`${API_BASE}/api/v1/screener/export`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      filters,
+      sort_by: options.sort_by || 'market_cap',
+      sort_dir: options.sort_dir || 'desc',
+      page: 1,
+      page_size: 50,  // ignored server-side for export
+    }),
+  })
+  if (!response.ok) throw new Error(`Export failed: ${response.statusText}`)
+  const blob = await response.blob()
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  const cd   = response.headers.get('content-disposition') || ''
+  const match = cd.match(/filename="([^"]+)"/)
+  a.href     = url
+  a.download = match ? match[1] : 'asx_screener_export.csv'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+/**
  * Fetch live screener data for a specific list of ASX codes.
  * Used by the watchlist page. Input order is preserved.
  */
@@ -425,6 +458,21 @@ export interface CompanyOverview {
   sharpe_1y: number | null
   momentum_3m: number | null
   momentum_6m: number | null
+
+  // Short interest
+  short_interest_chg_1w: number | null  // pp change WoW (absolute)
+
+  // Composite factor scores (0-100 percentile ranks)
+  composite_score: number | null
+  value_score:     number | null
+  quality_score:   number | null
+  growth_score:    number | null
+  momentum_score:  number | null
+  income_score:    number | null
+
+  // DB-computed pros/cons signal lists
+  pros: string[]
+  cons: string[]
 }
 
 export interface AnnualFinancialsRow {

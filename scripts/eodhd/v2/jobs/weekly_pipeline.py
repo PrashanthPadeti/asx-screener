@@ -91,14 +91,17 @@ def main():
 
     log.info(f"Weekly pipeline starting — from_date: {from_date}")
 
-    # ── Step 0: ASIC short interest — download + load ─────────────────────────
+    # ── Step 0: ASIC short interest — download → staging → transform ──────────
     # Downloads the most recent ASIC aggregate short position CSV (free, public).
     # Published with ~2–3 business-day lag; idempotent if already cached.
     run("Step 0a: ASIC download short positions", [
         PYTHON, str(ASIC / "download_short_positions.py"),
     ])
-    run("Step 0b: ASIC load → market.short_interest", [
-        PYTHON, str(ASIC / "load_short_positions.py"),
+    run("Step 0b: ASIC load → staging.short_positions", [
+        PYTHON, str(ASIC / "load_to_staging_short.py"),
+    ])
+    run("Step 0c: ASIC transform → market.short_positions (+ back-fill short_interest)", [
+        PYTHON, str(ASIC / "transforms" / "transform_short.py"),
     ])
 
     # ── Step 1: Load staging from raw fundamentals ────────────────────────────
@@ -153,6 +156,18 @@ def main():
     # ── Step 8: Rebuild Golden Record ─────────────────────────────────────────
     run("Step 8: Build screener.universe", [
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
+    ])
+
+    # ── Step 9: Post-universe enrichment ──────────────────────────────────────
+    # Runs after the golden record is fully rebuilt.
+    run("Step 9a: Composite factor scores → screener.universe", [
+        PYTHON, str(COMPUTE / "composite_score.py"),
+    ])
+    run("Step 9b: Pros/Cons signals → screener.universe", [
+        PYTHON, str(COMPUTE / "pros_cons.py"),
+    ])
+    run("Step 9c: Sector benchmarks → market.sector_benchmarks", [
+        PYTHON, str(COMPUTE / "sector_benchmarks.py"),
     ])
 
     log.info(f"Weekly pipeline complete for {today}")

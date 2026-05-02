@@ -185,7 +185,8 @@ async def get_company_overview(
             revenue_growth_yoy_q, eps_growth_yoy_q,
             revenue_growth_hoh, net_income_growth_hoh, eps_growth_hoh,
             piotroski_f_score, altman_z_score,
-            short_pct, percent_insiders, percent_institutions,
+            short_pct, short_interest_chg_1w,
+            percent_insiders, percent_institutions,
             analyst_rating, analyst_target_price, analyst_upside,
             return_1w, return_1m, return_3m, return_6m, return_1y, return_ytd,
             return_3y, return_5y, drawdown_from_ath,
@@ -193,7 +194,11 @@ async def get_company_overview(
             sma_20, sma_50, sma_200, ema_20,
             bb_upper, bb_lower, atr_14, obv,
             volatility_20d, volatility_60d, beta_1y, sharpe_1y,
-            momentum_3m, momentum_6m
+            momentum_3m, momentum_6m,
+            composite_score, value_score, quality_score,
+            growth_score, momentum_score, income_score,
+            COALESCE(pros, '{}') AS pros,
+            COALESCE(cons, '{}') AS cons
         FROM screener.universe
         WHERE asx_code = :asx_code
     """

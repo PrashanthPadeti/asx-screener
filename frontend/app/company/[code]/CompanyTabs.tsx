@@ -15,7 +15,7 @@ import {
   formatPrice, formatMarketCap, formatVolume,
   formatRatio, formatRatioChange, formatPctRaw, formatNumber,
 } from '@/lib/utils'
-import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, TrendingUp as TrendUp } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -107,6 +107,108 @@ function LoadingCard() {
   )
 }
 
+// ── Composite Score Meter ─────────────────────────────────────
+
+interface FactorScore {
+  label: string
+  key: keyof CompanyOverview
+  color: string
+}
+
+const FACTOR_SCORES: FactorScore[] = [
+  { label: 'Value',    key: 'value_score',    color: 'bg-blue-500'   },
+  { label: 'Quality',  key: 'quality_score',  color: 'bg-purple-500' },
+  { label: 'Growth',   key: 'growth_score',   color: 'bg-emerald-500'},
+  { label: 'Momentum', key: 'momentum_score', color: 'bg-orange-500' },
+  { label: 'Income',   key: 'income_score',   color: 'bg-yellow-500' },
+]
+
+function scoreColor(score: number): string {
+  if (score >= 75) return 'text-green-600'
+  if (score >= 50) return 'text-blue-600'
+  if (score >= 25) return 'text-orange-500'
+  return 'text-red-500'
+}
+
+function ScoreBar({ score }: { score: number }) {
+  const color =
+    score >= 75 ? 'bg-green-500' :
+    score >= 50 ? 'bg-blue-500'  :
+    score >= 25 ? 'bg-orange-400': 'bg-red-400'
+  return (
+    <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+      <div className={`h-1.5 rounded-full transition-all ${color}`} style={{ width: `${score}%` }} />
+    </div>
+  )
+}
+
+function CompositeScoreMeter({ o }: { o: CompanyOverview }) {
+  const composite = o.composite_score
+  if (composite == null) return null
+
+  const radius = 40
+  const circumference = 2 * Math.PI * radius
+  const dash = (composite / 100) * circumference
+  const gap  = circumference - dash
+
+  const strokeColor =
+    composite >= 75 ? '#16a34a' :  // green-600
+    composite >= 50 ? '#2563eb' :  // blue-600
+    composite >= 25 ? '#ea580c' :  // orange-600
+    '#dc2626'                       // red-600
+
+  const label =
+    composite >= 75 ? 'Strong' :
+    composite >= 50 ? 'Moderate' :
+    composite >= 25 ? 'Weak' :
+    'Poor'
+
+  return (
+    <Card title="Composite Factor Score">
+      <div className="flex items-center gap-6">
+        {/* Donut gauge */}
+        <div className="relative shrink-0">
+          <svg width="100" height="100" viewBox="0 0 100 100" className="-rotate-90">
+            <circle cx="50" cy="50" r={radius} fill="none" stroke="#f3f4f6" strokeWidth="10" />
+            <circle
+              cx="50" cy="50" r={radius}
+              fill="none"
+              stroke={strokeColor}
+              strokeWidth="10"
+              strokeDasharray={`${dash} ${gap}`}
+              strokeLinecap="round"
+            />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className={`text-2xl font-bold ${scoreColor(composite)}`}>{composite}</span>
+            <span className="text-xs text-gray-400">{label}</span>
+          </div>
+        </div>
+
+        {/* Factor breakdown */}
+        <div className="flex-1 space-y-2">
+          {FACTOR_SCORES.map(({ label: fl, key }) => {
+            const val = o[key] as number | null
+            if (val == null) return null
+            return (
+              <div key={key}>
+                <div className="flex justify-between text-xs mb-0.5">
+                  <span className="text-gray-500">{fl}</span>
+                  <span className={`font-medium ${scoreColor(val)}`}>{val}</span>
+                </div>
+                <ScoreBar score={val} />
+              </div>
+            )
+          })}
+        </div>
+      </div>
+      <p className="text-xs text-gray-400 mt-3">
+        Percentile rank 0–100 vs all ASX stocks. Higher = better relative standing.
+      </p>
+    </Card>
+  )
+}
+
 // ── Pros / Cons Engine ────────────────────────────────────────
 
 function buildSignals(o: CompanyOverview): { pros: string[]; cons: string[] } {
@@ -185,7 +287,11 @@ function buildSignals(o: CompanyOverview): { pros: string[]; cons: string[] } {
 // ── Overview Tab ──────────────────────────────────────────────
 
 function OverviewTab({ o }: { o: CompanyOverview }) {
-  const { pros, cons } = buildSignals(o)
+  // Use DB-computed pros/cons when available; fall back to client-side engine
+  const hasDatabaseSignals = (o.pros?.length ?? 0) > 0 || (o.cons?.length ?? 0) > 0
+  const { pros, cons } = hasDatabaseSignals
+    ? { pros: o.pros ?? [], cons: o.cons ?? [] }
+    : buildSignals(o)
 
   const pos52w = o.high_52w != null && o.low_52w != null && o.price != null
     ? ((o.price - o.low_52w) / (o.high_52w - o.low_52w)) * 100
@@ -239,6 +345,9 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
           </div>
         )}
       </Card>
+
+      {/* Composite Score Meter */}
+      {o.composite_score != null && <CompositeScoreMeter o={o} />}
 
       {/* 3-column metrics grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -362,8 +471,16 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
               sub={o.altman_z_score > 2.99 ? 'safe' : o.altman_z_score < 1.81 ? 'distress' : 'grey'}
             />
           )}
-          <MetricRow label="Short Interest"    value={o.short_pct != null ? `${o.short_pct.toFixed(1)}%` : '—'}
-            highlight={o.short_pct != null && o.short_pct > 5 ? 'red' : 'neutral'} />
+          <MetricRow
+            label="Short Interest"
+            value={o.short_pct != null ? `${o.short_pct.toFixed(1)}%` : '—'}
+            sub={
+              o.short_interest_chg_1w != null
+                ? `${o.short_interest_chg_1w >= 0 ? '+' : ''}${o.short_interest_chg_1w.toFixed(2)}pp WoW`
+                : undefined
+            }
+            highlight={o.short_pct != null && o.short_pct > 5 ? 'red' : 'neutral'}
+          />
           <MetricRow label="Insiders"          value={o.percent_insiders != null ? `${o.percent_insiders.toFixed(1)}%` : '—'} />
           <MetricRow label="Institutions"      value={o.percent_institutions != null ? `${o.percent_institutions.toFixed(1)}%` : '—'} />
           {o.cfo_fy0 != null && <MetricRow label="CFO (FY0)"    value={fmtM(o.cfo_fy0)} />}

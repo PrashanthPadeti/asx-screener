@@ -127,7 +127,7 @@ INSERT INTO screener.universe (
     analyst_strong_buy, analyst_buy, analyst_hold, analyst_sell, analyst_strong_sell,
 
     -- ── Short interest (ASIC) ────────────────────────────────────────────────
-    short_pct, short_position_shares,
+    short_pct, short_position_shares, short_interest_chg_1w,
 
     -- ── Shares ───────────────────────────────────────────────────────────────
     shares_outstanding,
@@ -293,9 +293,10 @@ SELECT
     ar.target_price     AS analyst_target_price,
     ar.strong_buy, ar.buy, ar.hold, ar.sell, ar.strong_sell,
 
-    -- ── Short interest (ASIC — latest date per stock) ───────────────────────
-    si.total_product_short_pct AS short_pct,
-    si.gross_short_position    AS short_position_shares,
+    -- ── Short interest (ASIC — latest report date per stock) ─────────────────
+    si.short_pct,
+    si.short_shares            AS short_position_shares,
+    si.short_pct_chg_1w        AS short_interest_chg_1w,
 
     -- ── Shares ───────────────────────────────────────────────────────────────
     ss.shares_outstanding,
@@ -471,13 +472,15 @@ LEFT JOIN LATERAL (
 ) ss ON TRUE
 
 -- ── ASIC short interest (latest report date per stock) ──────────────────────
+-- Prefer market.short_positions (has WoW change); fall back to short_interest.
 LEFT JOIN LATERAL (
     SELECT
-        total_product_short_pct,
-        gross_short_position
-    FROM market.short_interest
+        short_pct,
+        short_shares,
+        short_pct_chg_1w
+    FROM market.short_positions
     WHERE asx_code = c.asx_code
-    ORDER BY time DESC
+    ORDER BY report_date DESC
     LIMIT 1
 ) si ON TRUE
 
@@ -629,6 +632,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- Short interest (ASIC)
     short_pct               = EXCLUDED.short_pct,
     short_position_shares   = EXCLUDED.short_position_shares,
+    short_interest_chg_1w   = EXCLUDED.short_interest_chg_1w,
     -- Shares
     shares_outstanding      = EXCLUDED.shares_outstanding,
     universe_built_at       = NOW()

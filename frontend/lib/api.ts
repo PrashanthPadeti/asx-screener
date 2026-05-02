@@ -630,9 +630,15 @@ export interface HalfYearlyRow {
   eps: number | null
   dps: number | null
   dps_franking_pct: number | null  // 0-100
-  gpm: number | null             // decimal ratio
-  ebitda_margin: number | null   // decimal ratio
-  npm: number | null             // decimal ratio
+  gpm: number | null             // gross_margin decimal ratio
+  ebitda_margin: number | null   // ebit_margin decimal ratio
+  npm: number | null             // net_margin decimal ratio
+  // Growth rates (decimal ratios)
+  revenue_growth_hoh: number | null
+  net_profit_growth_hoh: number | null
+  eps_growth_hoh: number | null
+  revenue_growth_yoy: number | null
+  eps_growth_yoy: number | null
 }
 
 export interface HalfYearlyResponse {

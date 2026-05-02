@@ -558,9 +558,22 @@ function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
   ]
   const marginRows: HRow[] = [
     { label: 'Gross Margin',  key: 'gpm',          fmt: formatRatio },
-    { label: 'EBITDA Margin', key: 'ebitda_margin',fmt: formatRatio },
+    { label: 'EBIT Margin',   key: 'ebitda_margin',fmt: formatRatio },
     { label: 'Net Margin',    key: 'npm',          fmt: formatRatio },
   ]
+  const signedPctFmt = (v: number | null) => {
+    if (v == null) return '—'
+    const pct = v * 100
+    return <span className={pct >= 0 ? 'text-green-600' : 'text-red-600'}>{pct >= 0 ? '+' : ''}{pct.toFixed(1)}%</span>
+  }
+  const growthRows: HRow[] = [
+    { label: 'Revenue HoH',     key: 'revenue_growth_hoh',      fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
+    { label: 'Revenue YoY',     key: 'revenue_growth_yoy',      fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
+    { label: 'Net Profit HoH',  key: 'net_profit_growth_hoh',   fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
+    { label: 'EPS HoH',         key: 'eps_growth_hoh',          fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
+    { label: 'EPS YoY',         key: 'eps_growth_yoy',          fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
+  ]
+  void signedPctFmt // suppress unused warning
 
   const TableSection = ({ title, rows }: { title: string; rows: HRow[] }) => (
     <>
@@ -603,6 +616,7 @@ function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
         <tbody className="divide-y divide-gray-50">
           <TableSection title="Income Statement (AUD)" rows={pnlRows} />
           <TableSection title="Margins" rows={marginRows} />
+          <TableSection title="Growth Rates" rows={growthRows} />
         </tbody>
       </table>
     </div>

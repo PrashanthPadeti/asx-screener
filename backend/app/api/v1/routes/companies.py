@@ -515,22 +515,29 @@ async def get_company_halfyearly(
     Half-yearly P&L from financials.half_year_pnl.
     Returns most recent `periods` half-years (e.g. 8 = 4 years), newest first.
     """
+    # market.halfyearly_metrics is populated by halfyearly_compute.py from
+    # quarterly staging data.  financials.half_year_pnl is schema-only (empty).
     sql = """
         SELECT
             period_label,
             period_end_date,
-            (revenue / 1000000)::double precision           AS revenue,
-            (gross_profit / 1000000)::double precision      AS gross_profit,
-            (ebitda / 1000000)::double precision            AS ebitda,
-            (ebit / 1000000)::double precision              AS ebit,
-            (net_profit / 1000000)::double precision        AS net_profit,
+            revenue::double precision,
+            gross_profit::double precision,
+            ebitda::double precision,
+            ebit::double precision,
+            net_income::double precision            AS net_profit,
             eps::double precision,
             dps::double precision,
-            dps_franking_pct::double precision,
-            gpm::double precision,
-            opm::double precision               AS ebitda_margin,
-            npm::double precision
-        FROM financials.half_year_pnl
+            franking_pct::double precision          AS dps_franking_pct,
+            gross_margin::double precision          AS gpm,
+            ebit_margin::double precision           AS ebitda_margin,
+            net_margin::double precision            AS npm,
+            revenue_growth_hoh::double precision,
+            net_income_growth_hoh::double precision AS net_profit_growth_hoh,
+            eps_growth_hoh::double precision,
+            revenue_growth_yoy::double precision,
+            eps_growth_yoy::double precision
+        FROM market.halfyearly_metrics
         WHERE asx_code = :code
         ORDER BY period_end_date DESC
         LIMIT :periods

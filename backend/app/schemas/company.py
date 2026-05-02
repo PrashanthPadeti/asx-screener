@@ -355,20 +355,26 @@ class PeersResponse(BaseModel):
 # ── Half-yearly financials schemas ────────────────────────────────────────────
 
 class HalfYearlyRow(BaseModel):
-    """One half-yearly period from financials.half_year_pnl."""
-    period_label: str                       # e.g. '1H FY2024'
+    """One half-yearly period from market.halfyearly_metrics."""
+    period_label: str                           # e.g. '1H FY2024'
     period_end_date: Optional[date] = None
-    revenue: Optional[float] = None         # AUD millions (note: stored as full dollars)
+    revenue: Optional[float] = None             # AUD millions
     gross_profit: Optional[float] = None
     ebitda: Optional[float] = None
     ebit: Optional[float] = None
-    net_profit: Optional[float] = None
+    net_profit: Optional[float] = None          # net_income aliased
     eps: Optional[float] = None
     dps: Optional[float] = None
-    dps_franking_pct: Optional[float] = None  # 0-100
-    gpm: Optional[float] = None             # decimal ratio
-    ebitda_margin: Optional[float] = None   # decimal ratio
-    npm: Optional[float] = None             # decimal ratio
+    dps_franking_pct: Optional[float] = None    # 0-100 (franking_pct aliased)
+    gpm: Optional[float] = None                 # gross_margin (decimal ratio)
+    ebitda_margin: Optional[float] = None       # ebit_margin (decimal ratio)
+    npm: Optional[float] = None                 # net_margin (decimal ratio)
+    # Growth rates (decimal ratios)
+    revenue_growth_hoh: Optional[float] = None
+    net_profit_growth_hoh: Optional[float] = None
+    eps_growth_hoh: Optional[float] = None
+    revenue_growth_yoy: Optional[float] = None
+    eps_growth_yoy: Optional[float] = None
 
     model_config = {"from_attributes": True}
 

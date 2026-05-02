@@ -164,8 +164,10 @@ def download_csv(report_date: date, url: str, force: bool = False) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Download ASIC Aggregate Short Position Reports")
-    parser.add_argument("--force", action="store_true", help="Re-download even if already cached")
-    parser.add_argument("--list",  action="store_true", help="List available reports without downloading")
+    parser.add_argument("--force",      action="store_true", help="Re-download even if already cached")
+    parser.add_argument("--list",       action="store_true", help="List available reports without downloading")
+    parser.add_argument("--dump-html",  action="store_true", help="Dump first 3000 chars of ASIC page HTML (for debugging)")
+    parser.add_argument("--dump-hrefs", action="store_true", help="Dump ALL hrefs found on ASIC page (for debugging)")
     args = parser.parse_args()
 
     # ── Step 1: Fetch the ASIC reports table page ──────────────────────────────
@@ -176,6 +178,19 @@ def main():
     except requests.RequestException as e:
         log.error(f"Failed to fetch ASIC reports index: {e}")
         raise SystemExit(1)
+
+    # ── Debug modes ───────────────────────────────────────────────────────────
+    if args.dump_html:
+        print("=== First 3000 chars of ASIC page HTML ===")
+        print(resp.text[:3000])
+        return
+
+    if args.dump_hrefs:
+        all_hrefs = re.findall(r'href=["\']([^"\']+)["\']', resp.text, re.IGNORECASE)
+        print(f"=== All {len(all_hrefs)} hrefs on ASIC page ===")
+        for h in sorted(set(all_hrefs)):
+            print(f"  {h}")
+        return
 
     # ── Step 2: Parse CSV links from the page ─────────────────────────────────
     links = scrape_report_links(resp.text)

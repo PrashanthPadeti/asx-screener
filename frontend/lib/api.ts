@@ -745,6 +745,32 @@ export const getCompanyAnnouncements = async (
   return data
 }
 
+// ── AI Summary ───────────────────────────────────────────────
+
+export interface AISummary {
+  asx_code:      string
+  verdict:       string
+  sentiment:     'bullish' | 'bearish' | 'neutral'
+  bull_case:     string[]
+  bear_case:     string[]
+  key_catalysts: string[]
+  key_risks:     string[]
+  generated_at:  string
+  model_used:    string
+  cached:        boolean
+}
+
+export const getAISummary = async (
+  asxCode: string,
+  refresh = false,
+): Promise<AISummary> => {
+  const { data } = await api.get(
+    `/api/v1/companies/${asxCode}/ai-summary`,
+    { params: refresh ? { refresh: true } : {} },
+  )
+  return data
+}
+
 // ── Watchlists ────────────────────────────────────────────────
 
 export interface WatchlistSummary {

@@ -10,10 +10,12 @@ from sqlalchemy import text
 from typing import Optional
 import math
 import logging
+import json
 
 import httpx
 
 from app.db.session import get_db
+from app.core.config import settings
 from app.schemas.company import (
     CompanyListItem, CompanyDetail,
     CompanySearchResult, CompanyListResponse,
@@ -719,3 +721,227 @@ async def get_company_announcements(
         data=live_rows,
         source="live",
     )
+
+
+# ── AI Summary ────────────────────────────────────────────────
+
+def _fmt_pct(v) -> str:
+    if v is None: return "N/A"
+    return f"{v * 100:.1f}%"
+
+def _fmt_x(v) -> str:
+    if v is None or v == 0: return "N/A"
+    return f"{v:.1f}x"
+
+def _fmt_price(v) -> str:
+    if v is None: return "N/A"
+    return f"${v:.3f}"
+
+def _fmt_mcap(v) -> str:
+    if v is None: return "N/A"
+    if v >= 1_000_000: return f"${v/1_000_000:.2f}T"
+    if v >= 1_000:     return f"${v/1_000:.1f}B"
+    return f"${v:.0f}M"
+
+
+@router.get("/{asx_code}/ai-summary")
+async def get_ai_summary(
+    asx_code: str,
+    refresh: bool = Query(False, description="Force regenerate even if cached"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns a Claude-generated AI analysis for the stock.
+    Cached for 24 hours per ticker. Pass ?refresh=true to force regeneration.
+    Requires ANTHROPIC_API_KEY to be configured.
+    """
+    code = asx_code.upper()
+
+    # ── Check 24h cache ───────────────────────────────────────
+    if not refresh:
+        cached = await db.execute(text("""
+            SELECT verdict, sentiment, bull_case, bear_case,
+                   key_catalysts, key_risks, generated_at, model_used
+            FROM market.ai_summaries
+            WHERE asx_code = :code
+              AND generated_at > NOW() - INTERVAL '24 hours'
+        """), {"code": code})
+        row = cached.mappings().first()
+        if row:
+            return {
+                "asx_code":      code,
+                "verdict":       row["verdict"],
+                "sentiment":     row["sentiment"],
+                "bull_case":     row["bull_case"],
+                "bear_case":     row["bear_case"],
+                "key_catalysts": row["key_catalysts"],
+                "key_risks":     row["key_risks"],
+                "generated_at":  row["generated_at"].isoformat(),
+                "model_used":    row["model_used"],
+                "cached":        True,
+            }
+
+    # ── Verify API key configured ─────────────────────────────
+    if not settings.ANTHROPIC_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="AI Insights not configured. Add ANTHROPIC_API_KEY to server .env."
+        )
+
+    # ── Fetch screener data ───────────────────────────────────
+    result = await db.execute(text("""
+        SELECT u.company_name, c.gics_sector, c.gics_industry_group,
+               u.last_price, u.market_cap,
+               u.pe_ratio, u.forward_pe, u.price_to_book, u.ev_to_ebitda,
+               u.dividend_yield, u.grossed_up_yield, u.franking_pct, u.dps_ttm, u.payout_ratio,
+               u.revenue_growth_1y, u.earnings_growth_1y, u.revenue_growth_3y_cagr,
+               u.gross_margin, u.ebitda_margin, u.net_margin, u.roe, u.roa,
+               u.debt_to_equity, u.current_ratio, u.net_debt,
+               u.piotroski_f_score, u.altman_z_score, u.short_pct,
+               u.return_1w, u.return_1m, u.return_3m, u.return_1y, u.return_3y,
+               u.rsi_14, u.sma_50, u.sma_200, u.composite_score,
+               u.value_score, u.quality_score, u.growth_score,
+               u.momentum_score, u.income_score,
+               u.revenue_growth_hoh, u.net_income_growth_hoh
+        FROM screener.universe u
+        JOIN market.companies c ON c.asx_code = u.asx_code
+        WHERE u.asx_code = :code
+    """), {"code": code})
+    d = result.mappings().first()
+
+    if not d:
+        raise HTTPException(status_code=404, detail="Screener data not found for this company")
+
+    # ── Build prompt ──────────────────────────────────────────
+    above_sma50  = d["last_price"] and d["sma_50"]  and d["last_price"] > d["sma_50"]
+    above_sma200 = d["last_price"] and d["sma_200"] and d["last_price"] > d["sma_200"]
+
+    prompt = f"""You are a senior Australian equities analyst. Analyse {code} ({d['company_name'] or 'N/A'}) \
+using the financial data below and provide a concise, structured investment assessment.
+
+COMPANY DATA:
+Sector: {d['gics_sector'] or 'N/A'} | Industry: {d['gics_industry_group'] or 'N/A'}
+Price: {_fmt_price(d['last_price'])} | Market Cap: {_fmt_mcap(d['market_cap'])}
+
+VALUATION:
+P/E: {_fmt_x(d['pe_ratio'])} | Fwd P/E: {_fmt_x(d['forward_pe'])} | P/B: {_fmt_x(d['price_to_book'])} | EV/EBITDA: {_fmt_x(d['ev_to_ebitda'])}
+
+DIVIDENDS (ASX-SPECIFIC):
+Yield: {_fmt_pct(d['dividend_yield'])} | Grossed-Up Yield: {_fmt_pct(d['grossed_up_yield'])} | Franking: {f"{d['franking_pct']:.0f}%" if d['franking_pct'] is not None else 'N/A'}
+DPS: {_fmt_price(d['dps_ttm'])} | Payout Ratio: {_fmt_pct(d['payout_ratio'])}
+
+GROWTH:
+Revenue (1Y): {_fmt_pct(d['revenue_growth_1y'])} | Earnings (1Y): {_fmt_pct(d['earnings_growth_1y'])} | Revenue CAGR (3Y): {_fmt_pct(d['revenue_growth_3y_cagr'])}
+Revenue HoH: {_fmt_pct(d['revenue_growth_hoh'])} | Net Income HoH: {_fmt_pct(d['net_income_growth_hoh'])}
+
+PROFITABILITY:
+Gross Margin: {_fmt_pct(d['gross_margin'])} | EBITDA Margin: {_fmt_pct(d['ebitda_margin'])} | Net Margin: {_fmt_pct(d['net_margin'])}
+ROE: {_fmt_pct(d['roe'])} | ROA: {_fmt_pct(d['roa'])}
+
+BALANCE SHEET:
+D/E: {_fmt_x(d['debt_to_equity'])} | Current Ratio: {_fmt_x(d['current_ratio'])} | Net Debt: {_fmt_mcap(d['net_debt'])}
+
+QUALITY & RISK:
+Piotroski F-Score: {d['piotroski_f_score'] or 'N/A'}/9 | Altman Z: {f"{d['altman_z_score']:.2f}" if d['altman_z_score'] else 'N/A'} | Short Interest: {f"{d['short_pct']:.1f}%" if d['short_pct'] else 'N/A'}
+
+TECHNICALS:
+RSI(14): {f"{d['rsi_14']:.1f}" if d['rsi_14'] else 'N/A'} | Above 50MA: {'Yes' if above_sma50 else 'No'} | Above 200MA: {'Yes' if above_sma200 else 'No'}
+
+RETURNS:
+1W: {_fmt_pct(d['return_1w'])} | 1M: {_fmt_pct(d['return_1m'])} | 3M: {_fmt_pct(d['return_3m'])} | 1Y: {_fmt_pct(d['return_1y'])} | 3Y: {_fmt_pct(d['return_3y'])}
+
+COMPOSITE SCORES (percentile vs all ASX):
+Overall: {d['composite_score'] or 'N/A'}/100 | Value: {d['value_score'] or 'N/A'} | Quality: {d['quality_score'] or 'N/A'} | Growth: {d['growth_score'] or 'N/A'} | Momentum: {d['momentum_score'] or 'N/A'} | Income: {d['income_score'] or 'N/A'}
+
+Respond ONLY with a valid JSON object — no markdown, no explanation, just the JSON:
+{{
+  "verdict": "One-sentence investment verdict, max 25 words",
+  "sentiment": "bullish",
+  "bull_case": ["bull point 1 (max 15 words)", "bull point 2", "bull point 3"],
+  "bear_case": ["bear point 1 (max 15 words)", "bear point 2", "bear point 3"],
+  "key_catalysts": ["catalyst 1 (max 12 words)", "catalyst 2"],
+  "key_risks": ["risk 1 (max 12 words)", "risk 2"]
+}}
+sentiment must be exactly one of: bullish, bearish, neutral
+Mention franking credits where they add meaningful value for Australian investors."""
+
+    # ── Call Claude ───────────────────────────────────────────
+    MODEL = "claude-3-5-haiku-20241022"
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+        message = client.messages.create(
+            model=MODEL,
+            max_tokens=600,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        summary = json.loads(raw)
+    except json.JSONDecodeError as e:
+        log.error(f"AI summary JSON parse error for {code}: {e}\nRaw: {raw[:200]}")
+        raise HTTPException(status_code=502, detail="AI response could not be parsed")
+    except Exception as e:
+        log.error(f"AI summary generation failed for {code}: {e}")
+        raise HTTPException(status_code=502, detail=f"AI generation failed: {str(e)}")
+
+    # Validate fields
+    sentiment = summary.get("sentiment", "neutral")
+    if sentiment not in ("bullish", "bearish", "neutral"):
+        sentiment = "neutral"
+
+    bull_case      = summary.get("bull_case",      [])[:5]
+    bear_case      = summary.get("bear_case",      [])[:5]
+    key_catalysts  = summary.get("key_catalysts",  [])[:4]
+    key_risks      = summary.get("key_risks",      [])[:4]
+    verdict        = summary.get("verdict", "")[:300]
+
+    # ── Cache in DB (upsert) ──────────────────────────────────
+    try:
+        await db.execute(text("""
+            INSERT INTO market.ai_summaries
+                (asx_code, verdict, sentiment, bull_case, bear_case, key_catalysts, key_risks, model_used, generated_at)
+            VALUES
+                (:code, :verdict, :sentiment, :bull_case::jsonb, :bear_case::jsonb,
+                 :catalysts::jsonb, :risks::jsonb, :model, NOW())
+            ON CONFLICT (asx_code) DO UPDATE SET
+                verdict       = EXCLUDED.verdict,
+                sentiment     = EXCLUDED.sentiment,
+                bull_case     = EXCLUDED.bull_case,
+                bear_case     = EXCLUDED.bear_case,
+                key_catalysts = EXCLUDED.key_catalysts,
+                key_risks     = EXCLUDED.key_risks,
+                model_used    = EXCLUDED.model_used,
+                generated_at  = NOW()
+        """), {
+            "code":      code,
+            "verdict":   verdict,
+            "sentiment": sentiment,
+            "bull_case": json.dumps(bull_case),
+            "bear_case": json.dumps(bear_case),
+            "catalysts": json.dumps(key_catalysts),
+            "risks":     json.dumps(key_risks),
+            "model":     MODEL,
+        })
+        await db.commit()
+    except Exception as e:
+        log.warning(f"AI summary cache write failed for {code}: {e}")
+        await db.rollback()
+
+    from datetime import datetime, timezone
+    return {
+        "asx_code":      code,
+        "verdict":       verdict,
+        "sentiment":     sentiment,
+        "bull_case":     bull_case,
+        "bear_case":     bear_case,
+        "key_catalysts": key_catalysts,
+        "key_risks":     key_risks,
+        "generated_at":  datetime.now(timezone.utc).isoformat(),
+        "model_used":    MODEL,
+        "cached":        False,
+    }

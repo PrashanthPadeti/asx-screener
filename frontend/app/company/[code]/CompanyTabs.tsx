@@ -8,10 +8,10 @@ import {
 import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
   getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
-  getCompanyAnnouncements,
+  getCompanyAnnouncements, getAISummary,
   type CompanyOverview, type FinancialsResponse, type PricesResponse,
   type DividendsResponse, type PeersResponse, type HalfYearlyResponse,
-  type Announcement, type AnnouncementsResponse,
+  type Announcement, type AnnouncementsResponse, type AISummary,
 } from '@/lib/api'
 import {
   formatPrice, formatMarketCap, formatVolume,
@@ -1545,19 +1545,146 @@ function DocumentsTab({ code }: { code: string }) {
 }
 
 
-// ── Coming Soon Tab ───────────────────────────────────────────
+// ── AI Insights Tab ───────────────────────────────────────────
 
-function ComingSoonTab({ title, description }: { title: string; description: string }) {
-  return (
-    <div className="text-center py-16">
-      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-50 mb-4">
-        <span className="text-2xl">🚀</span>
+function AIInsightsTab({ code }: { code: string }) {
+  const [data,    setData]    = useState<AISummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState<string | null>(null)
+
+  const load = (refresh = false) => {
+    setLoading(true)
+    setError(null)
+    getAISummary(code, refresh)
+      .then(setData)
+      .catch(e => {
+        const msg = e?.response?.data?.detail || e.message || 'Failed to generate AI summary'
+        setError(msg)
+      })
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { load() }, [code]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-20 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl" />
+      <div className="grid grid-cols-2 gap-4">
+        <div className="h-40 bg-gray-50 rounded-xl" />
+        <div className="h-40 bg-gray-50 rounded-xl" />
       </div>
-      <h3 className="text-base font-semibold text-gray-700 mb-2">{title}</h3>
-      <p className="text-sm text-gray-400 max-w-xs mx-auto">{description}</p>
-      <span className="inline-block mt-3 px-3 py-1 bg-blue-50 text-blue-600 text-xs font-medium rounded-full">
-        Coming Soon
-      </span>
+      <div className="h-8 bg-gray-50 rounded w-1/3 mx-auto mt-6" />
+      <p className="text-center text-sm text-gray-400 -mt-2">Claude is analysing {code}…</p>
+    </div>
+  )
+
+  if (error) return (
+    <div className="text-center py-16">
+      <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-red-50 mb-4">
+        <span className="text-2xl">⚠️</span>
+      </div>
+      <p className="text-gray-700 font-medium mb-1">AI Insights unavailable</p>
+      <p className="text-sm text-gray-400 max-w-sm mx-auto mb-4">{error}</p>
+      <button onClick={() => load()} className="text-sm text-blue-600 hover:underline">Try again</button>
+    </div>
+  )
+
+  if (!data) return null
+
+  const sentimentConfig = {
+    bullish: { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-700', badge: 'bg-emerald-100 text-emerald-700', icon: '▲' },
+    bearish: { bg: 'bg-red-50',     border: 'border-red-200',     text: 'text-red-700',     badge: 'bg-red-100 text-red-700',         icon: '▼' },
+    neutral: { bg: 'bg-blue-50',    border: 'border-blue-200',    text: 'text-blue-700',    badge: 'bg-blue-100 text-blue-700',        icon: '◆' },
+  }
+  const s = sentimentConfig[data.sentiment] ?? sentimentConfig.neutral
+
+  return (
+    <div className="space-y-4">
+
+      {/* Verdict banner */}
+      <div className={`rounded-xl p-4 border ${s.bg} ${s.border} flex items-start gap-3`}>
+        <span className={`text-lg mt-0.5 ${s.text}`}>{s.icon}</span>
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${s.badge}`}>
+              {data.sentiment}
+            </span>
+          </div>
+          <p className={`text-sm font-semibold leading-snug ${s.text}`}>{data.verdict}</p>
+        </div>
+      </div>
+
+      {/* Bull / Bear */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card title="Bull Case">
+          <ul className="space-y-2">
+            {data.bull_case.map((p, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                <span className="text-emerald-500 mt-0.5 shrink-0 font-bold">↑</span>
+                {p}
+              </li>
+            ))}
+          </ul>
+        </Card>
+        <Card title="Bear Case">
+          <ul className="space-y-2">
+            {data.bear_case.map((p, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                <span className="text-red-500 mt-0.5 shrink-0 font-bold">↓</span>
+                {p}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      </div>
+
+      {/* Catalysts / Risks */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {data.key_catalysts.length > 0 && (
+          <Card title="Key Catalysts">
+            <ul className="space-y-2">
+              {data.key_catalysts.map((c, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                  <span className="text-blue-500 mt-0.5 shrink-0">✦</span>
+                  {c}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+        {data.key_risks.length > 0 && (
+          <Card title="Key Risks">
+            <ul className="space-y-2">
+              {data.key_risks.map((r, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                  <span className="text-amber-500 mt-0.5 shrink-0">⚑</span>
+                  {r}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-full font-medium text-slate-500">
+            ⚡ Powered by Claude
+          </span>
+          <span>{data.cached ? 'Cached' : 'Generated'} {new Date(data.generated_at).toLocaleString('en-AU', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+        </div>
+        <button
+          onClick={() => load(true)}
+          className="text-xs text-blue-500 hover:text-blue-700 hover:underline transition-colors"
+        >
+          Regenerate ↻
+        </button>
+      </div>
+
+      <p className="text-xs text-gray-300 text-center">
+        AI-generated analysis for informational purposes only. Not financial advice.
+      </p>
     </div>
   )
 }

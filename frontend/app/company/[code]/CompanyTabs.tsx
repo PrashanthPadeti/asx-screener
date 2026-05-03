@@ -71,16 +71,16 @@ function signedPct(v: number | null | undefined, decimals = 1): string {
 
 function MetricRow({ label, value, sub, highlight }: MetricRowProps) {
   const valueClass =
-    highlight === 'green' ? 'text-green-700 font-semibold' :
-    highlight === 'red'   ? 'text-red-600 font-semibold' :
-    'text-gray-900 font-medium'
+    highlight === 'green' ? 'text-emerald-600 font-semibold' :
+    highlight === 'red'   ? 'text-red-500 font-semibold' :
+    'text-gray-800 font-semibold'
 
   return (
-    <div className="flex items-baseline justify-between py-1.5 border-b border-gray-50 last:border-0">
-      <span className="text-sm text-gray-500">{label}</span>
+    <div className="flex items-baseline justify-between py-1.5 border-b border-gray-50/80 last:border-0 group hover:bg-blue-50/30 -mx-1 px-1 rounded transition-colors">
+      <span className="text-xs text-gray-400 font-medium">{label}</span>
       <span className={`text-sm text-right ${valueClass}`}>
         {value}
-        {sub && <span className="text-xs text-gray-400 ml-1">{sub}</span>}
+        {sub && <span className="text-xs text-gray-400 ml-1 font-normal">{sub}</span>}
       </span>
     </div>
   )
@@ -88,9 +88,13 @@ function MetricRow({ label, value, sub, highlight }: MetricRowProps) {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">{title}</h3>
-      {children}
+    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-200">
+      <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">{title}</h3>
+      </div>
+      <div className="p-4">
+        {children}
+      </div>
     </div>
   )
 }
@@ -133,13 +137,16 @@ function scoreColor(score: number): string {
 }
 
 function ScoreBar({ score }: { score: number }) {
-  const color =
-    score >= 75 ? 'bg-green-500' :
-    score >= 50 ? 'bg-blue-500'  :
-    score >= 25 ? 'bg-orange-400': 'bg-red-400'
+  const gradient =
+    score >= 75 ? 'from-emerald-400 to-green-500' :
+    score >= 50 ? 'from-blue-400 to-indigo-500'   :
+    score >= 25 ? 'from-amber-400 to-orange-500'  : 'from-red-400 to-rose-500'
   return (
     <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-      <div className={`h-1.5 rounded-full transition-all ${color}`} style={{ width: `${score}%` }} />
+      <div
+        className={`h-1.5 rounded-full bg-gradient-to-r ${gradient} transition-all duration-500`}
+        style={{ width: `${score}%` }}
+      />
     </div>
   )
 }
@@ -302,51 +309,50 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
   return (
     <div className="space-y-4">
 
-      {/* Price summary */}
-      <Card title="Price Summary">
-        <div className="flex flex-wrap gap-6 mb-3">
-          <div>
-            <span className="text-3xl font-bold text-gray-900">
-              {o.price != null ? `$${o.price.toFixed(3)}` : '—'}
-            </span>
+      {/* Price summary — dark hero */}
+      <div className="relative bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-xl overflow-hidden border border-white/10">
+        <div className="absolute -top-16 -right-16 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+        <div className="relative p-5">
+          <div className="flex flex-wrap gap-6 mb-4">
+            <div>
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1">Last Price</p>
+              <span className="text-4xl font-black text-white tracking-tight">
+                {o.price != null ? `$${o.price.toFixed(3)}` : '—'}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-5 items-center">
+              {[
+                { label: 'Market Cap',   value: formatMarketCap(o.market_cap) },
+                { label: 'Volume',       value: formatVolume(o.volume) },
+                { label: 'Avg Vol (20D)',value: formatVolume(o.avg_volume_20d) },
+                ...(o.price_date ? [{ label: 'As at', value: o.price_date }] : []),
+              ].map(item => (
+                <div key={item.label} className="flex flex-col justify-center">
+                  <span className="text-xs text-slate-500 font-medium mb-0.5">{item.label}</span>
+                  <span className="font-bold text-slate-200 text-sm">{item.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-col justify-center gap-0.5">
-            <span className="text-xs text-gray-400">Market Cap</span>
-            <span className="font-semibold">{formatMarketCap(o.market_cap)}</span>
-          </div>
-          <div className="flex flex-col justify-center gap-0.5">
-            <span className="text-xs text-gray-400">Volume</span>
-            <span className="font-semibold">{formatVolume(o.volume)}</span>
-          </div>
-          <div className="flex flex-col justify-center gap-0.5">
-            <span className="text-xs text-gray-400">Avg Vol (20D)</span>
-            <span className="font-semibold">{formatVolume(o.avg_volume_20d)}</span>
-          </div>
-          {o.price_date && (
-            <div className="flex flex-col justify-center gap-0.5">
-              <span className="text-xs text-gray-400">As at</span>
-              <span className="font-semibold">{o.price_date}</span>
+
+          {/* 52-week range */}
+          {o.high_52w != null && o.low_52w != null && (
+            <div>
+              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                <span>52W Low: ${o.low_52w.toFixed(2)}</span>
+                <span>52W High: ${o.high_52w.toFixed(2)}</span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-1.5 relative">
+                <div className="h-1.5 bg-gradient-to-r from-red-400 via-amber-400 to-emerald-400 rounded-full" />
+                <div
+                  className="absolute w-3 h-3 bg-white rounded-full -top-[3px] shadow-lg ring-2 ring-blue-400/50"
+                  style={{ left: `calc(${Math.max(1, Math.min(97, pos52w ?? 50))}% - 6px)` }}
+                />
+              </div>
             </div>
           )}
         </div>
-
-        {/* 52-week range */}
-        {o.high_52w != null && o.low_52w != null && (
-          <div>
-            <div className="flex justify-between text-xs text-gray-400 mb-1">
-              <span>52W Low: ${o.low_52w.toFixed(2)}</span>
-              <span>52W High: ${o.high_52w.toFixed(2)}</span>
-            </div>
-            <div className="w-full bg-gray-100 rounded-full h-2 relative">
-              <div
-                className="absolute h-4 w-1 bg-blue-600 rounded-full -top-1"
-                style={{ left: `${Math.max(0, Math.min(100, pos52w ?? 50))}%` }}
-              />
-              <div className="h-2 bg-gradient-to-r from-red-200 via-yellow-200 to-green-200 rounded-full" />
-            </div>
-          </div>
-        )}
-      </Card>
+      </div>
 
       {/* Composite Score Meter */}
       {o.composite_score != null && <CompositeScoreMeter o={o} />}
@@ -496,7 +502,7 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
 
       {/* Returns */}
       <Card title="Price Returns">
-        <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
+        <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
           {([
             ['1W',  o.return_1w],
             ['1M',  o.return_1m],
@@ -507,9 +513,12 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
             ['3Y',  o.return_3y],
             ['5Y',  o.return_5y],
           ] as [string, number | null][]).map(([label, val]) => (
-            <div key={label} className="text-center">
-              <div className="text-xs text-gray-400 mb-1">{label}</div>
-              <div className={`text-sm font-semibold ${signClass(val)}`}>
+            <div key={label} className={[
+              'text-center rounded-lg py-2 px-1',
+              val == null ? 'bg-gray-50' : val >= 0 ? 'bg-emerald-50' : 'bg-red-50',
+            ].join(' ')}>
+              <div className="text-xs text-gray-400 font-semibold mb-1 uppercase tracking-wide">{label}</div>
+              <div className={`text-sm font-bold ${signClass(val)}`}>
                 {signedPct(val)}
               </div>
             </div>
@@ -1653,83 +1662,86 @@ export default function CompanyTabs({ code }: { code: string }) {
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5">
-      {/* Tab bar */}
-      <div className="flex gap-0.5 border-b border-gray-200 mb-5 -mx-5 px-5 overflow-x-auto">
+    <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+
+      {/* ── Tab bar — dark slate ─────────────────────────────── */}
+      <div className="flex bg-slate-900 overflow-x-auto">
         {tabs.map(t => (
           <button
             key={t.id}
             onClick={() => !t.comingSoon && setActiveTab(t.id)}
             className={[
-              'pb-3 px-3 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors',
+              'py-3.5 px-5 text-sm font-semibold whitespace-nowrap transition-all duration-200 relative',
               t.comingSoon
-                ? 'border-transparent text-gray-300 cursor-not-allowed'
+                ? 'text-slate-600 cursor-not-allowed'
                 : activeTab === t.id
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700',
+                  ? 'text-white bg-gradient-to-b from-blue-600 to-blue-700 shadow-inner'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/5',
             ].join(' ')}
           >
             {t.label}
             {t.comingSoon && (
-              <span className="ml-1 text-xs text-gray-300">(soon)</span>
+              <span className="ml-1.5 text-xs text-slate-600 font-normal">soon</span>
             )}
           </button>
         ))}
       </div>
 
-      {/* Content */}
-      {loading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {[1, 2, 3, 4, 5, 6].map(i => <LoadingCard key={i} />)}
-        </div>
-      ) : error ? (
-        <div className="text-center py-10">
-          <p className="text-red-500 font-medium mb-1">Could not load market data</p>
-          <p className="text-sm text-gray-400">{error}</p>
-        </div>
-      ) : overview ? (
-        <>
-          {activeTab === 'overview' && <OverviewTab o={overview} />}
+      {/* ── Tab content ──────────────────────────────────────── */}
+      <div className="p-5">
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[1, 2, 3, 4, 5, 6].map(i => <LoadingCard key={i} />)}
+          </div>
+        ) : error ? (
+          <div className="text-center py-10">
+            <p className="text-red-500 font-medium mb-1">Could not load market data</p>
+            <p className="text-sm text-gray-400">{error}</p>
+          </div>
+        ) : overview ? (
+          <>
+            {activeTab === 'overview' && <OverviewTab o={overview} />}
 
-          {activeTab === 'financials' && (
-            isLoading('financials')
-              ? <div className="grid grid-cols-1 gap-4">{[1,2,3].map(i=><LoadingCard key={i}/>)}</div>
-              : <FinancialsTab
-                  financials={financials}
-                  halfYearly={halfYearly}
-                  period={financialPeriod}
-                  onPeriodChange={setFinancialPeriod}
-                />
-          )}
+            {activeTab === 'financials' && (
+              isLoading('financials')
+                ? <div className="grid grid-cols-1 gap-4">{[1,2,3].map(i=><LoadingCard key={i}/>)}</div>
+                : <FinancialsTab
+                    financials={financials}
+                    halfYearly={halfYearly}
+                    period={financialPeriod}
+                    onPeriodChange={setFinancialPeriod}
+                  />
+            )}
 
-          {activeTab === 'technicals' && (
-            <TechnicalsTab o={overview} prices={prices} pricesLoading={pricesLoading} />
-          )}
+            {activeTab === 'technicals' && (
+              <TechnicalsTab o={overview} prices={prices} pricesLoading={pricesLoading} />
+            )}
 
-          {activeTab === 'dividends' && (
-            isLoading('dividends')
-              ? <div className="grid grid-cols-1 gap-4">{[1,2].map(i=><LoadingCard key={i}/>)}</div>
-              : <DividendsTab data={dividends} />
-          )}
+            {activeTab === 'dividends' && (
+              isLoading('dividends')
+                ? <div className="grid grid-cols-1 gap-4">{[1,2].map(i=><LoadingCard key={i}/>)}</div>
+                : <DividendsTab data={dividends} />
+            )}
 
-          {activeTab === 'peers' && (
-            isLoading('peers')
-              ? <div className="grid grid-cols-1 gap-4">{[1,2].map(i=><LoadingCard key={i}/>)}</div>
-              : <PeersTab data={peers} currentCode={code} />
-          )}
+            {activeTab === 'peers' && (
+              isLoading('peers')
+                ? <div className="grid grid-cols-1 gap-4">{[1,2].map(i=><LoadingCard key={i}/>)}</div>
+                : <PeersTab data={peers} currentCode={code} />
+            )}
 
-          {activeTab === 'ai' && (
-            <ComingSoonTab
-              title="AI Insights"
-              description="AI-powered analysis of fundamentals, news sentiment, and earnings call transcripts. Powered by Claude."
-            />
-          )}
+            {activeTab === 'ai' && (
+              <ComingSoonTab
+                title="AI Insights"
+                description="AI-powered analysis of fundamentals, news sentiment, and earnings call transcripts. Powered by Claude."
+              />
+            )}
 
-          {activeTab === 'documents' && (
-            <DocumentsTab code={code} />
-          )}
-        </>
-      ) : null}
+            {activeTab === 'documents' && (
+              <DocumentsTab code={code} />
+            )}
+          </>
+        ) : null}
+      </div>
     </div>
   )
 }

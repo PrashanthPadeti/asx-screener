@@ -8,10 +8,11 @@ import {
 import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
   getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
-  getCompanyAnnouncements, getAISummary,
+  getCompanyAnnouncements, getAISummary, getAnomalyFlags,
   type CompanyOverview, type FinancialsResponse, type PricesResponse,
   type DividendsResponse, type PeersResponse, type HalfYearlyResponse,
   type Announcement, type AnnouncementsResponse, type AISummary,
+  type AnomalyFlag,
 } from '@/lib/api'
 import {
   formatPrice, formatMarketCap, formatVolume,
@@ -295,12 +296,28 @@ function buildSignals(o: CompanyOverview): { pros: string[]; cons: string[] } {
 
 // ── Overview Tab ──────────────────────────────────────────────
 
-function OverviewTab({ o }: { o: CompanyOverview }) {
+function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
   // Use DB-computed pros/cons when available; fall back to client-side engine
   const hasDatabaseSignals = (o.pros?.length ?? 0) > 0 || (o.cons?.length ?? 0) > 0
   const { pros, cons } = hasDatabaseSignals
     ? { pros: o.pros ?? [], cons: o.cons ?? [] }
     : buildSignals(o)
+
+  // AI Analysis state (Week 12)
+  const [aiData, setAiData]     = useState<AISummary | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError]   = useState<string | null>(null)
+  const [aiLoaded, setAiLoaded] = useState(false)
+
+  const loadAI = () => {
+    if (aiLoaded) return
+    setAiLoading(true)
+    setAiError(null)
+    getAISummary(code)
+      .then(d => { setAiData(d); setAiLoaded(true) })
+      .catch(e => setAiError(e?.response?.data?.detail || e.message || 'Failed'))
+      .finally(() => setAiLoading(false))
+  }
 
   const pos52w = o.high_52w != null && o.low_52w != null && o.price != null
     ? ((o.price - o.low_52w) / (o.high_52w - o.low_52w)) * 100
@@ -579,6 +596,63 @@ function OverviewTab({ o }: { o: CompanyOverview }) {
               </ul>
             </Card>
           )}
+        </div>
+      )}
+
+      {/* AI Deep Analysis (Week 12) */}
+      {!aiLoaded && !aiLoading && (
+        <div className="border border-dashed border-blue-200 rounded-xl p-5 text-center bg-blue-50/30">
+          <p className="text-sm font-semibold text-gray-700 mb-1">AI Deep Analysis</p>
+          <p className="text-xs text-gray-400 mb-3">Get Claude{"'"}s bull/bear case, key catalysts, and risks</p>
+          <button onClick={loadAI}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500
+                       text-white text-sm font-semibold rounded-lg transition-colors">
+            ⚡ Generate AI Analysis
+          </button>
+        </div>
+      )}
+
+      {aiLoading && (
+        <div className="border border-blue-100 rounded-xl p-5 text-center animate-pulse bg-blue-50/20">
+          <p className="text-sm text-blue-600 font-medium">Claude is analysing {code}…</p>
+        </div>
+      )}
+
+      {aiError && (
+        <div className="border border-red-100 rounded-xl p-4 text-center">
+          <p className="text-sm text-red-600">{aiError}</p>
+          <button onClick={() => { setAiLoaded(false); loadAI() }}
+            className="text-xs text-blue-600 hover:underline mt-1">Retry</button>
+        </div>
+      )}
+
+      {aiData && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">AI Deep Analysis</span>
+            <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">⚡ Claude</span>
+            {aiData.cached && <span className="text-xs text-gray-400">cached</span>}
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Card title="Bull Case">
+              <ul className="space-y-2">
+                {aiData.bull_case.map((p, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                    <span className="text-emerald-500 mt-0.5 shrink-0 font-bold">↑</span>{p}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+            <Card title="Bear Case">
+              <ul className="space-y-2">
+                {aiData.bear_case.map((p, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-gray-700">
+                    <span className="text-red-500 mt-0.5 shrink-0 font-bold">↓</span>{p}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          </div>
         </div>
       )}
     </div>
@@ -1712,7 +1786,10 @@ export default function CompanyTabs({ code }: { code: string }) {
   // Financial period toggle (annual vs half-yearly)
   const [financialPeriod, setFinancialPeriod] = useState<FinancialPeriod>('annual')
 
-  // Fetch overview immediately on mount
+  // Anomaly flags (Week 13)
+  const [anomalyFlags, setAnomalyFlags] = useState<AnomalyFlag[]>([])
+
+  // Fetch overview + anomaly flags on mount
   useEffect(() => {
     setLoading(true)
     setError(null)
@@ -1720,6 +1797,9 @@ export default function CompanyTabs({ code }: { code: string }) {
       .then(setOverview)
       .catch(e => setError(e?.response?.data?.detail ?? e.message))
       .finally(() => setLoading(false))
+    getAnomalyFlags(code)
+      .then(r => setAnomalyFlags(r.flags))
+      .catch(() => {}) // silently ignore — table may not exist yet
   }, [code])
 
   // Lazy-load per tab
@@ -1823,6 +1903,25 @@ export default function CompanyTabs({ code }: { code: string }) {
         ))}
       </div>
 
+      {/* ── Anomaly Flags (Week 13) ──────────────────────────── */}
+      {anomalyFlags.length > 0 && (
+        <div className="border-b border-amber-100 bg-amber-50/50 px-5 py-3 space-y-1.5">
+          {anomalyFlags.map((f, i) => (
+            <div key={i} className="flex items-start gap-2 text-sm">
+              <span className={[
+                'shrink-0 text-xs font-bold px-1.5 py-0.5 rounded uppercase tracking-wide mt-0.5',
+                f.severity === 'high'   ? 'bg-red-100 text-red-700' :
+                f.severity === 'medium' ? 'bg-amber-100 text-amber-700' :
+                                          'bg-slate-100 text-slate-600',
+              ].join(' ')}>
+                {f.severity}
+              </span>
+              <span className="text-gray-700 leading-snug">{f.description}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ── Tab content ──────────────────────────────────────── */}
       <div className="p-5">
         {loading ? (
@@ -1836,7 +1935,7 @@ export default function CompanyTabs({ code }: { code: string }) {
           </div>
         ) : overview ? (
           <>
-            {activeTab === 'overview' && <OverviewTab o={overview} />}
+            {activeTab === 'overview' && <OverviewTab o={overview} code={code} />}
 
             {activeTab === 'financials' && (
               isLoading('financials')

@@ -2,8 +2,9 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   runScreener, getScreenerFields, getScreenerPresets, exportScreener,
+  nlScreener,
   type ScreenerFilter, type ScreenerRow, type ScreenerFieldMeta,
-  type ScreenerPreset,
+  type ScreenerPreset, type NLScreenerResponse,
 } from '@/lib/api'
 import {
   formatPrice, formatVolume, formatMarketCap,
@@ -12,6 +13,7 @@ import {
 import {
   Plus, Trash2, Play, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
+  Sparkles, Search,
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
@@ -381,6 +383,12 @@ export default function ScreenerPage() {
   const [sortBy, setSortBy]         = useState('market_cap')
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
 
+  // NL screener state
+  const [nlQuery, setNlQuery]               = useState('')
+  const [nlLoading, setNlLoading]           = useState(false)
+  const [nlError, setNlError]               = useState<string | null>(null)
+  const [nlResult, setNlResult]             = useState<NLScreenerResponse | null>(null)
+
   // Column visibility — persisted to localStorage
   const STORAGE_KEY = 'screener_visible_columns_v1'
   const defaultVisible = new Set(
@@ -552,6 +560,41 @@ export default function ScreenerPage() {
       : <ChevronDown className="w-3 h-3 inline ml-0.5" />
   }
 
+  // Run NL screener
+  const runNLScreen = async () => {
+    if (!nlQuery.trim()) return
+    setNlLoading(true)
+    setNlError(null)
+    setNlResult(null)
+    try {
+      const res = await nlScreener(nlQuery.trim())
+      setNlResult(res)
+      setResults(res.data)
+      setTotal(res.total)
+      setTotalPages(res.total_pages)
+      setPage(1)
+      setRan(true)
+      // Populate the filter builder with the interpreted filters
+      const rows: FilterRow[] = res.filters.map(f => ({
+        id:       nextId++,
+        field:    f.field,
+        operator: f.operator,
+        value:    String(f.value),
+      }))
+      setFilters(rows)
+      setSortBy(res.sort_by)
+      setSortDir(res.sort_dir as 'asc' | 'desc')
+      setActivePreset(null)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || (e as Error).message
+        || 'Failed to run AI screen'
+      setNlError(msg)
+    } finally {
+      setNlLoading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
 
@@ -559,6 +602,59 @@ export default function ScreenerPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>
         <span className="text-sm text-gray-500">ASX-listed stocks</span>
+      </div>
+
+      {/* AI Natural Language Search */}
+      <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl p-5 border border-white/10">
+        <div className="flex items-center gap-2 mb-3">
+          <Sparkles className="w-4 h-4 text-blue-400" />
+          <span className="text-sm font-semibold text-white">AI Screen</span>
+          <span className="text-xs text-slate-400 ml-1">Powered by Claude</span>
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={nlQuery}
+            onChange={e => setNlQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && runNLScreen()}
+            placeholder='e.g. "profitable miners with low debt and high franked dividends"'
+            className="flex-1 bg-white/10 border border-white/20 text-white placeholder-slate-400
+                       rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-400
+                       focus:bg-white/15 transition-all"
+          />
+          <button
+            onClick={runNLScreen}
+            disabled={nlLoading || !nlQuery.trim()}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500
+                       disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm
+                       font-semibold rounded-xl transition-colors shrink-0">
+            {nlLoading
+              ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              : <Search className="w-4 h-4" />}
+            {nlLoading ? 'Thinking…' : 'Screen'}
+          </button>
+        </div>
+
+        {nlError && (
+          <p className="mt-2 text-sm text-red-400">{nlError}</p>
+        )}
+
+        {nlResult && !nlLoading && (
+          <div className="mt-3 space-y-2">
+            <p className="text-sm text-blue-300 leading-snug">
+              <span className="font-semibold text-white">Interpreted as:</span> {nlResult.interpretation}
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {nlResult.filters.map((f, i) => (
+                <span key={i} className="text-xs bg-white/10 text-slate-300 border border-white/10
+                                          px-2 py-0.5 rounded-full font-mono">
+                  {f.field} {f.operator} {String(f.value)}
+                </span>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500">{nlResult.total} stocks matched</p>
+          </div>
+        )}
       </div>
 
       {/* Quick Presets */}

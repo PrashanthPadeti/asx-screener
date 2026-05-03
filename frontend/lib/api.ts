@@ -771,6 +771,43 @@ export const getAISummary = async (
   return data
 }
 
+// ── NL Screener ──────────────────────────────────────────────
+
+export interface NLScreenerResponse {
+  query:          string
+  interpretation: string
+  filters:        ScreenerFilter[]
+  sort_by:        string
+  sort_dir:       string
+  total:          number
+  total_pages:    number
+  data:           ScreenerRow[]
+}
+
+export const nlScreener = async (query: string): Promise<NLScreenerResponse> => {
+  const { data } = await api.post('/api/v1/ai/nl-screener', { query })
+  return data
+}
+
+// ── Anomaly Flags ─────────────────────────────────────────────
+
+export interface AnomalyFlag {
+  flag_type:   string
+  description: string
+  severity:    'low' | 'medium' | 'high'
+  detected_at: string
+}
+
+export interface AnomaliesResponse {
+  asx_code: string
+  flags:    AnomalyFlag[]
+}
+
+export const getAnomalyFlags = async (asxCode: string): Promise<AnomaliesResponse> => {
+  const { data } = await api.get(`/api/v1/ai/anomalies/${asxCode}`)
+  return data
+}
+
 // ── Watchlists ────────────────────────────────────────────────
 
 export interface WatchlistSummary {

@@ -72,22 +72,35 @@ def get_codes(conn, mode: str, explicit_codes: list[str] | None) -> list[str]:
         return [c.upper().strip() for c in explicit_codes]
 
     cur = conn.cursor()
+
+    # Try index-filtered modes first; fall back to all active if flags not populated
+    if mode == "asx200":
+        cur.execute("""
+            SELECT DISTINCT asx_code FROM screener.universe
+            WHERE is_asx200 = true AND status = 'active' ORDER BY asx_code
+        """)
+        codes = [r[0] for r in cur.fetchall()]
+        if not codes:
+            log.warning("is_asx200 flags not populated — falling back to all active companies")
+            mode = "all"
+
+    if mode == "asx300":
+        cur.execute("""
+            SELECT DISTINCT asx_code FROM screener.universe
+            WHERE is_asx300 = true AND status = 'active' ORDER BY asx_code
+        """)
+        codes = [r[0] for r in cur.fetchall()]
+        if not codes:
+            log.warning("is_asx300 flags not populated — falling back to all active companies")
+            mode = "all"
+
     if mode == "all":
         cur.execute("""
             SELECT DISTINCT asx_code FROM screener.universe
             WHERE status = 'active' ORDER BY asx_code
         """)
-    elif mode == "asx300":
-        cur.execute("""
-            SELECT DISTINCT asx_code FROM screener.universe
-            WHERE is_asx300 = true AND status = 'active' ORDER BY asx_code
-        """)
-    else:   # default: asx200
-        cur.execute("""
-            SELECT DISTINCT asx_code FROM screener.universe
-            WHERE is_asx200 = true AND status = 'active' ORDER BY asx_code
-        """)
-    codes = [r[0] for r in cur.fetchall()]
+        codes = [r[0] for r in cur.fetchall()]
+
     cur.close()
     return codes
 

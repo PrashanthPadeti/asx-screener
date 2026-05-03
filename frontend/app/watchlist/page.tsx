@@ -317,7 +317,7 @@ function ServerWatchlists() {
           Watchlists
         </h1>
         <div className="flex items-center gap-2">
-          {activeId && detail && detail.codes.length > 0 && (
+          {activeId && (
             <AddStockSearch onAdd={handleAdd} />
           )}
           {activeId && (

@@ -744,3 +744,53 @@ export const getCompanyAnnouncements = async (
   )
   return data
 }
+
+// ── Watchlists ────────────────────────────────────────────────
+
+export interface WatchlistSummary {
+  id:          string
+  name:        string
+  description: string | null
+  item_count:  number
+  created_at:  string | null
+}
+
+export interface WatchlistDetail extends WatchlistSummary {
+  codes: string[]
+}
+
+export interface WatchlistsResponse {
+  watchlists: WatchlistSummary[]
+}
+
+export const getWatchlists = async (): Promise<WatchlistsResponse> => {
+  const { data } = await api.get('/api/v1/watchlist')
+  return data
+}
+
+export const createWatchlist = async (name: string, description?: string): Promise<WatchlistSummary> => {
+  const { data } = await api.post('/api/v1/watchlist', { name, description })
+  return data
+}
+
+export const getWatchlist = async (id: string): Promise<WatchlistDetail> => {
+  const { data } = await api.get(`/api/v1/watchlist/${id}`)
+  return data
+}
+
+export const updateWatchlist = async (id: string, name: string, description?: string): Promise<WatchlistSummary> => {
+  const { data } = await api.patch(`/api/v1/watchlist/${id}`, { name, description })
+  return data
+}
+
+export const deleteWatchlist = async (id: string): Promise<void> => {
+  await api.delete(`/api/v1/watchlist/${id}`)
+}
+
+export const addToWatchlist = async (watchlistId: string, asxCode: string): Promise<void> => {
+  await api.post(`/api/v1/watchlist/${watchlistId}/stocks`, { asx_code: asxCode })
+}
+
+export const removeFromWatchlist = async (watchlistId: string, asxCode: string): Promise<void> => {
+  await api.delete(`/api/v1/watchlist/${watchlistId}/stocks/${asxCode}`)
+}

@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import { User, CreditCard, Bell, Shield, CheckCircle2, Loader2, LogIn } from 'lucide-react'
@@ -23,6 +23,14 @@ const PRO_FEATURES = [
 ]
 
 export default function AccountPage() {
+  return (
+    <Suspense>
+      <AccountPageInner />
+    </Suspense>
+  )
+}
+
+function AccountPageInner() {
   const { user, loading } = useAuth()
   const searchParams      = useSearchParams()
   const upgradeStatus     = searchParams.get('upgrade')

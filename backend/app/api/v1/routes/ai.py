@@ -178,6 +178,8 @@ async def nl_screener(
     try:
         count_sql, data_sql, params = build_screener_sql(req)
         total  = (await db.execute(text(count_sql), params)).scalar() or 0
+        params["_limit"]  = req.page_size
+        params["_offset"] = (req.page - 1) * req.page_size
         rows   = (await db.execute(text(data_sql),  params)).mappings().all()
     except Exception as e:
         log.error("nl-screener DB error: %s", e)

@@ -33,8 +33,11 @@ _ASX_ANN_URL = (
     "?count={count}&market_sensitive=false"
 )
 _ASX_HEADERS = {
-    "User-Agent": "ASX-Screener/1.0",
-    "Accept":     "application/json",
+    "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept":          "application/json, text/plain, */*",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Referer":         "https://www.asx.com.au/",
+    "Origin":          "https://www.asx.com.au",
 }
 
 router = APIRouter()

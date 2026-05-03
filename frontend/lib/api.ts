@@ -1,10 +1,21 @@
 import axios from 'axios'
+import { getStoredAccessToken } from './auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://209.38.84.102:8000'
 
 export const api = axios.create({
   baseURL: API_BASE,
   timeout: 15000,
+})
+
+// Inject Bearer token on every request when one is available
+api.interceptors.request.use(config => {
+  const token = getStoredAccessToken()
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers['Authorization'] = `Bearer ${token}`
+  }
+  return config
 })
 
 // ── Types ────────────────────────────────────────────────────

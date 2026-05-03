@@ -1,4 +1,3 @@
-import { getCompany } from '@/lib/api'
 import { formatNumber, cn, SECTOR_COLORS } from '@/lib/utils'
 import { Globe, Building2, Users, Calendar, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
@@ -6,11 +5,18 @@ import { notFound } from 'next/navigation'
 import CompanyTabs from './CompanyTabs'
 import WatchlistButton from '@/components/WatchlistButton'
 
+// Server-side fetch uses internal URL (avoids routing through public IP)
+const INTERNAL_API = process.env.INTERNAL_API_URL || 'http://localhost:8000'
+
 export default async function CompanyPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params
   let company
   try {
-    company = await getCompany(code.toUpperCase())
+    const res = await fetch(`${INTERNAL_API}/api/v1/companies/${code.toUpperCase()}`, {
+      cache: 'no-store',
+    })
+    if (!res.ok) notFound()
+    company = await res.json()
   } catch {
     notFound()
   }

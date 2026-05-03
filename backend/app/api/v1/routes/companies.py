@@ -791,7 +791,7 @@ async def get_ai_summary(
     # ── Fetch screener data ───────────────────────────────────
     result = await db.execute(text("""
         SELECT u.company_name, c.gics_sector, c.gics_industry_group,
-               u.last_price, u.market_cap,
+               u.price, u.market_cap,
                u.pe_ratio, u.forward_pe, u.price_to_book, u.ev_to_ebitda,
                u.dividend_yield, u.grossed_up_yield, u.franking_pct, u.dps_ttm, u.payout_ratio,
                u.revenue_growth_1y, u.earnings_growth_1y, u.revenue_growth_3y_cagr,
@@ -813,15 +813,15 @@ async def get_ai_summary(
         raise HTTPException(status_code=404, detail="Screener data not found for this company")
 
     # ── Build prompt ──────────────────────────────────────────
-    above_sma50  = d["last_price"] and d["sma_50"]  and d["last_price"] > d["sma_50"]
-    above_sma200 = d["last_price"] and d["sma_200"] and d["last_price"] > d["sma_200"]
+    above_sma50  = d["price"] and d["sma_50"]  and d["price"] > d["sma_50"]
+    above_sma200 = d["price"] and d["sma_200"] and d["price"] > d["sma_200"]
 
     prompt = f"""You are a senior Australian equities analyst. Analyse {code} ({d['company_name'] or 'N/A'}) \
 using the financial data below and provide a concise, structured investment assessment.
 
 COMPANY DATA:
 Sector: {d['gics_sector'] or 'N/A'} | Industry: {d['gics_industry_group'] or 'N/A'}
-Price: {_fmt_price(d['last_price'])} | Market Cap: {_fmt_mcap(d['market_cap'])}
+Price: {_fmt_price(d['price'])} | Market Cap: {_fmt_mcap(d['market_cap'])}
 
 VALUATION:
 P/E: {_fmt_x(d['pe_ratio'])} | Fwd P/E: {_fmt_x(d['forward_pe'])} | P/B: {_fmt_x(d['price_to_book'])} | EV/EBITDA: {_fmt_x(d['ev_to_ebitda'])}

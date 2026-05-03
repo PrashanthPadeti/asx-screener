@@ -8,14 +8,16 @@ import {
 import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
   getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
+  getCompanyAnnouncements,
   type CompanyOverview, type FinancialsResponse, type PricesResponse,
   type DividendsResponse, type PeersResponse, type HalfYearlyResponse,
+  type Announcement, type AnnouncementsResponse,
 } from '@/lib/api'
 import {
   formatPrice, formatMarketCap, formatVolume,
   formatRatio, formatRatioChange, formatPctRaw, formatNumber,
 } from '@/lib/utils'
-import { TrendingUp, TrendingDown, Minus, TrendingUp as TrendUp } from 'lucide-react'
+import { TrendingUp, TrendingDown, Minus, FileText, ExternalLink, AlertTriangle, Tag } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -1323,6 +1325,208 @@ function PeersTab({
 }
 
 
+// ── Documents Tab ─────────────────────────────────────────────
+
+type AnnFilter = 'all' | 'sensitive' | 'type'
+
+function formatFileSize(kb: number | null): string {
+  if (kb == null) return ''
+  if (kb < 1024) return `${kb} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
+}
+
+function formatAnnDate(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleDateString('en-AU', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+
+function formatAnnTime(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
+function DocumentsTab({ code }: { code: string }) {
+  const [data, setData]       = useState<AnnouncementsResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState<string | null>(null)
+  const [filter, setFilter]   = useState<'all' | 'sensitive'>('all')
+  const [typeFilter, setTypeFilter] = useState<string>('all')
+
+  useEffect(() => {
+    setLoading(true)
+    getCompanyAnnouncements(code, 50)
+      .then(r => { setData(r); setLoading(false) })
+      .catch(e => { setError(String(e)); setLoading(false) })
+  }, [code])
+
+  if (loading) return (
+    <div className="space-y-3 animate-pulse">
+      {[1,2,3,4,5].map(i => (
+        <div key={i} className="flex gap-3 py-3 border-b border-gray-100">
+          <div className="h-4 bg-gray-100 rounded w-24 shrink-0" />
+          <div className="h-4 bg-gray-100 rounded flex-1" />
+        </div>
+      ))}
+    </div>
+  )
+
+  if (error) return (
+    <div className="text-center py-12">
+      <p className="text-red-500 font-medium">Could not load announcements</p>
+      <p className="text-sm text-gray-400 mt-1">{error}</p>
+    </div>
+  )
+
+  if (!data || data.data.length === 0) return (
+    <div className="text-center py-16">
+      <FileText className="w-8 h-8 text-gray-300 mx-auto mb-3" />
+      <p className="text-gray-500 font-medium">No announcements found</p>
+      <p className="text-sm text-gray-400 mt-1">This company may not have recent ASX filings.</p>
+    </div>
+  )
+
+  // Derive unique document types for the type filter
+  const types = Array.from(new Set(
+    data.data.map(a => a.document_type).filter(Boolean)
+  )).sort() as string[]
+
+  // Apply filters
+  const filtered = data.data.filter(a => {
+    if (filter === 'sensitive' && !a.market_sensitive) return false
+    if (typeFilter !== 'all' && a.document_type !== typeFilter) return false
+    return true
+  })
+
+  return (
+    <div className="space-y-4">
+      {/* Filter bar */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden text-sm">
+          {(['all', 'sensitive'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={[
+                'px-3 py-1.5 font-medium transition-colors',
+                filter === f
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-white text-gray-600 hover:bg-gray-50',
+              ].join(' ')}
+            >
+              {f === 'all' ? 'All' : '🔔 Market Sensitive'}
+            </button>
+          ))}
+        </div>
+
+        {types.length > 0 && (
+          <select
+            value={typeFilter}
+            onChange={e => setTypeFilter(e.target.value)}
+            className="text-sm border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600
+                       bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="all">All types</option>
+            {types.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
+
+        <span className="text-xs text-gray-400 ml-auto">
+          {filtered.length} of {data.total} announcements
+          {data.source === 'live' && (
+            <span className="ml-1 text-blue-400">· live</span>
+          )}
+        </span>
+      </div>
+
+      {/* Announcement list */}
+      {filtered.length === 0 ? (
+        <p className="text-center py-8 text-gray-400 text-sm">No announcements match the filter.</p>
+      ) : (
+        <div className="divide-y divide-gray-100">
+          {filtered.map(a => (
+            <div key={a.id} className="py-3 flex items-start gap-3 group hover:bg-gray-50 -mx-1 px-1 rounded-lg">
+              {/* Date column */}
+              <div className="w-28 shrink-0 text-right">
+                <div className="text-xs font-medium text-gray-700">{formatAnnDate(a.released_at)}</div>
+                <div className="text-xs text-gray-400">{formatAnnTime(a.released_at)}</div>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start gap-2 flex-wrap">
+                  {/* Sensitive badges */}
+                  {a.price_sensitive && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium
+                                     bg-red-50 text-red-600 border border-red-200 shrink-0">
+                      <AlertTriangle className="w-3 h-3" /> Price Sensitive
+                    </span>
+                  )}
+                  {a.market_sensitive && !a.price_sensitive && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium
+                                     bg-orange-50 text-orange-600 border border-orange-200 shrink-0">
+                      🔔 Market Sensitive
+                    </span>
+                  )}
+                </div>
+
+                {/* Title / link */}
+                {a.url ? (
+                  <a
+                    href={a.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-gray-800 hover:text-blue-600 font-medium flex items-start gap-1
+                               group-hover:underline mt-1"
+                  >
+                    <span className="leading-snug">{a.title || 'Untitled announcement'}</span>
+                    <ExternalLink className="w-3 h-3 mt-0.5 shrink-0 text-gray-400 group-hover:text-blue-500" />
+                  </a>
+                ) : (
+                  <p className="text-sm text-gray-800 font-medium mt-1">
+                    {a.title || 'Untitled announcement'}
+                  </p>
+                )}
+
+                {/* Meta row */}
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  {a.document_type && (
+                    <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                      <Tag className="w-3 h-3" />
+                      {a.document_type}
+                    </span>
+                  )}
+                  {a.num_pages != null && (
+                    <span className="text-xs text-gray-400">{a.num_pages}p</span>
+                  )}
+                  {a.file_size_kb != null && (
+                    <span className="text-xs text-gray-400">{formatFileSize(a.file_size_kb)}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* PDF icon */}
+              {a.url && (
+                <a
+                  href={a.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 text-gray-300 hover:text-red-500 transition-colors"
+                  title="Open PDF"
+                >
+                  <FileText className="w-5 h-5" />
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 // ── Coming Soon Tab ───────────────────────────────────────────
 
 function ComingSoonTab({ title, description }: { title: string; description: string }) {
@@ -1437,7 +1641,7 @@ export default function CompanyTabs({ code }: { code: string }) {
     { id: 'dividends',  label: 'Dividends'   },
     { id: 'peers',      label: 'Peers'       },
     { id: 'ai',         label: 'AI Insights', comingSoon: true },
-    { id: 'documents',  label: 'Documents',   comingSoon: true },
+    { id: 'documents',  label: 'Documents' },
   ]
 
   const isLoading = (tab: Tab) => {
@@ -1522,10 +1726,7 @@ export default function CompanyTabs({ code }: { code: string }) {
           )}
 
           {activeTab === 'documents' && (
-            <ComingSoonTab
-              title="Company Documents"
-              description="ASX announcements, annual reports, investor presentations, and half-year results in one place."
-            />
+            <DocumentsTab code={code} />
           )}
         </>
       ) : null}

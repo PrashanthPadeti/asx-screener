@@ -397,3 +397,28 @@ class HalfYearlyRow(BaseModel):
 class HalfYearlyResponse(BaseModel):
     asx_code: str
     periods: list[HalfYearlyRow]
+
+
+class AnnouncementRow(BaseModel):
+    """One ASX company announcement from market.asx_announcements."""
+    id:               int
+    asx_code:         str
+    announcement_id:  str
+    released_at:      Optional[datetime] = None
+    document_date:    Optional[date]     = None
+    title:            Optional[str]      = None
+    document_type:    Optional[str]      = None
+    url:              Optional[str]      = None
+    market_sensitive: bool               = False
+    price_sensitive:  bool               = False
+    num_pages:        Optional[int]      = None
+    file_size_kb:     Optional[int]      = None
+
+    model_config = {"from_attributes": True}
+
+
+class AnnouncementsResponse(BaseModel):
+    asx_code:  str
+    total:     int
+    data:      list[AnnouncementRow]
+    source:    str = "db"   # "db" | "live"

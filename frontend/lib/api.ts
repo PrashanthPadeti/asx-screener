@@ -698,3 +698,38 @@ export const getCompanyHalfYearly = async (asxCode: string, periods = 8): Promis
   const { data } = await api.get(`/api/v1/companies/${asxCode}/halfyearly`, { params: { periods } })
   return data
 }
+
+// ── Announcements ─────────────────────────────────────────────
+
+export interface Announcement {
+  id:               number
+  asx_code:         string
+  announcement_id:  string
+  released_at:      string | null   // ISO datetime
+  document_date:    string | null   // ISO date
+  title:            string | null
+  document_type:    string | null
+  url:              string | null
+  market_sensitive: boolean
+  price_sensitive:  boolean
+  num_pages:        number | null
+  file_size_kb:     number | null
+}
+
+export interface AnnouncementsResponse {
+  asx_code: string
+  total:    number
+  data:     Announcement[]
+  source:   'db' | 'live'
+}
+
+export const getCompanyAnnouncements = async (
+  asxCode: string,
+  limit = 30,
+): Promise<AnnouncementsResponse> => {
+  const { data } = await api.get(
+    `/api/v1/companies/${asxCode}/announcements`,
+    { params: { limit } },
+  )
+  return data
+}

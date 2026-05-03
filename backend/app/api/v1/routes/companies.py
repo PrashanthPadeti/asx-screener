@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from typing import Optional
 import math
+import logging
+
+import httpx
 
 from app.db.session import get_db
 from app.schemas.company import (
@@ -19,7 +22,20 @@ from app.schemas.company import (
     DividendRecord, DividendsSummary, DividendsResponse,
     PeerStock, PeersResponse,
     HalfYearlyRow, HalfYearlyResponse,
+    AnnouncementRow, AnnouncementsResponse,
 )
+
+log = logging.getLogger(__name__)
+
+# ASX public announcements API (no auth required)
+_ASX_ANN_URL = (
+    "https://www.asx.com.au/asx/1/company/{code}/announcements"
+    "?count={count}&market_sensitive=false"
+)
+_ASX_HEADERS = {
+    "User-Agent": "ASX-Screener/1.0",
+    "Accept":     "application/json",
+}
 
 router = APIRouter()
 
@@ -555,4 +571,138 @@ async def get_company_halfyearly(
     return HalfYearlyResponse(
         asx_code=asx_code.upper(),
         periods=[HalfYearlyRow(**dict(r)) for r in rows],
+    )
+
+
+# ── Company Announcements ─────────────────────────────────────
+
+@router.get("/{asx_code}/announcements", response_model=AnnouncementsResponse)
+async def get_company_announcements(
+    asx_code: str,
+    limit: int = Query(default=30, ge=1, le=100, description="Max announcements to return"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Returns recent ASX announcements for a company.
+
+    Checks market.asx_announcements (populated by daily download script) first.
+    If no DB records exist for this company, falls back to a live ASX API fetch
+    and caches the results for future requests.
+
+    PDF links are direct asx.com.au URLs — publicly accessible.
+    """
+    code = asx_code.upper()
+
+    # ── DB query ──────────────────────────────────────────────────────────────
+    result = await db.execute(text("""
+        SELECT id, asx_code, announcement_id, released_at, document_date,
+               title, document_type, url,
+               market_sensitive, price_sensitive, num_pages, file_size_kb
+        FROM market.asx_announcements
+        WHERE asx_code = :code
+        ORDER BY released_at DESC NULLS LAST
+        LIMIT :limit
+    """), {"code": code, "limit": limit})
+    rows = result.mappings().all()
+
+    if rows:
+        return AnnouncementsResponse(
+            asx_code=code,
+            total=len(rows),
+            data=[AnnouncementRow(**dict(r)) for r in rows],
+            source="db",
+        )
+
+    # ── Live fallback — fetch from ASX API and cache ──────────────────────────
+    log.info(f"Announcements: DB miss for {code} — fetching live from ASX API")
+    try:
+        async with httpx.AsyncClient(timeout=12) as client:
+            resp = await client.get(
+                _ASX_ANN_URL.format(code=code, count=min(limit, 20)),
+                headers=_ASX_HEADERS,
+            )
+        if resp.status_code == 404:
+            return AnnouncementsResponse(asx_code=code, total=0, data=[], source="live")
+        resp.raise_for_status()
+        announcements = resp.json().get("data", [])
+    except Exception as e:
+        log.warning(f"Announcements live fetch failed for {code}: {e}")
+        return AnnouncementsResponse(asx_code=code, total=0, data=[], source="live")
+
+    if not announcements:
+        return AnnouncementsResponse(asx_code=code, total=0, data=[], source="live")
+
+    # Cache to DB (fire-and-forget style — use sync insert via raw asyncpg)
+    insert_rows = []
+    for a in announcements:
+        ann_id = str(a.get("id") or "").strip()
+        if not ann_id:
+            continue
+        url = a.get("url") or ""
+        if not url and a.get("relative_url"):
+            url = "https://www.asx.com.au" + a["relative_url"]
+        size_kb = (int(a.get("size", 0) or 0)) // 1024 or None
+        insert_rows.append({
+            "code":    code,
+            "ann_id":  ann_id,
+            "rel_at":  a.get("document_release_date"),
+            "doc_dt":  a.get("document_date"),
+            "title":   (a.get("header") or a.get("document_type") or "").strip(),
+            "dtype":   (a.get("document_type") or "").strip(),
+            "url":     url,
+            "mkt_sen": bool(a.get("market_sensitive", False)),
+            "prc_sen": bool(a.get("price_sensitive", False)),
+            "pages":   a.get("number_of_pages"),
+            "size_kb": size_kb,
+        })
+
+    if insert_rows:
+        try:
+            await db.execute(text("""
+                INSERT INTO market.asx_announcements
+                    (asx_code, announcement_id, released_at, document_date,
+                     title, document_type, url,
+                     market_sensitive, price_sensitive, num_pages, file_size_kb)
+                VALUES
+                    (:code, :ann_id, :rel_at, :doc_dt,
+                     :title, :dtype, :url,
+                     :mkt_sen, :prc_sen, :pages, :size_kb)
+                ON CONFLICT (asx_code, announcement_id) DO NOTHING
+            """), insert_rows)
+            await db.commit()
+        except Exception as e:
+            log.warning(f"Announcements cache write failed for {code}: {e}")
+            await db.rollback()
+
+    # Build response from live data
+    live_rows = []
+    seq = 0
+    for a in announcements:
+        ann_id = str(a.get("id") or "").strip()
+        if not ann_id:
+            continue
+        url = a.get("url") or ""
+        if not url and a.get("relative_url"):
+            url = "https://www.asx.com.au" + a["relative_url"]
+        seq -= 1  # fake negative IDs so they don't clash with DB rows
+        live_rows.append(AnnouncementRow(
+            id=seq,
+            asx_code=code,
+            announcement_id=ann_id,
+            released_at=a.get("document_release_date"),
+            document_date=a.get("document_date"),
+            title=(a.get("header") or a.get("document_type") or "").strip() or None,
+            document_type=(a.get("document_type") or "").strip() or None,
+            url=url or None,
+            market_sensitive=bool(a.get("market_sensitive", False)),
+            price_sensitive=bool(a.get("price_sensitive", False)),
+            num_pages=a.get("number_of_pages"),
+            file_size_kb=(int(a.get("size", 0) or 0)) // 1024 or None,
+        ))
+
+    return AnnouncementsResponse(
+        asx_code=code,
+        total=len(live_rows),
+        data=live_rows,
+        source="live",
     )

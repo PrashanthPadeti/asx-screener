@@ -1866,10 +1866,7 @@ export default function CompanyTabs({ code }: { code: string }) {
             )}
 
             {activeTab === 'ai' && (
-              <ComingSoonTab
-                title="AI Insights"
-                description="AI-powered analysis of fundamentals, news sentiment, and earnings call transcripts. Powered by Claude."
-              />
+              <AIInsightsTab code={code} />
             )}
 
             {activeTab === 'documents' && (

@@ -9,24 +9,26 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt as _bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-# ── Password hashing ─────────────────────────────────────────────────────────
-
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
+# ── Password hashing (direct bcrypt — avoids passlib/bcrypt 4.x compat bug) ──
 
 def hash_password(plain: str) -> str:
     """Return bcrypt hash of *plain*. Truncated to 72 bytes (bcrypt limit)."""
-    return _pwd_context.hash(plain.encode()[:72])
+    secret = plain.encode("utf-8")[:72]
+    return _bcrypt.hashpw(secret, _bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """Return True if *plain* matches *hashed*."""
-    return _pwd_context.verify(plain.encode()[:72], hashed)
+    secret = plain.encode("utf-8")[:72]
+    try:
+        return _bcrypt.checkpw(secret, hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 
 # ── JWT access tokens ────────────────────────────────────────────────────────

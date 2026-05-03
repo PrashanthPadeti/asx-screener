@@ -1785,7 +1785,7 @@ export default function CompanyTabs({ code }: { code: string }) {
     { id: 'technicals', label: 'Technicals'  },
     { id: 'dividends',  label: 'Dividends'   },
     { id: 'peers',      label: 'Peers'       },
-    { id: 'ai',         label: 'AI Insights', comingSoon: true },
+    { id: 'ai',         label: 'AI Insights' },
     { id: 'documents',  label: 'Documents' },
   ]
 

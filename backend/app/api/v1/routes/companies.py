@@ -27,11 +27,12 @@ from app.schemas.company import (
 
 log = logging.getLogger(__name__)
 
-# ASX public announcements API (no auth required)
-_ASX_ANN_URL = (
-    "https://www.asx.com.au/asx/1/company/{code}/announcements"
-    "?count={count}&market_sensitive=false"
-)
+# ASX public announcements API — try multiple URL patterns (ASX changes these periodically)
+_ASX_ANN_URLS = [
+    "https://www.asx.com.au/asx/1/company/{code}/announcements?count={count}&market_sensitive=0",
+    "https://www.asx.com.au/asx/1/security/{code}/announcements?count={count}&market_sensitive=0",
+    "https://www.asx.com.au/asx/1/company/{code}/announcements?count={count}",
+]
 _ASX_HEADERS = {
     "User-Agent":      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept":          "application/json, text/plain, */*",
@@ -616,20 +617,29 @@ async def get_company_announcements(
             source="db",
         )
 
-    # ── Live fallback — fetch from ASX API and cache ──────────────────────────
+    # ── Live fallback — try multiple ASX URL patterns ────────────────────────
     log.info(f"Announcements: DB miss for {code} — fetching live from ASX API")
-    try:
-        async with httpx.AsyncClient(timeout=12) as client:
-            resp = await client.get(
-                _ASX_ANN_URL.format(code=code, count=min(limit, 20)),
-                headers=_ASX_HEADERS,
-            )
-        if resp.status_code == 404:
-            return AnnouncementsResponse(asx_code=code, total=0, data=[], source="live")
-        resp.raise_for_status()
-        announcements = resp.json().get("data", [])
-    except Exception as e:
-        log.warning(f"Announcements live fetch failed for {code}: {e}")
+    announcements = []
+    async with httpx.AsyncClient(timeout=12) as client:
+        for url_tpl in _ASX_ANN_URLS:
+            try:
+                url = url_tpl.format(code=code, count=min(limit, 20))
+                resp = await client.get(url, headers=_ASX_HEADERS)
+                log.info(f"Announcements: {url} → {resp.status_code}")
+                if resp.status_code == 200:
+                    body = resp.json()
+                    # Response is either {"data": [...]} or a list directly
+                    if isinstance(body, list):
+                        announcements = body
+                    else:
+                        announcements = body.get("data", [])
+                    if announcements:
+                        break  # success — stop trying other URLs
+            except Exception as e:
+                log.warning(f"Announcements fetch failed ({url_tpl}): {e}")
+                continue
+
+    if not announcements:
         return AnnouncementsResponse(asx_code=code, total=0, data=[], source="live")
 
     if not announcements:

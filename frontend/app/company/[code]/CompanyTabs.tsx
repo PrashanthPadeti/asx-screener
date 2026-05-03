@@ -1391,8 +1391,17 @@ function DocumentsTab({ code }: { code: string }) {
   if (!data || data.data.length === 0) return (
     <div className="text-center py-16">
       <FileText className="w-8 h-8 text-gray-300 mx-auto mb-3" />
-      <p className="text-gray-500 font-medium">No announcements found</p>
-      <p className="text-sm text-gray-400 mt-1">This company may not have recent ASX filings.</p>
+      <p className="text-gray-500 font-medium">No announcements available</p>
+      <p className="text-sm text-gray-400 mt-1 mb-4">ASX announcement data is not currently available via API.</p>
+      <a
+        href={`https://www.asx.com.au/markets/company/${code}.html`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors"
+      >
+        <ExternalLink className="w-4 h-4" />
+        View on ASX website
+      </a>
     </div>
   )
 

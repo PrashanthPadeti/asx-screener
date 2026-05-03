@@ -866,7 +866,7 @@ sentiment must be exactly one of: bullish, bearish, neutral
 Mention franking credits where they add meaningful value for Australian investors."""
 
     # ── Call Claude ───────────────────────────────────────────
-    MODEL = "claude-3-5-haiku-20241022"
+    MODEL = "claude-haiku-4-5-20251001"
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)

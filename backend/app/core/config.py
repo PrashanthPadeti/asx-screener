@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
+    STRIPE_PRO_PRICE_ID: str = ""   # e.g. price_1ABC...
 
     # Anthropic (Claude)
     ANTHROPIC_API_KEY: str = ""

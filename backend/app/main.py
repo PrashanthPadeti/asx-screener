@@ -16,7 +16,25 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
+
+    # ── Start alert scheduler ──────────────────────────────────
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from app.workers.alert_worker import check_alerts
+
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        check_alerts,
+        trigger="interval",
+        minutes=15,
+        id="alert_checker",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("Alert scheduler started (every 15 min)")
+
     yield
+
+    scheduler.shutdown(wait=False)
     logger.info("Shutting down...")
 
 
@@ -33,9 +51,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",            # Next.js dev
-        "http://209.38.84.102:3000",        # Server IP (staging)
-        "https://asxscreener.com.au",       # Production
+        "http://localhost:3000",
+        "http://209.38.84.102:3000",
+        "https://asxscreener.com.au",
         "https://www.asxscreener.com.au",
     ],
     allow_credentials=True,

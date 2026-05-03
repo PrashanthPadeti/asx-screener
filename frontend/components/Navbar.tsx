@@ -4,13 +4,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
   { href: '/',          label: 'Home',      icon: TrendingUp },
   { href: '/screener',  label: 'Screener',  icon: BarChart2 },
   { href: '/watchlist', label: 'Watchlist', icon: Star },
+  { href: '/alerts',    label: 'Alerts',    icon: Bell },
 ]
 
 const PLAN_BADGE: Record<string, string> = {

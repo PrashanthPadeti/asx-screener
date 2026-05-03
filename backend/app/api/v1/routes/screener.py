@@ -226,15 +226,15 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
                 params[f"{param_key}_{j}"] = v
 
         elif ftype == "boolean":
-            # boolean: just check truthy/falsy — no operator needed in SQL
+            # Embed literal TRUE/FALSE to avoid asyncpg type inference issues with boolean params
             if isinstance(f.value, bool):
                 bool_val = f.value
             elif isinstance(f.value, str):
                 bool_val = f.value.lower() in ("true", "1", "yes")
             else:
                 bool_val = bool(f.value)
-            where_clauses.append(f"({sql_col}) = :{param_key}")
-            params[param_key] = bool_val
+            literal = "TRUE" if bool_val else "FALSE"
+            where_clauses.append(f"({sql_col}) = {literal}")
 
         else:
             # number or text

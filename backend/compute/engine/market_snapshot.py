@@ -220,7 +220,9 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                     })
 
         # ── 4. Ex-dividend snapshots ──────────────────────────────────────────
-        exdiv_rows = (await session.execute(text(f"""
+        from datetime import timedelta
+        cutoff = snapshot_date + timedelta(days=EXDIV_DAYS)
+        exdiv_rows = (await session.execute(text("""
             SELECT
                 asx_code, company_name,
                 ex_div_date, pay_date,
@@ -231,24 +233,7 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
               AND ex_div_date BETWEEN :today AND :cutoff
             ORDER BY ex_div_date ASC
             LIMIT 50
-        """), {
-            "today":  snapshot_date,
-            "cutoff": f"{snapshot_date.year}-{snapshot_date.month:02d}-{min(snapshot_date.day + EXDIV_DAYS, 28):02d}",
-        })).mappings().all()
-
-        # Use interval properly
-        exdiv_rows = (await session.execute(text("""
-            SELECT
-                asx_code, company_name,
-                ex_div_date, pay_date,
-                dps_ttm, dividend_yield, franking_pct
-            FROM screener.universe
-            WHERE status = 'active'
-              AND ex_div_date IS NOT NULL
-              AND ex_div_date BETWEEN :today AND (:today + INTERVAL '14 days')
-            ORDER BY ex_div_date ASC
-            LIMIT 50
-        """), {"today": snapshot_date})).mappings().all()
+        """), {"today": snapshot_date, "cutoff": cutoff})).mappings().all()
 
         log.info("Ex-div upcoming: %d stocks", len(exdiv_rows))
 

@@ -174,7 +174,7 @@ export default async function HomePage() {
       total_stocks: 0, asx200_stocks: 0, stocks_with_dividends: 0,
       avg_dividend_yield: null, median_pe: null, total_market_cap_bn: null, universe_built_at: null,
     })),
-    getMarketMovers().catch((): MoversResponse => ({ gainers: [], losers: [], period: '1w' })),
+    getMarketMovers('1w').catch((): MoversResponse => ({ gainers: [], losers: [], period: '1w' })),
     getMarketSectors().catch((): SectorsResponse => ({ sectors: [] })),
   ])
 

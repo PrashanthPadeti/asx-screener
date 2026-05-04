@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid,
+  ComposedChart, LineChart, Line, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, CartesianGrid, Legend,
 } from 'recharts'
 import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
@@ -883,14 +883,21 @@ function FinancialsTab({
 
 // ── Technicals Tab ────────────────────────────────────────────
 
+const PRICE_PERIODS = ['1W', '1M', '3M', '6M', '1Y', '3Y', '5Y'] as const
+type PricePeriod = typeof PRICE_PERIODS[number]
+
 function TechnicalsTab({
   o,
   prices,
   pricesLoading,
+  pricePeriod,
+  onPeriodChange,
 }: {
   o: CompanyOverview
   prices: PricesResponse | null
   pricesLoading: boolean
+  pricePeriod: PricePeriod
+  onPeriodChange: (p: PricePeriod) => void
 }) {
   const rsiClass =
     o.rsi_14 == null ? 'text-gray-400' :
@@ -965,45 +972,106 @@ function TechnicalsTab({
         </div>
       )}
 
-      {/* Price chart */}
-      <Card title="Price History (1 Year)">
+      {/* Price + Volume chart */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        {/* Header with period selector */}
+        <div className="px-4 pt-4 pb-2 flex items-center justify-between flex-wrap gap-2">
+          <span className="text-sm font-semibold text-slate-700">Price &amp; Volume</span>
+          <div className="flex items-center gap-1">
+            {PRICE_PERIODS.map(p => (
+              <button
+                key={p}
+                onClick={() => onPeriodChange(p)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                  pricePeriod === p
+                    ? 'bg-blue-600 text-white'
+                    : 'text-slate-500 hover:bg-slate-100'
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {pricesLoading ? (
-          <div className="h-48 flex items-center justify-center text-sm text-gray-400">Loading chart…</div>
+          <div className="h-56 flex items-center justify-center text-sm text-slate-400">Loading chart…</div>
         ) : prices && prices.data.length > 0 ? (
-          <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={prices.data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis
-                dataKey="date"
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickFormatter={d => d.slice(5)} // "MM-DD"
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                domain={['auto', 'auto']}
-                tick={{ fontSize: 11, fill: '#9ca3af' }}
-                tickFormatter={v => `$${v.toFixed(2)}`}
-                width={60}
-              />
-              <Tooltip
-                formatter={(v) => [`$${Number(v).toFixed(3)}`, 'Close']}
-                labelFormatter={l => `Date: ${l}`}
-              />
-              <Line
-                type="monotone"
-                dataKey="close"
-                stroke="#2563eb"
-                dot={false}
-                strokeWidth={1.5}
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          <div className="px-2 pb-3">
+            {/* Price line chart */}
+            <ResponsiveContainer width="100%" height={180}>
+              <ComposedChart data={prices.data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis
+                  dataKey="date"
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  tickFormatter={d => d.slice(5)}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  yAxisId="price"
+                  domain={['auto', 'auto']}
+                  tick={{ fontSize: 10, fill: '#94a3b8' }}
+                  tickFormatter={v => `$${Number(v).toFixed(2)}`}
+                  width={58}
+                />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const close = payload.find(p => p.dataKey === 'close')
+                    const vol   = payload.find(p => p.dataKey === 'volume')
+                    return (
+                      <div className="bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs">
+                        <div className="font-semibold text-slate-600 mb-1">{label}</div>
+                        {close && <div className="text-blue-600">Close: ${Number(close.value).toFixed(3)}</div>}
+                        {vol   && <div className="text-slate-500">Vol: {Number(vol.value) >= 1_000_000 ? (Number(vol.value)/1_000_000).toFixed(1)+'M' : Number(vol.value) >= 1_000 ? (Number(vol.value)/1_000).toFixed(0)+'K' : vol.value}</div>}
+                      </div>
+                    )
+                  }}
+                />
+                <Line
+                  yAxisId="price"
+                  type="monotone"
+                  dataKey="close"
+                  stroke="#2563eb"
+                  dot={false}
+                  strokeWidth={1.5}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+
+            {/* Volume bar chart */}
+            <ResponsiveContainer width="100%" height={70}>
+              <ComposedChart data={prices.data} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
+                <XAxis dataKey="date" hide />
+                <YAxis
+                  tick={{ fontSize: 9, fill: '#94a3b8' }}
+                  tickFormatter={v => Number(v) >= 1_000_000 ? (Number(v)/1_000_000).toFixed(0)+'M' : Number(v) >= 1_000 ? (Number(v)/1_000).toFixed(0)+'K' : String(v)}
+                  width={58}
+                />
+                <Tooltip
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const vol = payload[0]
+                    return (
+                      <div className="bg-white border border-slate-200 rounded-lg shadow-lg px-3 py-2 text-xs">
+                        <div className="font-semibold text-slate-600 mb-1">{label}</div>
+                        <div className="text-slate-500">Vol: {Number(vol.value) >= 1_000_000 ? (Number(vol.value)/1_000_000).toFixed(1)+'M' : Number(vol.value) >= 1_000 ? (Number(vol.value)/1_000).toFixed(0)+'K' : vol.value}</div>
+                      </div>
+                    )
+                  }}
+                />
+                <Bar dataKey="volume" fill="#cbd5e1" radius={[1,1,0,0]} maxBarSize={8} />
+              </ComposedChart>
+            </ResponsiveContainer>
+            <div className="text-center text-xs text-slate-400 mt-1">Volume</div>
+          </div>
         ) : (
-          <div className="h-48 flex items-center justify-center text-sm text-gray-400">
+          <div className="h-56 flex items-center justify-center text-sm text-slate-400">
             Price chart data not available
           </div>
         )}
-      </Card>
+      </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
@@ -1786,6 +1854,9 @@ export default function CompanyTabs({ code }: { code: string }) {
   // Financial period toggle (annual vs half-yearly)
   const [financialPeriod, setFinancialPeriod] = useState<FinancialPeriod>('annual')
 
+  // Price chart period
+  const [pricePeriod, setPricePeriod] = useState<PricePeriod>('1Y')
+
   // Anomaly flags (Week 13)
   const [anomalyFlags, setAnomalyFlags] = useState<AnomalyFlag[]>([])
 
@@ -1802,16 +1873,17 @@ export default function CompanyTabs({ code }: { code: string }) {
       .catch(() => {}) // silently ignore — table may not exist yet
   }, [code])
 
-  // Lazy-load per tab
+  // Lazy-load per tab — re-fetch prices when period changes
   useEffect(() => {
-    if (activeTab === 'technicals' && !prices) {
+    if (activeTab === 'technicals') {
       setPricesLoading(true)
-      getCompanyPrices(code, '1y')
+      const apiPeriod = pricePeriod.toLowerCase()
+      getCompanyPrices(code, apiPeriod)
         .then(setPrices)
-        .catch(() => setPrices({ asx_code: code, period: '1y', data: [] }))
+        .catch(() => setPrices({ asx_code: code, period: apiPeriod, data: [] }))
         .finally(() => setPricesLoading(false))
     }
-  }, [activeTab, code, prices])
+  }, [activeTab, code, pricePeriod])
 
   useEffect(() => {
     if (activeTab === 'financials' && !financials) {
@@ -1949,7 +2021,13 @@ export default function CompanyTabs({ code }: { code: string }) {
             )}
 
             {activeTab === 'technicals' && (
-              <TechnicalsTab o={overview} prices={prices} pricesLoading={pricesLoading} />
+              <TechnicalsTab
+                o={overview}
+                prices={prices}
+                pricesLoading={pricesLoading}
+                pricePeriod={pricePeriod}
+                onPeriodChange={setPricePeriod}
+              />
             )}
 
             {activeTab === 'dividends' && (

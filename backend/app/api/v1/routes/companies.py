@@ -310,6 +310,7 @@ async def get_company_prices(
     Returns ascending date order suitable for charting.
     """
     period_intervals: dict[str, str] = {
+        "1w":  "7 days",
         "1m":  "1 month",
         "3m":  "3 months",
         "6m":  "6 months",

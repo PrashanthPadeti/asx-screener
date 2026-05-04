@@ -708,45 +708,21 @@ async def get_screener_fields():
 
 @router.get("/presets")
 async def get_screener_presets():
-    """Pre-built screen templates that power the Quick Screens section."""
+    """Pre-built screen templates. premium=True presets require Pro plan or higher."""
     return {
         "presets": [
+            # ── Free presets ──────────────────────────────────────────────────
             {
                 "id":          "value_franked",
                 "name":        "Value + Fully Franked",
                 "description": "Low PE, 100% franked dividends, profitable ASX stocks",
                 "icon":        "shield",
+                "premium":     False,
                 "filters": [
-                    {"field": "pe_ratio",     "operator": "lte", "value": 15},
-                    {"field": "franking_pct", "operator": "eq",  "value": 100},
+                    {"field": "pe_ratio",      "operator": "lte", "value": 15},
+                    {"field": "franking_pct",  "operator": "eq",  "value": 100},
                     {"field": "dividend_yield","operator": "gte", "value": 3},
-                    {"field": "net_margin",   "operator": "gt",  "value": 0},
-                ],
-                "sort_by": "grossed_up_yield", "sort_dir": "desc",
-            },
-            {
-                "id":          "quality_growth",
-                "name":        "Quality Growth",
-                "description": "High sustained ROE, growing revenue, low debt",
-                "icon":        "trending-up",
-                "filters": [
-                    {"field": "avg_roe_3y",        "operator": "gte", "value": 15},
-                    {"field": "revenue_growth_1y",  "operator": "gte", "value": 10},
-                    {"field": "debt_to_equity",     "operator": "lte", "value": 0.5},
-                    {"field": "piotroski_f_score",  "operator": "gte", "value": 6},
-                ],
-                "sort_by": "avg_roe_3y", "sort_dir": "desc",
-            },
-            {
-                "id":          "income_asx200",
-                "name":        "ASX 200 Income",
-                "description": "Blue-chip income stocks with franking credits",
-                "icon":        "dollar-sign",
-                "filters": [
-                    {"field": "is_asx200",              "operator": "eq",  "value": True},
-                    {"field": "grossed_up_yield",        "operator": "gte", "value": 5},
-                    {"field": "dividend_consecutive_yrs","operator": "gte", "value": 3},
-                    {"field": "payout_ratio",            "operator": "lte", "value": 90},
+                    {"field": "net_margin",    "operator": "gt",  "value": 0},
                 ],
                 "sort_by": "grossed_up_yield", "sort_dir": "desc",
             },
@@ -755,6 +731,7 @@ async def get_screener_presets():
                 "name":        "Price Momentum",
                 "description": "Strong trend — above all key MAs with ADX confirmation",
                 "icon":        "zap",
+                "premium":     False,
                 "filters": [
                     {"field": "return_3m",    "operator": "gte", "value": 10},
                     {"field": "above_sma200", "operator": "eq",  "value": True},
@@ -764,22 +741,11 @@ async def get_screener_presets():
                 "sort_by": "return_3m", "sort_dir": "desc",
             },
             {
-                "id":          "turnaround",
-                "name":        "Potential Turnaround",
-                "description": "Oversold stocks near 52W low with positive FCF",
-                "icon":        "rotate-ccw",
-                "filters": [
-                    {"field": "rsi_14",  "operator": "lte", "value": 35},
-                    {"field": "fcf_fy0", "operator": "gt",  "value": 0},
-                    {"field": "debt_to_equity", "operator": "lte", "value": 1.5},
-                ],
-                "sort_by": "rsi_14", "sort_dir": "asc",
-            },
-            {
                 "id":          "piotroski_strong",
                 "name":        "Piotroski Strong (F ≥ 7)",
                 "description": "Financially healthy stocks by Piotroski F-Score",
                 "icon":        "award",
+                "premium":     False,
                 "filters": [
                     {"field": "piotroski_f_score", "operator": "gte", "value": 7},
                     {"field": "market_cap",        "operator": "gte", "value": 100},
@@ -787,10 +753,118 @@ async def get_screener_presets():
                 "sort_by": "piotroski_f_score", "sort_dir": "desc",
             },
             {
-                "id":          "halfyearly_acceleration",
-                "name":        "Half-Yearly Acceleration ★",
-                "description": "Revenue and EPS accelerating half-over-half — unique ASX insight",
+                "id":          "turnaround",
+                "name":        "Potential Turnaround",
+                "description": "Oversold stocks near 52W low with positive FCF",
+                "icon":        "rotate-ccw",
+                "premium":     False,
+                "filters": [
+                    {"field": "rsi_14",            "operator": "lte", "value": 35},
+                    {"field": "fcf_fy0",           "operator": "gt",  "value": 0},
+                    {"field": "debt_to_equity",    "operator": "lte", "value": 1.5},
+                ],
+                "sort_by": "rsi_14", "sort_dir": "asc",
+            },
+
+            # ── Pro+ presets ──────────────────────────────────────────────────
+            {
+                "id":          "dividend_income",
+                "name":        "Dividend Income Portfolio",
+                "description": "High-yield franked stocks with sustainable payouts for income investors",
+                "icon":        "dollar-sign",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "dividend_yield",         "operator": "gte", "value": 4},
+                    {"field": "franking_pct",           "operator": "gte", "value": 70},
+                    {"field": "payout_ratio",           "operator": "lte", "value": 85},
+                    {"field": "dividend_consecutive_yrs","operator": "gte", "value": 3},
+                    {"field": "net_margin",             "operator": "gt",  "value": 0},
+                ],
+                "sort_by": "grossed_up_yield", "sort_dir": "desc",
+            },
+            {
+                "id":          "quality_undervalued",
+                "name":        "Quality Undervalued",
+                "description": "High-quality businesses trading at a discount — low PE with strong fundamentals",
+                "icon":        "search",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "pe_ratio",          "operator": "lte", "value": 15},
+                    {"field": "piotroski_f_score", "operator": "gte", "value": 7},
+                    {"field": "roe",               "operator": "gte", "value": 12},
+                    {"field": "debt_to_equity",    "operator": "lte", "value": 0.5},
+                    {"field": "net_margin",        "operator": "gt",  "value": 5},
+                ],
+                "sort_by": "quality_score", "sort_dir": "desc",
+            },
+            {
+                "id":          "high_growth",
+                "name":        "Fast Growing Companies",
+                "description": "Top-line and earnings accelerating — identify tomorrow's compounders today",
+                "icon":        "trending-up",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "revenue_growth_1y",  "operator": "gte", "value": 20},
+                    {"field": "earnings_growth_1y", "operator": "gte", "value": 15},
+                    {"field": "net_margin",         "operator": "gt",  "value": 0},
+                    {"field": "market_cap",         "operator": "gte", "value": 50},
+                ],
+                "sort_by": "earnings_growth_1y", "sort_dir": "desc",
+            },
+            {
+                "id":          "ma_crossover",
+                "name":        "50/200-Day MA Crossover",
+                "description": "Golden cross signal — price above both key moving averages with momentum",
                 "icon":        "bar-chart-2",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "above_sma50",  "operator": "eq",  "value": True},
+                    {"field": "above_sma200", "operator": "eq",  "value": True},
+                    {"field": "return_1m",    "operator": "gte", "value": 3},
+                    {"field": "market_cap",   "operator": "gte", "value": 100},
+                ],
+                "sort_by": "momentum_score", "sort_dir": "desc",
+            },
+            {
+                "id":          "new_52w_highs",
+                "name":        "New 52-Week Highs",
+                "description": "Stocks at or near all-time highs — breakout candidates with strong momentum",
+                "icon":        "arrow-up",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "pct_from_52w_high", "operator": "gte", "value": -5},
+                    {"field": "return_3m",         "operator": "gte", "value": 5},
+                    {"field": "volume",            "operator": "gte", "value": 100000},
+                ],
+                "sort_by": "return_3m", "sort_dir": "desc",
+            },
+            {
+                "id":          "deep_value_growth",
+                "name":        "P/E < 10 + EPS Growth",
+                "description": "Deep value stocks with earnings growth — the rarest and most rewarding combination",
+                "icon":        "star",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "pe_ratio",          "operator": "lte", "value": 10},
+                    {"field": "pe_ratio",          "operator": "gt",  "value": 0},
+                    {"field": "earnings_growth_1y","operator": "gte", "value": 5},
+                    {"field": "market_cap",        "operator": "gte", "value": 50},
+                ],
+                "sort_by": "earnings_growth_1y", "sort_dir": "desc",
+            },
+            {
+                "id":          "halfyearly_acceleration",
+                "name":        "Half-Yearly Acceleration",
+                "description": "Revenue and EPS accelerating half-over-half — unique ASX reporting insight",
+                "icon":        "activity",
+                "premium":     True,
+                "min_plan":    "pro",
                 "filters": [
                     {"field": "revenue_growth_hoh", "operator": "gte", "value": 10},
                     {"field": "eps_growth_hoh",     "operator": "gte", "value": 10},

@@ -13,10 +13,11 @@ import {
 import {
   Plus, Trash2, Play, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
-  Sparkles, Search,
+  Sparkles, Search, Lock,
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
+import { useAuth } from '@/lib/auth'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -360,6 +361,12 @@ function ColumnPicker({
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function ScreenerPage() {
+  const { user } = useAuth()
+  const userPlan = user?.plan ?? 'free'
+  const isPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+
   // Filter state
   const [filters, setFilters] = useState<FilterRow[]>([])
 
@@ -468,6 +475,10 @@ export default function ScreenerPage() {
   }
 
   const applyPreset = (preset: ScreenerPreset) => {
+    if (preset.premium && !isPro) {
+      setShowUpgradeModal(true)
+      return
+    }
     const rows: FilterRow[] = preset.filters.map(f => ({
       id:       nextId++,
       field:    f.field,
@@ -663,9 +674,15 @@ export default function ScreenerPage() {
           <div className="flex items-center gap-2 mb-3">
             <Zap className="w-4 h-4 text-yellow-500" />
             <span className="text-sm font-semibold text-gray-700">Quick Screens</span>
+            {!isPro && (
+              <span className="ml-auto text-xs text-slate-400">
+                <Lock className="w-3 h-3 inline mr-1" />Pro screens below
+              </span>
+            )}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {presets.map(p => (
+          {/* Free presets */}
+          <div className="flex flex-wrap gap-2 mb-3">
+            {presets.filter(p => !p.premium).map(p => (
               <button key={p.id} onClick={() => applyPreset(p)}
                 className={cn(
                   'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors',
@@ -676,6 +693,59 @@ export default function ScreenerPage() {
                 {p.name}
               </button>
             ))}
+          </div>
+          {/* Premium presets */}
+          <div className="border-t border-slate-100 pt-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Pro Screens</span>
+              {!isPro && <Lock className="w-3 h-3 text-amber-500" />}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {presets.filter(p => p.premium).map(p => (
+                <button key={p.id} onClick={() => applyPreset(p)}
+                  title={p.description}
+                  className={cn(
+                    'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors flex items-center gap-1.5',
+                    activePreset === p.id
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : isPro
+                        ? 'bg-white text-gray-700 border-amber-200 hover:border-amber-400 hover:text-amber-700'
+                        : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 cursor-pointer'
+                  )}>
+                  {!isPro && <Lock className="w-3 h-3 flex-shrink-0" />}
+                  {p.name}
+                  {!isPro && (
+                    <span className="text-[10px] bg-amber-500 text-white rounded px-1 py-0.5 font-bold leading-none">PRO</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade modal */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-6 h-6 text-amber-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Pro Screen</h2>
+            <p className="text-sm text-slate-500 mb-5">
+              This screen is available on the <span className="font-semibold text-amber-600">Pro plan</span> and above.
+              Upgrade to unlock all 7 premium screens, NL Screener, CSV export, and more.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowUpgradeModal(false)}
+                className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                Maybe later
+              </button>
+              <Link href="/account" onClick={() => setShowUpgradeModal(false)}
+                className="flex-1 px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
+                Upgrade to Pro
+              </Link>
+            </div>
           </div>
         </div>
       )}

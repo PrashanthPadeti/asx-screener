@@ -228,6 +228,8 @@ export interface ScreenerPreset {
   filters: ScreenerFilter[]
   sort_by: string
   sort_dir: string
+  premium?: boolean
+  min_plan?: string   // 'pro' | 'premium'
 }
 
 export interface ScreenerPresetsResponse {

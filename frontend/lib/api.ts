@@ -657,6 +657,39 @@ export const getMarketDashboard = async (): Promise<MarketDashboard> => {
   return data
 }
 
+export interface SignalStock {
+  asx_code: string
+  company_name: string | null
+  sector: string | null
+  price: number | null
+  market_cap: number | null
+  high_52w: number | null
+  low_52w: number | null
+  volume: number | null
+  avg_volume_20d: number | null
+  return_1w: number | null
+  return_1m: number | null
+  pct_from_high?: number
+  pct_from_low?: number
+  vol_ratio?: number
+}
+
+export interface MarketSignals {
+  near_52w_high: SignalStock[]
+  near_52w_low:  SignalStock[]
+  volume_surge:  SignalStock[]
+}
+
+export const getMarketMovers = async (period: '1w' | '1m' | '3m', limit = 10): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
+  const { data } = await api.get('/api/v1/market/movers', { params: { period, limit } })
+  return data
+}
+
+export const getMarketSignals = async (): Promise<MarketSignals> => {
+  const { data } = await api.get('/api/v1/market/signals')
+  return data
+}
+
 export const getCompanyOverview = async (asxCode: string): Promise<CompanyOverview> => {
   const { data } = await api.get(`/api/v1/companies/${asxCode}/overview`)
   return data

@@ -4,7 +4,7 @@ Dashboard reads from pre-computed snapshot tables populated by
 compute/engine/market_snapshot.py after each nightly universe build.
 screener.universe is never queried here — snapshot tables own market-level data.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -60,43 +60,34 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/movers", response_model=MoversResponse)
-async def market_movers(db: AsyncSession = Depends(get_db)):
+async def market_movers(
+    period: str = Query("1w", pattern="^(1w|1m|3m)$"),
+    limit: int  = Query(10, ge=5, le=25),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    Top 5 weekly gainers and top 5 losers.
-    Filters to stocks with price > $0.10 and market cap > $50M to exclude micro-caps.
+    Top gainers and losers for a given period (1w / 1m / 3m).
+    Filters to stocks with price > $0.10 and market cap > $50M.
     """
-    cols = """
-        asx_code,
-        company_name,
-        sector,
-        price,
-        return_1w,
-        return_1m,
-        market_cap
-    """
-    base_where = """
-        WHERE return_1w IS NOT NULL
-          AND status = 'Active'
+    col_map = {"1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
+    ret_col = col_map[period]
+
+    base_where = f"""
+        WHERE {ret_col} IS NOT NULL
           AND price > 0.10
           AND market_cap > 50
     """
-    gainers_sql = text(f"""
-        SELECT {cols}
-        FROM screener.universe
-        {base_where}
-        ORDER BY return_1w DESC
-        LIMIT 5
-    """)
-    losers_sql = text(f"""
-        SELECT {cols}
-        FROM screener.universe
-        {base_where}
-        ORDER BY return_1w ASC
-        LIMIT 5
-    """)
+    cols = f"asx_code, company_name, sector, price, return_1w, return_1m, return_3m, market_cap"
 
-    gainers_rows = (await db.execute(gainers_sql)).mappings().all()
-    losers_rows  = (await db.execute(losers_sql)).mappings().all()
+    gainers_rows = (await db.execute(text(f"""
+        SELECT {cols} FROM screener.universe
+        {base_where} ORDER BY {ret_col} DESC LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    losers_rows = (await db.execute(text(f"""
+        SELECT {cols} FROM screener.universe
+        {base_where} ORDER BY {ret_col} ASC LIMIT :lim
+    """), {"lim": limit})).mappings().all()
 
     def to_mover(r) -> MoverStock:
         return MoverStock(
@@ -112,8 +103,87 @@ async def market_movers(db: AsyncSession = Depends(get_db)):
     return MoversResponse(
         gainers=[to_mover(r) for r in gainers_rows],
         losers=[to_mover(r) for r in losers_rows],
-        period="1w",
+        period=period,
     )
+
+
+@router.get("/signals")
+async def market_signals(
+    limit: int = Query(15, ge=5, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Market signals: 52-week highs/lows and volume surges.
+    All sourced live from screener.universe.
+    """
+    base = "price > 0.10 AND market_cap > 20"
+
+    cols = """
+        asx_code, company_name, sector, price, market_cap,
+        high_52w, low_52w, volume, avg_volume_20d,
+        return_1w, return_1m
+    """
+
+    # Near 52W high (within 5%)
+    high_rows = (await db.execute(text(f"""
+        SELECT {cols},
+               ROUND(((price - high_52w) / NULLIF(high_52w,0) * 100)::numeric, 1) AS pct_from_high
+        FROM screener.universe
+        WHERE {base}
+          AND high_52w IS NOT NULL AND high_52w > 0
+          AND price >= high_52w * 0.95
+        ORDER BY price / NULLIF(high_52w,0) DESC
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    # Near 52W low (within 5%)
+    low_rows = (await db.execute(text(f"""
+        SELECT {cols},
+               ROUND(((price - low_52w) / NULLIF(low_52w,0) * 100)::numeric, 1) AS pct_from_low
+        FROM screener.universe
+        WHERE {base}
+          AND low_52w IS NOT NULL AND low_52w > 0
+          AND price <= low_52w * 1.05
+        ORDER BY price / NULLIF(low_52w,0) ASC
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    # Volume surge (volume > 2× 20D average)
+    vol_rows = (await db.execute(text(f"""
+        SELECT {cols},
+               ROUND((volume::numeric / NULLIF(avg_volume_20d,0)), 1) AS vol_ratio
+        FROM screener.universe
+        WHERE {base}
+          AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL
+          AND avg_volume_20d > 10000
+          AND volume > avg_volume_20d * 2
+        ORDER BY volume::numeric / NULLIF(avg_volume_20d,0) DESC
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    def _row(r, extra_key=None):
+        d = {
+            "asx_code":      r["asx_code"],
+            "company_name":  r["company_name"],
+            "sector":        r["sector"],
+            "price":         float(r["price"]) if r["price"] is not None else None,
+            "market_cap":    float(r["market_cap"]) if r["market_cap"] is not None else None,
+            "high_52w":      float(r["high_52w"]) if r["high_52w"] is not None else None,
+            "low_52w":       float(r["low_52w"]) if r["low_52w"] is not None else None,
+            "volume":        int(r["volume"]) if r["volume"] is not None else None,
+            "avg_volume_20d":int(r["avg_volume_20d"]) if r["avg_volume_20d"] is not None else None,
+            "return_1w":     float(r["return_1w"]) if r["return_1w"] is not None else None,
+            "return_1m":     float(r["return_1m"]) if r["return_1m"] is not None else None,
+        }
+        if extra_key and r[extra_key] is not None:
+            d[extra_key] = float(r[extra_key])
+        return d
+
+    return {
+        "near_52w_high":  [_row(r, "pct_from_high") for r in high_rows],
+        "near_52w_low":   [_row(r, "pct_from_low")  for r in low_rows],
+        "volume_surge":   [_row(r, "vol_ratio")      for r in vol_rows],
+    }
 
 
 @router.get("/sectors", response_model=SectorsResponse)

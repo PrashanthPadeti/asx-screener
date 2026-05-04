@@ -178,6 +178,7 @@ def seed_funds(cur, codes: Optional[list] = None):
             row[6],   # mer_pct
             row[7],   # distribution_freq
             row[8],   # is_hedged
+            True,     # is_active
         )
         for row in catalogue
     ]

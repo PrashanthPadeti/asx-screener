@@ -583,11 +583,6 @@ export const getMarketSummary = async (): Promise<MarketSummary> => {
   return data
 }
 
-export const getMarketMovers = async (): Promise<MoversResponse> => {
-  const { data } = await api.get('/api/v1/market/movers')
-  return data
-}
-
 export const getMarketSectors = async (): Promise<SectorsResponse> => {
   const { data } = await api.get('/api/v1/market/sectors')
   return data
@@ -1080,5 +1075,81 @@ export const importTransactionsCsv = async (portfolioId: string, file: File): Pr
   const { data } = await api.post(`/api/v1/portfolio/${portfolioId}/import/transactions`, form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
+  return data
+}
+
+// ── Indices ───────────────────────────────────────────────────
+
+export interface IndexPrice {
+  index_code: string
+  display_name: string
+  price_date: string | null
+  close_price: number | null
+  return_1d: number | null
+  return_1w: number | null
+  return_1m: number | null
+  return_3m: number | null
+  return_6m: number | null
+  return_1y: number | null
+  return_ytd: number | null
+  high_52w: number | null
+  low_52w: number | null
+}
+
+export interface IndicesResponse {
+  indices: IndexPrice[]
+  as_of: string | null
+}
+
+export const getIndices = async (): Promise<IndicesResponse> => {
+  const { data } = await api.get('/api/v1/market-data/indices')
+  return data
+}
+
+export const getIndexHistory = async (indexCode: string, days = 365): Promise<{ index_code: string; history: { date: string; close: number | null; return_1d: number | null }[] }> => {
+  const { data } = await api.get(`/api/v1/market-data/indices/${indexCode}/history`, { params: { days } })
+  return data
+}
+
+// ── ETF / Managed Funds ───────────────────────────────────────
+
+export interface FundRow {
+  asx_code: string
+  fund_name: string
+  fund_type: 'ETF' | 'LIC' | 'MANAGED'
+  asset_class: string | null
+  index_tracked: string | null
+  fund_manager: string | null
+  mer_pct: number | null
+  funds_under_mgmt_bn: number | null
+  distribution_freq: string | null
+  is_hedged: boolean | null
+  close_price: number | null
+  return_1d: number | null
+  return_1w: number | null
+  return_1m: number | null
+  return_1y: number | null
+  return_ytd: number | null
+  distribution_yield: number | null
+  nav_discount_pct: number | null
+  high_52w: number | null
+  low_52w: number | null
+  price_date: string | null
+}
+
+export interface FundsResponse {
+  funds: FundRow[]
+  total: number
+  as_of: string | null
+}
+
+export const getFunds = async (params?: {
+  fund_type?: 'ETF' | 'LIC' | 'MANAGED'
+  asset_class?: string
+  sort?: string
+  order?: 'asc' | 'desc'
+  limit?: number
+}): Promise<FundsResponse> => {
+  const { data } = await api.get('/api/v1/market-data/funds', { params })
   return data
 }

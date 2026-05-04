@@ -20,11 +20,18 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
     Latest daily performance for all active ASX indices.
     Falls back to empty list if index_prices table has no data yet.
     """
-    # Latest date across the table
+    # Latest date that has benchmark index data (ASX200 as canonical)
     date_row = (await db.execute(text(
-        "SELECT MAX(price_date) AS latest FROM market.index_prices"
+        "SELECT MAX(price_date) AS latest FROM market.index_prices WHERE index_code = 'ASX200'"
     ))).mappings().fetchone()
-    as_of = date_row["latest"] if date_row else None
+    as_of = date_row["latest"] if date_row and date_row["latest"] else None
+
+    if as_of is None:
+        # Fallback: any date in the table
+        date_row2 = (await db.execute(text(
+            "SELECT MAX(price_date) AS latest FROM market.index_prices"
+        ))).mappings().fetchone()
+        as_of = date_row2["latest"] if date_row2 and date_row2["latest"] else None
 
     if as_of is None:
         # No data yet — return metadata only, no price info
@@ -59,8 +66,12 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
             p.high_52w,
             p.low_52w
         FROM market.indices i
-        LEFT JOIN market.index_prices p
-               ON p.index_code = i.index_code AND p.price_date = :d
+        LEFT JOIN LATERAL (
+            SELECT * FROM market.index_prices
+            WHERE index_code = i.index_code
+            ORDER BY price_date DESC
+            LIMIT 1
+        ) p ON TRUE
         WHERE i.is_active = TRUE
         ORDER BY
             CASE i.index_code
@@ -72,7 +83,7 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
                 WHEN 'AXJO'   THEN 6
                 ELSE 99
             END
-    """), {"d": as_of})).mappings().all()
+    """))).mappings().all()
 
     def _f(v): return float(v) if v is not None else None
 

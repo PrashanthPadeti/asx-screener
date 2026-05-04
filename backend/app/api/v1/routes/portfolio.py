@@ -204,7 +204,7 @@ async def get_performance(
         text(f"""
             SELECT asx_code, company_name, sector, price, dps_ttm, dividend_yield, franking_pct
             FROM screener.universe
-            WHERE asx_code IN ({placeholders}) AND status = 'Active'
+            WHERE asx_code IN ({placeholders})
         """),
         code_params,
     )).mappings().all()

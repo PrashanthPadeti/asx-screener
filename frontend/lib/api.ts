@@ -591,6 +591,70 @@ export const getMarketSectors = async (): Promise<SectorsResponse> => {
   return data
 }
 
+// ── Market Dashboard ──────────────────────────────────────────
+
+export interface IndexSnapshot {
+  stock_count: number
+  gainers: number
+  losers: number
+  unchanged: number
+  avg_return_1w: number | null
+  total_market_cap_bn: number | null
+}
+
+export interface DashboardStock {
+  asx_code: string
+  company_name: string
+  sector: string | null
+  price: number | null
+  return_1w: number | null
+  market_cap: number | null
+}
+
+export interface ActiveStock extends DashboardStock {
+  volume: number | null
+  avg_volume_20d: number | null
+}
+
+export interface ShortedStock extends DashboardStock {
+  short_pct: number | null
+}
+
+export interface SectorHeatmapItem {
+  sector: string
+  stock_count: number
+  avg_return_1w: number | null
+  total_market_cap_bn: number | null
+}
+
+export interface ExDivStock {
+  asx_code: string
+  company_name: string
+  ex_div_date: string | null
+  pay_date: string | null
+  dps_ttm: number | null
+  dividend_yield: number | null
+  franking_pct: number | null
+}
+
+export interface MarketDashboard {
+  asx200: IndexSnapshot
+  asx300: IndexSnapshot
+  sector_heatmap: SectorHeatmapItem[]
+  top_gainers: DashboardStock[]
+  top_losers: DashboardStock[]
+  most_active: ActiveStock[]
+  most_shorted: ShortedStock[]
+  upcoming_exdiv: ExDivStock[]
+  period: string
+  universe_built_at: string | null
+}
+
+export const getMarketDashboard = async (): Promise<MarketDashboard> => {
+  const { data } = await api.get('/api/v1/market/dashboard')
+  return data
+}
+
 export const getCompanyOverview = async (asxCode: string): Promise<CompanyOverview> => {
   const { data } = await api.get(`/api/v1/companies/${asxCode}/overview`)
   return data

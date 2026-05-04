@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.plans import get_limits
 from app.db.session import get_db
 from app.schemas.watchlist import (
     WatchlistAddStock,
@@ -31,11 +32,6 @@ from app.schemas.watchlist import (
 
 log = logging.getLogger(__name__)
 router = APIRouter()
-
-_FREE_WATCHLIST_LIMIT  = 3
-_FREE_STOCK_LIMIT      = 50
-_PRO_WATCHLIST_LIMIT   = 20
-_PRO_STOCK_LIMIT       = 500
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -114,9 +110,8 @@ async def create_watchlist(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a new watchlist. Free plan: max 3 watchlists."""
-    plan = current_user.get("plan", "free")
-    limit = _PRO_WATCHLIST_LIMIT if plan in ("pro", "premium", "enterprise") else _FREE_WATCHLIST_LIMIT
+    """Create a new watchlist."""
+    limit = get_limits(current_user.get("plan", "free"))["watchlists"]
 
     count_result = await db.execute(
         text("SELECT COUNT(*) FROM users.watchlists WHERE user_id = :uid"),
@@ -245,8 +240,7 @@ async def add_stock(
     """Add a stock to a watchlist. Idempotent (ignores duplicates)."""
     await _get_watchlist_or_404(watchlist_id, current_user["id"], db)
 
-    plan = current_user.get("plan", "free")
-    limit = _PRO_STOCK_LIMIT if plan in ("pro", "premium", "enterprise") else _FREE_STOCK_LIMIT
+    limit = get_limits(current_user.get("plan", "free"))["stocks_per_wl"]
 
     count_result = await db.execute(
         text("SELECT COUNT(*) FROM users.watchlist_items WHERE watchlist_id = :wid"),

@@ -26,10 +26,33 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
+    # Frontend base URL (used in Stripe redirect URLs)
+    FRONTEND_URL: str = "http://209.38.84.102:3000"
+
     # Stripe
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
-    STRIPE_PRO_PRICE_ID: str = ""   # e.g. price_1ABC...
+
+    # Individual plans
+    STRIPE_PRO_MONTHLY:     str = ""
+    STRIPE_PRO_YEARLY:      str = ""
+    STRIPE_PREMIUM_MONTHLY: str = ""
+    STRIPE_PREMIUM_YEARLY:  str = ""
+
+    # Enterprise Pro
+    STRIPE_ENT_PRO_5_MONTHLY:   str = ""
+    STRIPE_ENT_PRO_5_YEARLY:    str = ""
+    STRIPE_ENT_PRO_10_MONTHLY:  str = ""
+    STRIPE_ENT_PRO_10_YEARLY:   str = ""
+
+    # Enterprise Premium
+    STRIPE_ENT_PREM_5_MONTHLY:   str = ""
+    STRIPE_ENT_PREM_5_YEARLY:    str = ""
+    STRIPE_ENT_PREM_10_MONTHLY:  str = ""
+    STRIPE_ENT_PREM_10_YEARLY:   str = ""
+
+    # Legacy (keep for backwards compat)
+    STRIPE_PRO_PRICE_ID: str = ""
 
     # Anthropic (Claude)
     ANTHROPIC_API_KEY: str = ""

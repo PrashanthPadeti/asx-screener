@@ -14,11 +14,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
+from app.core.plans import PLAN_RANK as _PLAN_RANK
 from app.db.session import get_db
-
-# ── Plan ordering ────────────────────────────────────────────────────────────
-
-_PLAN_RANK = {"free": 0, "pro": 1, "premium": 2, "enterprise": 3}
 
 # ── Bearer scheme (auto_error=False so optional use works) ───────────────────
 

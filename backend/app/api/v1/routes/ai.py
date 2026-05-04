@@ -14,6 +14,8 @@ import logging
 
 from app.db.session import get_db
 from app.core.config import settings
+from app.core.deps import get_current_user
+from app.core.plans import get_limits
 from app.schemas.screener import ScreenerRequest, ScreenerFilter
 from app.api.v1.routes.screener import ALLOWED_FIELDS, build_screener_sql, SORTABLE_COLS
 
@@ -94,12 +96,15 @@ class NLScreenerRequest(BaseModel):
 @router.post("/nl-screener")
 async def nl_screener(
     body: NLScreenerRequest,
+    current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Convert a natural language query into structured screener filters and run the screen.
-    Returns: query, interpretation, filters applied, and paginated results.
+    Requires Pro plan or higher.
     """
+    if not get_limits(current_user.get("plan", "free"))["nl_screener"]:
+        raise HTTPException(status_code=403, detail="NL Screener requires a Pro plan or higher.")
     if not settings.ANTHROPIC_API_KEY:
         raise HTTPException(status_code=503, detail="AI features not configured.")
 

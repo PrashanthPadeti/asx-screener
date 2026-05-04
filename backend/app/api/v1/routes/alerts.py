@@ -12,14 +12,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.plans import get_limits
 from app.db.session import get_db
 from app.schemas.alert import AlertCreate, AlertOut, AlertsResponse
 
 log = logging.getLogger(__name__)
 router = APIRouter()
-
-_FREE_ALERT_LIMIT = 3
-_PRO_ALERT_LIMIT  = 50
 
 
 # ── List alerts ───────────────────────────────────────────────────────────────
@@ -65,8 +63,7 @@ async def create_alert(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    plan  = current_user.get("plan", "free")
-    limit = _PRO_ALERT_LIMIT if plan in ("pro", "premium", "enterprise") else _FREE_ALERT_LIMIT
+    limit = get_limits(current_user.get("plan", "free"))["alerts"]
 
     count_result = await db.execute(
         text("SELECT COUNT(*) FROM users.alerts WHERE user_id = :uid AND is_active = TRUE"),

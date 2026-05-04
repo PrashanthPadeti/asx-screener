@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
+from app.core.plans import get_limits
 from app.db.session import get_db
 from app.schemas.portfolio import (
     PortfolioCreate,
@@ -124,7 +125,7 @@ async def create_portfolio(
         text("SELECT COUNT(*) FROM users.portfolios WHERE user_id = :uid"),
         {"uid": current_user["id"]},
     )).scalar()
-    limit = 10 if current_user["plan"] in ("pro", "premium", "enterprise") else 3
+    limit = get_limits(current_user.get("plan", "free"))["portfolios"]
     if (count or 0) >= limit:
         raise HTTPException(status_code=403, detail=f"Portfolio limit reached ({limit} for your plan)")
 

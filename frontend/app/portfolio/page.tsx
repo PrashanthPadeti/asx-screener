@@ -1,13 +1,19 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import Link from 'next/link'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, Legend,
+} from 'recharts'
 import { useAuth } from '@/lib/auth'
 import {
   listPortfolios,
   createPortfolio,
   deletePortfolio,
   getPortfolioPerformance,
+  getPortfolioHistory,
+  getPortfolioDividends,
   listTransactions,
   addTransaction,
   deleteTransaction,
@@ -15,6 +21,8 @@ import {
   importTransactionsCsv,
   PortfolioOut,
   PortfolioPerformance,
+  PortfolioHistory,
+  PortfolioDividends,
   TransactionOut,
   ImportResult,
 } from '@/lib/api'
@@ -30,6 +38,12 @@ const fmtPct   = (n: number | null | undefined) => n == null ? '—' : `${n >= 0
 const glColor = (n: number | null | undefined) =>
   n == null ? 'text-slate-500' : n >= 0 ? 'text-emerald-600' : 'text-red-500'
 
+const PIE_COLORS = [
+  '#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6',
+  '#06b6d4','#84cc16','#f97316','#ec4899','#6366f1',
+  '#14b8a6','#a855f7','#eab308','#64748b','#0ea5e9',
+]
+
 // ── Subcomponents ─────────────────────────────────────────────
 
 function SummaryCard({ label, value, sub, subColor }: { label: string; value: string; sub?: string; subColor?: string }) {
@@ -38,6 +52,298 @@ function SummaryCard({ label, value, sub, subColor }: { label: string; value: st
       <p className="text-xs text-slate-500 mb-1">{label}</p>
       <p className="text-xl font-bold text-slate-900">{value}</p>
       {sub && <p className={`text-xs mt-0.5 font-medium ${subColor ?? 'text-slate-400'}`}>{sub}</p>}
+    </div>
+  )
+}
+
+// ── Portfolio Chart ───────────────────────────────────────────
+
+const CHART_PERIODS = ['1m', '3m', '6m', '1y', '2y', 'all'] as const
+type ChartPeriod = typeof CHART_PERIODS[number]
+
+function PortfolioChart({ portfolioId }: { portfolioId: string }) {
+  const [period, setPeriod]   = useState<ChartPeriod>('1y')
+  const [data, setData]       = useState<PortfolioHistory | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true)
+    setError(null)
+    getPortfolioHistory(portfolioId, period)
+      .then(setData)
+      .catch(() => setError('Failed to load history'))
+      .finally(() => setLoading(false))
+  }, [portfolioId, period])
+
+  const latest = data?.history.at(-1)
+  const first  = data?.history[0]
+  const totalReturn = (latest && first)
+    ? ((latest.value - first.cost) / first.cost * 100)
+    : null
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Portfolio Value Over Time</h3>
+          {latest && (
+            <p className={`text-xs mt-0.5 ${latest.gain_loss >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {fmtMoney(latest.gain_loss)} ({totalReturn != null ? fmtPct(totalReturn) : '—'}) vs cost
+            </p>
+          )}
+        </div>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+          {CHART_PERIODS.map(p => (
+            <button key={p} onClick={() => setPeriod(p)}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${period === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              {p.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="h-64 bg-slate-100 rounded-xl animate-pulse" />
+      ) : error ? (
+        <div className="h-64 flex items-center justify-center text-sm text-slate-400">{error}</div>
+      ) : !data?.history.length ? (
+        <div className="h-64 flex items-center justify-center text-sm text-slate-400">
+          No price history available yet. Add transactions and wait for data to populate.
+        </div>
+      ) : (
+        <ResponsiveContainer width="100%" height={260}>
+          <LineChart data={data.history} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+            <XAxis
+              dataKey="date"
+              tick={{ fontSize: 11, fill: '#94a3b8' }}
+              tickFormatter={d => {
+                const dt = new Date(d)
+                return `${dt.toLocaleString('en-AU', { month: 'short' })} '${String(dt.getFullYear()).slice(2)}`
+              }}
+              interval="preserveStartEnd"
+            />
+            <YAxis
+              tick={{ fontSize: 11, fill: '#94a3b8' }}
+              tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
+              width={55}
+            />
+            <Tooltip
+              formatter={(val: any, name: any) => [fmtMoney(val as number), name === 'value' ? 'Market Value' : 'Cost Basis']}
+              labelFormatter={d => new Date(d).toLocaleDateString('en-AU')}
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+            />
+            <Line type="monotone" dataKey="cost" stroke="#94a3b8" strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="cost" />
+            <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2.5} dot={false} name="value" />
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
+// ── Allocation Charts ─────────────────────────────────────────
+
+function AllocationCharts({ perf }: { perf: PortfolioPerformance }) {
+  const holdings = perf.holdings.filter(h => h.current_value != null && h.current_value > 0)
+  const totalValue = holdings.reduce((s, h) => s + (h.current_value ?? 0), 0)
+
+  const byStock = holdings
+    .map(h => ({ name: h.asx_code, value: h.current_value ?? 0 }))
+    .sort((a, b) => b.value - a.value)
+
+  const bySector = Object.entries(
+    holdings.reduce<Record<string, number>>((acc, h) => {
+      const s = h.sector ?? 'Other'
+      acc[s] = (acc[s] ?? 0) + (h.current_value ?? 0)
+      return acc
+    }, {})
+  )
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value)
+
+  if (!holdings.length) {
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
+        No holdings with live prices to display allocation.
+      </div>
+    )
+  }
+
+  const customLabel = ({ name, value }: { name: string; value: number }) => {
+    const pct = totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : '0'
+    return `${pct}%`
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+      {/* By Stock */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-800 mb-4">By Stock</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart>
+            <Pie data={byStock} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}
+              label={({ name, value }) => `${name} ${totalValue > 0 ? ((value / totalValue) * 100).toFixed(0) : 0}%`}
+              labelLine={false}>
+              {byStock.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+            </Pie>
+            <Tooltip formatter={(v: any) => [fmtMoney(v as number)]} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="mt-3 space-y-1.5 max-h-36 overflow-y-auto">
+          {byStock.map((item, i) => (
+            <div key={item.name} className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                <span className="font-medium text-slate-700">{item.name}</span>
+              </div>
+              <div className="flex items-center gap-3 text-slate-500">
+                <span>{fmtMoney(item.value)}</span>
+                <span className="w-10 text-right">{totalValue > 0 ? ((item.value / totalValue) * 100).toFixed(1) : 0}%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* By Sector */}
+      <div className="bg-white border border-slate-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-slate-800 mb-4">By Sector</h3>
+        <ResponsiveContainer width="100%" height={220}>
+          <PieChart>
+            <Pie data={bySector} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}
+              label={({ name, value }) => `${totalValue > 0 ? ((value / totalValue) * 100).toFixed(0) : 0}%`}
+              labelLine={false}>
+              {bySector.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+            </Pie>
+            <Tooltip formatter={(v: any) => [fmtMoney(v as number)]} contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }} />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="mt-3 space-y-1.5 max-h-36 overflow-y-auto">
+          {bySector.map((item, i) => (
+            <div key={item.name} className="flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: PIE_COLORS[i % PIE_COLORS.length] }} />
+                <span className="font-medium text-slate-700 truncate max-w-32">{item.name}</span>
+              </div>
+              <div className="flex items-center gap-3 text-slate-500">
+                <span>{fmtMoney(item.value)}</span>
+                <span className="w-10 text-right">{totalValue > 0 ? ((item.value / totalValue) * 100).toFixed(1) : 0}%</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Dividend Calendar ─────────────────────────────────────────
+
+function DividendCalendar({ portfolioId }: { portfolioId: string }) {
+  const [data, setData]       = useState<PortfolioDividends | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState<string | null>(null)
+  const [tab, setTab]         = useState<'upcoming' | 'received'>('upcoming')
+
+  useEffect(() => {
+    setLoading(true)
+    getPortfolioDividends(portfolioId)
+      .then(setData)
+      .catch(() => setError('Failed to load dividend data'))
+      .finally(() => setLoading(false))
+  }, [portfolioId])
+
+  const upcomingTotal  = data?.upcoming.reduce((s, d) => s + (d.est_income ?? 0), 0) ?? 0
+  const receivedTotal  = data?.received.reduce((s, d) => s + (d.est_income ?? 0), 0) ?? 0
+
+  const events = tab === 'upcoming' ? (data?.upcoming ?? []) : (data?.received ?? [])
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Dividend Calendar</h3>
+          <p className="text-xs text-slate-400 mt-0.5">Based on your current holdings</p>
+        </div>
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+          <button onClick={() => setTab('upcoming')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${tab === 'upcoming' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            Upcoming {data ? `(${data.upcoming.length})` : ''}
+          </button>
+          <button onClick={() => setTab('received')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${tab === 'received' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            Last 12M {data ? `(${data.received.length})` : ''}
+          </button>
+        </div>
+      </div>
+
+      {/* Summary strip */}
+      {data && (
+        <div className="mb-4 grid grid-cols-2 gap-3">
+          <div className="bg-blue-50 rounded-lg p-3">
+            <p className="text-xs text-blue-600 font-medium">Upcoming Est. Income</p>
+            <p className="text-lg font-bold text-blue-700">{fmtMoney(upcomingTotal)}</p>
+            <p className="text-xs text-blue-500 mt-0.5">next 6 months</p>
+          </div>
+          <div className="bg-emerald-50 rounded-lg p-3">
+            <p className="text-xs text-emerald-600 font-medium">Received (12M)</p>
+            <p className="text-lg font-bold text-emerald-700">{fmtMoney(receivedTotal)}</p>
+            <p className="text-xs text-emerald-500 mt-0.5">estimated</p>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="h-40 bg-slate-100 rounded-xl animate-pulse" />
+      ) : error ? (
+        <div className="text-center text-sm text-slate-400 py-8">{error}</div>
+      ) : events.length === 0 ? (
+        <div className="text-center text-sm text-slate-400 py-8">
+          {tab === 'upcoming'
+            ? 'No upcoming dividends found for your holdings in the next 6 months.'
+            : 'No dividends received in the last 12 months.'}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <th className="px-3 py-2 text-left">Stock</th>
+                <th className="px-3 py-2 text-left">Ex-Date</th>
+                <th className="px-3 py-2 text-left">Pay Date</th>
+                <th className="px-3 py-2 text-right">Amount</th>
+                <th className="px-3 py-2 text-right">Qty</th>
+                <th className="px-3 py-2 text-right">Est. Income</th>
+                <th className="px-3 py-2 text-right">Gross Inc.</th>
+                <th className="px-3 py-2 text-right">Franking</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+              {events.map((ev, i) => (
+                <tr key={i} className="hover:bg-slate-50 transition-colors">
+                  <td className="px-3 py-2.5">
+                    <Link href={`/company/${ev.asx_code}`} className="font-semibold text-blue-600 hover:underline">{ev.asx_code}</Link>
+                    {ev.company_name && <div className="text-xs text-slate-400 truncate max-w-28">{ev.company_name}</div>}
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">{ev.ex_date ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-400 whitespace-nowrap">{ev.payment_date ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{fmt(ev.amount, 4, '$')}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">{fmt(ev.quantity, 0)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums font-medium text-blue-700">{fmtMoney(ev.est_income)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600">
+                    {ev.franking_pct > 0 ? fmtMoney(ev.gross_income) : '—'}
+                  </td>
+                  <td className="px-3 py-2.5 text-right tabular-nums text-slate-500">
+                    {ev.franking_pct > 0 ? `${ev.franking_pct.toFixed(0)}%` : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }
@@ -207,7 +513,6 @@ function ImportModal({
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
         <h2 className="text-lg font-bold text-slate-900 mb-4">Import from CSV</h2>
 
-        {/* Mode selector */}
         <div className="flex gap-2 mb-4">
           {(['holdings', 'transactions'] as const).map(m => (
             <button key={m} onClick={() => { setMode(m); setResult(null); if (fileRef.current) fileRef.current.value = '' }}
@@ -217,7 +522,6 @@ function ImportModal({
           ))}
         </div>
 
-        {/* Format description */}
         <div className="bg-slate-50 rounded-lg p-3 mb-4 text-xs text-slate-600 font-mono">
           {mode === 'holdings'
             ? 'asx_code, quantity, avg_cost, purchase_date (optional)'
@@ -225,13 +529,11 @@ function ImportModal({
         </div>
 
         <div className="flex gap-2 mb-4">
-          <button onClick={downloadTemplate}
-            className="text-xs text-blue-600 hover:underline">
+          <button onClick={downloadTemplate} className="text-xs text-blue-600 hover:underline">
             ↓ Download template
           </button>
         </div>
 
-        {/* Upload */}
         <label className="block w-full border-2 border-dashed border-slate-300 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 transition-colors">
           <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
           {loading
@@ -239,7 +541,6 @@ function ImportModal({
             : <span className="text-sm text-slate-500">Click to upload CSV file</span>}
         </label>
 
-        {/* Result */}
         {result && (
           <div className={`mt-3 rounded-lg px-4 py-3 text-sm ${result.imported > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
             <p className="font-semibold">{result.imported} row{result.imported !== 1 ? 's' : ''} imported{result.skipped > 0 ? `, ${result.skipped} skipped` : ''}</p>
@@ -262,6 +563,8 @@ function ImportModal({
 
 // ── Main page ─────────────────────────────────────────────────
 
+type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends'
+
 export default function PortfolioPage() {
   const { user, loading: authLoading } = useAuth()
 
@@ -269,7 +572,7 @@ export default function PortfolioPage() {
   const [activeId, setActiveId]       = useState<string | null>(null)
   const [perf, setPerf]               = useState<PortfolioPerformance | null>(null)
   const [txns, setTxns]               = useState<TransactionOut[]>([])
-  const [view, setView]               = useState<'holdings' | 'transactions'>('holdings')
+  const [view, setView]               = useState<ViewTab>('holdings')
 
   const [loading, setLoading]         = useState(false)
   const [perfLoading, setPerfLoading] = useState(false)
@@ -283,7 +586,6 @@ export default function PortfolioPage() {
   const [showAddTxn, setShowAddTxn]   = useState(false)
   const [showImport, setShowImport]   = useState(false)
 
-  // ── Load portfolios on mount ──────────────────────────────────
   useEffect(() => {
     if (!user) return
     setLoading(true)
@@ -295,7 +597,6 @@ export default function PortfolioPage() {
       .finally(() => setLoading(false))
   }, [user])
 
-  // ── Load performance + transactions when active portfolio changes ──
   useEffect(() => {
     if (!activeId) return
     setPerfLoading(true)
@@ -368,7 +669,6 @@ export default function PortfolioPage() {
     refresh()
   }
 
-  // ── Auth gate ─────────────────────────────────────────────────
   if (authLoading) return <div className="flex items-center justify-center h-64 text-slate-500">Loading…</div>
   if (!user) return (
     <div className="flex flex-col items-center justify-center h-64 gap-4">
@@ -378,6 +678,14 @@ export default function PortfolioPage() {
   )
 
   const activePortfolio = portfolios.find(p => p.id === activeId)
+
+  const VIEW_TABS: { key: ViewTab; label: string }[] = [
+    { key: 'holdings',     label: `Holdings${perf ? ` (${perf.holdings.length})` : ''}` },
+    { key: 'chart',        label: 'Performance' },
+    { key: 'allocation',   label: 'Allocation' },
+    { key: 'dividends',    label: 'Dividends' },
+    { key: 'transactions', label: `Transactions${txns.length ? ` (${txns.length})` : ''}` },
+  ]
 
   return (
     <div className="space-y-6">
@@ -488,13 +796,13 @@ export default function PortfolioPage() {
                 />
               </div>
 
-              {/* View toggle */}
-              <div className="flex items-center justify-between">
-                <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-                  {(['holdings', 'transactions'] as const).map(v => (
-                    <button key={v} onClick={() => setView(v)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${view === v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                      {v === 'holdings' ? `Holdings (${perf.holdings.length})` : `Transactions (${txns.length})`}
+              {/* View tabs */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div className="flex gap-1 bg-slate-100 p-1 rounded-lg overflow-x-auto">
+                  {VIEW_TABS.map(({ key, label }) => (
+                    <button key={key} onClick={() => setView(key)}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${view === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -561,6 +869,15 @@ export default function PortfolioPage() {
                   </div>
                 )
               )}
+
+              {/* Performance chart */}
+              {view === 'chart' && <PortfolioChart portfolioId={activeId} />}
+
+              {/* Allocation */}
+              {view === 'allocation' && <AllocationCharts perf={perf} />}
+
+              {/* Dividends */}
+              {view === 'dividends' && <DividendCalendar portfolioId={activeId} />}
 
               {/* Transactions table */}
               {view === 'transactions' && (

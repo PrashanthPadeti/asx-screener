@@ -411,7 +411,6 @@ async def import_holdings_csv(
     await db.commit()
     return ImportResult(imported=imported, skipped=skipped, errors=errors[:20])
 
-
 # ── CSV Import — transactions format ─────────────────────────────────────────
 
 @router.post("/{portfolio_id}/import/transactions", response_model=ImportResult)
@@ -467,3 +466,205 @@ async def import_transactions_csv(
 
     await db.commit()
     return ImportResult(imported=imported, skipped=skipped, errors=errors[:20])
+
+
+# ── Portfolio value history ───────────────────────────────────────────────────
+
+@router.get("/{portfolio_id}/history")
+async def get_portfolio_history(
+    portfolio_id: str,
+    period: str = "1y",
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Daily portfolio value history — replays transactions against price history.
+    period: 1m | 3m | 6m | 1y | 2y | all
+    """
+    await _get_portfolio_or_404(portfolio_id, current_user["id"], db)
+
+    period_days = {"1m": 30, "3m": 90, "6m": 180, "1y": 365, "2y": 730, "all": 3650}
+    days = period_days.get(period, 365)
+
+    txn_rows = (await db.execute(text("""
+        SELECT asx_code, transaction_type, transaction_date,
+               shares, price_per_share, brokerage
+        FROM users.portfolio_transactions
+        WHERE portfolio_id = :pid
+        ORDER BY transaction_date ASC, created_at ASC
+    """), {"pid": portfolio_id})).mappings().all()
+
+    if not txn_rows:
+        return {"portfolio_id": portfolio_id, "period": period, "history": []}
+
+    from datetime import timedelta, date as date_type
+    end_date   = date_type.today()
+    start_date = end_date - timedelta(days=days)
+    first_txn_date = txn_rows[0]["transaction_date"]
+    if hasattr(first_txn_date, 'date'):
+        first_txn_date = first_txn_date.date()
+    start_date = max(start_date, first_txn_date)
+
+    codes = list({r["asx_code"] for r in txn_rows})
+    placeholders = ", ".join(f":c{i}" for i in range(len(codes)))
+    code_params  = {f"c{i}": code for i, code in enumerate(codes)}
+
+    price_start = min(start_date, first_txn_date) - timedelta(days=5)
+    price_rows = (await db.execute(text(f"""
+        SELECT asx_code, time::date AS price_date, close
+        FROM market.daily_prices
+        WHERE asx_code IN ({placeholders})
+          AND time::date BETWEEN :start AND :end
+        ORDER BY time ASC
+    """), {**code_params, "start": price_start, "end": end_date})).mappings().all()
+
+    prices: dict[str, dict] = {}
+    for r in price_rows:
+        prices.setdefault(r["asx_code"], {})[r["price_date"]] = float(r["close"])
+
+    all_dates = sorted({r["price_date"] for r in price_rows if r["price_date"] >= start_date})
+
+    holdings_state: dict[str, dict] = {}
+    txn_idx = 0
+    txns_list = list(txn_rows)
+    history = []
+
+    for d in all_dates:
+        while txn_idx < len(txns_list):
+            t = txns_list[txn_idx]
+            txn_date = t["transaction_date"]
+            if hasattr(txn_date, 'date'):
+                txn_date = txn_date.date()
+            if txn_date > d:
+                break
+            code  = t["asx_code"]
+            qty   = float(t["shares"])
+            price = float(t["price_per_share"])
+            brok  = float(t["brokerage"] or 0)
+            ttype = t["transaction_type"]
+            if code not in holdings_state:
+                holdings_state[code] = {"quantity": 0.0, "cost": 0.0}
+            h = holdings_state[code]
+            if ttype in ("buy", "drp"):
+                h["cost"]     += qty * price + brok
+                h["quantity"] += qty
+            elif ttype == "sell":
+                if h["quantity"] > 0:
+                    ratio = qty / h["quantity"]
+                    h["cost"] -= h["cost"] * ratio
+                h["quantity"] -= qty
+                if h["quantity"] < 0.0001:
+                    h["quantity"] = 0.0
+                    h["cost"]     = 0.0
+            txn_idx += 1
+
+        total_value = total_cost = 0.0
+        for code, h in holdings_state.items():
+            if h["quantity"] <= 0:
+                continue
+            day_price = None
+            for offset in range(5):
+                day_price = prices.get(code, {}).get(d - timedelta(days=offset))
+                if day_price is not None:
+                    break
+            if day_price is None:
+                continue
+            total_value += h["quantity"] * day_price
+            total_cost  += h["cost"]
+
+        if total_value > 0:
+            history.append({
+                "date":      d.isoformat(),
+                "value":     round(total_value, 2),
+                "cost":      round(total_cost, 2),
+                "gain_loss": round(total_value - total_cost, 2),
+            })
+
+    return {"portfolio_id": portfolio_id, "period": period, "history": history}
+
+
+# ── Dividend calendar for holdings ────────────────────────────────────────────
+
+@router.get("/{portfolio_id}/dividends")
+async def get_portfolio_dividends(
+    portfolio_id: str,
+    months_ahead: int = 6,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upcoming ex-dividend events for current portfolio holdings +
+    last 12 months of received dividends.
+    """
+    await _get_portfolio_or_404(portfolio_id, current_user["id"], db)
+
+    txn_rows = (await db.execute(text("""
+        SELECT asx_code, transaction_type, shares, price_per_share, brokerage
+        FROM users.portfolio_transactions
+        WHERE portfolio_id = :pid
+        ORDER BY transaction_date ASC
+    """), {"pid": portfolio_id})).mappings().all()
+
+    holdings = _compute_holdings(txn_rows)
+    if not holdings:
+        return {"portfolio_id": portfolio_id, "upcoming": [], "received": []}
+
+    codes = list(holdings.keys())
+    placeholders = ", ".join(f":c{i}" for i in range(len(codes)))
+    code_params  = {f"c{i}": code for i, code in enumerate(codes)}
+
+    from datetime import timedelta, date as date_type
+    today      = date_type.today()
+    future_end = today + timedelta(days=months_ahead * 30)
+    past_start = today - timedelta(days=365)
+
+    upcoming_rows = (await db.execute(text(f"""
+        SELECT d.asx_code, d.ex_date, d.payment_date, d.amount,
+               d.franking_pct, d.div_type, u.company_name
+        FROM market.dividends d
+        LEFT JOIN screener.universe u ON u.asx_code = d.asx_code
+        WHERE d.asx_code IN ({placeholders})
+          AND d.ex_date >= :today AND d.ex_date <= :future_end AND d.amount > 0
+        ORDER BY d.ex_date ASC
+    """), {**code_params, "today": today, "future_end": future_end})).mappings().all()
+
+    received_rows = (await db.execute(text(f"""
+        SELECT d.asx_code, d.ex_date, d.payment_date, d.amount,
+               d.franking_pct, d.div_type, u.company_name
+        FROM market.dividends d
+        LEFT JOIN screener.universe u ON u.asx_code = d.asx_code
+        WHERE d.asx_code IN ({placeholders})
+          AND d.ex_date >= :past_start AND d.ex_date < :today AND d.amount > 0
+        ORDER BY d.ex_date DESC LIMIT 50
+    """), {**code_params, "past_start": past_start, "today": today})).mappings().all()
+
+    def _f(v): return float(v) if v is not None else None
+
+    def enrich(rows):
+        result = []
+        for r in rows:
+            code     = r["asx_code"]
+            qty      = holdings.get(code, {}).get("quantity", 0)
+            amount   = _f(r["amount"]) or 0
+            franking = _f(r["franking_pct"]) or 0
+            est      = round(qty * amount, 2) if qty > 0 else None
+            gross    = round(est / (1 - 0.30 * (franking / 100)), 2) if est and franking > 0 else est
+            result.append({
+                "asx_code":     code,
+                "company_name": r["company_name"],
+                "ex_date":      r["ex_date"].isoformat() if r["ex_date"] else None,
+                "payment_date": r["payment_date"].isoformat() if r["payment_date"] else None,
+                "amount":       amount,
+                "franking_pct": franking,
+                "div_type":     r["div_type"],
+                "quantity":     qty,
+                "est_income":   est,
+                "gross_income": gross,
+            })
+        return result
+
+    return {
+        "portfolio_id": portfolio_id,
+        "upcoming": enrich(upcoming_rows),
+        "received": enrich(received_rows),
+    }

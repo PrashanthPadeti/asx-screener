@@ -1153,3 +1153,53 @@ export const getFunds = async (params?: {
   const { data } = await api.get('/api/v1/market-data/funds', { params })
   return data
 }
+
+// ── Portfolio History & Dividends ─────────────────────────────
+
+export interface PortfolioHistoryPoint {
+  date: string
+  value: number
+  cost: number
+  gain_loss: number
+}
+
+export interface PortfolioHistory {
+  portfolio_id: string
+  period: string
+  history: PortfolioHistoryPoint[]
+}
+
+export interface DividendEvent {
+  asx_code: string
+  company_name: string | null
+  ex_date: string | null
+  payment_date: string | null
+  amount: number
+  franking_pct: number
+  div_type: string | null
+  quantity: number
+  est_income: number | null
+  gross_income: number | null
+}
+
+export interface PortfolioDividends {
+  portfolio_id: string
+  upcoming: DividendEvent[]
+  received: DividendEvent[]
+}
+
+export const getPortfolioHistory = async (
+  portfolioId: string,
+  period = '1y',
+): Promise<PortfolioHistory> => {
+  const { data } = await api.get(`/api/v1/portfolio/${portfolioId}/history`, { params: { period } })
+  return data
+}
+
+export const getPortfolioDividends = async (
+  portfolioId: string,
+  monthsAhead = 6,
+): Promise<PortfolioDividends> => {
+  const { data } = await api.get(`/api/v1/portfolio/${portfolioId}/dividends`, { params: { months_ahead: monthsAhead } })
+  return data
+}

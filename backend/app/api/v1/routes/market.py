@@ -1,6 +1,8 @@
 """
-Market-level summary endpoints — used by the homepage and market dashboard.
-All data sourced from screener.universe (end-of-day, nightly batch).
+Market-level summary endpoints.
+Dashboard reads from pre-computed snapshot tables populated by
+compute/engine/market_snapshot.py after each nightly universe build.
+screener.universe is never queried here — snapshot tables own market-level data.
 """
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -153,117 +155,62 @@ async def market_sectors(db: AsyncSession = Depends(get_db)):
 @router.get("/dashboard", response_model=MarketDashboard)
 async def market_dashboard(db: AsyncSession = Depends(get_db)):
     """
-    All-in-one market overview: index snapshots, sector heatmap, movers,
-    volume leaders, most shorted, and upcoming ex-dividend dates.
+    All-in-one market overview sourced from pre-computed snapshot tables.
+    Returns the latest available snapshot date (today or most recent prior day).
     """
-    mover_cols = """
-        asx_code, company_name,
-        sector,
-        price, return_1w, market_cap
-    """
-    base_filter = """
-        status = 'Active'
-        AND price > 0.05
-        AND market_cap > 20
-        AND return_1w IS NOT NULL
-    """
+    # Resolve latest snapshot date available
+    date_row = (await db.execute(text("""
+        SELECT MAX(snapshot_date) AS latest FROM market.index_snapshots
+    """))).mappings().one()
+    snap_date = date_row["latest"]
 
-    index_sql = """
-        SELECT
-            COUNT(*)                                        AS stock_count,
-            COUNT(*) FILTER (WHERE return_1w > 0)          AS gainers,
-            COUNT(*) FILTER (WHERE return_1w < 0)          AS losers,
-            COUNT(*) FILTER (WHERE return_1w = 0)          AS unchanged,
-            AVG(return_1w)                                 AS avg_return_1w,
-            SUM(market_cap) / 1000.0                       AS total_market_cap_bn
-        FROM screener.universe
-        WHERE status = 'Active' AND {flag} = TRUE
-    """
-    asx200_rows  = await db.execute(text(index_sql.format(flag="is_asx200")))
-    asx300_rows  = await db.execute(text(index_sql.format(flag="is_asx300")))
-    sector_rows  = await db.execute(text("""
-        SELECT
-            sector,
-            COUNT(*)                                                   AS stock_count,
-            AVG(return_1w) FILTER (WHERE return_1w IS NOT NULL)        AS avg_return_1w,
-            SUM(market_cap) / 1000.0                                   AS total_market_cap_bn
-        FROM screener.universe
-        WHERE status = 'Active' AND sector IS NOT NULL
-        GROUP BY sector
-        ORDER BY total_market_cap_bn DESC NULLS LAST
-    """))
-    gainers_rows = await db.execute(text(f"""
-        SELECT {mover_cols}
-        FROM screener.universe
-        WHERE {base_filter}
-        ORDER BY return_1w DESC NULLS LAST
-        LIMIT 10
-    """))
-    losers_rows  = await db.execute(text(f"""
-        SELECT {mover_cols}
-        FROM screener.universe
-        WHERE {base_filter}
-        ORDER BY return_1w ASC NULLS LAST
-        LIMIT 10
-    """))
-    active_rows  = await db.execute(text("""
-        SELECT
-            asx_code, company_name,
-            sector,
-            price, return_1w, market_cap,
-            volume, avg_volume_20d
-        FROM screener.universe
-        WHERE status = 'Active'
-          AND volume IS NOT NULL
-          AND volume > 0
-          AND price > 0.05
-        ORDER BY volume DESC NULLS LAST
-        LIMIT 10
-    """))
-    shorted_rows = await db.execute(text("""
-        SELECT
-            asx_code, company_name,
-            sector,
-            price, return_1w, market_cap,
-            short_pct
-        FROM screener.universe
-        WHERE status = 'Active'
-          AND short_pct IS NOT NULL
-          AND short_pct > 0
-          AND market_cap > 50
-        ORDER BY short_pct DESC NULLS LAST
-        LIMIT 10
-    """))
-    exdiv_rows   = await db.execute(text("""
-        SELECT
-            asx_code, company_name,
-            ex_div_date::text  AS ex_div_date,
-            pay_date::text     AS pay_date,
-            dps_ttm,
-            dividend_yield,
-            franking_pct
-        FROM screener.universe
-        WHERE status = 'Active'
-          AND ex_div_date IS NOT NULL
-          AND ex_div_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '14 days'
-        ORDER BY ex_div_date ASC
-        LIMIT 30
-    """))
-    built_row    = await db.execute(text("""
-        SELECT MAX(universe_built_at) AS universe_built_at
-        FROM screener.universe
-    """))
-
-    def _snap(row) -> IndexSnapshot:
-        r = row.mappings().one()
-        return IndexSnapshot(
-            stock_count=int(r["stock_count"] or 0),
-            gainers=int(r["gainers"] or 0),
-            losers=int(r["losers"] or 0),
-            unchanged=int(r["unchanged"] or 0),
-            avg_return_1w=float(r["avg_return_1w"]) if r["avg_return_1w"] is not None else None,
-            total_market_cap_bn=float(r["total_market_cap_bn"]) if r["total_market_cap_bn"] is not None else None,
+    if snap_date is None:
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=503,
+            detail="Market snapshot not yet available. Run compute/engine/market_snapshot.py first."
         )
+
+    # Index snapshots
+    idx_rows = (await db.execute(text("""
+        SELECT index_code, stock_count, gainers, losers, unchanged,
+               avg_return_1w, total_market_cap_bn
+        FROM market.index_snapshots
+        WHERE snapshot_date = :d
+    """), {"d": snap_date})).mappings().all()
+    idx = {r["index_code"]: r for r in idx_rows}
+
+    def _snap(code: str) -> IndexSnapshot:
+        r = idx.get(code, {})
+        return IndexSnapshot(
+            stock_count=int(r.get("stock_count") or 0),
+            gainers=int(r.get("gainers") or 0),
+            losers=int(r.get("losers") or 0),
+            unchanged=int(r.get("unchanged") or 0),
+            avg_return_1w=float(r["avg_return_1w"]) if r.get("avg_return_1w") is not None else None,
+            total_market_cap_bn=float(r["total_market_cap_bn"]) if r.get("total_market_cap_bn") is not None else None,
+        )
+
+    # Sector heatmap
+    sector_rows = (await db.execute(text("""
+        SELECT sector, stock_count, gainers, losers, avg_return_1w, total_market_cap_bn
+        FROM market.sector_snapshots
+        WHERE snapshot_date = :d
+        ORDER BY total_market_cap_bn DESC NULLS LAST
+    """), {"d": snap_date})).mappings().all()
+
+    # Mover snapshots
+    mover_rows = (await db.execute(text("""
+        SELECT snapshot_type, rank, asx_code, company_name, sector,
+               price, return_1w, market_cap, volume, avg_volume_20d, short_pct
+        FROM market.mover_snapshots
+        WHERE snapshot_date = :d
+        ORDER BY snapshot_type, rank
+    """), {"d": snap_date})).mappings().all()
+
+    by_type: dict[str, list] = {"GAINER": [], "LOSER": [], "ACTIVE": [], "SHORTED": []}
+    for r in mover_rows:
+        by_type.setdefault(r["snapshot_type"], []).append(r)
 
     def _dash(r) -> DashboardStock:
         return DashboardStock(
@@ -275,11 +222,20 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
             market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
         )
 
-    built_at = built_row.mappings().one()["universe_built_at"]
+    # Ex-div snapshots
+    exdiv_rows = (await db.execute(text("""
+        SELECT asx_code, company_name,
+               ex_div_date::text AS ex_div_date,
+               pay_date::text    AS pay_date,
+               dps_ttm, dividend_yield, franking_pct
+        FROM market.exdiv_snapshots
+        WHERE snapshot_date = :d
+        ORDER BY ex_div_date ASC
+    """), {"d": snap_date})).mappings().all()
 
     return MarketDashboard(
-        asx200=_snap(asx200_rows),
-        asx300=_snap(asx300_rows),
+        asx200=_snap("ASX200"),
+        asx300=_snap("ASX300"),
         sector_heatmap=[
             SectorHeatmapItem(
                 sector=r["sector"],
@@ -287,10 +243,10 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
                 avg_return_1w=float(r["avg_return_1w"]) if r["avg_return_1w"] is not None else None,
                 total_market_cap_bn=float(r["total_market_cap_bn"]) if r["total_market_cap_bn"] is not None else None,
             )
-            for r in sector_rows.mappings().all()
+            for r in sector_rows
         ],
-        top_gainers=[_dash(r) for r in gainers_rows.mappings().all()],
-        top_losers=[_dash(r) for r in losers_rows.mappings().all()],
+        top_gainers=[_dash(r) for r in by_type["GAINER"]],
+        top_losers=[_dash(r) for r in by_type["LOSER"]],
         most_active=[
             ActiveStock(
                 asx_code=r["asx_code"],
@@ -302,7 +258,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
                 volume=int(r["volume"]) if r["volume"] is not None else None,
                 avg_volume_20d=int(r["avg_volume_20d"]) if r["avg_volume_20d"] is not None else None,
             )
-            for r in active_rows.mappings().all()
+            for r in by_type["ACTIVE"]
         ],
         most_shorted=[
             ShortedStock(
@@ -314,7 +270,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
                 market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
                 short_pct=float(r["short_pct"]) if r["short_pct"] is not None else None,
             )
-            for r in shorted_rows.mappings().all()
+            for r in by_type["SHORTED"]
         ],
         upcoming_exdiv=[
             ExDivStock(
@@ -326,8 +282,8 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
                 dividend_yield=float(r["dividend_yield"]) if r["dividend_yield"] is not None else None,
                 franking_pct=float(r["franking_pct"]) if r["franking_pct"] is not None else None,
             )
-            for r in exdiv_rows.mappings().all()
+            for r in exdiv_rows
         ],
         period="1w",
-        universe_built_at=built_at,
+        universe_built_at=snap_date.isoformat() if snap_date else None,
     )

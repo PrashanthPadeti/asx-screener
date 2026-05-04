@@ -25,6 +25,7 @@ export default function Footer() {
           <Link href="/market"    className="hover:text-slate-600 transition-colors">Market</Link>
           <Link href="/screener"  className="hover:text-slate-600 transition-colors">Screener</Link>
           <Link href="/watchlist" className="hover:text-slate-600 transition-colors">Watchlist</Link>
+          <Link href="/portfolio" className="hover:text-slate-600 transition-colors">Portfolio</Link>
           <Link href="/alerts"    className="hover:text-slate-600 transition-colors">Alerts</Link>
         </div>
 

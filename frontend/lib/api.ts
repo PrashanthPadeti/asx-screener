@@ -921,3 +921,129 @@ export const addToWatchlist = async (watchlistId: string, asxCode: string): Prom
 export const removeFromWatchlist = async (watchlistId: string, asxCode: string): Promise<void> => {
   await api.delete(`/api/v1/watchlist/${watchlistId}/stocks/${asxCode}`)
 }
+
+// ── Portfolio ─────────────────────────────────────────────────
+
+export interface PortfolioOut {
+  id: string
+  name: string
+  description: string | null
+  is_smsf: boolean
+  created_at: string
+}
+
+export interface PortfoliosResponse {
+  portfolios: PortfolioOut[]
+}
+
+export interface HoldingRow {
+  asx_code: string
+  company_name: string | null
+  sector: string | null
+  quantity: number
+  avg_cost: number
+  cost_basis: number
+  current_price: number | null
+  current_value: number | null
+  gain_loss: number | null
+  gain_loss_pct: number | null
+  dividend_yield: number | null
+  annual_income: number | null
+  franking_pct: number | null
+}
+
+export interface PortfolioPerformance {
+  portfolio_id: string
+  portfolio_name: string
+  total_cost: number
+  total_value: number | null
+  total_gain_loss: number | null
+  total_gain_loss_pct: number | null
+  annual_income: number | null
+  portfolio_yield: number | null
+  holdings: HoldingRow[]
+}
+
+export interface TransactionOut {
+  id: number
+  asx_code: string
+  transaction_type: string
+  transaction_date: string
+  shares: number
+  price_per_share: number
+  brokerage: number
+  total_cost: number | null
+  notes: string | null
+}
+
+export interface TransactionsResponse {
+  transactions: TransactionOut[]
+}
+
+export interface ImportResult {
+  imported: number
+  skipped: number
+  errors: string[]
+}
+
+export const listPortfolios = async (): Promise<PortfoliosResponse> => {
+  const { data } = await api.get('/api/v1/portfolio')
+  return data
+}
+
+export const createPortfolio = async (name: string, description?: string, is_smsf = false): Promise<PortfolioOut> => {
+  const { data } = await api.post('/api/v1/portfolio', { name, description, is_smsf })
+  return data
+}
+
+export const deletePortfolio = async (id: string): Promise<void> => {
+  await api.delete(`/api/v1/portfolio/${id}`)
+}
+
+export const getPortfolioPerformance = async (id: string): Promise<PortfolioPerformance> => {
+  const { data } = await api.get(`/api/v1/portfolio/${id}/performance`)
+  return data
+}
+
+export const listTransactions = async (portfolioId: string): Promise<TransactionsResponse> => {
+  const { data } = await api.get(`/api/v1/portfolio/${portfolioId}/transactions`)
+  return data
+}
+
+export const addTransaction = async (
+  portfolioId: string,
+  payload: {
+    asx_code: string
+    transaction_type: string
+    transaction_date: string
+    shares: number
+    price_per_share: number
+    brokerage?: number
+    notes?: string
+  }
+): Promise<TransactionOut> => {
+  const { data } = await api.post(`/api/v1/portfolio/${portfolioId}/transactions`, payload)
+  return data
+}
+
+export const deleteTransaction = async (portfolioId: string, txnId: number): Promise<void> => {
+  await api.delete(`/api/v1/portfolio/${portfolioId}/transactions/${txnId}`)
+}
+
+export const importHoldingsCsv = async (portfolioId: string, file: File): Promise<ImportResult> => {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await api.post(`/api/v1/portfolio/${portfolioId}/import/holdings`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}
+
+export const importTransactionsCsv = async (portfolioId: string, file: File): Promise<ImportResult> => {
+  const form = new FormData()
+  form.append('file', file)
+  const { data } = await api.post(`/api/v1/portfolio/${portfolioId}/import/transactions`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+  return data
+}

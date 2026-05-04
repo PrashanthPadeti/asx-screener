@@ -306,7 +306,14 @@ export default function PortfolioPage() {
     ]).then(([p, t]) => {
       setPerf(p)
       setTxns(t.transactions)
-    }).catch(e => setPerfError(e?.response?.data?.detail ?? 'Failed to load portfolio'))
+    }).catch(e => {
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      const msg = detail
+        ? (typeof detail === 'string' ? detail : JSON.stringify(detail))
+        : (e?.message ?? 'Unknown error')
+      setPerfError(status ? `HTTP ${status}: ${msg}` : msg)
+    })
     .finally(() => setPerfLoading(false))
   }, [activeId])
 
@@ -320,7 +327,14 @@ export default function PortfolioPage() {
     ]).then(([p, t]) => {
       setPerf(p)
       setTxns(t.transactions)
-    }).catch(e => setPerfError(e?.response?.data?.detail ?? 'Failed to load portfolio'))
+    }).catch(e => {
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      const msg = detail
+        ? (typeof detail === 'string' ? detail : JSON.stringify(detail))
+        : (e?.message ?? 'Unknown error')
+      setPerfError(status ? `HTTP ${status}: ${msg}` : msg)
+    })
     .finally(() => setPerfLoading(false))
   }
 

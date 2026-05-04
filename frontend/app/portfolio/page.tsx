@@ -445,6 +445,15 @@ export default function PortfolioPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[1,2,3,4].map(i => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}
             </div>
+          ) : perfError ? (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-5 flex items-start gap-3">
+              <span className="text-red-500 text-lg">⚠</span>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-red-700">Failed to load portfolio data</p>
+                <p className="text-xs text-red-600 mt-0.5">{perfError}</p>
+              </div>
+              <button onClick={refresh} className="text-xs text-red-600 underline hover:text-red-800">Retry</button>
+            </div>
           ) : perf && (
             <>
               {/* Summary cards */}

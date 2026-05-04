@@ -197,13 +197,16 @@ async def get_performance(
 
     # Enrich with live data from screener.universe
     codes = list(holdings.keys())
+    # Use individual placeholders — asyncpg doesn't coerce Python lists in text() queries
+    placeholders = ', '.join(f':c{i}' for i in range(len(codes)))
+    code_params  = {f'c{i}': code for i, code in enumerate(codes)}
     universe_rows = (await db.execute(
-        text("""
+        text(f"""
             SELECT asx_code, company_name, sector, price, dps_ttm, dividend_yield, franking_pct
             FROM screener.universe
-            WHERE asx_code = ANY(:codes) AND status = 'Active'
+            WHERE asx_code IN ({placeholders}) AND status = 'Active'
         """),
-        {"codes": codes},
+        code_params,
     )).mappings().all()
     live = {r["asx_code"]: r for r in universe_rows}
 

@@ -273,6 +273,7 @@ export default function PortfolioPage() {
 
   const [loading, setLoading]         = useState(false)
   const [perfLoading, setPerfLoading] = useState(false)
+  const [perfError, setPerfError]     = useState<string | null>(null)
 
   const [showCreate, setShowCreate]   = useState(false)
   const [newName, setNewName]         = useState('')
@@ -298,25 +299,29 @@ export default function PortfolioPage() {
   useEffect(() => {
     if (!activeId) return
     setPerfLoading(true)
+    setPerfError(null)
     Promise.all([
       getPortfolioPerformance(activeId),
       listTransactions(activeId),
     ]).then(([p, t]) => {
       setPerf(p)
       setTxns(t.transactions)
-    }).finally(() => setPerfLoading(false))
+    }).catch(e => setPerfError(e?.response?.data?.detail ?? 'Failed to load portfolio'))
+    .finally(() => setPerfLoading(false))
   }, [activeId])
 
   const refresh = () => {
     if (!activeId) return
     setPerfLoading(true)
+    setPerfError(null)
     Promise.all([
       getPortfolioPerformance(activeId),
       listTransactions(activeId),
     ]).then(([p, t]) => {
       setPerf(p)
       setTxns(t.transactions)
-    }).finally(() => setPerfLoading(false))
+    }).catch(e => setPerfError(e?.response?.data?.detail ?? 'Failed to load portfolio'))
+    .finally(() => setPerfLoading(false))
   }
 
   const handleCreate = async (e: React.FormEvent) => {

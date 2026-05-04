@@ -2,7 +2,6 @@
 Market-level summary endpoints — used by the homepage and market dashboard.
 All data sourced from screener.universe (end-of-day, nightly batch).
 """
-import asyncio
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -169,112 +168,91 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
         AND return_1w IS NOT NULL
     """
 
-    (
-        asx200_rows,
-        asx300_rows,
-        sector_rows,
-        gainers_rows,
-        losers_rows,
-        active_rows,
-        shorted_rows,
-        exdiv_rows,
-        built_row,
-    ) = await asyncio.gather(
-        db.execute(text(f"""
-            SELECT
-                COUNT(*)                                        AS stock_count,
-                COUNT(*) FILTER (WHERE return_1w > 0)          AS gainers,
-                COUNT(*) FILTER (WHERE return_1w < 0)          AS losers,
-                COUNT(*) FILTER (WHERE return_1w = 0)          AS unchanged,
-                AVG(return_1w)                                 AS avg_return_1w,
-                SUM(market_cap) / 1000.0                       AS total_market_cap_bn
-            FROM screener.universe
-            WHERE status = 'Active' AND is_asx200 = TRUE
-        """)),
-        db.execute(text(f"""
-            SELECT
-                COUNT(*)                                        AS stock_count,
-                COUNT(*) FILTER (WHERE return_1w > 0)          AS gainers,
-                COUNT(*) FILTER (WHERE return_1w < 0)          AS losers,
-                COUNT(*) FILTER (WHERE return_1w = 0)          AS unchanged,
-                AVG(return_1w)                                 AS avg_return_1w,
-                SUM(market_cap) / 1000.0                       AS total_market_cap_bn
-            FROM screener.universe
-            WHERE status = 'Active' AND is_asx300 = TRUE
-        """)),
-        db.execute(text("""
-            SELECT
-                gics_sector                                                AS sector,
-                COUNT(*)                                                   AS stock_count,
-                AVG(return_1w) FILTER (WHERE return_1w IS NOT NULL)        AS avg_return_1w,
-                SUM(market_cap) / 1000.0                                   AS total_market_cap_bn
-            FROM screener.universe
-            WHERE status = 'Active' AND gics_sector IS NOT NULL
-            GROUP BY gics_sector
-            ORDER BY total_market_cap_bn DESC NULLS LAST
-        """)),
-        db.execute(text(f"""
-            SELECT {mover_cols}
-            FROM screener.universe
-            WHERE {base_filter}
-            ORDER BY return_1w DESC NULLS LAST
-            LIMIT 10
-        """)),
-        db.execute(text(f"""
-            SELECT {mover_cols}
-            FROM screener.universe
-            WHERE {base_filter}
-            ORDER BY return_1w ASC NULLS LAST
-            LIMIT 10
-        """)),
-        db.execute(text("""
-            SELECT
-                asx_code, company_name,
-                gics_sector AS sector,
-                price, return_1w, market_cap,
-                volume, avg_volume_20d
-            FROM screener.universe
-            WHERE status = 'Active'
-              AND volume IS NOT NULL
-              AND volume > 0
-              AND price > 0.05
-            ORDER BY volume DESC NULLS LAST
-            LIMIT 10
-        """)),
-        db.execute(text("""
-            SELECT
-                asx_code, company_name,
-                gics_sector AS sector,
-                price, return_1w, market_cap,
-                short_pct
-            FROM screener.universe
-            WHERE status = 'Active'
-              AND short_pct IS NOT NULL
-              AND short_pct > 0
-              AND market_cap > 50
-            ORDER BY short_pct DESC NULLS LAST
-            LIMIT 10
-        """)),
-        db.execute(text("""
-            SELECT
-                asx_code, company_name,
-                ex_div_date::text  AS ex_div_date,
-                pay_date::text     AS pay_date,
-                dps_ttm,
-                dividend_yield,
-                franking_pct
-            FROM screener.universe
-            WHERE status = 'Active'
-              AND ex_div_date IS NOT NULL
-              AND ex_div_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '14 days'
-            ORDER BY ex_div_date ASC
-            LIMIT 30
-        """)),
-        db.execute(text("""
-            SELECT MAX(universe_built_at) AS universe_built_at
-            FROM screener.universe
-        """)),
-    )
+    index_sql = """
+        SELECT
+            COUNT(*)                                        AS stock_count,
+            COUNT(*) FILTER (WHERE return_1w > 0)          AS gainers,
+            COUNT(*) FILTER (WHERE return_1w < 0)          AS losers,
+            COUNT(*) FILTER (WHERE return_1w = 0)          AS unchanged,
+            AVG(return_1w)                                 AS avg_return_1w,
+            SUM(market_cap) / 1000.0                       AS total_market_cap_bn
+        FROM screener.universe
+        WHERE status = 'Active' AND {flag} = TRUE
+    """
+    asx200_rows  = await db.execute(text(index_sql.format(flag="is_asx200")))
+    asx300_rows  = await db.execute(text(index_sql.format(flag="is_asx300")))
+    sector_rows  = await db.execute(text("""
+        SELECT
+            gics_sector                                                AS sector,
+            COUNT(*)                                                   AS stock_count,
+            AVG(return_1w) FILTER (WHERE return_1w IS NOT NULL)        AS avg_return_1w,
+            SUM(market_cap) / 1000.0                                   AS total_market_cap_bn
+        FROM screener.universe
+        WHERE status = 'Active' AND gics_sector IS NOT NULL
+        GROUP BY gics_sector
+        ORDER BY total_market_cap_bn DESC NULLS LAST
+    """))
+    gainers_rows = await db.execute(text(f"""
+        SELECT {mover_cols}
+        FROM screener.universe
+        WHERE {base_filter}
+        ORDER BY return_1w DESC NULLS LAST
+        LIMIT 10
+    """))
+    losers_rows  = await db.execute(text(f"""
+        SELECT {mover_cols}
+        FROM screener.universe
+        WHERE {base_filter}
+        ORDER BY return_1w ASC NULLS LAST
+        LIMIT 10
+    """))
+    active_rows  = await db.execute(text("""
+        SELECT
+            asx_code, company_name,
+            gics_sector AS sector,
+            price, return_1w, market_cap,
+            volume, avg_volume_20d
+        FROM screener.universe
+        WHERE status = 'Active'
+          AND volume IS NOT NULL
+          AND volume > 0
+          AND price > 0.05
+        ORDER BY volume DESC NULLS LAST
+        LIMIT 10
+    """))
+    shorted_rows = await db.execute(text("""
+        SELECT
+            asx_code, company_name,
+            gics_sector AS sector,
+            price, return_1w, market_cap,
+            short_pct
+        FROM screener.universe
+        WHERE status = 'Active'
+          AND short_pct IS NOT NULL
+          AND short_pct > 0
+          AND market_cap > 50
+        ORDER BY short_pct DESC NULLS LAST
+        LIMIT 10
+    """))
+    exdiv_rows   = await db.execute(text("""
+        SELECT
+            asx_code, company_name,
+            ex_div_date::text  AS ex_div_date,
+            pay_date::text     AS pay_date,
+            dps_ttm,
+            dividend_yield,
+            franking_pct
+        FROM screener.universe
+        WHERE status = 'Active'
+          AND ex_div_date IS NOT NULL
+          AND ex_div_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '14 days'
+        ORDER BY ex_div_date ASC
+        LIMIT 30
+    """))
+    built_row    = await db.execute(text("""
+        SELECT MAX(universe_built_at) AS universe_built_at
+        FROM screener.universe
+    """))
 
     def _snap(row) -> IndexSnapshot:
         r = row.mappings().one()

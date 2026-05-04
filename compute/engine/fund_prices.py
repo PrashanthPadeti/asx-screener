@@ -278,7 +278,7 @@ def compute_fund_returns(df: pd.DataFrame, dividends: pd.Series) -> pd.DataFrame
     if not dividends.empty:
         dist_yield_vals = []
         for d in df.index:
-            one_yr_ago = date(d.year - 1, d.month, d.day)
+            one_yr_ago = d - timedelta(days=365)
             ttm_divs = dividends[(dividends.index > one_yr_ago) & (dividends.index <= d)]
             ttm_sum = float(ttm_divs.sum()) if not ttm_divs.empty else 0.0
             price = float(close[d])

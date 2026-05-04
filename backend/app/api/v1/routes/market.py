@@ -66,7 +66,7 @@ async def market_movers(db: AsyncSession = Depends(get_db)):
     cols = """
         asx_code,
         company_name,
-        gics_sector AS sector,
+        sector,
         price,
         return_1w,
         return_1m,
@@ -122,7 +122,7 @@ async def market_sectors(db: AsyncSession = Depends(get_db)):
     """
     sql = text("""
         SELECT
-            gics_sector                                                           AS sector,
+            sector,
             COUNT(*)                                                              AS stock_count,
             AVG(pe_ratio) FILTER (WHERE pe_ratio > 0 AND pe_ratio < 100)         AS avg_pe,
             AVG(dividend_yield) FILTER (WHERE dividend_yield > 0)                AS avg_dividend_yield,
@@ -130,8 +130,8 @@ async def market_sectors(db: AsyncSession = Depends(get_db)):
             SUM(market_cap) / 1000.0                                             AS total_market_cap_bn
         FROM screener.universe
         WHERE status = 'Active'
-          AND gics_sector IS NOT NULL
-        GROUP BY gics_sector
+          AND sector IS NOT NULL
+        GROUP BY sector
         ORDER BY total_market_cap_bn DESC NULLS LAST
     """)
     rows = (await db.execute(sql)).mappings().all()
@@ -158,7 +158,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
     """
     mover_cols = """
         asx_code, company_name,
-        gics_sector AS sector,
+        sector,
         price, return_1w, market_cap
     """
     base_filter = """
@@ -183,13 +183,13 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
     asx300_rows  = await db.execute(text(index_sql.format(flag="is_asx300")))
     sector_rows  = await db.execute(text("""
         SELECT
-            gics_sector                                                AS sector,
+            sector,
             COUNT(*)                                                   AS stock_count,
             AVG(return_1w) FILTER (WHERE return_1w IS NOT NULL)        AS avg_return_1w,
             SUM(market_cap) / 1000.0                                   AS total_market_cap_bn
         FROM screener.universe
-        WHERE status = 'Active' AND gics_sector IS NOT NULL
-        GROUP BY gics_sector
+        WHERE status = 'Active' AND sector IS NOT NULL
+        GROUP BY sector
         ORDER BY total_market_cap_bn DESC NULLS LAST
     """))
     gainers_rows = await db.execute(text(f"""
@@ -209,7 +209,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
     active_rows  = await db.execute(text("""
         SELECT
             asx_code, company_name,
-            gics_sector AS sector,
+            sector,
             price, return_1w, market_cap,
             volume, avg_volume_20d
         FROM screener.universe
@@ -223,7 +223,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
     shorted_rows = await db.execute(text("""
         SELECT
             asx_code, company_name,
-            gics_sector AS sector,
+            sector,
             price, return_1w, market_cap,
             short_pct
         FROM screener.universe

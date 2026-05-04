@@ -47,7 +47,7 @@ async def _get_portfolio_or_404(portfolio_id: str, user_id: str, db: AsyncSessio
     row = (await db.execute(
         text("SELECT id, name, description, is_smsf, created_at FROM users.portfolios WHERE id = :pid AND user_id = :uid"),
         {"pid": portfolio_id, "uid": user_id},
-    )).fetchone()
+    )).mappings().fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Portfolio not found")
     return row

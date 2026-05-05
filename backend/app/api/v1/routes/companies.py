@@ -907,8 +907,10 @@ Mention franking credits where they add meaningful value for Australian investor
             INSERT INTO market.ai_summaries
                 (asx_code, verdict, sentiment, bull_case, bear_case, key_catalysts, key_risks, model_used, generated_at)
             VALUES
-                (:code, :verdict, :sentiment, :bull_case::jsonb, :bear_case::jsonb,
-                 :catalysts::jsonb, :risks::jsonb, :model, NOW())
+                (:code, :verdict, :sentiment,
+                 CAST(:bull_case AS jsonb), CAST(:bear_case AS jsonb),
+                 CAST(:catalysts AS jsonb), CAST(:risks AS jsonb),
+                 :model, NOW())
             ON CONFLICT (asx_code) DO UPDATE SET
                 verdict       = EXCLUDED.verdict,
                 sentiment     = EXCLUDED.sentiment,

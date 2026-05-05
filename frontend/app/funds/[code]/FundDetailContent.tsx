@@ -142,9 +142,10 @@ function PriceChart({ history, days }: { history: FundDetail['history']; days: n
           width={50}
         />
         <Tooltip
-          formatter={(v: number, name: string) =>
-            name === 'close' ? [`$${v.toFixed(3)}`, 'Price'] : [`${(v * 100).toFixed(2)}%`, 'NAV Disc/Prem']
-          }
+          formatter={(v: unknown, name: unknown) => {
+            const val = v as number
+            return name === 'close' ? [`$${val.toFixed(3)}`, 'Price'] : [`${(val * 100).toFixed(2)}%`, 'NAV Disc/Prem']
+          }}
           labelFormatter={l => new Date(l).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
         />
         <Line yAxisId="price" type="monotone" dataKey="close" stroke="#3b82f6" strokeWidth={2} dot={false} name="close" />

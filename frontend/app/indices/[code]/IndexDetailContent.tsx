@@ -160,7 +160,7 @@ function PerformanceChart({ code }: { code: string }) {
               width={60}
             />
             <Tooltip
-              formatter={(v: number) => [v.toLocaleString('en-AU', { maximumFractionDigits: 2 }), 'Close']}
+              formatter={(v: unknown) => [(v as number).toLocaleString('en-AU', { maximumFractionDigits: 2 }), 'Close']}
               labelFormatter={l => new Date(l).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
             />
             <Line type="monotone" dataKey="close" stroke="#3b82f6" strokeWidth={2} dot={false} />
@@ -254,7 +254,7 @@ function CompareChart({ currentCode }: { currentCode: string }) {
             <XAxis dataKey="date" tickFormatter={d => new Date(d).toLocaleDateString('en-AU', { month: 'short', year: '2-digit' })} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
             <YAxis tickFormatter={v => `${v}`} tick={{ fontSize: 11 }} width={45} />
             <Tooltip
-              formatter={(v: number, name: string) => [`${v.toFixed(1)} (rebased 100)`, name]}
+              formatter={(v: unknown, name: unknown) => [`${(v as number).toFixed(1)} (rebased 100)`, name as string]}
               labelFormatter={l => new Date(l).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
             />
             <Legend />
@@ -300,7 +300,7 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
                     <Cell key={entry.sector} fill={SECTOR_COLORS[entry.sector] || SECTOR_COLORS['Other']} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v: number) => [`${v.toFixed(2)}%`, 'Weight']} />
+                <Tooltip formatter={(v: unknown) => [`${(v as number).toFixed(2)}%`, 'Weight']} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
@@ -309,7 +309,7 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
                 <XAxis type="number" tickFormatter={v => `${v.toFixed(0)}%`} tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="sector" tick={{ fontSize: 11 }} width={100} />
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <Tooltip formatter={(v: number) => [`${v.toFixed(2)}%`, 'Weight']} />
+                <Tooltip formatter={(v: unknown) => [`${(v as number).toFixed(2)}%`, 'Weight']} />
                 <Bar dataKey="weight_pct" radius={[0, 4, 4, 0]}>
                   {data.map((entry) => (
                     <Cell key={entry.sector} fill={SECTOR_COLORS[entry.sector] || SECTOR_COLORS['Other']} />

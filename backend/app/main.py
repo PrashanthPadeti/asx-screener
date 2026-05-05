@@ -17,20 +17,35 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
-    # ── Start alert scheduler ──────────────────────────────────
+    # ── Start schedulers ──────────────────────────────────────
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
     from app.workers.alert_worker import check_alerts
+    from app.workers.portfolio_worker import check_portfolio_thresholds, send_weekly_portfolio_summaries
+    from app.workers.announcement_worker import fetch_announcements
 
     scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        check_alerts,
-        trigger="interval",
-        minutes=15,
-        id="alert_checker",
-        replace_existing=True,
-    )
+
+    # Price alerts — every 15 min
+    scheduler.add_job(check_alerts, trigger="interval", minutes=15,
+                      id="alert_checker", replace_existing=True)
+
+    # Portfolio threshold alerts — every 30 min
+    scheduler.add_job(check_portfolio_thresholds, trigger="interval", minutes=30,
+                      id="portfolio_threshold_checker", replace_existing=True)
+
+    # Weekly portfolio summary — Monday 8am AEST
+    scheduler.add_job(send_weekly_portfolio_summaries,
+                      CronTrigger(day_of_week="mon", hour=8, minute=0,
+                                  timezone="Australia/Sydney"),
+                      id="weekly_portfolio_summary", replace_existing=True)
+
+    # ASX announcements fetch — every 10 min
+    scheduler.add_job(fetch_announcements, trigger="interval", minutes=10,
+                      id="announcement_fetcher", replace_existing=True)
+
     scheduler.start()
-    logger.info("Alert scheduler started (every 15 min)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m)")
 
     yield
 

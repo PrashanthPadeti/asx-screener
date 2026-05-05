@@ -1203,3 +1203,113 @@ export const getPortfolioDividends = async (
   const { data } = await api.get(`/api/v1/portfolio/${portfolioId}/dividends`, { params: { months_ahead: monthsAhead } })
   return data
 }
+
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+export interface NotificationPreferences {
+  portfolio_weekly_email:    boolean
+  portfolio_threshold_email: boolean
+  portfolio_threshold_sms:   boolean
+  portfolio_threshold_pct:   number
+  alerts_email:              boolean
+  alerts_sms:                boolean
+  announcements_email:       boolean
+  announcements_sms:         boolean
+  phone_number:              string | null
+  weekly_report_day:         number
+  weekly_report_hour:        number
+  timezone:                  string
+}
+
+export interface NotificationHistoryItem {
+  id:                number
+  channel:           string
+  notification_type: string
+  subject:           string | null
+  recipient:         string | null
+  status:            string
+  error_message:     string | null
+  attempt_count:     number
+  sent_at:           string | null
+  created_at:        string
+}
+
+export interface NotificationHistory {
+  total: number
+  items: NotificationHistoryItem[]
+}
+
+export const getNotificationPreferences = async (): Promise<NotificationPreferences> => {
+  const { data } = await api.get('/api/v1/notifications/preferences')
+  return data
+}
+
+export const updateNotificationPreferences = async (prefs: NotificationPreferences): Promise<NotificationPreferences> => {
+  const { data } = await api.put('/api/v1/notifications/preferences', prefs)
+  return data
+}
+
+export const getNotificationHistory = async (params?: {
+  channel?: string
+  notification_type?: string
+  limit?: number
+  offset?: number
+}): Promise<NotificationHistory> => {
+  const { data } = await api.get('/api/v1/notifications/history', { params })
+  return data
+}
+
+export const sendTestNotification = async (channel: 'email' | 'sms'): Promise<{ ok: boolean; channel: string; recipient: string }> => {
+  const { data } = await api.post('/api/v1/notifications/test', { channel })
+  return data
+}
+
+// ── Announcements Feed ────────────────────────────────────────────────────────
+
+export interface AnnouncementFeedItem {
+  id:               number
+  asx_code:         string
+  company_name:     string | null
+  title:            string
+  document_type:    string | null
+  url:              string | null
+  market_sensitive: boolean
+  price_sensitive:  boolean
+  released_at:      string | null
+  num_pages:        number | null
+}
+
+export interface AnnouncementFeed {
+  total:          number
+  limit:          number
+  offset:         number
+  announcements:  AnnouncementFeedItem[]
+  document_types: string[]
+}
+
+export const getAnnouncements = async (params?: {
+  asx_code?: string
+  sector?: string
+  document_type?: string
+  sensitive_only?: boolean
+  search?: string
+  limit?: number
+  offset?: number
+}): Promise<AnnouncementFeed> => {
+  const { data } = await api.get('/api/v1/announcements', { params })
+  return data
+}
+
+export const getLatestAnnouncements = async (limit = 20): Promise<{ announcements: AnnouncementFeedItem[] }> => {
+  const { data } = await api.get('/api/v1/announcements/latest', { params: { limit } })
+  return data
+}
+
+export const getCompanyAnnouncementsFeed = async (
+  code: string,
+  limit = 30,
+  offset = 0,
+): Promise<{ asx_code: string; total: number; announcements: AnnouncementFeedItem[] }> => {
+  const { data } = await api.get(`/api/v1/announcements/${code}`, { params: { limit, offset } })
+  return data
+}

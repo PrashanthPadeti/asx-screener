@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "noreply@asxscreener.com.au"
 
+    # SMS (Twilio)
+    TWILIO_ACCOUNT_SID:  str = ""
+    TWILIO_AUTH_TOKEN:   str = ""
+    TWILIO_PHONE_NUMBER: str = ""
+
+    # EODHD (market data)
+    EODHD_API_KEY: str = ""
+
     # Rate limiting (requests per minute by plan)
     RATE_LIMIT_FREE: int = 30
     RATE_LIMIT_PRO: int = 120

@@ -3,7 +3,7 @@ ASX Screener — Alert Worker
 =============================
 Runs every 15 minutes via APScheduler.
 Checks active price / pct-change alerts against screener.universe
-and fires email notifications when triggered.
+and fires email + SMS notifications when triggered.
 """
 import logging
 from datetime import datetime, timezone
@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import AsyncSessionLocal
-from app.services.email import send_alert_email
+from app.services.notification_service import send_alert_notification
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,6 @@ async def check_alerts() -> None:
 
 
 async def _run_checks(db: AsyncSession) -> None:
-    # Fetch all active alerts with current price data
     result = await db.execute(text("""
         SELECT
             a.id              AS alert_id,
@@ -36,19 +35,22 @@ async def _run_checks(db: AsyncSession) -> None:
             a.alert_type,
             a.threshold_value,
             a.via_email,
+            COALESCE(a.via_sms, FALSE)  AS via_sms,
             a.repeat_mode,
             a.last_triggered_at,
             u.email,
             u.name,
             u.plan,
-            -- current price metrics from screener.universe
+            -- Prefer user prefs phone; alerts table doesn't store phone
+            np.phone_number,
             s.price,
-            s.return_1w       AS pct_change_1d,   -- best proxy available
+            s.return_1w       AS pct_change_1d,
             c.company_name
         FROM users.alerts a
-        JOIN users.users u         ON u.id   = a.user_id
-        LEFT JOIN screener.universe s ON s.asx_code = a.asx_code
-        LEFT JOIN market.companies c  ON c.asx_code = a.asx_code
+        JOIN users.users u             ON u.id   = a.user_id
+        LEFT JOIN screener.universe s  ON s.asx_code = a.asx_code
+        LEFT JOIN market.companies c   ON c.asx_code = a.asx_code
+        LEFT JOIN users.notification_preferences np ON np.user_id = a.user_id
         WHERE a.is_active = TRUE
           AND (a.repeat_mode = 'every_time'
                OR a.last_triggered_at IS NULL
@@ -89,31 +91,25 @@ async def _run_checks(db: AsyncSession) -> None:
             WHERE id = :aid
         """), {"aid": alert.alert_id})
 
-        # Revoke once-only alerts
         if alert.repeat_mode == "once":
             await db.execute(text(
                 "UPDATE users.alerts SET is_active = FALSE WHERE id = :aid"
             ), {"aid": alert.alert_id})
 
-        # Send email
-        if alert.via_email and alert.email:
-            sent = send_alert_email(
-                to_email=alert.email,
-                asx_code=alert.asx_code,
-                alert_type=alert.alert_type,
-                threshold=float(alert.threshold_value),
-                current_value=current_value,
-                company_name=alert.company_name,
-            )
-            if sent:
-                # Mark notification sent on the trigger row (best-effort)
-                await db.execute(text("""
-                    UPDATE users.alert_triggers
-                    SET notification_sent = TRUE, notification_sent_at = NOW()
-                    WHERE alert_id = :aid
-                    ORDER BY triggered_at DESC
-                    LIMIT 1
-                """), {"aid": alert.alert_id})
+        # Send notifications (email + SMS) via unified service
+        await send_alert_notification(
+            db=db,
+            user_id=str(alert.user_id),
+            email=alert.email,
+            phone=alert.phone_number,
+            asx_code=alert.asx_code,
+            alert_type=alert.alert_type,
+            threshold=float(alert.threshold_value),
+            current_value=current_value,
+            company_name=alert.company_name,
+            via_email=bool(alert.via_email),
+            via_sms=bool(alert.via_sms),
+        )
 
         triggered += 1
 
@@ -122,9 +118,8 @@ async def _run_checks(db: AsyncSession) -> None:
 
 
 def _get_current_value(alert) -> float | None:
-    """Return the metric value to compare against the threshold."""
     if "pct_change" in alert.alert_type:
-        return alert.pct_change_1d   # can be None
+        return alert.pct_change_1d
     return alert.price
 
 

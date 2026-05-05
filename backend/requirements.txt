@@ -49,6 +49,9 @@ stripe==11.3.0
 # Email
 resend==2.5.0
 
+# SMS
+twilio==9.4.3
+
 # AWS S3
 boto3==1.35.84
 

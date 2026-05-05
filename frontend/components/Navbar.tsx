@@ -4,13 +4,14 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2 } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
   { href: '/',          label: 'Home',      icon: TrendingUp },
   { href: '/market',    label: 'Market',    icon: Globe },
   { href: '/screener',  label: 'Screener',  icon: BarChart2 },
+  { href: '/news',      label: 'News',      icon: Newspaper },
   { href: '/watchlist', label: 'Watchlist', icon: Star },
   { href: '/portfolio', label: 'Portfolio', icon: PieChart },
   { href: '/alerts',    label: 'Alerts',    icon: Bell },
@@ -169,6 +170,14 @@ export default function Navbar() {
                     >
                       <User className="w-4 h-4" />
                       Account settings
+                    </Link>
+                    <Link
+                      href="/notifications"
+                      onClick={() => setUserDropOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Notifications
                     </Link>
                     <button
                       onClick={handleLogout}

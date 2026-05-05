@@ -1154,6 +1154,109 @@ export const getFunds = async (params?: {
   return data
 }
 
+// ── Index Detail ──────────────────────────────────────────────
+
+export interface IndexConstituent {
+  asx_code: string
+  company_name: string
+  sector: string | null
+  market_cap: number | null
+  weight_pct: number | null
+  price: number | null
+  return_1d: number | null
+  return_1y: number | null
+  pe_ratio: number | null
+  dividend_yield: number | null
+  franking_pct: number | null
+}
+
+export interface IndexSectorBreakdown {
+  sector: string
+  count: number
+  weight_pct: number
+  market_cap_bn: number
+}
+
+export interface IndexPrimaryETF {
+  asx_code: string | null
+  name: string | null
+  mer_pct: number | null
+}
+
+export interface IndexDetail {
+  index_code: string
+  display_name: string
+  description: string | null
+  eligibility: string | null
+  methodology: string | null
+  rebalance_freq: string | null
+  market_coverage: string | null
+  primary_etf: IndexPrimaryETF | null
+  price: IndexPrice | null
+  constituents: IndexConstituent[]
+  total_market_cap_bn: number | null
+  constituent_count: number
+  sector_breakdown: IndexSectorBreakdown[]
+}
+
+export const getIndexDetail = async (indexCode: string): Promise<IndexDetail> => {
+  const { data } = await api.get(`/api/v1/market-data/indices/${indexCode}`)
+  return data
+}
+
+// ── Fund Detail ───────────────────────────────────────────────
+
+export interface FundHistoryPoint {
+  date: string
+  close: number | null
+  return_1d: number | null
+  distribution_yield: number | null
+  nav_discount_pct: number | null
+}
+
+export interface FundLatest {
+  price_date: string | null
+  close_price: number | null
+  return_1d: number | null
+  return_1w: number | null
+  return_1m: number | null
+  return_1y: number | null
+  return_ytd: number | null
+  return_3y_pa: number | null
+  return_5y_pa: number | null
+  distribution_yield: number | null
+  nav_discount_pct: number | null
+  high_52w: number | null
+  low_52w: number | null
+}
+
+export interface FundDetail {
+  asx_code: string
+  fund_name: string
+  fund_type: 'ETF' | 'LIC' | 'MANAGED'
+  asset_class: string | null
+  index_tracked: string | null
+  fund_manager: string | null
+  mer_pct: number | null
+  funds_under_mgmt_bn: number | null
+  distribution_freq: string | null
+  is_hedged: boolean | null
+  inception_date: string | null
+  asx_url: string | null
+  latest: FundLatest | null
+  history: FundHistoryPoint[]
+}
+
+export const getFundDetail = async (asxCode: string, days = 365): Promise<FundDetail> => {
+  const { data } = await api.get(`/api/v1/market-data/funds/${asxCode}`, { params: { days } })
+  return data
+}
+
+export const getSimilarFunds = async (asxCode: string): Promise<{ similar: FundRow[] }> => {
+  const { data } = await api.get(`/api/v1/market-data/funds/${asxCode}/similar`)
+  return data
+}
+
 // ── Portfolio History & Dividends ─────────────────────────────
 
 export interface PortfolioHistoryPoint {

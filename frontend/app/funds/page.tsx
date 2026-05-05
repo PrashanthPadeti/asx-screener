@@ -72,16 +72,14 @@ const SORT_OPTIONS: { label: string; value: string }[] = [
 
 function FundCard({ fund }: { fund: FundRow }) {
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 hover:border-slate-600 transition-all hover:bg-slate-750">
+    <Link href={`/funds/${fund.asx_code}`} className="block group">
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 group-hover:border-slate-500 transition-all">
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <Link
-              href={`/company/${fund.asx_code}`}
-              className="text-sm font-bold text-white hover:text-blue-400 transition-colors"
-            >
+            <span className="text-sm font-bold text-white group-hover:text-blue-400 transition-colors">
               {fund.asx_code}
-            </Link>
+            </span>
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wide ${typeBadge(fund.fund_type)}`}>
               {fund.fund_type}
             </span>
@@ -137,6 +135,7 @@ function FundCard({ fund }: { fund: FundRow }) {
         )}
       </div>
     </div>
+    </Link>
   )
 }
 

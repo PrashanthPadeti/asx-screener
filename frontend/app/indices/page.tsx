@@ -50,11 +50,16 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
       {/* Index name */}
       <div className="col-span-2">
         <div className="flex items-center gap-2">
-          <span className={`text-xs font-bold px-2 py-0.5 rounded ${retBg(idx.return_1d)} text-white`}>
+          <Link
+            href={`/indices/${idx.index_code}`}
+            className={`text-xs font-bold px-2 py-0.5 rounded ${retBg(idx.return_1d)} text-white hover:opacity-80 transition-opacity`}
+          >
             {idx.index_code}
-          </span>
+          </Link>
         </div>
-        <div className="text-xs text-slate-400 mt-1 leading-tight">{idx.display_name}</div>
+        <Link href={`/indices/${idx.index_code}`} className="text-xs text-slate-400 hover:text-slate-200 mt-1 leading-tight block transition-colors">
+          {idx.display_name}
+        </Link>
       </div>
 
       {/* Close price */}
@@ -118,7 +123,8 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
 function SummaryCard({ idx }: { idx: IndexPrice }) {
   const r = idx.return_1d
   return (
-    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+    <Link href={`/indices/${idx.index_code}`} className="block group">
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 group-hover:border-slate-500 transition-colors">
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">{idx.index_code}</div>
@@ -151,6 +157,7 @@ function SummaryCard({ idx }: { idx: IndexPrice }) {
         </div>
       </div>
     </div>
+    </Link>
   )
 }
 

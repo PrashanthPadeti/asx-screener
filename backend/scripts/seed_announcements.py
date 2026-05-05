@@ -1,14 +1,12 @@
 """
-One-shot script: seed market.asx_announcements using the companies API
-live-fetch pathway (same as company page Documents tab, which works in browser).
+One-shot script: seed market.asx_announcements via Markit Digital API
+(the same backend the ASX website uses; works from cloud IPs unlike the ASX v1 API).
 
-Since the ASX blocks direct server-side requests, this script calls the
-internal announcements endpoint for each top company which handles caching.
-
-Run: /opt/asx-venv/bin/python scripts/seed_announcements.py
+Run: cd /opt/asx-screener/backend && /opt/asx-venv/bin/python scripts/seed_announcements.py
 """
 import asyncio
 import logging
+import re
 import sys
 import os
 
@@ -21,26 +19,8 @@ from app.db.session import AsyncSessionLocal
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger(__name__)
 
-# Alternative ASX announcement APIs — try newer endpoints
-ASX_ANN_URLS = [
-    # New ASX API format (2024+)
-    "https://asx.api.markitdigital.com/asx-research/1.0/companies/{code}/announcements?count=20",
-    # Backup: old v1 without query params
-    "https://www.asx.com.au/asx/1/company/{code}/announcements?count=20",
-    "https://www.asx.com.au/asx/1/security/{code}/announcements?count=20",
-]
-
-ASX_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-    "Accept": "application/json, text/plain, */*",
-    "Accept-Language": "en-AU,en;q=0.9",
-    "Referer": "https://www.asx.com.au/markets/company/",
-    "Origin": "https://www.asx.com.au",
-    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
-    "sec-fetch-dest": "empty",
-    "sec-fetch-mode": "cors",
-    "sec-fetch-site": "same-origin",
-}
+# Markit Digital API — actual backend used by asx.com.au
+MARKIT_URL = "https://asx.api.markitdigital.com/asx-research/1.0/companies/{code}/announcements"
 
 MARKIT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -50,52 +30,69 @@ MARKIT_HEADERS = {
 }
 
 
+def parse_file_size_kb(size_str: str | None) -> float | None:
+    """Convert '176KB' / '1.2MB' to kilobytes."""
+    if not size_str:
+        return None
+    m = re.match(r"([\d.]+)\s*(KB|MB|GB)?", size_str.strip(), re.IGNORECASE)
+    if not m:
+        return None
+    val = float(m.group(1))
+    unit = (m.group(2) or "KB").upper()
+    if unit == "MB":
+        val *= 1024
+    elif unit == "GB":
+        val *= 1024 * 1024
+    return round(val, 1)
+
+
 async def fetch_markit(client: httpx.AsyncClient, code: str) -> list:
-    """Try the Markit Digital API used by the ASX website."""
+    """Fetch announcements from Markit Digital API.
+
+    Response shape:
+      {"data": {"displayName": "...", "issueType": "CS", "items": [
+        {"announcementType": "...", "date": "2026-05-04T04:11:25.000Z",
+         "documentKey": "2924-03084633-3A692621", "fileSize": "176KB",
+         "headline": "...", "isPriceSensitive": false, "url": ""}
+      ]}}
+    """
     try:
         resp = await client.get(
-            f"https://asx.api.markitdigital.com/asx-research/1.0/companies/{code}/announcements",
-            params={"count": 20, "pageSize": 20},
+            MARKIT_URL.format(code=code),
+            params={"count": 20},
             headers=MARKIT_HEADERS,
             timeout=10,
         )
         if resp.status_code == 200:
             body = resp.json()
             data = body.get("data", {}) if isinstance(body, dict) else {}
-            if isinstance(data, dict):
-                items = data.get("announcementSummaries", []) or data.get("announcements", [])
-            elif isinstance(data, list):
-                items = data
-            else:
-                items = []
-            if items and not isinstance(items[0], dict):
-                log.warning(f"Markit {code}: item type={type(items[0])}, data keys={list(data.keys()) if isinstance(data, dict) else 'n/a'}, sample={str(items[:2])[:400]}")
-                return []
-            return items
+            items = data.get("items", []) if isinstance(data, dict) else []
+            return [a for a in items if isinstance(a, dict)]
     except Exception as e:
         log.debug(f"Markit {code}: {e}")
     return []
 
 
-async def parse_markit_item(a: dict, code: str) -> dict | None:
-    ann_id = str(a.get("id") or a.get("documentId") or "").strip()
+def parse_item(a: dict, code: str) -> dict | None:
+    ann_id = (a.get("documentKey") or "").strip()
     if not ann_id:
         return None
-    url = a.get("url") or a.get("documentUrl") or ""
-    if not url and a.get("relativeUrl"):
-        url = "https://www.asx.com.au" + a["relativeUrl"]
+    url = (a.get("url") or "").strip()
+    if not url:
+        # Construct PDF link from documentKey: "2924-03084633-3A692621"
+        url = f"https://www.asx.com.au/asx/1/company/{code}/announcements/{ann_id}"
     return {
         "code":    code,
         "ann_id":  ann_id,
-        "rel_at":  a.get("documentReleaseDate") or a.get("document_release_date"),
-        "doc_dt":  a.get("documentDate") or a.get("document_date"),
-        "title":   (a.get("header") or a.get("documentType") or a.get("document_type") or "").strip(),
-        "dtype":   (a.get("documentType") or a.get("document_type") or "").strip(),
+        "rel_at":  a.get("date"),
+        "doc_dt":  a.get("date"),
+        "title":   (a.get("headline") or a.get("announcementType") or "").strip(),
+        "dtype":   (a.get("announcementType") or "").strip(),
         "url":     url,
-        "mkt_sen": bool(a.get("marketSensitive") or a.get("market_sensitive", False)),
-        "prc_sen": bool(a.get("priceSensitive") or a.get("price_sensitive", False)),
-        "pages":   a.get("numberOfPages") or a.get("number_of_pages"),
-        "size_kb": None,
+        "mkt_sen": bool(a.get("isPriceSensitive", False)),
+        "prc_sen": bool(a.get("isPriceSensitive", False)),
+        "pages":   None,
+        "size_kb": parse_file_size_kb(a.get("fileSize")),
     }
 
 
@@ -113,17 +110,6 @@ async def main():
     failed = 0
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
-        # Probe first company to log raw response shape
-        if codes:
-            probe = await client.get(
-                f"https://asx.api.markitdigital.com/asx-research/1.0/companies/{codes[0]}/announcements",
-                params={"count": 5},
-                headers=MARKIT_HEADERS,
-                timeout=10,
-            )
-            log.info(f"PROBE {codes[0]} status={probe.status_code}")
-            log.info(f"PROBE body (first 800 chars): {probe.text[:800]}")
-
         for i, code in enumerate(codes):
             items = await fetch_markit(client, code)
 
@@ -135,11 +121,7 @@ async def main():
                     log.info("Suppressing further 'no data' messages...")
                 continue
 
-            rows = []
-            for a in items:
-                row = await parse_markit_item(a, code)
-                if row:
-                    rows.append(row)
+            rows = [r for a in items if (r := parse_item(a, code))]
 
             if rows:
                 async with AsyncSessionLocal() as db:

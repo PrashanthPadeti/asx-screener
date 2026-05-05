@@ -225,12 +225,12 @@ INDEX_META: dict[str, dict] = {
 
 # Map index_code → screener.universe boolean flag
 INDEX_UNIVERSE_FLAG: dict[str, str | None] = {
-    "ASX20":  "is_asx20",
-    "ASX50":  "is_asx50",
-    "ASX100": "is_asx100",
-    "ASX200": "is_asx200",
-    "ASX300": "is_asx300",
-    "AXJO":   "is_asx200",  # accumulation index, same constituents as ASX200
+    "ASX20":  20,
+    "ASX50":  50,
+    "ASX100": 100,
+    "ASX200": 200,
+    "ASX300": 300,
+    "AXJO":   200,  # accumulation index, same constituents as ASX200
     "AXFJ":   None,
     "AXMJ":   None,
     "AXEJ":   None,
@@ -246,28 +246,37 @@ INDEX_GICS_SECTOR: dict[str, str] = {
 }
 
 
-# Maps index_tracked text (as stored in market.funds) → universe flag column
-INDEX_NAME_TO_FLAG: dict[str, str] = {
-    "s&p/asx 20":   "is_asx20",
-    "s&p/asx 50":   "is_asx50",
-    "s&p/asx 100":  "is_asx100",
-    "s&p/asx 200":  "is_asx200",
-    "s&p/asx 300":  "is_asx300",
-    "asx 20":       "is_asx20",
-    "asx 50":       "is_asx50",
-    "asx 100":      "is_asx100",
-    "asx 200":      "is_asx200",
-    "asx 300":      "is_asx300",
-    "asx200":       "is_asx200",
-    "asx300":       "is_asx300",
-    # Sector indices → fallback to is_asx200 + sector filter handled separately
+# Maps index_tracked text (as stored in market.funds) → top-N limit
+# Strip trailing " Index" / " index" before lookup
+INDEX_NAME_TO_LIMIT: dict[str, int] = {
+    "s&p/asx 20":   20,
+    "s&p/asx 50":   50,
+    "s&p/asx 100":  100,
+    "s&p/asx 200":  200,
+    "s&p/asx 300":  300,
+    "asx 20":       20,
+    "asx 50":       50,
+    "asx 100":      100,
+    "asx 200":      200,
+    "asx 300":      300,
+    "asx20":        20,
+    "asx50":        50,
+    "asx100":       100,
+    "asx200":       200,
+    "asx300":       300,
+    # MSCI / global indices — approximate top-N from universe
+    "msci world ex-australia": 300,
+    "msci world":              300,
+    "msci emerging markets":   200,
+    "ftse 100":                100,
+    "s&p 500":                 300,
 }
 
 INDEX_NAME_TO_SECTOR: dict[str, str] = {
-    "s&p/asx 200 financials": "Financials",
-    "s&p/asx 200 materials":  "Materials",
-    "s&p/asx 200 energy":     "Energy",
-    "s&p/asx 200 health care":"Health Care",
+    "s&p/asx 200 financials":  "Financials",
+    "s&p/asx 200 materials":   "Materials",
+    "s&p/asx 200 energy":      "Energy",
+    "s&p/asx 200 health care": "Health Care",
 }
 
 
@@ -386,29 +395,33 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
         ORDER BY price_date DESC LIMIT 1
     """), {"code": code})).mappings().fetchone()
 
-    # Constituents
-    flag_col = INDEX_UNIVERSE_FLAG.get(code)
-    if flag_col:
-        constituent_rows = (await db.execute(text(f"""
-            SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
-                   u.sector, u.market_cap, u.price,
-                   u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
-            FROM screener.universe u
-            LEFT JOIN market.companies c ON c.asx_code = u.asx_code
-            WHERE u.{flag_col} = TRUE
-            ORDER BY u.market_cap DESC NULLS LAST
-        """))).mappings().all()
-    else:
-        sector_name = INDEX_GICS_SECTOR.get(code, "")
+    # Constituents — use top-N by market cap (flags unreliable)
+    limit_n = INDEX_UNIVERSE_FLAG.get(code)
+    sector_name = INDEX_GICS_SECTOR.get(code)
+    if limit_n:
         constituent_rows = (await db.execute(text("""
             SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
                    u.sector, u.market_cap, u.price,
                    u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
-            WHERE u.is_asx200 = TRUE AND u.sector = :sector
+            WHERE u.price IS NOT NULL AND u.market_cap IS NOT NULL
             ORDER BY u.market_cap DESC NULLS LAST
+            LIMIT :n
+        """), {"n": limit_n})).mappings().all()
+    elif sector_name:
+        constituent_rows = (await db.execute(text("""
+            SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
+                   u.sector, u.market_cap, u.price,
+                   u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
+            FROM screener.universe u
+            LEFT JOIN market.companies c ON c.asx_code = u.asx_code
+            WHERE u.price IS NOT NULL AND u.sector = :sector
+            ORDER BY u.market_cap DESC NULLS LAST
+            LIMIT 50
         """), {"sector": sector_name})).mappings().all()
+    else:
+        constituent_rows = []
 
     total_mcap = sum(float(r["market_cap"]) for r in constituent_rows if r["market_cap"])
 
@@ -712,23 +725,31 @@ async def get_fund_constituents(asx_code: str, db: AsyncSession = Depends(get_db
     if not fund_row or not fund_row["index_tracked"]:
         return {"asx_code": code, "constituents": [], "source": None}
 
-    index_name = (fund_row["index_tracked"] or "").strip().lower()
-    flag_col = INDEX_NAME_TO_FLAG.get(index_name)
-    sector_name = INDEX_NAME_TO_SECTOR.get(index_name)
+    # Strip trailing " Index" / " index" then normalise to lowercase for lookup
+    raw_name = (fund_row["index_tracked"] or "").strip()
+    normalised = raw_name.lower()
+    for suffix in (" index", " accumulation index", " total return index"):
+        if normalised.endswith(suffix):
+            normalised = normalised[: -len(suffix)].strip()
+            break
+
+    limit_n = INDEX_NAME_TO_LIMIT.get(normalised)
+    sector_name = INDEX_NAME_TO_SECTOR.get(normalised)
 
     def _f(v): return float(v) if v is not None else None
 
-    if flag_col:
-        rows = (await db.execute(text(f"""
+    if limit_n:
+        rows = (await db.execute(text("""
             SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
                    u.sector, u.market_cap, u.price,
                    u.return_1w AS return_1d, u.return_1y,
                    u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
-            WHERE u.{flag_col} = TRUE
+            WHERE u.price IS NOT NULL AND u.market_cap IS NOT NULL
             ORDER BY u.market_cap DESC NULLS LAST
-        """))).mappings().all()
+            LIMIT :n
+        """), {"n": limit_n})).mappings().all()
     elif sector_name:
         rows = (await db.execute(text("""
             SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
@@ -737,11 +758,12 @@ async def get_fund_constituents(asx_code: str, db: AsyncSession = Depends(get_db
                    u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
-            WHERE u.is_asx200 = TRUE AND u.sector = :sector
+            WHERE u.price IS NOT NULL AND u.sector = :sector
             ORDER BY u.market_cap DESC NULLS LAST
+            LIMIT 50
         """), {"sector": sector_name})).mappings().all()
     else:
-        return {"asx_code": code, "constituents": [], "source": fund_row["index_tracked"]}
+        return {"asx_code": code, "constituents": [], "source": raw_name}
 
     total_mcap = sum(float(r["market_cap"]) for r in rows if r["market_cap"])
     constituents = []

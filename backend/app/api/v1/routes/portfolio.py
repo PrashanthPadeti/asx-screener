@@ -619,22 +619,26 @@ async def get_portfolio_dividends(
     past_start = today - timedelta(days=365)
 
     upcoming_rows = (await db.execute(text(f"""
-        SELECT d.asx_code, d.ex_date, d.payment_date, d.amount,
+        SELECT d.asx_code, d.ex_date, d.payment_date,
+               COALESCE(d.amount_per_share, d.amount) AS amount,
                d.franking_pct, d.div_type, u.company_name
         FROM market.dividends d
         LEFT JOIN screener.universe u ON u.asx_code = d.asx_code
         WHERE d.asx_code IN ({placeholders})
-          AND d.ex_date >= :today AND d.ex_date <= :future_end AND d.amount > 0
+          AND d.ex_date >= :today AND d.ex_date <= :future_end
+          AND COALESCE(d.amount_per_share, d.amount) > 0
         ORDER BY d.ex_date ASC
     """), {**code_params, "today": today, "future_end": future_end})).mappings().all()
 
     received_rows = (await db.execute(text(f"""
-        SELECT d.asx_code, d.ex_date, d.payment_date, d.amount,
+        SELECT d.asx_code, d.ex_date, d.payment_date,
+               COALESCE(d.amount_per_share, d.amount) AS amount,
                d.franking_pct, d.div_type, u.company_name
         FROM market.dividends d
         LEFT JOIN screener.universe u ON u.asx_code = d.asx_code
         WHERE d.asx_code IN ({placeholders})
-          AND d.ex_date >= :past_start AND d.ex_date < :today AND d.amount > 0
+          AND d.ex_date >= :past_start AND d.ex_date < :today
+          AND COALESCE(d.amount_per_share, d.amount) > 0
         ORDER BY d.ex_date DESC LIMIT 50
     """), {**code_params, "past_start": past_start, "today": today})).mappings().all()
 

@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { TrendingUp, TrendingDown, Filter, RefreshCw, Info, Search, X } from 'lucide-react'
 import { getFunds, FundsResponse, FundRow } from '@/lib/api'
+import { PlanGate } from '@/components/PlanGate'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ function FundCard({ fund }: { fund: FundRow }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function FundsPage() {
+function FundsContent() {
   const [data, setData] = useState<FundsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -352,5 +353,13 @@ export default function FundsPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function FundsPage() {
+  return (
+    <PlanGate required="premium" feature="ETF & Managed Funds">
+      <FundsContent />
+    </PlanGate>
   )
 }

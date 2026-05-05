@@ -38,9 +38,14 @@ router = APIRouter()
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _token_response(user_id: str, email: str, plan: str) -> TokenResponse:
+def _token_response(
+    user_id: str,
+    email: str,
+    plan: str,
+    subscription_status: str = "inactive",
+) -> tuple:
     """Build a full TokenResponse (access + refresh) for a user."""
-    access  = create_access_token(user_id, email, plan)
+    access  = create_access_token(user_id, email, plan, subscription_status)
     refresh = generate_refresh_token()
     return TokenResponse(
         access_token=access,
@@ -78,7 +83,6 @@ async def register(
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new user account and return tokens."""
-    # Check duplicate email
     row = await db.execute(
         text("SELECT id FROM users.users WHERE email = :email"),
         {"email": body.email.lower()},
@@ -95,17 +99,18 @@ async def register(
         text("""
             INSERT INTO users.users (email, name, password_hash)
             VALUES (:email, :name, :pw)
-            RETURNING id, plan
+            RETURNING id, plan, subscription_status
         """),
         {"email": body.email.lower(), "name": body.name, "pw": hashed},
     )
     row = result.fetchone()
     await db.commit()
 
-    user_id = str(row.id)
-    plan    = row.plan
+    user_id             = str(row.id)
+    plan                = row.plan
+    subscription_status = row.subscription_status or "inactive"
 
-    token_resp, refresh = _token_response(user_id, body.email.lower(), plan)
+    token_resp, refresh = _token_response(user_id, body.email.lower(), plan, subscription_status)
     await _store_session(db, user_id, refresh, request)
 
     log.info(f"New user registered: {body.email}")
@@ -123,7 +128,7 @@ async def login(
     """Authenticate with email + password. Returns access + refresh tokens."""
     result = await db.execute(
         text("""
-            SELECT id, email, password_hash, plan, email_verified
+            SELECT id, email, password_hash, plan, email_verified, subscription_status
             FROM users.users
             WHERE email = :email
         """),
@@ -131,22 +136,21 @@ async def login(
     )
     user = result.fetchone()
 
-    # Constant-time check (avoid user-enumeration timing attacks)
     if user is None or not verify_password(body.password, user.password_hash or ""):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
-    # Update last_login_at
     await db.execute(
         text("UPDATE users.users SET last_login_at = NOW() WHERE id = :id"),
         {"id": user.id},
     )
     await db.commit()
 
-    user_id = str(user.id)
-    token_resp, refresh = _token_response(user_id, user.email, user.plan)
+    user_id             = str(user.id)
+    subscription_status = user.subscription_status or "inactive"
+    token_resp, refresh = _token_response(user_id, user.email, user.plan, subscription_status)
     await _store_session(db, user_id, refresh, request)
 
     log.info(f"User logged in: {user.email}")
@@ -165,7 +169,7 @@ async def refresh(
     result = await db.execute(
         text("""
             SELECT s.id AS session_id, s.user_id, s.expires_at, s.revoked,
-                   u.email, u.plan
+                   u.email, u.plan, u.subscription_status
             FROM users.sessions s
             JOIN users.users u ON u.id = s.user_id
             WHERE s.refresh_token = :tok
@@ -186,7 +190,6 @@ async def refresh(
             detail="Refresh token has expired — please log in again",
         )
 
-    # Revoke old token (rotation)
     await db.execute(
         text("""
             UPDATE users.sessions
@@ -197,8 +200,9 @@ async def refresh(
     )
     await db.commit()
 
-    user_id = str(row.user_id)
-    token_resp, new_refresh = _token_response(user_id, row.email, row.plan)
+    user_id             = str(row.user_id)
+    subscription_status = row.subscription_status or "inactive"
+    token_resp, new_refresh = _token_response(user_id, row.email, row.plan, subscription_status)
     await _store_session(db, user_id, new_refresh, request)
 
     return token_resp
@@ -230,10 +234,11 @@ async def me(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the current user's profile (requires valid access token)."""
+    """Return the current user's full profile (requires valid access token)."""
     result = await db.execute(
         text("""
-            SELECT id, email, name, plan, email_verified, created_at
+            SELECT id, email, name, plan, email_verified,
+                   subscription_status, subscription_ends_at, created_at
             FROM users.users
             WHERE id = :id
         """),
@@ -248,6 +253,8 @@ async def me(
         email=row.email,
         name=row.name,
         plan=row.plan,
+        subscription_status=row.subscription_status or "inactive",
+        subscription_ends_at=row.subscription_ends_at.isoformat() if row.subscription_ends_at else None,
         email_verified=row.email_verified or False,
         created_at=row.created_at.isoformat() if row.created_at else None,
     )

@@ -37,6 +37,7 @@ def create_access_token(
     user_id: str,
     email: str,
     plan: str,
+    subscription_status: str = "inactive",
     *,
     expires_delta: Optional[timedelta] = None,
 ) -> str:
@@ -44,22 +45,24 @@ def create_access_token(
     Create a signed JWT access token.
 
     Payload:
-        sub   — user UUID (string)
-        email — user email
-        plan  — free | pro | premium | enterprise
-        exp   — expiry (UTC)
-        iat   — issued-at (UTC)
-        type  — "access"
+        sub    — user UUID (string)
+        email  — user email
+        plan   — free | pro | premium | enterprise_pro | enterprise_premium
+        status — subscription_status (active | inactive | past_due | cancelled | trialing)
+        exp    — expiry (UTC)
+        iat    — issued-at (UTC)
+        type   — "access"
     """
     delta = expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     now   = datetime.now(timezone.utc)
     payload = {
-        "sub":   user_id,
-        "email": email,
-        "plan":  plan,
-        "iat":   now,
-        "exp":   now + delta,
-        "type":  "access",
+        "sub":    user_id,
+        "email":  email,
+        "plan":   plan,
+        "status": subscription_status,
+        "iat":    now,
+        "exp":    now + delta,
+        "type":   "access",
     }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 

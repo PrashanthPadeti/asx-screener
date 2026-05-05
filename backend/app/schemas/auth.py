@@ -44,11 +44,13 @@ class AccessTokenResponse(BaseModel):
 
 class UserProfile(BaseModel):
     """Returned by GET /me."""
-    id:             str
-    email:          str
-    name:           Optional[str]   = None
-    plan:           str             = "free"
-    email_verified: bool            = False
-    created_at:     Optional[str]   = None
+    id:                   str
+    email:                str
+    name:                 Optional[str]  = None
+    plan:                 str            = "free"
+    subscription_status:  str            = "inactive"
+    subscription_ends_at: Optional[str]  = None
+    email_verified:       bool           = False
+    created_at:           Optional[str]  = None
 
     model_config = {"from_attributes": True}

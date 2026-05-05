@@ -4,6 +4,7 @@ import './globals.css'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
 import { AuthProvider } from '@/lib/auth'
+import { ClientGuard } from '@/components/ClientGuard'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <AuthProvider>
           <Navbar />
           <main className="max-w-screen-2xl mx-auto px-4 py-6">
-            {children}
+            <ClientGuard>
+              {children}
+            </ClientGuard>
           </main>
           <Footer />
         </AuthProvider>

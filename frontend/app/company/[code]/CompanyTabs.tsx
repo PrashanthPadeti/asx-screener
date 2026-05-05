@@ -19,6 +19,7 @@ import {
   formatRatio, formatRatioChange, formatPctRaw, formatNumber,
 } from '@/lib/utils'
 import { TrendingUp, TrendingDown, Minus, FileText, ExternalLink, AlertTriangle, Tag } from 'lucide-react'
+import { PlanGate } from '@/components/PlanGate'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -2043,7 +2044,9 @@ export default function CompanyTabs({ code }: { code: string }) {
             )}
 
             {activeTab === 'ai' && (
-              <AIInsightsTab code={code} />
+              <PlanGate required="premium" feature="AI Insights">
+                <AIInsightsTab code={code} />
+              </PlanGate>
             )}
 
             {activeTab === 'documents' && (

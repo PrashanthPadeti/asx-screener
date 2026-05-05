@@ -42,9 +42,10 @@ async def _resolve_user(
         return None
 
     return {
-        "id":             payload["sub"],
-        "email":          payload["email"],
-        "plan":           payload.get("plan", "free"),
+        "id":                  payload["sub"],
+        "email":               payload["email"],
+        "plan":                payload.get("plan", "free"),
+        "subscription_status": payload.get("status", "inactive"),
     }
 
 

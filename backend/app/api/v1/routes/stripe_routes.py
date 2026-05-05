@@ -194,47 +194,114 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     event_type = event["type"]
     log.info(f"Stripe event: {event_type}")
 
+    async def _log_event(user_id: str, event_type: str, old_plan: str, new_plan: str, stripe_event_id: str):
+        """Write to subscription_events audit table if it exists."""
+        try:
+            await db.execute(text("""
+                INSERT INTO users.subscription_events
+                    (user_id, event_type, old_plan, new_plan, stripe_event_id)
+                VALUES (:uid, :et, :op, :np, :eid)
+            """), {"uid": user_id, "et": event_type, "op": old_plan, "np": new_plan, "eid": stripe_event_id})
+        except Exception:
+            pass  # table may not exist yet
+
     if event_type in ("customer.subscription.created", "customer.subscription.updated"):
         sub        = event["data"]["object"]
         sub_status = sub["status"]
         cid        = sub["customer"]
         ends       = sub.get("current_period_end")
-        metadata   = event.get("data", {}).get("object", {}).get("metadata", {})
+        metadata   = sub.get("metadata", {})
         seats      = int(metadata.get("seats", 1))
 
-        # Determine plan from price ID
-        price_id   = sub["items"]["data"][0]["price"]["id"] if sub.get("items") else ""
-        price_map  = _build_price_plan_map()
-        plan_info  = price_map.get(price_id)
+        price_id  = sub["items"]["data"][0]["price"]["id"] if sub.get("items") else ""
+        price_map = _build_price_plan_map()
+        plan_info = price_map.get(price_id)
 
         if sub_status in ("active", "trialing") and plan_info:
             plan, seat_limit, billing_period = plan_info
         else:
             plan, seat_limit, billing_period = "free", 1, "monthly"
 
+        result = await db.execute(
+            text("SELECT id, plan FROM users.users WHERE stripe_customer_id = :cid"),
+            {"cid": cid},
+        )
+        user_row = result.fetchone()
+
         await db.execute(
             text("""
                 UPDATE users.users
-                SET plan = :plan,
+                SET plan                 = :plan,
                     subscription_status  = :status,
                     subscription_ends_at = to_timestamp(:ends),
                     billing_period       = :bp,
-                    seat_limit           = :seats
+                    seat_limit           = :seats,
+                    subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
+                    data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
                 WHERE stripe_customer_id = :cid
             """),
             {"plan": plan, "status": sub_status, "ends": ends,
              "bp": billing_period, "seats": seat_limit, "cid": cid},
         )
         await db.commit()
-        log.info(f"Updated to plan='{plan}' seats={seat_limit} for Stripe customer {cid}")
+        if user_row:
+            await _log_event(str(user_row.id), event_type, user_row.plan, plan, event["id"])
+            await db.commit()
+        log.info(f"Subscription updated: plan='{plan}' status='{sub_status}' for customer {cid}")
 
     elif event_type == "customer.subscription.deleted":
+        cid = event["data"]["object"]["customer"]
+        result = await db.execute(
+            text("SELECT id, plan FROM users.users WHERE stripe_customer_id = :cid"),
+            {"cid": cid},
+        )
+        user_row = result.fetchone()
+
+        await db.execute(
+            text("""
+                UPDATE users.users
+                SET plan = 'free',
+                    subscription_status = 'cancelled',
+                    subscription_ends_at = NULL,
+                    seat_limit = 1,
+                    subscription_inactive_since = NOW(),
+                    data_deletion_scheduled_at  = NOW() + INTERVAL '12 months',
+                    deletion_reminder_30d_sent  = FALSE,
+                    deletion_reminder_7d_sent   = FALSE,
+                    deletion_reminder_1d_sent   = FALSE
+                WHERE stripe_customer_id = :cid
+            """),
+            {"cid": cid},
+        )
+        await db.commit()
+        if user_row:
+            await _log_event(str(user_row.id), "cancelled", user_row.plan, "free", event["id"])
+            await db.commit()
+        log.info(f"Subscription cancelled for customer {cid} — downgraded to free")
+
+    elif event_type == "invoice.payment_failed":
         cid = event["data"]["object"]["customer"]
         await db.execute(
             text("""
                 UPDATE users.users
-                SET plan = 'free', subscription_status = 'cancelled',
-                    subscription_ends_at = NULL, seat_limit = 1
+                SET subscription_status = 'past_due'
+                WHERE stripe_customer_id = :cid
+            """),
+            {"cid": cid},
+        )
+        await db.commit()
+        log.warning(f"Payment failed for customer {cid} — marked past_due")
+
+    elif event_type == "invoice.payment_succeeded":
+        cid = event["data"]["object"]["customer"]
+        await db.execute(
+            text("""
+                UPDATE users.users
+                SET subscription_inactive_since = NULL,
+                    data_deletion_scheduled_at  = NULL,
+                    deletion_reminder_30d_sent  = FALSE,
+                    deletion_reminder_7d_sent   = FALSE,
+                    deletion_reminder_1d_sent   = FALSE
                 WHERE stripe_customer_id = :cid
             """),
             {"cid": cid},

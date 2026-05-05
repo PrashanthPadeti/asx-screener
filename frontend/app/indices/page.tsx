@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Info } from 'lucide-react'
 import { getIndices, IndicesResponse, IndexPrice } from '@/lib/api'
+import { PlanGate } from '@/components/PlanGate'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -155,7 +156,7 @@ function SummaryCard({ idx }: { idx: IndexPrice }) {
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
-export default function IndicesPage() {
+function IndicesContent() {
   const [data, setData] = useState<IndicesResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -319,5 +320,13 @@ export default function IndicesPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function IndicesPage() {
+  return (
+    <PlanGate required="premium" feature="ASX Indices">
+      <IndicesContent />
+    </PlanGate>
   )
 }

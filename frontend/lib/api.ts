@@ -1257,6 +1257,25 @@ export const getSimilarFunds = async (asxCode: string): Promise<{ similar: FundR
   return data
 }
 
+export interface FundConstituent {
+  asx_code: string
+  company_name: string
+  sector: string | null
+  market_cap: number | null
+  weight_pct: number | null
+  price: number | null
+  return_1d: number | null
+  return_1y: number | null
+  pe_ratio: number | null
+  dividend_yield: number | null
+  franking_pct: number | null
+}
+
+export const getFundConstituents = async (asxCode: string): Promise<{ asx_code: string; source: string | null; constituents: FundConstituent[] }> => {
+  const { data } = await api.get(`/api/v1/market-data/funds/${asxCode}/constituents`)
+  return data
+}
+
 // ── Portfolio History & Dividends ─────────────────────────────
 
 export interface PortfolioHistoryPoint {

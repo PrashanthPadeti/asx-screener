@@ -9,7 +9,7 @@ import {
   ResponsiveContainer, ComposedChart, LineChart, Line,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts'
-import { FundDetail, FundRow, getFundDetail, getSimilarFunds } from '@/lib/api'
+import { FundDetail, FundRow, FundConstituent, getFundDetail, getSimilarFunds, getFundConstituents } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -239,6 +239,111 @@ function SimilarFunds({ code }: { code: string }) {
   )
 }
 
+// ── Constituents Table ────────────────────────────────────────────────────────
+
+function FundConstituentsTable({ code, indexTracked }: { code: string; indexTracked: string | null }) {
+  const [rows, setRows] = useState<FundConstituent[]>([])
+  const [source, setSource] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [sortCol, setSortCol] = useState<'weight_pct' | 'return_1y' | 'market_cap'>('weight_pct')
+
+  useEffect(() => {
+    getFundConstituents(code)
+      .then(d => { setRows(d.constituents); setSource(d.source) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [code])
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase()
+    return rows
+      .filter(r => !q || r.asx_code.toLowerCase().includes(q) || r.company_name.toLowerCase().includes(q) || (r.sector ?? '').toLowerCase().includes(q))
+      .sort((a, b) => ((b[sortCol] ?? -Infinity) as number) - ((a[sortCol] ?? -Infinity) as number))
+  }, [rows, search, sortCol])
+
+  if (!indexTracked) return null
+  if (!loading && rows.length === 0) return null
+
+  const fmtPct = (v: number | null) => v == null ? '—' : (v > 0 ? '+' : '') + (v * 100).toFixed(2) + '%'
+  const fmtMcap = (v: number | null) => v == null ? '—' : v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${(v / 1e6).toFixed(0)}M`
+  const retColor = (v: number | null) => v == null ? 'text-gray-400' : v > 0 ? 'text-emerald-600' : v < 0 ? 'text-red-500' : 'text-gray-400'
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Holdings / Constituents</h2>
+          {source && <p className="text-xs text-gray-400 mt-0.5">Based on {source} index membership · {rows.length} stocks · estimated weights</p>}
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search holdings…"
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:border-blue-400 w-44"
+          />
+          <select
+            value={sortCol}
+            onChange={e => setSortCol(e.target.value as typeof sortCol)}
+            className="border border-gray-200 rounded-lg px-2 py-1.5 text-xs text-gray-700 focus:outline-none"
+          >
+            <option value="weight_pct">Sort: Weight</option>
+            <option value="market_cap">Sort: Market Cap</option>
+            <option value="return_1y">Sort: 1Y Return</option>
+          </select>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-10">
+          <RefreshCw className="w-5 h-5 text-blue-400 animate-spin" />
+        </div>
+      ) : (
+        <>
+          {/* Header */}
+          <div className="grid grid-cols-12 gap-2 px-5 py-2 bg-gray-50 border-b border-gray-100 text-[10px] font-semibold text-gray-400 uppercase tracking-wide">
+            <div className="col-span-3">Stock</div>
+            <div className="col-span-3">Sector</div>
+            <div className="text-right col-span-2">Market Cap</div>
+            <div className="text-right col-span-1">Weight</div>
+            <div className="text-right col-span-1">Price</div>
+            <div className="text-right col-span-1">1W Ret</div>
+            <div className="text-right col-span-1">1Y Ret</div>
+          </div>
+          <div className="divide-y divide-gray-50 max-h-[600px] overflow-y-auto">
+            {filtered.slice(0, 300).map((r, i) => (
+              <div key={r.asx_code} className="grid grid-cols-12 gap-2 px-5 py-2.5 hover:bg-gray-50 transition-colors text-sm">
+                <div className="col-span-3 flex items-center gap-2">
+                  <span className="text-xs text-gray-400 w-5 shrink-0">{i + 1}</span>
+                  <div>
+                    <Link href={`/company/${r.asx_code}`} className="text-xs font-bold text-blue-600 hover:text-blue-800">{r.asx_code}</Link>
+                    <p className="text-[11px] text-gray-500 truncate max-w-[120px]">{r.company_name}</p>
+                  </div>
+                </div>
+                <div className="col-span-3 text-xs text-gray-500 self-center truncate">{r.sector ?? '—'}</div>
+                <div className="col-span-2 text-xs text-gray-700 text-right self-center">{fmtMcap(r.market_cap)}</div>
+                <div className="col-span-1 text-xs font-medium text-gray-700 text-right self-center">
+                  {r.weight_pct != null ? r.weight_pct.toFixed(2) + '%' : '—'}
+                </div>
+                <div className="col-span-1 text-xs text-gray-700 text-right self-center">
+                  {r.price != null ? `$${r.price.toFixed(2)}` : '—'}
+                </div>
+                <div className={`col-span-1 text-xs font-medium text-right self-center ${retColor(r.return_1d)}`}>{fmtPct(r.return_1d)}</div>
+                <div className={`col-span-1 text-xs font-medium text-right self-center ${retColor(r.return_1y)}`}>{fmtPct(r.return_1y)}</div>
+              </div>
+            ))}
+          </div>
+          {filtered.length === 0 && (
+            <p className="text-center text-sm text-gray-400 py-8">No holdings match your search.</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function FundDetailContent({
@@ -436,6 +541,9 @@ export default function FundDetailContent({
             )}
           </div>
         )}
+
+        {/* Holdings / Constituents */}
+        <FundConstituentsTable code={code} indexTracked={data.index_tracked} />
 
         {/* Similar funds */}
         <SimilarFunds code={code} />

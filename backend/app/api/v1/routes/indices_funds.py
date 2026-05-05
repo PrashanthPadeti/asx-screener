@@ -246,6 +246,31 @@ INDEX_GICS_SECTOR: dict[str, str] = {
 }
 
 
+# Maps index_tracked text (as stored in market.funds) → universe flag column
+INDEX_NAME_TO_FLAG: dict[str, str] = {
+    "s&p/asx 20":   "is_asx20",
+    "s&p/asx 50":   "is_asx50",
+    "s&p/asx 100":  "is_asx100",
+    "s&p/asx 200":  "is_asx200",
+    "s&p/asx 300":  "is_asx300",
+    "asx 20":       "is_asx20",
+    "asx 50":       "is_asx50",
+    "asx 100":      "is_asx100",
+    "asx 200":      "is_asx200",
+    "asx 300":      "is_asx300",
+    "asx200":       "is_asx200",
+    "asx300":       "is_asx300",
+    # Sector indices → fallback to is_asx200 + sector filter handled separately
+}
+
+INDEX_NAME_TO_SECTOR: dict[str, str] = {
+    "s&p/asx 200 financials": "Financials",
+    "s&p/asx 200 materials":  "Materials",
+    "s&p/asx 200 energy":     "Energy",
+    "s&p/asx 200 health care":"Health Care",
+}
+
+
 # ── Indices list ──────────────────────────────────────────────────────────────
 
 @router.get("/indices", response_model=IndicesResponse)
@@ -370,7 +395,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
                    u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
-            WHERE u.{flag_col} = TRUE AND u.market_cap IS NOT NULL
+            WHERE u.{flag_col} = TRUE
             ORDER BY u.market_cap DESC NULLS LAST
         """))).mappings().all()
     else:
@@ -381,7 +406,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
                    u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
-            WHERE u.is_asx200 = TRUE AND u.sector = :sector AND u.market_cap IS NOT NULL
+            WHERE u.is_asx200 = TRUE AND u.sector = :sector
             ORDER BY u.market_cap DESC NULLS LAST
         """), {"sector": sector_name})).mappings().all()
 
@@ -670,4 +695,75 @@ async def get_fund_detail(
             }
             for r in hist
         ],
+    }
+
+
+@router.get("/funds/{asx_code}/constituents")
+async def get_fund_constituents(asx_code: str, db: AsyncSession = Depends(get_db)):
+    """
+    Returns the constituent stocks for a fund by mapping its index_tracked
+    field to screener.universe flag columns.
+    """
+    code = asx_code.upper()
+    fund_row = (await db.execute(text(
+        "SELECT index_tracked FROM market.funds WHERE asx_code = :code AND is_active = TRUE"
+    ), {"code": code})).mappings().fetchone()
+
+    if not fund_row or not fund_row["index_tracked"]:
+        return {"asx_code": code, "constituents": [], "source": None}
+
+    index_name = (fund_row["index_tracked"] or "").strip().lower()
+    flag_col = INDEX_NAME_TO_FLAG.get(index_name)
+    sector_name = INDEX_NAME_TO_SECTOR.get(index_name)
+
+    def _f(v): return float(v) if v is not None else None
+
+    if flag_col:
+        rows = (await db.execute(text(f"""
+            SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
+                   u.sector, u.market_cap, u.price,
+                   u.return_1w AS return_1d, u.return_1y,
+                   u.pe_ratio, u.dividend_yield, u.franking_pct
+            FROM screener.universe u
+            LEFT JOIN market.companies c ON c.asx_code = u.asx_code
+            WHERE u.{flag_col} = TRUE
+            ORDER BY u.market_cap DESC NULLS LAST
+        """))).mappings().all()
+    elif sector_name:
+        rows = (await db.execute(text("""
+            SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
+                   u.sector, u.market_cap, u.price,
+                   u.return_1w AS return_1d, u.return_1y,
+                   u.pe_ratio, u.dividend_yield, u.franking_pct
+            FROM screener.universe u
+            LEFT JOIN market.companies c ON c.asx_code = u.asx_code
+            WHERE u.is_asx200 = TRUE AND u.sector = :sector
+            ORDER BY u.market_cap DESC NULLS LAST
+        """), {"sector": sector_name})).mappings().all()
+    else:
+        return {"asx_code": code, "constituents": [], "source": fund_row["index_tracked"]}
+
+    total_mcap = sum(float(r["market_cap"]) for r in rows if r["market_cap"])
+    constituents = []
+    for r in rows:
+        mc = _f(r["market_cap"])
+        weight = round(mc / total_mcap * 100, 4) if total_mcap and mc else None
+        constituents.append({
+            "asx_code":       r["asx_code"],
+            "company_name":   r["company_name"],
+            "sector":         r["sector"],
+            "market_cap":     mc,
+            "weight_pct":     weight,
+            "price":          _f(r["price"]),
+            "return_1d":      _f(r["return_1d"]),
+            "return_1y":      _f(r["return_1y"]),
+            "pe_ratio":       _f(r["pe_ratio"]),
+            "dividend_yield": _f(r["dividend_yield"]),
+            "franking_pct":   _f(r["franking_pct"]),
+        })
+
+    return {
+        "asx_code":    code,
+        "source":      fund_row["index_tracked"],
+        "constituents": constituents,
     }

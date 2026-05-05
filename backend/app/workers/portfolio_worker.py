@@ -3,11 +3,10 @@ ASX Screener — Portfolio Notification Worker
 =============================================
 Two jobs:
   1. check_portfolio_thresholds()  — every 30 min
-     Compares current portfolio value to last-notified value.
-     Fires email/SMS if change exceeds user's configured threshold %.
-
   2. send_weekly_portfolio_summaries() — Monday 8am AEST (cron)
-     Sends a full portfolio summary email to all users with weekly email enabled.
+
+Portfolio holdings are derived from users.portfolio_transactions
+(buys add quantity, sells subtract).
 """
 import logging
 from datetime import datetime, timezone, timedelta
@@ -22,6 +21,27 @@ from app.services.notification_service import (
 
 log = logging.getLogger(__name__)
 
+# CTE that computes current holdings from transactions
+_HOLDINGS_CTE = """
+    WITH holdings AS (
+        SELECT
+            portfolio_id,
+            asx_code,
+            SUM(CASE WHEN transaction_type = 'BUY'  THEN quantity
+                     WHEN transaction_type = 'SELL' THEN -quantity
+                     ELSE 0 END)                          AS quantity,
+            SUM(CASE WHEN transaction_type = 'BUY'  THEN quantity * price
+                     ELSE 0 END) /
+            NULLIF(SUM(CASE WHEN transaction_type = 'BUY' THEN quantity
+                            ELSE 0 END), 0)               AS avg_cost
+        FROM users.portfolio_transactions
+        GROUP BY portfolio_id, asx_code
+        HAVING SUM(CASE WHEN transaction_type = 'BUY'  THEN quantity
+                        WHEN transaction_type = 'SELL' THEN -quantity
+                        ELSE 0 END) > 0
+    )
+"""
+
 
 # ── Threshold check ───────────────────────────────────────────────────────────
 
@@ -34,8 +54,8 @@ async def check_portfolio_thresholds() -> None:
 
 
 async def _run_threshold_checks(db) -> None:
-    # Fetch all portfolios with current value + user preferences
-    result = await db.execute(text("""
+    result = await db.execute(text(f"""
+        {_HOLDINGS_CTE}
         SELECT
             p.id            AS portfolio_id,
             p.name          AS portfolio_name,
@@ -43,25 +63,21 @@ async def _run_threshold_checks(db) -> None:
             u.email,
             u.name          AS user_name,
             u.plan,
-            -- Current portfolio value from holdings
             COALESCE(SUM(h.quantity * s.price), 0)  AS current_value,
-            -- Notification state
             pns.last_value,
             pns.last_notified_at,
-            -- Preferences
             np.portfolio_threshold_email,
             np.portfolio_threshold_sms,
             np.portfolio_threshold_pct,
             np.phone_number
         FROM users.portfolios p
         JOIN users.users u            ON u.id = p.user_id
-        LEFT JOIN users.holdings h    ON h.portfolio_id = p.id
+        LEFT JOIN holdings h          ON h.portfolio_id = p.id
         LEFT JOIN screener.universe s ON s.asx_code = h.asx_code
         LEFT JOIN users.portfolio_notification_state pns ON pns.portfolio_id = p.id
         LEFT JOIN users.notification_preferences np      ON np.user_id = p.user_id
         WHERE u.subscription_status = 'active'
           AND (np.portfolio_threshold_email = TRUE OR np.portfolio_threshold_sms = TRUE)
-          -- Don't re-notify within 4 hours
           AND (pns.last_notified_at IS NULL OR pns.last_notified_at < NOW() - INTERVAL '4 hours')
         GROUP BY p.id, p.name, p.user_id, u.email, u.name, u.plan,
                  pns.last_value, pns.last_notified_at,
@@ -77,11 +93,10 @@ async def _run_threshold_checks(db) -> None:
     fired = 0
 
     for p in portfolios:
-        current = float(p.current_value or 0)
+        current  = float(p.current_value or 0)
         previous = float(p.last_value or current)
 
         if previous == 0:
-            # No previous value — just record current
             await _upsert_state(db, str(p.portfolio_id), current, record_notify=False)
             continue
 
@@ -132,7 +147,6 @@ async def send_weekly_portfolio_summaries() -> None:
 
 
 async def _run_weekly_summaries(db) -> None:
-    # Get users due for weekly email (not sent in last 6 days)
     result = await db.execute(text("""
         SELECT DISTINCT
             u.id        AS user_id,
@@ -174,12 +188,12 @@ async def _run_weekly_summaries(db) -> None:
             portfolios=portfolios,
         )
 
-        # Mark weekly_sent_at on all portfolios for this user
-        await db.execute(text("""
+        await db.execute(text(f"""
+            {_HOLDINGS_CTE}
             INSERT INTO users.portfolio_notification_state (portfolio_id, last_value, weekly_sent_at)
             SELECT p.id, COALESCE(SUM(h.quantity * s.price), 0), NOW()
             FROM users.portfolios p
-            LEFT JOIN users.holdings h    ON h.portfolio_id = p.id
+            LEFT JOIN holdings h          ON h.portfolio_id = p.id
             LEFT JOIN screener.universe s ON s.asx_code = h.asx_code
             WHERE p.user_id = :uid
             GROUP BY p.id
@@ -192,7 +206,8 @@ async def _run_weekly_summaries(db) -> None:
 
 
 async def _get_user_portfolios(db, user_id: str) -> list[dict]:
-    result = await db.execute(text("""
+    result = await db.execute(text(f"""
+        {_HOLDINGS_CTE}
         SELECT
             p.id            AS portfolio_id,
             p.name,
@@ -200,16 +215,16 @@ async def _get_user_portfolios(db, user_id: str) -> list[dict]:
             COALESCE(SUM(h.quantity * h.avg_cost), 0)                      AS total_cost,
             COALESCE(SUM(h.quantity * (s.price - h.avg_cost)), 0)          AS total_gain_loss,
             JSON_AGG(JSON_BUILD_OBJECT(
-                'asx_code', h.asx_code,
-                'quantity', h.quantity,
+                'asx_code',      h.asx_code,
+                'quantity',      h.quantity,
                 'current_price', s.price,
-                'avg_cost', h.avg_cost,
+                'avg_cost',      h.avg_cost,
                 'gain_pct', CASE WHEN h.avg_cost > 0
                                  THEN ((s.price - h.avg_cost) / h.avg_cost) * 100
                                  ELSE 0 END
-            )) FILTER (WHERE h.id IS NOT NULL) AS holdings
+            )) FILTER (WHERE h.asx_code IS NOT NULL) AS holdings
         FROM users.portfolios p
-        LEFT JOIN users.holdings h    ON h.portfolio_id = p.id
+        LEFT JOIN holdings h          ON h.portfolio_id = p.id
         LEFT JOIN screener.universe s ON s.asx_code = h.asx_code
         WHERE p.user_id = :uid
         GROUP BY p.id, p.name

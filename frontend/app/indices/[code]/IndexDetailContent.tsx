@@ -295,7 +295,7 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
           {view === 'pie' ? (
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie data={data} dataKey="weight_pct" nameKey="sector" cx="50%" cy="50%" outerRadius={100} label={({ sector, weight_pct }) => `${sector.split(' ')[0]} ${weight_pct.toFixed(1)}%`} labelLine={false}>
+                <Pie data={data} dataKey="weight_pct" nameKey="sector" cx="50%" cy="50%" outerRadius={100} label={({ name, value }: { name?: string; value?: number }) => `${(name ?? '').split(' ')[0]} ${(value ?? 0).toFixed(1)}%`} labelLine={false}>
                   {data.map((entry) => (
                     <Cell key={entry.sector} fill={SECTOR_COLORS[entry.sector] || SECTOR_COLORS['Other']} />
                   ))}

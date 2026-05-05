@@ -61,12 +61,16 @@ async def fetch_markit(client: httpx.AsyncClient, code: str) -> list:
         )
         if resp.status_code == 200:
             body = resp.json()
-            # Markit returns {"data": {"announcementSummaries": [...]}}
-            items = (
-                body.get("data", {}).get("announcementSummaries", [])
-                or body.get("data", [])
-                or (body if isinstance(body, list) else [])
-            )
+            data = body.get("data", {}) if isinstance(body, dict) else {}
+            if isinstance(data, dict):
+                items = data.get("announcementSummaries", []) or data.get("announcements", [])
+            elif isinstance(data, list):
+                items = data
+            else:
+                items = []
+            if items and not isinstance(items[0], dict):
+                log.warning(f"Markit {code}: item type={type(items[0])}, data keys={list(data.keys()) if isinstance(data, dict) else 'n/a'}, sample={str(items[:2])[:400]}")
+                return []
             return items
     except Exception as e:
         log.debug(f"Markit {code}: {e}")
@@ -109,6 +113,17 @@ async def main():
     failed = 0
 
     async with httpx.AsyncClient(follow_redirects=True) as client:
+        # Probe first company to log raw response shape
+        if codes:
+            probe = await client.get(
+                f"https://asx.api.markitdigital.com/asx-research/1.0/companies/{codes[0]}/announcements",
+                params={"count": 5},
+                headers=MARKIT_HEADERS,
+                timeout=10,
+            )
+            log.info(f"PROBE {codes[0]} status={probe.status_code}")
+            log.info(f"PROBE body (first 800 chars): {probe.text[:800]}")
+
         for i, code in enumerate(codes):
             items = await fetch_markit(client, code)
 

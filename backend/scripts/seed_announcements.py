@@ -9,6 +9,7 @@ import logging
 import re
 import sys
 import os
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,6 +29,15 @@ MARKIT_HEADERS = {
     "Origin": "https://www.asx.com.au",
     "Referer": "https://www.asx.com.au/",
 }
+
+
+def parse_iso(dt_str: str | None):
+    if not dt_str:
+        return None
+    try:
+        return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+    except Exception:
+        return None
 
 
 def parse_file_size_kb(size_str: str | None) -> float | None:
@@ -84,8 +94,8 @@ def parse_item(a: dict, code: str) -> dict | None:
     return {
         "code":    code,
         "ann_id":  ann_id,
-        "rel_at":  a.get("date"),
-        "doc_dt":  a.get("date"),
+        "rel_at":  parse_iso(a.get("date")),
+        "doc_dt":  parse_iso(a.get("date")),
         "title":   (a.get("headline") or a.get("announcementType") or "").strip(),
         "dtype":   (a.get("announcementType") or "").strip(),
         "url":     url,

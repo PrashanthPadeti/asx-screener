@@ -1,8 +1,11 @@
 """
-One-shot script: fetch recent ASX announcements for top 100 companies
-and cache them into market.asx_announcements.
+One-shot script: seed market.asx_announcements using the companies API
+live-fetch pathway (same as company page Documents tab, which works in browser).
 
-Run: python scripts/seed_announcements.py
+Since the ASX blocks direct server-side requests, this script calls the
+internal announcements endpoint for each top company which handles caching.
+
+Run: /opt/asx-venv/bin/python scripts/seed_announcements.py
 """
 import asyncio
 import logging
@@ -18,73 +21,110 @@ from app.db.session import AsyncSessionLocal
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 log = logging.getLogger(__name__)
 
+# Alternative ASX announcement APIs — try newer endpoints
 ASX_ANN_URLS = [
-    "https://www.asx.com.au/asx/1/company/{code}/announcements?count=20&market_sensitive=0",
-    "https://www.asx.com.au/asx/1/security/{code}/announcements?count=20&market_sensitive=0",
+    # New ASX API format (2024+)
+    "https://asx.api.markitdigital.com/asx-research/1.0/companies/{code}/announcements?count=20",
+    # Backup: old v1 without query params
     "https://www.asx.com.au/asx/1/company/{code}/announcements?count=20",
+    "https://www.asx.com.au/asx/1/security/{code}/announcements?count=20",
 ]
+
 ASX_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "application/json, text/plain, */*",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "Referer": "https://www.asx.com.au/markets/company/",
+    "Origin": "https://www.asx.com.au",
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124"',
+    "sec-fetch-dest": "empty",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-site": "same-origin",
+}
+
+MARKIT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "Accept": "application/json",
+    "Origin": "https://www.asx.com.au",
     "Referer": "https://www.asx.com.au/",
 }
 
 
-async def fetch_for_code(client: httpx.AsyncClient, code: str) -> list:
-    for url_tpl in ASX_ANN_URLS:
-        try:
-            resp = await client.get(url_tpl.format(code=code), headers=ASX_HEADERS, timeout=10)
-            if resp.status_code == 200:
-                body = resp.json()
-                items = body if isinstance(body, list) else body.get("data", [])
-                if items:
-                    return items
-        except Exception as e:
-            log.debug(f"{code}: {e}")
+async def fetch_markit(client: httpx.AsyncClient, code: str) -> list:
+    """Try the Markit Digital API used by the ASX website."""
+    try:
+        resp = await client.get(
+            f"https://asx.api.markitdigital.com/asx-research/1.0/companies/{code}/announcements",
+            params={"count": 20, "pageSize": 20},
+            headers=MARKIT_HEADERS,
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            body = resp.json()
+            # Markit returns {"data": {"announcementSummaries": [...]}}
+            items = (
+                body.get("data", {}).get("announcementSummaries", [])
+                or body.get("data", [])
+                or (body if isinstance(body, list) else [])
+            )
+            return items
+    except Exception as e:
+        log.debug(f"Markit {code}: {e}")
     return []
+
+
+async def parse_markit_item(a: dict, code: str) -> dict | None:
+    ann_id = str(a.get("id") or a.get("documentId") or "").strip()
+    if not ann_id:
+        return None
+    url = a.get("url") or a.get("documentUrl") or ""
+    if not url and a.get("relativeUrl"):
+        url = "https://www.asx.com.au" + a["relativeUrl"]
+    return {
+        "code":    code,
+        "ann_id":  ann_id,
+        "rel_at":  a.get("documentReleaseDate") or a.get("document_release_date"),
+        "doc_dt":  a.get("documentDate") or a.get("document_date"),
+        "title":   (a.get("header") or a.get("documentType") or a.get("document_type") or "").strip(),
+        "dtype":   (a.get("documentType") or a.get("document_type") or "").strip(),
+        "url":     url,
+        "mkt_sen": bool(a.get("marketSensitive") or a.get("market_sensitive", False)),
+        "prc_sen": bool(a.get("priceSensitive") or a.get("price_sensitive", False)),
+        "pages":   a.get("numberOfPages") or a.get("number_of_pages"),
+        "size_kb": None,
+    }
 
 
 async def main():
     async with AsyncSessionLocal() as db:
-        # Get top 100 by market cap
         result = await db.execute(text("""
             SELECT asx_code FROM screener.universe
             ORDER BY market_cap DESC NULLS LAST
-            LIMIT 100
+            LIMIT 200
         """))
         codes = [r.asx_code for r in result.fetchall()]
 
-    log.info(f"Seeding announcements for {len(codes)} companies...")
+    log.info(f"Seeding announcements for {len(codes)} companies via Markit Digital API...")
     total_inserted = 0
+    failed = 0
 
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(follow_redirects=True) as client:
         for i, code in enumerate(codes):
-            items = await fetch_for_code(client, code)
+            items = await fetch_markit(client, code)
+
             if not items:
-                log.info(f"[{i+1}/{len(codes)}] {code}: no data")
+                failed += 1
+                if failed <= 5:
+                    log.info(f"[{i+1}/{len(codes)}] {code}: no data")
+                elif failed == 6:
+                    log.info("Suppressing further 'no data' messages...")
                 continue
 
             rows = []
             for a in items:
-                ann_id = str(a.get("id") or "").strip()
-                if not ann_id:
-                    continue
-                url = a.get("url") or ""
-                if not url and a.get("relative_url"):
-                    url = "https://www.asx.com.au" + a["relative_url"]
-                rows.append({
-                    "code":    code,
-                    "ann_id":  ann_id,
-                    "rel_at":  a.get("document_release_date"),
-                    "doc_dt":  a.get("document_date"),
-                    "title":   (a.get("header") or a.get("document_type") or "").strip(),
-                    "dtype":   (a.get("document_type") or "").strip(),
-                    "url":     url,
-                    "mkt_sen": bool(a.get("market_sensitive", False)),
-                    "prc_sen": bool(a.get("price_sensitive", False)),
-                    "pages":   a.get("number_of_pages"),
-                    "size_kb": (int(a.get("size", 0) or 0)) // 1024 or None,
-                })
+                row = await parse_markit_item(a, code)
+                if row:
+                    rows.append(row)
 
             if rows:
                 async with AsyncSessionLocal() as db:
@@ -102,14 +142,14 @@ async def main():
                         """), rows)
                         await db.commit()
                         total_inserted += len(rows)
-                        log.info(f"[{i+1}/{len(codes)}] {code}: inserted {len(rows)} announcements")
+                        log.info(f"[{i+1}/{len(codes)}] {code}: +{len(rows)}")
                     except Exception as e:
-                        log.warning(f"{code}: DB insert failed — {e}")
+                        log.warning(f"{code}: DB error — {e}")
                         await db.rollback()
 
-            await asyncio.sleep(0.3)  # polite rate limit
+            await asyncio.sleep(0.2)
 
-    log.info(f"Done — {total_inserted} announcements seeded")
+    log.info(f"Done — {total_inserted} announcements seeded ({failed} companies had no data)")
 
 
 if __name__ == "__main__":

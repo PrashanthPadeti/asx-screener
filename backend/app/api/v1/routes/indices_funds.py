@@ -367,7 +367,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
         constituent_rows = (await db.execute(text(f"""
             SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
                    u.sector, u.market_cap, u.price,
-                   u.return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
+                   u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
             WHERE u.{flag_col} = TRUE AND u.market_cap IS NOT NULL
@@ -378,7 +378,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
         constituent_rows = (await db.execute(text("""
             SELECT u.asx_code, COALESCE(c.company_name, u.asx_code) AS company_name,
                    u.sector, u.market_cap, u.price,
-                   u.return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
+                   u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
             LEFT JOIN market.companies c ON c.asx_code = u.asx_code
             WHERE u.is_asx200 = TRUE AND u.sector = :sector AND u.market_cap IS NOT NULL

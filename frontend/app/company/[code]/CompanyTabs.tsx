@@ -375,16 +375,52 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
       {/* Composite Score Meter */}
       {o.composite_score != null && <CompositeScoreMeter o={o} />}
 
+      {/* Key Statistics Strip */}
+      <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100">
+          <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Key Statistics</h3>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 divide-x divide-y divide-gray-50">
+          {[
+            { label: 'EPS (FY0)',     value: o.eps_fy0 != null ? `$${o.eps_fy0.toFixed(2)}` : '—' },
+            { label: 'EPS (FY1)',     value: o.eps_fy1 != null ? `$${o.eps_fy1.toFixed(2)}` : '—' },
+            { label: 'P/E Ratio',     value: fmtX(o.pe_ratio) },
+            { label: 'P/B Ratio',     value: fmtX(o.price_to_book) },
+            { label: 'EV/EBITDA',     value: fmtX(o.ev_to_ebitda) },
+            { label: 'PEG Ratio',     value: fmtX(o.peg_ratio) },
+            { label: 'Div Yield',     value: formatRatio(o.dividend_yield) },
+            { label: 'Grossed-Up',    value: formatRatio(o.grossed_up_yield) },
+            { label: 'D/E Ratio',     value: fmtX(o.debt_to_equity) },
+            { label: 'FCF Yield',     value: formatRatio(o.fcf_yield) },
+            { label: 'Rev Growth 1Y', value: signedPct(o.revenue_growth_1y) },
+            { label: 'Net Margin',    value: formatRatio(o.net_margin) },
+            { label: 'ROE',           value: formatRatio(o.roe) },
+            { label: 'EV/Revenue',    value: fmtX(o.ev_to_revenue) },
+            { label: 'Book Val/Sh',   value: o.book_value_per_share != null ? `$${o.book_value_per_share.toFixed(2)}` : '—' },
+            { label: 'DPS (TTM)',     value: o.dps_ttm != null ? `$${o.dps_ttm.toFixed(3)}` : '—' },
+          ].map(({ label, value }) => (
+            <div key={label} className="px-4 py-3 flex flex-col gap-0.5">
+              <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">{label}</span>
+              <span className="text-sm font-bold text-gray-800">{value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* 3-column metrics grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Valuation */}
         <Card title="Valuation">
+          <MetricRow label="EPS (FY0)"        value={o.eps_fy0 != null ? `$${o.eps_fy0.toFixed(2)}` : '—'} />
+          <MetricRow label="EPS (FY1 est.)"   value={o.eps_fy1 != null ? `$${o.eps_fy1.toFixed(2)}` : '—'} />
           <MetricRow label="P/E Ratio"        value={fmtX(o.pe_ratio)} />
           <MetricRow label="Forward P/E"      value={fmtX(o.forward_pe)} />
+          <MetricRow label="PEG Ratio"        value={fmtX(o.peg_ratio)} />
           <MetricRow label="Price / Book"     value={fmtX(o.price_to_book)} />
           <MetricRow label="Price / Sales"    value={fmtX(o.price_to_sales)} />
           <MetricRow label="EV / EBITDA"      value={fmtX(o.ev_to_ebitda)} />
-          <MetricRow label="PEG Ratio"        value={fmtX(o.peg_ratio)} />
+          <MetricRow label="EV / Revenue"     value={fmtX(o.ev_to_revenue)} />
+          <MetricRow label="EV / EBIT"        value={fmtX(o.ev_to_ebit)} />
           <MetricRow label="Price / FCF"      value={fmtX(o.price_to_fcf)} />
           <MetricRow label="FCF Yield"        value={formatRatio(o.fcf_yield)} />
           {o.graham_number != null && (
@@ -1274,6 +1310,81 @@ function DividendsTab({ data }: { data: DividendsResponse | null }) {
           </div>
         </div>
       </div>
+
+      {/* Upcoming Dividend */}
+      {(() => {
+        const nextExDiv = summary.ex_div_date
+        const today = new Date().toISOString().slice(0, 10)
+        // Most recent future or current dividend record
+        const upcoming = history.find(d => d.ex_date >= today)
+        // Fall back to summary ex_div_date + most recent historical amount/franking
+        const lastDiv = history[0]
+        const showUpcoming = nextExDiv != null || upcoming != null
+
+        if (!showUpcoming) return null
+
+        const exDate = upcoming?.ex_date ?? nextExDiv
+        const payDate = upcoming?.payment_date ?? null
+        const amount = upcoming?.amount ?? lastDiv?.amount ?? null
+        const franking = upcoming?.franking_pct ?? lastDiv?.franking_pct ?? null
+
+        // Estimate grossed-up amount
+        const grossedUp = amount != null && franking != null
+          ? amount * (1 + (franking / 100) * (30 / 70))
+          : null
+
+        const daysToEx = exDate
+          ? Math.ceil((new Date(exDate).getTime() - new Date(today).getTime()) / 86400000)
+          : null
+
+        return (
+          <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 rounded-xl overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-emerald-100 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-widest">Upcoming Dividend</h3>
+              {daysToEx != null && daysToEx >= 0 && daysToEx <= 90 && (
+                <span className="ml-auto text-xs font-semibold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  {daysToEx === 0 ? 'Today' : daysToEx === 1 ? 'Tomorrow' : `In ${daysToEx} days`}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-emerald-100 p-0">
+              <div className="px-4 py-3 flex flex-col gap-0.5">
+                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Ex-Dividend Date</span>
+                <span className="text-sm font-bold text-gray-800">{exDate ?? '—'}</span>
+              </div>
+              <div className="px-4 py-3 flex flex-col gap-0.5">
+                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Payment Date</span>
+                <span className="text-sm font-bold text-gray-800">{payDate ?? '—'}</span>
+              </div>
+              <div className="px-4 py-3 flex flex-col gap-0.5">
+                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Est. DPS</span>
+                <span className="text-sm font-bold text-gray-800">
+                  {amount != null ? `$${amount.toFixed(4)}` : '—'}
+                  {franking != null && (
+                    <span className={`ml-1.5 text-xs font-medium px-1 py-0.5 rounded ${
+                      franking === 100 ? 'bg-green-100 text-green-700' :
+                      franking > 0 ? 'bg-yellow-100 text-yellow-700' :
+                      'bg-gray-100 text-gray-500'
+                    }`}>{franking.toFixed(0)}% franked</span>
+                  )}
+                </span>
+              </div>
+              <div className="px-4 py-3 flex flex-col gap-0.5">
+                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Grossed-Up DPS</span>
+                <span className="text-sm font-bold text-emerald-700">
+                  {grossedUp != null ? `$${grossedUp.toFixed(4)}` : '—'}
+                </span>
+              </div>
+            </div>
+            {upcoming == null && (
+              <div className="px-4 pb-2.5 text-[10px] text-emerald-500">
+                * Estimated based on most recent historical payment. Confirm via company announcements.
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* DPS bar chart */}
       {chartData.length > 0 && (

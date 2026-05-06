@@ -139,51 +139,73 @@ async def market_signals(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Market signals: 52-week highs/lows and volume surges.
-    All sourced live from screener.universe.
+    Market signals: 52-week highs/lows (computed live from market.daily_prices)
+    and volume surges from screener.universe.
     """
-    base = "price > 0.10 AND market_cap > 50"
-
-    cols = """
-        asx_code, company_name, sector, price, market_cap,
-        high_52w, low_52w, volume, avg_volume_20d,
-        return_1w, return_1m
+    # CTE: compute true 52W high/low from actual OHLC price history.
+    # Requires at least 30 trading days of history and a 10% annual range
+    # to filter out stocks with sparse/stale data.
+    w52_cte = """
+        WITH w52 AS (
+            SELECT
+                dp.asx_code,
+                MAX(dp.high)  AS high_52w,
+                MIN(dp.low)   AS low_52w,
+                COUNT(*)      AS trading_days
+            FROM market.daily_prices dp
+            WHERE dp.time >= CURRENT_DATE - 365
+            GROUP BY dp.asx_code
+            HAVING COUNT(*) >= 30
+               AND MAX(dp.high) > 0
+               AND MIN(dp.low)  > 0
+               AND (MAX(dp.high) - MIN(dp.low)) / NULLIF(MIN(dp.low), 0) >= 0.10
+        )
     """
 
-    # Near 52W high (within 3%) — require meaningful annual range (≥10%) to filter stale/flat data
+    # Near 52W high (within 5% of the true 52W high)
     high_rows = (await db.execute(text(f"""
-        SELECT {cols},
-               ROUND(((price - high_52w) / NULLIF(high_52w,0) * 100)::numeric, 2) AS pct_from_high
-        FROM screener.universe
-        WHERE {base}
-          AND high_52w IS NOT NULL AND high_52w > 0
-          AND low_52w IS NOT NULL  AND low_52w > 0
-          AND (high_52w - low_52w) / NULLIF(low_52w,0) >= 0.10
-          AND price >= high_52w * 0.97
-        ORDER BY price / NULLIF(high_52w,0) DESC
+        {w52_cte}
+        SELECT
+            u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
+            w.high_52w, w.low_52w,
+            u.volume, u.avg_volume_20d, u.return_1w, u.return_1m,
+            ROUND(((u.price - w.high_52w) / NULLIF(w.high_52w, 0) * 100)::numeric, 2) AS pct_from_high
+        FROM screener.universe u
+        INNER JOIN w52 w ON u.asx_code = w.asx_code
+        WHERE u.price > 0.10
+          AND u.market_cap > 50
+          AND u.price >= w.high_52w * 0.95
+        ORDER BY u.price / NULLIF(w.high_52w, 0) DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
-    # Near 52W low (within 3%) — same range filter
+    # Near 52W low (within 5% of the true 52W low)
     low_rows = (await db.execute(text(f"""
-        SELECT {cols},
-               ROUND(((price - low_52w) / NULLIF(low_52w,0) * 100)::numeric, 2) AS pct_from_low
-        FROM screener.universe
-        WHERE {base}
-          AND high_52w IS NOT NULL AND high_52w > 0
-          AND low_52w IS NOT NULL  AND low_52w > 0
-          AND (high_52w - low_52w) / NULLIF(low_52w,0) >= 0.10
-          AND price <= low_52w * 1.03
-        ORDER BY price / NULLIF(low_52w,0) ASC
+        {w52_cte}
+        SELECT
+            u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
+            w.high_52w, w.low_52w,
+            u.volume, u.avg_volume_20d, u.return_1w, u.return_1m,
+            ROUND(((u.price - w.low_52w) / NULLIF(w.low_52w, 0) * 100)::numeric, 2) AS pct_from_low
+        FROM screener.universe u
+        INNER JOIN w52 w ON u.asx_code = w.asx_code
+        WHERE u.price > 0.10
+          AND u.market_cap > 50
+          AND u.price <= w.low_52w * 1.05
+        ORDER BY u.price / NULLIF(w.low_52w, 0) ASC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
     # Volume surge (volume > 2× 20D average) — sorted by absolute volume DESC
-    vol_rows = (await db.execute(text(f"""
-        SELECT {cols},
-               ROUND((volume::numeric / NULLIF(avg_volume_20d,0)), 1) AS vol_ratio
+    vol_rows = (await db.execute(text("""
+        SELECT
+            asx_code, company_name, sector, price, market_cap,
+            high_52w, low_52w, volume, avg_volume_20d,
+            return_1w, return_1m,
+            ROUND((volume::numeric / NULLIF(avg_volume_20d, 0)), 1) AS vol_ratio
         FROM screener.universe
-        WHERE {base}
+        WHERE price > 0.10
+          AND market_cap > 50
           AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL
           AND avg_volume_20d > 10000
           AND volume > avg_volume_20d * 2

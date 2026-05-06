@@ -144,17 +144,18 @@ async def market_signals(
     Uses market.period_metrics (pre-computed daily) for accurate H/L data.
     Falls back to a live CTE if the table has no data for today.
     """
-    # Map period to the column names in market.period_metrics
+    # Map period to column names, fallback lookback days, and minimum H/L range.
+    # min_range filters out illiquid stocks with no real price movement in the period.
     col_map = {
-        "1d": ("high_1d",  "low_1d",  3),
-        "1w": ("high_1w",  "low_1w",  7),
-        "1m": ("high_1m",  "low_1m",  35),
-        "3m": ("high_3m",  "low_3m",  100),
-        "6m": ("high_6m",  "low_6m",  185),
-        "1y": ("high_1y",  "low_1y",  365),
-        "52w":("high_52w", "low_52w", 364),
+        "1d":  ("high_1d",  "low_1d",  3,   0.003),  # 0.3% min daily swing
+        "1w":  ("high_1w",  "low_1w",  7,   0.010),  # 1% min weekly swing
+        "1m":  ("high_1m",  "low_1m",  35,  0.030),  # 3% min monthly swing
+        "3m":  ("high_3m",  "low_3m",  100, 0.050),  # 5% min quarterly swing
+        "6m":  ("high_6m",  "low_6m",  185, 0.080),
+        "1y":  ("high_1y",  "low_1y",  365, 0.100),
+        "52w": ("high_52w", "low_52w", 364, 0.100),
     }
-    high_col, low_col, fallback_days = col_map[period]
+    high_col, low_col, fallback_days, min_range = col_map[period]
 
     # Check if period_metrics has been populated for today
     has_table = (await db.execute(text("""
@@ -189,7 +190,8 @@ async def market_signals(
         ph_expr = "pm.period_high"
         pl_expr = "pm.period_low"
 
-    # Near period high (within 5% of the period high)
+    # Near period high: within 5% of the high, stock must have had real movement,
+    # and price must be strictly below the high (exclude exact 0.0% — no signal)
     high_rows = (await db.execute(text(f"""
         SELECT
             u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
@@ -202,12 +204,16 @@ async def market_signals(
         WHERE u.price > 0.10
           AND u.market_cap > 50
           AND {ph_expr} > 0
+          AND {pl_expr} > 0
+          AND {ph_expr} > {pl_expr} * (1 + {min_range})
           AND u.price >= {ph_expr} * 0.95
+          AND u.price < {ph_expr} * 0.9999
         ORDER BY u.price / NULLIF({ph_expr}, 0) DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
-    # Near period low (within 5% of the period low)
+    # Near period low: within 5% of the low, stock must have had real movement,
+    # and price must be strictly above the low (exclude exact 0.0%)
     low_rows = (await db.execute(text(f"""
         SELECT
             u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
@@ -219,8 +225,11 @@ async def market_signals(
         {period_join}
         WHERE u.price > 0.10
           AND u.market_cap > 50
+          AND {ph_expr} > 0
           AND {pl_expr} > 0
+          AND {ph_expr} > {pl_expr} * (1 + {min_range})
           AND u.price <= {pl_expr} * 1.05
+          AND u.price > {pl_expr} * 1.0001
         ORDER BY u.price / NULLIF({pl_expr}, 0) ASC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()

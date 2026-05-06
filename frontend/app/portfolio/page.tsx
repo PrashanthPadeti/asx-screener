@@ -14,6 +14,7 @@ import {
   getPortfolioPerformance,
   getPortfolioHistory,
   getPortfolioDividends,
+  getTaxReport,
   listTransactions,
   addTransaction,
   deleteTransaction,
@@ -23,6 +24,7 @@ import {
   PortfolioPerformance,
   PortfolioHistory,
   PortfolioDividends,
+  TaxReport,
   TransactionOut,
   ImportResult,
 } from '@/lib/api'
@@ -561,9 +563,186 @@ function ImportModal({
   )
 }
 
+// ── CGT Tax Report ────────────────────────────────────────────
+
+const CURRENT_FY = (() => {
+  const now = new Date()
+  return now.getMonth() >= 6 ? now.getFullYear() + 1 : now.getFullYear()
+})()
+
+const FY_OPTIONS = Array.from({ length: 6 }, (_, i) => CURRENT_FY - i)
+
+function TaxReportView({ portfolioId }: { portfolioId: string }) {
+  const [taxYear, setTaxYear]   = useState(CURRENT_FY)
+  const [report, setReport]     = useState<TaxReport | null>(null)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+
+  useEffect(() => {
+    setLoading(true); setError(null)
+    getTaxReport(portfolioId, taxYear)
+      .then(setReport)
+      .catch(() => setError('Failed to load tax report'))
+      .finally(() => setLoading(false))
+  }, [portfolioId, taxYear])
+
+  const exportCsv = () => {
+    if (!report) return
+    const rows = [
+      ['ASX Code', 'Sell Date', 'Buy Date', 'Qty', 'Proceeds', 'Cost Base', 'Capital Gain/Loss', 'Held (days)', 'Discount Eligible', 'Discounted Gain'],
+      ...report.disposals.map(d => [
+        d.asx_code, d.sell_date, d.buy_date,
+        d.quantity, d.proceeds.toFixed(2), d.cost_base.toFixed(2),
+        d.capital_gain.toFixed(2), d.held_days,
+        d.discount_eligible ? 'Yes' : 'No',
+        d.discounted_gain.toFixed(2),
+      ]),
+    ]
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url
+    a.download = `CGT_${report.fy_label.replace('–', '-')}_${portfolioId.slice(0, 8)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const fmtG = (n: number) => {
+    const s = Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const color = n >= 0 ? 'text-emerald-600' : 'text-red-500'
+    const sign  = n >= 0 ? '+' : '-'
+    return <span className={`font-semibold ${color}`}>{sign}${s}</span>
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Header row */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Capital Gains Tax Report</h3>
+          <p className="text-xs text-slate-500 mt-0.5">FIFO cost-base matching · 50% CGT discount applied for parcels held &gt;12 months</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <select value={taxYear} onChange={e => setTaxYear(Number(e.target.value))}
+            className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+            {FY_OPTIONS.map(y => (
+              <option key={y} value={y}>FY{y - 1}–{String(y).slice(2)}</option>
+            ))}
+          </select>
+          {report && report.disposals.length > 0 && (
+            <button onClick={exportCsv}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
+              ↓ Export CSV
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}
+        </div>
+      ) : error ? (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-600">{error}</div>
+      ) : report && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs text-slate-500 mb-1">Total Proceeds</p>
+              <p className="text-xl font-bold text-slate-900">${report.summary.total_proceeds.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{report.summary.disposal_count} disposal{report.summary.disposal_count !== 1 ? 's' : ''}</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs text-slate-500 mb-1">Gross Capital Gain</p>
+              <p className="text-xl font-bold">{fmtG(report.summary.gross_gain)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Before discount</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs text-slate-500 mb-1">50% CGT Discount</p>
+              <p className="text-xl font-bold text-amber-600">−${report.summary.discount_amount.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-xs text-slate-400 mt-0.5">Held &gt;12 months</p>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 p-4">
+              <p className="text-xs text-slate-500 mb-1">Net Taxable Gain</p>
+              <p className="text-xl font-bold">{fmtG(report.summary.net_gain)}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{report.fy_label}</p>
+            </div>
+          </div>
+
+          {/* Disposals table */}
+          {report.disposals.length === 0 ? (
+            <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
+              No disposals in {report.fy_label}. Sell transactions will appear here.
+            </div>
+          ) : (
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                      <th className="px-4 py-3 text-left">Code</th>
+                      <th className="px-4 py-3 text-left">Sell Date</th>
+                      <th className="px-4 py-3 text-left">Buy Date</th>
+                      <th className="px-4 py-3 text-right">Qty</th>
+                      <th className="px-4 py-3 text-right">Proceeds</th>
+                      <th className="px-4 py-3 text-right">Cost Base</th>
+                      <th className="px-4 py-3 text-right">Gain / Loss</th>
+                      <th className="px-4 py-3 text-right">Held</th>
+                      <th className="px-4 py-3 text-right">Discount</th>
+                      <th className="px-4 py-3 text-right">Net Gain</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {report.disposals.map((d, i) => (
+                      <tr key={i} className="hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 font-semibold text-blue-600">{d.asx_code}</td>
+                        <td className="px-4 py-3 text-slate-500">{d.sell_date}</td>
+                        <td className="px-4 py-3 text-slate-500">{d.buy_date}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">{d.quantity.toLocaleString('en-AU', { maximumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">${d.proceeds.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">${d.cost_base.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-3 text-right tabular-nums">{fmtG(d.capital_gain)}</td>
+                        <td className="px-4 py-3 text-right tabular-nums text-slate-500">{d.held_days}d</td>
+                        <td className="px-4 py-3 text-right">
+                          {d.discount_eligible
+                            ? <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">50%</span>
+                            : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-right tabular-nums">{fmtG(d.discounted_gain)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                    <tr className="text-sm font-semibold">
+                      <td colSpan={4} className="px-4 py-3 text-slate-600">Total {report.fy_label}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">${report.summary.total_proceeds.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">${report.summary.total_cost_base.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className="px-4 py-3 text-right">{fmtG(report.summary.gross_gain)}</td>
+                      <td className="px-4 py-3"></td>
+                      <td className="px-4 py-3 text-right text-amber-600">−${report.summary.discount_amount.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td className="px-4 py-3 text-right">{fmtG(report.summary.net_gain)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Disclaimer */}
+          <p className="text-xs text-slate-400">
+            This report is for reference only and does not constitute tax advice. Consult a registered tax agent for your tax obligations.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
-type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends'
+type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends' | 'tax'
 
 export default function PortfolioPage() {
   const { user, loading: authLoading } = useAuth()
@@ -684,6 +863,7 @@ export default function PortfolioPage() {
     { key: 'chart',        label: 'Performance' },
     { key: 'allocation',   label: 'Allocation' },
     { key: 'dividends',    label: 'Dividends' },
+    { key: 'tax',          label: 'Tax Report' },
     { key: 'transactions', label: `Transactions${txns.length ? ` (${txns.length})` : ''}` },
   ]
 
@@ -878,6 +1058,9 @@ export default function PortfolioPage() {
 
               {/* Dividends */}
               {view === 'dividends' && <DividendCalendar portfolioId={activeId} />}
+
+              {/* Tax Report */}
+              {view === 'tax' && <TaxReportView portfolioId={activeId} />}
 
               {/* Transactions table */}
               {view === 'transactions' && (

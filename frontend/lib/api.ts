@@ -1329,6 +1329,47 @@ export const getPortfolioDividends = async (
   return data
 }
 
+export interface CgtDisposal {
+  asx_code:          string
+  sell_date:         string
+  buy_date:          string
+  quantity:          number
+  proceeds:          number
+  cost_base:         number
+  capital_gain:      number
+  held_days:         number
+  discount_eligible: boolean
+  discounted_gain:   number
+  in_fy:             boolean
+}
+
+export interface CgtSummary {
+  total_proceeds:  number
+  total_cost_base: number
+  gross_gain:      number
+  discount_amount: number
+  net_gain:        number
+  total_gains:     number
+  total_losses:    number
+  disposal_count:  number
+}
+
+export interface TaxReport {
+  portfolio_id: string
+  tax_year:     number
+  fy_label:     string
+  fy_start:     string
+  fy_end:       string
+  summary:      CgtSummary
+  disposals:    CgtDisposal[]
+}
+
+export const getTaxReport = async (portfolioId: string, taxYear?: number): Promise<TaxReport> => {
+  const params = taxYear ? { tax_year: taxYear } : {}
+  const { data } = await api.get(`/api/v1/portfolio/${portfolioId}/tax-report`, { params })
+  return data
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 export interface NotificationPreferences {

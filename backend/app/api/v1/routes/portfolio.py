@@ -16,7 +16,8 @@ POST   /portfolio/{id}/import/transactions — CSV import (transactions format)
 import csv
 import io
 import logging
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy import text
@@ -671,4 +672,127 @@ async def get_portfolio_dividends(
         "portfolio_id": portfolio_id,
         "upcoming": enrich(upcoming_rows),
         "received": enrich(received_rows),
+    }
+
+
+# ── CGT Tax Report ────────────────────────────────────────────────────────────
+
+@router.get("/{portfolio_id}/tax-report")
+async def get_tax_report(
+    portfolio_id: str,
+    tax_year: int = None,   # e.g. 2025 means FY2024-25 (Jul 2024 – Jun 2025)
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Capital Gains Tax report for an Australian financial year (Jul–Jun).
+    Uses FIFO cost-base matching. Applies 50% CGT discount for parcels held > 12 months.
+    tax_year=2025 → FY2024-25 (1 Jul 2024 – 30 Jun 2025)
+    """
+    await _get_portfolio_or_404(portfolio_id, current_user["id"], db)
+
+    # Default to current Australian financial year
+    today = date.today()
+    if tax_year is None:
+        tax_year = today.year if today.month >= 7 else today.year - 1
+        tax_year += 1  # FY ending year
+
+    fy_start = date(tax_year - 1, 7, 1)
+    fy_end   = date(tax_year, 6, 30)
+
+    # Fetch all transactions up to end of this FY, ordered by date
+    rows = (await db.execute(text("""
+        SELECT asx_code, transaction_type, transaction_date, shares, price_per_share, brokerage
+        FROM users.portfolio_transactions
+        WHERE portfolio_id = :pid
+          AND transaction_date <= :fy_end
+          AND transaction_type IN ('buy', 'sell', 'drp')
+        ORDER BY transaction_date ASC, id ASC
+    """), {"pid": portfolio_id, "fy_end": fy_end})).mappings().all()
+
+    # FIFO lot tracking: {asx_code: [(buy_date, qty, unit_cost)]}
+    lots: dict[str, list] = defaultdict(list)
+    disposals = []
+
+    for r in rows:
+        code  = r["asx_code"]
+        ttype = r["transaction_type"]
+        qty   = float(r["shares"])
+        price = float(r["price_per_share"])
+        brok  = float(r["brokerage"] or 0)
+        txn_date = r["transaction_date"]
+
+        if ttype in ("buy", "drp"):
+            unit_cost = (qty * price + brok) / qty
+            lots[code].append({"date": txn_date, "qty": qty, "unit_cost": unit_cost})
+
+        elif ttype == "sell":
+            proceeds = qty * price - brok
+            remaining_sell = qty
+            cost_base = 0.0
+            matched_lots = []
+
+            while remaining_sell > 0 and lots[code]:
+                lot = lots[code][0]
+                take = min(remaining_sell, lot["qty"])
+                cost_base       += take * lot["unit_cost"]
+                matched_lots.append({"buy_date": lot["date"], "qty": take, "unit_cost": lot["unit_cost"]})
+                lot["qty"]      -= take
+                remaining_sell  -= take
+                if lot["qty"] < 0.0001:
+                    lots[code].pop(0)
+
+            capital_gain = proceeds - cost_base
+            # Oldest lot date for discount eligibility (conservative: use first matched lot)
+            oldest_buy = matched_lots[0]["buy_date"] if matched_lots else txn_date
+            held_days  = (txn_date - oldest_buy).days
+            discount_eligible = held_days >= 365 and capital_gain > 0
+            discounted_gain   = capital_gain * 0.5 if discount_eligible else capital_gain
+
+            disposals.append({
+                "asx_code":          code,
+                "sell_date":         txn_date.isoformat(),
+                "buy_date":          oldest_buy.isoformat(),
+                "quantity":          round(qty, 4),
+                "proceeds":          round(proceeds, 2),
+                "cost_base":         round(cost_base, 2),
+                "capital_gain":      round(capital_gain, 2),
+                "held_days":         held_days,
+                "discount_eligible": discount_eligible,
+                "discounted_gain":   round(discounted_gain, 2),
+                "in_fy":             fy_start <= txn_date <= fy_end,
+            })
+
+    # Filter to this FY only for summary
+    fy_disposals = [d for d in disposals if d["in_fy"]]
+
+    total_proceeds    = sum(d["proceeds"]       for d in fy_disposals)
+    total_cost_base   = sum(d["cost_base"]      for d in fy_disposals)
+    gross_gain        = sum(d["capital_gain"]   for d in fy_disposals)
+    discount_amount   = sum(
+        d["capital_gain"] * 0.5
+        for d in fy_disposals
+        if d["discount_eligible"]
+    )
+    net_gain          = sum(d["discounted_gain"] for d in fy_disposals)
+    losses            = sum(d["capital_gain"]    for d in fy_disposals if d["capital_gain"] < 0)
+    gains             = sum(d["capital_gain"]    for d in fy_disposals if d["capital_gain"] > 0)
+
+    return {
+        "portfolio_id":   portfolio_id,
+        "tax_year":       tax_year,
+        "fy_label":       f"FY{tax_year - 1}–{str(tax_year)[2:]}",
+        "fy_start":       fy_start.isoformat(),
+        "fy_end":         fy_end.isoformat(),
+        "summary": {
+            "total_proceeds":  round(total_proceeds, 2),
+            "total_cost_base": round(total_cost_base, 2),
+            "gross_gain":      round(gross_gain, 2),
+            "discount_amount": round(discount_amount, 2),
+            "net_gain":        round(net_gain, 2),
+            "total_gains":     round(gains, 2),
+            "total_losses":    round(losses, 2),
+            "disposal_count":  len(fy_disposals),
+        },
+        "disposals": fy_disposals,
     }

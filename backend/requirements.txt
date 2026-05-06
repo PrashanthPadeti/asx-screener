@@ -33,6 +33,7 @@ requests==2.32.3         # Used by data loader scripts
 
 # Data providers
 eodhd                    # Official EODHD Python SDK (pip install eodhd -U)
+yfinance==0.2.54         # Yahoo Finance — ASX index price ingestion
 
 # Data processing
 pandas==2.2.3

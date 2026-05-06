@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
     from app.workers.portfolio_worker import check_portfolio_thresholds, send_weekly_portfolio_summaries
     from app.workers.announcement_worker import fetch_announcements
     from app.workers.watchlist_digest_worker import send_watchlist_digests
+    from app.workers.index_prices_worker import compute_index_prices
 
     scheduler = AsyncIOScheduler()
 
@@ -50,8 +51,13 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
                       id="watchlist_digest", replace_existing=True)
 
+    # ASX index prices — daily at 5:30pm AEST (30 min after market close)
+    scheduler.add_job(compute_index_prices,
+                      CronTrigger(hour=17, minute=30, timezone="Australia/Sydney"),
+                      id="index_prices", replace_existing=True)
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), index-prices(5:30pm)")
 
     yield
 

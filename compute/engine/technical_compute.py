@@ -424,6 +424,7 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["new_ath"]       = (h >= df["ath_price"]) & (h > h.shift(1))
 
     # ── Returns ───────────────────────────────────────────────────────────────
+    df["return_1d"]  = (c / c.shift(1).replace(0, np.nan)   - 1).round(4)
     df["return_1w"]  = (c / c.shift(5).replace(0, np.nan)   - 1).round(4)
     df["return_1m"]  = (c / c.shift(21).replace(0, np.nan)  - 1).round(4)
     df["return_3m"]  = (c / c.shift(63).replace(0, np.nan)  - 1).round(4)
@@ -485,7 +486,7 @@ INSERT_COLS = [
     "above_sma20", "above_sma50", "above_sma100", "above_sma200",
     "golden_cross", "death_cross", "new_52w_high", "new_52w_low", "new_ath",
     # Returns
-    "return_1w", "return_1m", "return_3m", "return_6m", "return_ytd", "return_1y",
+    "return_1d", "return_1w", "return_1m", "return_3m", "return_6m", "return_ytd", "return_1y",
     # Metadata
     "compute_version", "computed_at",
 ]
@@ -557,7 +558,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None) ->
             g("above_sma20"), g("above_sma50"), g("above_sma100"), g("above_sma200"),
             g("golden_cross"), g("death_cross"),
             g("new_52w_high"), g("new_52w_low"), g("new_ath"),
-            c("return_1w"), c("return_1m"), c("return_3m"),
+            c("return_1d"), c("return_1w"), c("return_1m"), c("return_3m"),
             c("return_6m"), c("return_ytd"), c("return_1y"),
             COMPUTE_VERSION, now,
         ))

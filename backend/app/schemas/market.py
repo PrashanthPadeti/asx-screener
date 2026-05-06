@@ -22,6 +22,7 @@ class MoverStock(BaseModel):
     company_name: str
     sector: Optional[str] = None
     price: Optional[float] = None
+    return_1d: Optional[float] = None   # decimal ratio
     return_1w: Optional[float] = None   # decimal ratio
     return_1m: Optional[float] = None   # decimal ratio
     market_cap: Optional[float] = None  # AUD millions

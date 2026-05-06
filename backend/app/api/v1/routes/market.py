@@ -61,15 +61,15 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
 
 @router.get("/movers", response_model=MoversResponse)
 async def market_movers(
-    period: str = Query("1w", pattern="^(1w|1m|3m)$"),
+    period: str = Query("1w", pattern="^(1d|1w|1m|3m)$"),
     limit: int  = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Top gainers and losers for a given period (1w / 1m / 3m).
+    Top gainers and losers for a given period (1d / 1w / 1m / 3m).
     Filters to stocks with price > $0.10 and market cap > $50M.
     """
-    col_map = {"1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
+    col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
     ret_col = col_map[period]
 
     base_where = f"""
@@ -77,7 +77,7 @@ async def market_movers(
           AND price > 0.10
           AND market_cap > 50
     """
-    cols = f"asx_code, company_name, sector, price, return_1w, return_1m, return_3m, market_cap"
+    cols = "asx_code, company_name, sector, price, return_1d, return_1w, return_1m, return_3m, market_cap"
 
     gainers_rows = (await db.execute(text(f"""
         SELECT {cols} FROM screener.universe
@@ -95,6 +95,7 @@ async def market_movers(
             company_name=r["company_name"],
             sector=r["sector"],
             price=float(r["price"]) if r["price"] is not None else None,
+            return_1d=float(r["return_1d"]) if r["return_1d"] is not None else None,
             return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
             return_1m=float(r["return_1m"]) if r["return_1m"] is not None else None,
             market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,

@@ -554,6 +554,7 @@ export interface MoverStock {
   company_name: string
   sector: string | null
   price: number | null
+  return_1d: number | null   // decimal ratio
   return_1w: number | null   // decimal ratio
   return_1m: number | null   // decimal ratio
   market_cap: number | null  // AUD millions
@@ -675,7 +676,7 @@ export interface MarketSignals {
   volume_surge:  SignalStock[]
 }
 
-export const getMarketMovers = async (period: '1w' | '1m' | '3m', limit = 10): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
+export const getMarketMovers = async (period: '1d' | '1w' | '1m' | '3m', limit = 10): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
   const { data } = await api.get('/api/v1/market/movers', { params: { period, limit } })
   return data
 }

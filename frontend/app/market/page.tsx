@@ -98,7 +98,8 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
   )
 }
 
-function MoverRow({ s, rank, retKey }: { s: MoverStock; rank: number; retKey: 'return_1w' | 'return_1m' }) {
+type MoverRetKey = 'return_1d' | 'return_1w' | 'return_1m'
+function MoverRow({ s, rank, retKey }: { s: MoverStock; rank: number; retKey: MoverRetKey }) {
   const ret = s[retKey]
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
@@ -234,8 +235,8 @@ function TableCard({ title, icon: Icon, children, className }: {
   )
 }
 
-type Period = '1w' | '1m' | '3m'
-const PERIOD_LABELS: Record<Period, string> = { '1w': '1 Week', '1m': '1 Month', '3m': '3 Month' }
+type Period = '1d' | '1w' | '1m' | '3m'
+const PERIOD_LABELS: Record<Period, string> = { '1d': '1 Day', '1w': '1 Week', '1m': '1 Month', '3m': '3 Month' }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ export default function MarketPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
 
-  const [moverPeriod, setMoverPeriod] = useState<Period>('1w')
+  const [moverPeriod, setMoverPeriod] = useState<Period>('1d')
   const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
 
@@ -296,7 +297,9 @@ export default function MarketPage() {
     ? new Date(data.universe_built_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })
     : null
 
-  const retKey = moverPeriod === '1w' ? 'return_1w' : 'return_1m'
+  const retKey: MoverRetKey =
+    moverPeriod === '1d' ? 'return_1d' :
+    moverPeriod === '1w' ? 'return_1w' : 'return_1m'
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -344,7 +347,7 @@ export default function MarketPage() {
             <h2 className="text-sm font-semibold text-slate-700">Top Movers</h2>
           </div>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-            {(['1w', '1m', '3m'] as Period[]).map(p => (
+            {(['1d', '1w', '1m', '3m'] as Period[]).map(p => (
               <button key={p} onClick={() => setMoverPeriod(p)}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moverPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {p.toUpperCase()}

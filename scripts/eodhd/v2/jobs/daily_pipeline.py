@@ -9,6 +9,8 @@ Steps:
   3. Transform to market.daily_prices       → upsert --from-date TODAY
   4. Run daily compute engine               → market.computed_metrics
   4b. Run technical compute engine          → market.daily_metrics (latest date)
+  4c. Run half-yearly compute engine        → market.halfyearly_metrics
+  4d. Run period metrics compute engine     → market.period_metrics (H/L/AvgVol all periods)
   5. Build screener.universe                → Golden Record
 
 Usage:
@@ -99,6 +101,13 @@ def main():
     # Fast (~30s) — runs weekly on Sunday but also daily to catch new quarters.
     run("Step 4c: Half-yearly compute engine → market.halfyearly_metrics", [
         PYTHON, str(COMPUTE / "halfyearly_compute.py"),
+    ])
+
+    # ── Step 4d: Period metrics compute engine ────────────────────────────────
+    # Upserts H/L/AvgVol for 1D/1W/1M/3M/6M/1Y/52W into market.period_metrics.
+    # Used by the Market Signals API for accurate period-aware highs/lows.
+    run("Step 4d: Period metrics compute engine → market.period_metrics", [
+        PYTHON, str(COMPUTE / "period_metrics_compute.py"),
     ])
 
     # ── Step 5: Build screener.universe ───────────────────────────────────────

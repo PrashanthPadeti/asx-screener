@@ -136,70 +136,92 @@ async def market_movers(
 @router.get("/signals")
 async def market_signals(
     limit: int = Query(15, ge=5, le=50),
-    period: str = Query("1w", pattern="^(1d|1w|1m|3m)$"),
+    period: str = Query("1w", pattern="^(1d|1w|1m|3m|6m|1y|52w)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Market signals: period highs/lows (computed live from market.daily_prices)
-    and volume surges from screener.universe.
-    Period determines the lookback window for highs/lows.
+    Market signals: stocks near their period high/low and volume surges.
+    Uses market.period_metrics (pre-computed daily) for accurate H/L data.
+    Falls back to a live CTE if the table has no data for today.
     """
-    days_map  = {"1d": 3,  "1w": 10, "1m": 35, "3m": 100}
-    min_days  = {"1d": 1,  "1w": 3,  "1m": 10, "3m": 25}
-    min_range = {"1d": 0.001, "1w": 0.01, "1m": 0.03, "3m": 0.08}
+    # Map period to the column names in market.period_metrics
+    col_map = {
+        "1d": ("high_1d",  "low_1d",  3),
+        "1w": ("high_1w",  "low_1w",  7),
+        "1m": ("high_1m",  "low_1m",  35),
+        "3m": ("high_3m",  "low_3m",  100),
+        "6m": ("high_6m",  "low_6m",  185),
+        "1y": ("high_1y",  "low_1y",  365),
+        "52w":("high_52w", "low_52w", 364),
+    }
+    high_col, low_col, fallback_days = col_map[period]
 
-    look_days = days_map[period]
-    req_days  = min_days[period]
-    req_range = min_range[period]
+    # Check if period_metrics has been populated for today
+    has_table = (await db.execute(text("""
+        SELECT 1 FROM market.period_metrics
+        WHERE computed_date = CURRENT_DATE
+        LIMIT 1
+    """))).fetchone() is not None
 
-    period_cte = f"""
-        WITH w AS (
-            SELECT
-                dp.asx_code,
-                MAX(dp.high)  AS period_high,
-                MIN(dp.low)   AS period_low,
-                COUNT(*)      AS trading_days
-            FROM market.daily_prices dp
-            WHERE dp.time >= CURRENT_DATE - {look_days}
-            GROUP BY dp.asx_code
-            HAVING COUNT(*) >= {req_days}
-               AND MAX(dp.high) > 0
-               AND MIN(dp.low)  > 0
-               AND (MAX(dp.high) - MIN(dp.low)) / NULLIF(MIN(dp.low), 0) >= {req_range}
-        )
-    """
+    if has_table:
+        # Fast path: read from pre-computed table
+        period_join = f"""
+            INNER JOIN market.period_metrics pm
+                ON pm.asx_code = u.asx_code
+               AND pm.computed_date = CURRENT_DATE
+        """
+        ph_expr = f"pm.{high_col}"
+        pl_expr = f"pm.{low_col}"
+    else:
+        # Fallback: live CTE from daily_prices (used until first nightly run)
+        period_join = f"""
+            INNER JOIN (
+                SELECT asx_code,
+                       MAX(high) AS period_high,
+                       MIN(low)  AS period_low
+                FROM market.daily_prices
+                WHERE time >= CURRENT_DATE - {fallback_days}
+                  AND high > 0 AND low > 0
+                GROUP BY asx_code
+                HAVING COUNT(*) >= 1
+            ) pm ON pm.asx_code = u.asx_code
+        """
+        ph_expr = "pm.period_high"
+        pl_expr = "pm.period_low"
 
-    # Near period high (within 5% of the true period high)
+    # Near period high (within 5% of the period high)
     high_rows = (await db.execute(text(f"""
-        {period_cte}
         SELECT
             u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
-            w.period_high, w.period_low,
+            {ph_expr} AS period_high,
+            {pl_expr} AS period_low,
             u.volume, u.avg_volume_20d, u.return_1w, u.return_1m,
-            ROUND(((u.price - w.period_high) / NULLIF(w.period_high, 0) * 100)::numeric, 2) AS pct_from_high
+            ROUND(((u.price - {ph_expr}) / NULLIF({ph_expr}, 0) * 100)::numeric, 2) AS pct_from_high
         FROM screener.universe u
-        INNER JOIN w ON u.asx_code = w.asx_code
+        {period_join}
         WHERE u.price > 0.10
           AND u.market_cap > 50
-          AND u.price >= w.period_high * 0.95
-        ORDER BY u.price / NULLIF(w.period_high, 0) DESC
+          AND {ph_expr} > 0
+          AND u.price >= {ph_expr} * 0.95
+        ORDER BY u.price / NULLIF({ph_expr}, 0) DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
-    # Near period low (within 5% of the true period low)
+    # Near period low (within 5% of the period low)
     low_rows = (await db.execute(text(f"""
-        {period_cte}
         SELECT
             u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
-            w.period_high, w.period_low,
+            {ph_expr} AS period_high,
+            {pl_expr} AS period_low,
             u.volume, u.avg_volume_20d, u.return_1w, u.return_1m,
-            ROUND(((u.price - w.period_low) / NULLIF(w.period_low, 0) * 100)::numeric, 2) AS pct_from_low
+            ROUND(((u.price - {pl_expr}) / NULLIF({pl_expr}, 0) * 100)::numeric, 2) AS pct_from_low
         FROM screener.universe u
-        INNER JOIN w ON u.asx_code = w.asx_code
+        {period_join}
         WHERE u.price > 0.10
           AND u.market_cap > 50
-          AND u.price <= w.period_low * 1.05
-        ORDER BY u.price / NULLIF(w.period_low, 0) ASC
+          AND {pl_expr} > 0
+          AND u.price <= {pl_expr} * 1.05
+        ORDER BY u.price / NULLIF({pl_expr}, 0) ASC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 

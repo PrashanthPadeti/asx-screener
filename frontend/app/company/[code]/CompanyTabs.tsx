@@ -2,17 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import {
-  ComposedChart, LineChart, Line, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Legend,
+  ComposedChart, Line, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
   getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
   getCompanyAnnouncements, getAISummary, getAnomalyFlags,
-  type CompanyOverview, type FinancialsResponse, type PricesResponse,
-  type DividendsResponse, type PeersResponse, type HalfYearlyResponse,
-  type Announcement, type AnnouncementsResponse, type AISummary,
-  type AnomalyFlag,
+  type CompanyOverview, type FinancialsResponse, type AnnualFinancialsRow,
+  type PricesResponse, type DividendsResponse, type PeersResponse,
+  type HalfYearlyResponse, type Announcement, type AnnouncementsResponse,
+  type AISummary, type AnomalyFlag,
 } from '@/lib/api'
 import {
   formatPrice, formatMarketCap, formatVolume,
@@ -407,6 +407,140 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
         </div>
       </div>
 
+      {/* Fundamental Health Checklist */}
+      {(() => {
+        type CheckResult = { label: string; detail: string; status: 'pass' | 'warn' | 'fail' | 'na' }
+        const checks: CheckResult[] = []
+
+        // 1. Has the company ever been profitable?
+        if (o.net_margin != null) {
+          checks.push(o.net_margin > 0
+            ? { label: 'Profitable', detail: `Net margin ${formatRatio(o.net_margin)}`, status: 'pass' }
+            : { label: 'Profitable', detail: `Net margin ${formatRatio(o.net_margin)} — loss-making`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Profitable', detail: 'No earnings data', status: 'na' })
+        }
+
+        // 2. Revenue growing?
+        if (o.revenue_growth_1y != null) {
+          checks.push(o.revenue_growth_1y > 0.05
+            ? { label: 'Revenue Growth', detail: `+${(o.revenue_growth_1y*100).toFixed(1)}% YoY`, status: 'pass' }
+            : o.revenue_growth_1y >= 0
+            ? { label: 'Revenue Growth', detail: `+${(o.revenue_growth_1y*100).toFixed(1)}% YoY — flat`, status: 'warn' }
+            : { label: 'Revenue Growth', detail: `${(o.revenue_growth_1y*100).toFixed(1)}% YoY — declining`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Revenue Growth', detail: 'No data', status: 'na' })
+        }
+
+        // 3. Earnings quality (FCF > 0)
+        if (o.fcf_fy0 != null) {
+          checks.push(o.fcf_fy0 > 0
+            ? { label: 'Cash Earnings', detail: `FCF $${(o.fcf_fy0).toFixed(0)}M — positive`, status: 'pass' }
+            : { label: 'Cash Earnings', detail: `FCF $${(o.fcf_fy0).toFixed(0)}M — negative`, status: 'fail' })
+        } else if (o.cfo_fy0 != null) {
+          checks.push(o.cfo_fy0 > 0
+            ? { label: 'Cash Earnings', detail: `CFO $${(o.cfo_fy0).toFixed(0)}M — positive`, status: 'pass' }
+            : { label: 'Cash Earnings', detail: `CFO $${(o.cfo_fy0).toFixed(0)}M — negative`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Cash Earnings', detail: 'No cash flow data', status: 'na' })
+        }
+
+        // 4. Liquidity — Current Ratio
+        if (o.current_ratio != null) {
+          checks.push(o.current_ratio >= 1.5
+            ? { label: 'Liquidity', detail: `Current ratio ${o.current_ratio.toFixed(1)}x — healthy`, status: 'pass' }
+            : o.current_ratio >= 1.0
+            ? { label: 'Liquidity', detail: `Current ratio ${o.current_ratio.toFixed(1)}x — acceptable`, status: 'warn' }
+            : { label: 'Liquidity', detail: `Current ratio ${o.current_ratio.toFixed(1)}x — at risk`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Liquidity', detail: 'No balance sheet data', status: 'na' })
+        }
+
+        // 5. Leverage — D/E Ratio
+        if (o.debt_to_equity != null) {
+          checks.push(o.debt_to_equity < 1.0
+            ? { label: 'Low Leverage', detail: `D/E ${o.debt_to_equity.toFixed(1)}x — conservative`, status: 'pass' }
+            : o.debt_to_equity < 2.5
+            ? { label: 'Low Leverage', detail: `D/E ${o.debt_to_equity.toFixed(1)}x — moderate`, status: 'warn' }
+            : { label: 'Low Leverage', detail: `D/E ${o.debt_to_equity.toFixed(1)}x — high leverage`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Low Leverage', detail: 'No debt data', status: 'na' })
+        }
+
+        // 6. Competitive moat — Gross Margin > 20%
+        if (o.gross_margin != null) {
+          checks.push(o.gross_margin > 0.20
+            ? { label: 'Gross Margin', detail: `${(o.gross_margin*100).toFixed(1)}% — indicates moat`, status: 'pass' }
+            : o.gross_margin > 0
+            ? { label: 'Gross Margin', detail: `${(o.gross_margin*100).toFixed(1)}% — low margin`, status: 'warn' }
+            : { label: 'Gross Margin', detail: `${(o.gross_margin*100).toFixed(1)}% — negative margin`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Gross Margin', detail: 'No margin data', status: 'na' })
+        }
+
+        // 7. ROE > 15%
+        if (o.roe != null) {
+          checks.push(o.roe > 0.15
+            ? { label: 'ROE', detail: `${(o.roe*100).toFixed(1)}% — strong returns`, status: 'pass' }
+            : o.roe > 0
+            ? { label: 'ROE', detail: `${(o.roe*100).toFixed(1)}% — below benchmark`, status: 'warn' }
+            : { label: 'ROE', detail: `${(o.roe*100).toFixed(1)}% — negative`, status: 'fail' })
+        } else {
+          checks.push({ label: 'ROE', detail: 'No data', status: 'na' })
+        }
+
+        // 8. Valuation — P/E not extreme
+        if (o.pe_ratio != null && o.pe_ratio > 0) {
+          checks.push(o.pe_ratio < 20
+            ? { label: 'Valuation (P/E)', detail: `${o.pe_ratio.toFixed(1)}x — reasonable`, status: 'pass' }
+            : o.pe_ratio < 40
+            ? { label: 'Valuation (P/E)', detail: `${o.pe_ratio.toFixed(1)}x — elevated`, status: 'warn' }
+            : { label: 'Valuation (P/E)', detail: `${o.pe_ratio.toFixed(1)}x — very high`, status: 'fail' })
+        } else {
+          checks.push({ label: 'Valuation (P/E)', detail: o.pe_ratio == null ? 'No P/E data' : 'Negative earnings', status: 'na' })
+        }
+
+        const passCount = checks.filter(c => c.status === 'pass').length
+        const failCount = checks.filter(c => c.status === 'fail').length
+        const overallStatus = failCount >= 3 ? 'fail' : failCount >= 1 || passCount < 4 ? 'warn' : 'pass'
+
+        return (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Fundamental Health Checklist</h3>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                overallStatus === 'pass' ? 'bg-green-100 text-green-700' :
+                overallStatus === 'warn' ? 'bg-yellow-100 text-yellow-700' :
+                'bg-red-100 text-red-700'
+              }`}>
+                {passCount}/{checks.filter(c => c.status !== 'na').length} checks passed
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 divide-x divide-y divide-gray-50">
+              {checks.map(c => (
+                <div key={c.label} className="px-3 py-3 flex flex-col gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-sm ${
+                      c.status === 'pass' ? 'text-green-500' :
+                      c.status === 'fail' ? 'text-red-500' :
+                      c.status === 'warn' ? 'text-amber-500' : 'text-gray-300'
+                    }`}>
+                      {c.status === 'pass' ? '✓' : c.status === 'fail' ? '✗' : c.status === 'warn' ? '!' : '–'}
+                    </span>
+                    <span className="text-[10px] font-bold text-gray-600 uppercase tracking-wide">{c.label}</span>
+                  </div>
+                  <span className={`text-[10px] leading-tight ${
+                    c.status === 'pass' ? 'text-green-600' :
+                    c.status === 'fail' ? 'text-red-500' :
+                    c.status === 'warn' ? 'text-amber-600' : 'text-gray-400'
+                  }`}>{c.detail}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* 3-column metrics grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Valuation */}
@@ -699,7 +833,46 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
 // ── Financials Tab ────────────────────────────────────────────
 
 function AnnualTable({ financials }: { financials: FinancialsResponse }) {
-  const years = [...financials.years].reverse()
+  const years = [...financials.years].reverse()   // oldest → newest
+
+  // ── YoY growth helper ────────────────────────────────────────
+  const yoyGrowth = (key: keyof AnnualFinancialsRow): (number | null)[] =>
+    years.map((yr, i) => {
+      if (i === 0) return null
+      const curr = yr[key] as number | null
+      const prev = years[i - 1][key] as number | null
+      if (curr == null || prev == null || prev === 0) return null
+      return (curr - prev) / Math.abs(prev)
+    })
+
+  const fmtGrowth = (v: number | null) => {
+    if (v == null) return '—'
+    const pct = v * 100
+    const cls = pct >= 0 ? 'text-green-600' : 'text-red-500'
+    return <span className={cls}>{pct >= 0 ? '+' : ''}{pct.toFixed(1)}%</span>
+  }
+
+  const revenueGrowth    = yoyGrowth('revenue')
+  const netProfitGrowth  = yoyGrowth('net_profit')
+  const epsGrowth        = yoyGrowth('eps')
+
+  // ── Earnings Quality (CFO / Net Profit) ──────────────────────
+  const earningsQuality: (number | null)[] = years.map(yr => {
+    if (yr.cfo == null || yr.net_profit == null || yr.net_profit === 0) return null
+    return yr.cfo / Math.abs(yr.net_profit)
+  })
+
+  const fmtEQ = (v: number | null) => {
+    if (v == null) return '—'
+    const cls = v >= 1.0 ? 'text-green-600 font-semibold' : v >= 0.5 ? 'text-amber-600' : 'text-red-500'
+    return <span className={cls}>{v.toFixed(2)}x{v >= 1 ? ' ✓' : ''}</span>
+  }
+
+  // ── Operating margin (EBIT / Revenue) ────────────────────────
+  const operatingMargins: (number | null)[] = years.map(yr =>
+    yr.ebit != null && yr.revenue != null && yr.revenue > 0
+      ? yr.ebit / yr.revenue : null
+  )
 
   type ARow = { label: string; key: string; fmt: (v: number | null) => string }
 
@@ -713,9 +886,9 @@ function AnnualTable({ financials }: { financials: FinancialsResponse }) {
     { label: 'DPS',           key: 'dps',          fmt: v => v != null ? `$${v.toFixed(3)}` : '—' },
   ]
   const marginRows: ARow[] = [
-    { label: 'Gross Margin',  key: 'gpm',          fmt: formatRatio },
-    { label: 'EBITDA Margin', key: 'ebitda_margin',fmt: formatRatio },
-    { label: 'Net Margin',    key: 'npm',          fmt: formatRatio },
+    { label: 'Gross Margin',     key: 'gpm',          fmt: formatRatio },
+    { label: 'EBITDA Margin',    key: 'ebitda_margin', fmt: formatRatio },
+    { label: 'Net Margin',       key: 'npm',           fmt: formatRatio },
   ]
   const bsRows: ARow[] = [
     { label: 'Total Assets',    key: 'total_assets',        fmt: fmtM },
@@ -752,31 +925,180 @@ function AnnualTable({ financials }: { financials: FinancialsResponse }) {
     </>
   )
 
+  // ── Trend chart data ─────────────────────────────────────────
+  const chartData = years.map(yr => ({
+    year: `FY${yr.fiscal_year}`,
+    revenue: yr.revenue,
+    net_profit: yr.net_profit,
+    eps: yr.eps,
+    gross_margin: yr.gpm != null ? yr.gpm * 100 : null,
+    net_margin: yr.npm != null ? yr.npm * 100 : null,
+  }))
+
+  const hasRevenue    = years.some(y => y.revenue != null)
+  const hasEPS        = years.some(y => y.eps != null)
+  const hasMargins    = years.some(y => y.gpm != null || y.npm != null)
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-left min-w-[500px]">
-        <thead>
-          <tr className="border-b border-gray-200">
-            <th className="text-xs text-gray-400 font-medium pb-2 pr-4">Metric</th>
-            {years.map(yr => (
-              <th key={yr.fiscal_year} className="text-xs text-gray-700 font-semibold pb-2 pl-4 text-right">
-                FY{yr.fiscal_year}
-                {yr.period_end_date && (
-                  <span className="block font-normal text-gray-400">
-                    {yr.period_end_date.slice(0, 7)}
-                  </span>
-                )}
-              </th>
+    <div className="space-y-4">
+      {/* ── Trend Charts ───────────────────────────────────────── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+        {/* Revenue & Net Profit */}
+        {hasRevenue && (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden md:col-span-2">
+            <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Revenue &amp; Net Profit Trend (AUD)</h3>
+            </div>
+            <div className="p-3">
+              <ResponsiveContainer width="100%" height={160}>
+                <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    tickFormatter={v => { const n = v as number; return Math.abs(n) >= 1000 ? `$${(n/1000).toFixed(0)}B` : `$${n.toFixed(0)}M` }}
+                    width={52} />
+                  <Tooltip
+                    formatter={(v: unknown, name: unknown) => [
+                      (() => { const n = v as number; return Math.abs(n) >= 1000 ? `$${(n/1000).toFixed(1)}B` : `$${n.toFixed(0)}M` })(),
+                      name === 'revenue' ? 'Revenue' : 'Net Profit'
+                    ]}
+                  />
+                  <Bar dataKey="revenue"    name="revenue"    fill="#3b82f6" fillOpacity={0.8} radius={[2,2,0,0]} maxBarSize={28} />
+                  <Bar dataKey="net_profit" name="net_profit" fill="#10b981" fillOpacity={0.8} radius={[2,2,0,0]} maxBarSize={28} />
+                </ComposedChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-1 text-[10px] text-gray-400">
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-blue-500 mr-1" />Revenue</span>
+                <span><span className="inline-block w-2.5 h-2.5 rounded-sm bg-emerald-500 mr-1" />Net Profit</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* EPS Trend */}
+        {hasEPS && (
+          <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+            <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">EPS Trend</h3>
+            </div>
+            <div className="p-3">
+              <ResponsiveContainer width="100%" height={160}>
+                <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    tickFormatter={v => `$${(v as number).toFixed(2)}`}
+                    width={44} />
+                  <Tooltip formatter={(v: unknown) => [`$${(v as number).toFixed(3)}`, 'EPS']} />
+                  <Bar dataKey="eps" fill="#8b5cf6" fillOpacity={0.85} radius={[2,2,0,0]} maxBarSize={28} />
+                  <Line type="monotone" dataKey="eps" stroke="#8b5cf6" dot={false} strokeWidth={2} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* Margins Trend */}
+        {hasMargins && (
+          <div className={`bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden ${!hasEPS ? 'md:col-span-1' : 'md:col-span-3'}`}>
+            <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100">
+              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Profit Margins Trend (%)</h3>
+            </div>
+            <div className="p-3">
+              <ResponsiveContainer width="100%" height={hasEPS ? 100 : 160}>
+                <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="year" tick={{ fontSize: 10, fill: '#94a3b8' }} />
+                  <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }}
+                    tickFormatter={v => `${(v as number).toFixed(0)}%`}
+                    width={36} />
+                  <Tooltip formatter={(v: unknown, name: unknown) => [`${(v as number).toFixed(1)}%`, name === 'gross_margin' ? 'Gross Margin' : 'Net Margin']} />
+                  <Line type="monotone" dataKey="gross_margin" stroke="#3b82f6" dot={false} strokeWidth={2} name="gross_margin" />
+                  <Line type="monotone" dataKey="net_margin"   stroke="#10b981" dot={false} strokeWidth={2} name="net_margin" />
+                </ComposedChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-1 text-[10px] text-gray-400">
+                <span><span className="inline-block w-2.5 h-2 bg-blue-500 mr-1" />Gross</span>
+                <span><span className="inline-block w-2.5 h-2 bg-emerald-500 mr-1" />Net</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Financials Table ────────────────────────────────────── */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-left min-w-[500px]">
+          <thead>
+            <tr className="border-b border-gray-200">
+              <th className="text-xs text-gray-400 font-medium pb-2 pr-4">Metric</th>
+              {years.map(yr => (
+                <th key={yr.fiscal_year} className="text-xs text-gray-700 font-semibold pb-2 pl-4 text-right">
+                  FY{yr.fiscal_year}
+                  {yr.period_end_date && (
+                    <span className="block font-normal text-gray-400">
+                      {yr.period_end_date.slice(0, 7)}
+                    </span>
+                  )}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            <TableSection title="Income Statement (AUD)" rows={pnlRows} />
+
+            {/* YoY growth rates */}
+            <tr>
+              <td colSpan={years.length + 1} className="pt-3 pb-1">
+                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">YoY Growth</span>
+              </td>
+            </tr>
+            {[
+              { label: 'Revenue Growth',    data: revenueGrowth },
+              { label: 'Net Profit Growth', data: netProfitGrowth },
+              { label: 'EPS Growth',        data: epsGrowth },
+            ].map(({ label, data }) => (
+              <tr key={label} className="hover:bg-gray-50">
+                <td className="py-1.5 pr-4 text-sm text-gray-500 whitespace-nowrap">{label}</td>
+                {years.map((yr, i) => (
+                  <td key={yr.fiscal_year} className="py-1.5 text-sm text-right pl-4">
+                    {fmtGrowth(data[i])}
+                  </td>
+                ))}
+              </tr>
             ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-50">
-          <TableSection title="Income Statement (AUD)" rows={pnlRows} />
-          <TableSection title="Margins" rows={marginRows} />
-          <TableSection title="Balance Sheet (AUD)" rows={bsRows} />
-          <TableSection title="Cash Flow (AUD)" rows={cfRows} />
-        </tbody>
-      </table>
+
+            <TableSection title="Margins" rows={marginRows} />
+
+            {/* Operating Margin (computed) */}
+            <tr className="hover:bg-gray-50">
+              <td className="py-1.5 pr-4 text-sm text-gray-600 whitespace-nowrap">Operating Margin</td>
+              {years.map((yr, i) => (
+                <td key={yr.fiscal_year} className="py-1.5 text-sm text-right font-medium text-gray-900 pl-4">
+                  {formatRatio(operatingMargins[i])}
+                </td>
+              ))}
+            </tr>
+
+            <TableSection title="Balance Sheet (AUD)" rows={bsRows} />
+            <TableSection title="Cash Flow (AUD)" rows={cfRows} />
+
+            {/* Earnings Quality */}
+            <tr className="hover:bg-gray-50">
+              <td className="py-1.5 pr-4 text-sm text-gray-600 whitespace-nowrap">
+                <span>Earnings Quality</span>
+                <span className="block text-[10px] text-gray-400">CFO / Net Profit (≥1 = real cash)</span>
+              </td>
+              {years.map((yr, i) => (
+                <td key={yr.fiscal_year} className="py-1.5 text-sm text-right pl-4">
+                  {fmtEQ(earningsQuality[i])}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

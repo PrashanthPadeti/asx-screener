@@ -199,7 +199,7 @@ function ExDivRow({ s }: { s: ExDivStock }) {
   )
 }
 
-function Signal52WRow({ s, type }: { s: SignalStock; type: 'high' | 'low' }) {
+function SignalHighLowRow({ s, type }: { s: SignalStock; type: 'high' | 'low' }) {
   const pct = type === 'high' ? s.pct_from_high : s.pct_from_low
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
@@ -209,7 +209,7 @@ function Signal52WRow({ s, type }: { s: SignalStock; type: 'high' | 'low' }) {
       </td>
       <td className="py-2 px-3 text-sm text-right">{fmtPrice(s.price)}</td>
       <td className="py-2 px-3 text-sm text-right text-slate-500">
-        {fmtPrice(type === 'high' ? s.high_52w : s.low_52w)}
+        {fmtPrice(type === 'high' ? s.period_high : s.period_low)}
       </td>
       <td className={`py-2 px-3 text-sm text-right font-semibold ${type === 'high' ? 'text-emerald-600' : 'text-red-500'}`}>
         {pct != null ? fmtPctRaw(pct) : '—'}
@@ -269,7 +269,7 @@ export default function MarketPage() {
   const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
 
-  const [signals, setSignals]   = useState<{ near_52w_high: SignalStock[]; near_52w_low: SignalStock[]; volume_surge: SignalStock[] } | null>(null)
+  const [signals, setSignals]   = useState<{ near_period_high: SignalStock[]; near_period_low: SignalStock[]; volume_surge: SignalStock[] } | null>(null)
   const [signalsLoading, setSignalsLoading] = useState(false)
 
   const [sigTab, setSigTab]     = useState<'high' | 'low' | 'volume'>('high')
@@ -288,17 +288,17 @@ export default function MarketPage() {
     finally { setMoversLoading(false) }
   }, [])
 
-  const loadSignals = async () => {
+  const loadSignals = useCallback(async (period: Period) => {
     setSignalsLoading(true)
-    try { setSignals(await getMarketSignals()) }
+    try { setSignals(await getMarketSignals(period)) }
     catch { /* keep previous */ }
     finally { setSignalsLoading(false) }
-  }
+  }, [])
 
-  useEffect(() => { loadDashboard(); loadSignals() }, [])
-  useEffect(() => { loadMovers(moverPeriod) }, [moverPeriod, loadMovers])
+  useEffect(() => { loadDashboard(); loadSignals('1d') }, [loadSignals])
+  useEffect(() => { loadMovers(moverPeriod); loadSignals(moverPeriod) }, [moverPeriod, loadMovers, loadSignals])
 
-  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals() }
+  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals(moverPeriod) }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -409,15 +409,16 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* 52W Highs/Lows + Volume Surge */}
+      {/* Period Highs/Lows + Volume Surge */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-semibold text-slate-700">Market Signals</h2>
+            <span className="text-xs text-slate-400">{PERIOD_LABELS[moverPeriod]}</span>
           </div>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-            {([['high', '52W Highs'], ['low', '52W Lows'], ['volume', 'Volume Surge']] as const).map(([k, label]) => (
+            {([['high', 'Highs'], ['low', 'Lows'], ['volume', 'Volume Surge']] as const).map(([k, label]) => (
               <button key={k} onClick={() => setSigTab(k)}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${sigTab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {label}
@@ -435,15 +436,15 @@ export default function MarketPage() {
                   <tr className="text-xs text-slate-400 bg-slate-50">
                     <th className="py-2 px-3 text-left">Stock</th>
                     <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">52W High</th>
+                    <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} High</th>
                     <th className="py-2 px-3 text-right">From High</th>
                     <th className="py-2 px-3 text-right">1W</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {signals.near_52w_high.length === 0
-                    ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near 52-week high</td></tr>
-                    : signals.near_52w_high.map(s => <Signal52WRow key={s.asx_code} s={s} type="high" />)}
+                  {signals.near_period_high.length === 0
+                    ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period high</td></tr>
+                    : signals.near_period_high.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="high" />)}
                 </tbody>
               </table>
             )}
@@ -453,15 +454,15 @@ export default function MarketPage() {
                   <tr className="text-xs text-slate-400 bg-slate-50">
                     <th className="py-2 px-3 text-left">Stock</th>
                     <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">52W Low</th>
+                    <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} Low</th>
                     <th className="py-2 px-3 text-right">From Low</th>
                     <th className="py-2 px-3 text-right">1W</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {signals.near_52w_low.length === 0
-                    ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near 52-week low</td></tr>
-                    : signals.near_52w_low.map(s => <Signal52WRow key={s.asx_code} s={s} type="low" />)}
+                  {signals.near_period_low.length === 0
+                    ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period low</td></tr>
+                    : signals.near_period_low.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="low" />)}
                 </tbody>
               </table>
             )}

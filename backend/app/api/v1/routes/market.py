@@ -136,63 +136,70 @@ async def market_movers(
 @router.get("/signals")
 async def market_signals(
     limit: int = Query(15, ge=5, le=50),
+    period: str = Query("1w", pattern="^(1d|1w|1m|3m)$"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Market signals: 52-week highs/lows (computed live from market.daily_prices)
+    Market signals: period highs/lows (computed live from market.daily_prices)
     and volume surges from screener.universe.
+    Period determines the lookback window for highs/lows.
     """
-    # CTE: compute true 52W high/low from actual OHLC price history.
-    # Requires at least 30 trading days of history and a 10% annual range
-    # to filter out stocks with sparse/stale data.
-    w52_cte = """
-        WITH w52 AS (
+    days_map  = {"1d": 3,  "1w": 10, "1m": 35, "3m": 100}
+    min_days  = {"1d": 1,  "1w": 3,  "1m": 10, "3m": 25}
+    min_range = {"1d": 0.001, "1w": 0.01, "1m": 0.03, "3m": 0.08}
+
+    look_days = days_map[period]
+    req_days  = min_days[period]
+    req_range = min_range[period]
+
+    period_cte = f"""
+        WITH w AS (
             SELECT
                 dp.asx_code,
-                MAX(dp.high)  AS high_52w,
-                MIN(dp.low)   AS low_52w,
+                MAX(dp.high)  AS period_high,
+                MIN(dp.low)   AS period_low,
                 COUNT(*)      AS trading_days
             FROM market.daily_prices dp
-            WHERE dp.time >= CURRENT_DATE - 365
+            WHERE dp.time >= CURRENT_DATE - {look_days}
             GROUP BY dp.asx_code
-            HAVING COUNT(*) >= 30
+            HAVING COUNT(*) >= {req_days}
                AND MAX(dp.high) > 0
                AND MIN(dp.low)  > 0
-               AND (MAX(dp.high) - MIN(dp.low)) / NULLIF(MIN(dp.low), 0) >= 0.10
+               AND (MAX(dp.high) - MIN(dp.low)) / NULLIF(MIN(dp.low), 0) >= {req_range}
         )
     """
 
-    # Near 52W high (within 5% of the true 52W high)
+    # Near period high (within 5% of the true period high)
     high_rows = (await db.execute(text(f"""
-        {w52_cte}
+        {period_cte}
         SELECT
             u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
-            w.high_52w, w.low_52w,
+            w.period_high, w.period_low,
             u.volume, u.avg_volume_20d, u.return_1w, u.return_1m,
-            ROUND(((u.price - w.high_52w) / NULLIF(w.high_52w, 0) * 100)::numeric, 2) AS pct_from_high
+            ROUND(((u.price - w.period_high) / NULLIF(w.period_high, 0) * 100)::numeric, 2) AS pct_from_high
         FROM screener.universe u
-        INNER JOIN w52 w ON u.asx_code = w.asx_code
+        INNER JOIN w ON u.asx_code = w.asx_code
         WHERE u.price > 0.10
           AND u.market_cap > 50
-          AND u.price >= w.high_52w * 0.95
-        ORDER BY u.price / NULLIF(w.high_52w, 0) DESC
+          AND u.price >= w.period_high * 0.95
+        ORDER BY u.price / NULLIF(w.period_high, 0) DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
-    # Near 52W low (within 5% of the true 52W low)
+    # Near period low (within 5% of the true period low)
     low_rows = (await db.execute(text(f"""
-        {w52_cte}
+        {period_cte}
         SELECT
             u.asx_code, u.company_name, u.sector, u.price, u.market_cap,
-            w.high_52w, w.low_52w,
+            w.period_high, w.period_low,
             u.volume, u.avg_volume_20d, u.return_1w, u.return_1m,
-            ROUND(((u.price - w.low_52w) / NULLIF(w.low_52w, 0) * 100)::numeric, 2) AS pct_from_low
+            ROUND(((u.price - w.period_low) / NULLIF(w.period_low, 0) * 100)::numeric, 2) AS pct_from_low
         FROM screener.universe u
-        INNER JOIN w52 w ON u.asx_code = w.asx_code
+        INNER JOIN w ON u.asx_code = w.asx_code
         WHERE u.price > 0.10
           AND u.market_cap > 50
-          AND u.price <= w.low_52w * 1.05
-        ORDER BY u.price / NULLIF(w.low_52w, 0) ASC
+          AND u.price <= w.period_low * 1.05
+        ORDER BY u.price / NULLIF(w.period_low, 0) ASC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
@@ -200,7 +207,7 @@ async def market_signals(
     vol_rows = (await db.execute(text("""
         SELECT
             asx_code, company_name, sector, price, market_cap,
-            high_52w, low_52w, volume, avg_volume_20d,
+            volume, avg_volume_20d,
             return_1w, return_1m,
             ROUND((volume::numeric / NULLIF(avg_volume_20d, 0)), 1) AS vol_ratio
         FROM screener.universe
@@ -215,26 +222,26 @@ async def market_signals(
 
     def _row(r, extra_key=None):
         d = {
-            "asx_code":      r["asx_code"],
-            "company_name":  r["company_name"],
-            "sector":        r["sector"],
-            "price":         float(r["price"]) if r["price"] is not None else None,
-            "market_cap":    float(r["market_cap"]) if r["market_cap"] is not None else None,
-            "high_52w":      float(r["high_52w"]) if r["high_52w"] is not None else None,
-            "low_52w":       float(r["low_52w"]) if r["low_52w"] is not None else None,
-            "volume":        int(r["volume"]) if r["volume"] is not None else None,
-            "avg_volume_20d":int(r["avg_volume_20d"]) if r["avg_volume_20d"] is not None else None,
-            "return_1w":     float(r["return_1w"]) if r["return_1w"] is not None else None,
-            "return_1m":     float(r["return_1m"]) if r["return_1m"] is not None else None,
+            "asx_code":       r["asx_code"],
+            "company_name":   r["company_name"],
+            "sector":         r["sector"],
+            "price":          float(r["price"]) if r["price"] is not None else None,
+            "market_cap":     float(r["market_cap"]) if r["market_cap"] is not None else None,
+            "period_high":    float(r["period_high"]) if r.get("period_high") is not None else None,
+            "period_low":     float(r["period_low"]) if r.get("period_low") is not None else None,
+            "volume":         int(r["volume"]) if r["volume"] is not None else None,
+            "avg_volume_20d": int(r["avg_volume_20d"]) if r["avg_volume_20d"] is not None else None,
+            "return_1w":      float(r["return_1w"]) if r["return_1w"] is not None else None,
+            "return_1m":      float(r["return_1m"]) if r["return_1m"] is not None else None,
         }
         if extra_key and r[extra_key] is not None:
             d[extra_key] = float(r[extra_key])
         return d
 
     return {
-        "near_52w_high":  [_row(r, "pct_from_high") for r in high_rows],
-        "near_52w_low":   [_row(r, "pct_from_low")  for r in low_rows],
-        "volume_surge":   [_row(r, "vol_ratio")      for r in vol_rows],
+        "near_period_high": [_row(r, "pct_from_high") for r in high_rows],
+        "near_period_low":  [_row(r, "pct_from_low")  for r in low_rows],
+        "volume_surge":     [_row(r, "vol_ratio")      for r in vol_rows],
     }
 
 

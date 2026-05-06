@@ -661,8 +661,8 @@ export interface SignalStock {
   sector: string | null
   price: number | null
   market_cap: number | null
-  high_52w: number | null
-  low_52w: number | null
+  period_high: number | null
+  period_low: number | null
   volume: number | null
   avg_volume_20d: number | null
   return_1w: number | null
@@ -673,9 +673,9 @@ export interface SignalStock {
 }
 
 export interface MarketSignals {
-  near_52w_high: SignalStock[]
-  near_52w_low:  SignalStock[]
-  volume_surge:  SignalStock[]
+  near_period_high: SignalStock[]
+  near_period_low:  SignalStock[]
+  volume_surge:     SignalStock[]
 }
 
 export const getMarketMovers = async (period: '1d' | '1w' | '1m' | '3m', limit = 10): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
@@ -683,8 +683,8 @@ export const getMarketMovers = async (period: '1d' | '1w' | '1m' | '3m', limit =
   return data
 }
 
-export const getMarketSignals = async (): Promise<MarketSignals> => {
-  const { data } = await api.get('/api/v1/market/signals')
+export const getMarketSignals = async (period: '1d' | '1w' | '1m' | '3m' = '1w'): Promise<MarketSignals> => {
+  const { data } = await api.get('/api/v1/market/signals', { params: { period } })
   return data
 }
 

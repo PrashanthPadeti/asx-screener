@@ -208,7 +208,7 @@ async def market_signals(
           AND {ph_expr} > {pl_expr} * (1 + {min_range})
           AND u.price >= {ph_expr} * 0.95
           AND u.price < {ph_expr} * 0.9999
-        ORDER BY u.price / NULLIF({ph_expr}, 0) DESC
+        ORDER BY u.price / NULLIF({ph_expr}, 0) ASC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
@@ -230,7 +230,7 @@ async def market_signals(
           AND {ph_expr} > {pl_expr} * (1 + {min_range})
           AND u.price <= {pl_expr} * 1.05
           AND u.price > {pl_expr} * 1.0001
-        ORDER BY u.price / NULLIF({pl_expr}, 0) ASC
+        ORDER BY u.price / NULLIF({pl_expr}, 0) DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 

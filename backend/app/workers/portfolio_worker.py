@@ -27,17 +27,17 @@ _HOLDINGS_CTE = """
         SELECT
             portfolio_id,
             asx_code,
-            SUM(CASE WHEN transaction_type = 'BUY'  THEN quantity
-                     WHEN transaction_type = 'SELL' THEN -quantity
-                     ELSE 0 END)                          AS quantity,
-            SUM(CASE WHEN transaction_type = 'BUY'  THEN quantity * price
+            SUM(CASE WHEN transaction_type IN ('buy', 'drp') THEN shares
+                     WHEN transaction_type = 'sell'          THEN -shares
+                     ELSE 0 END)                                    AS quantity,
+            SUM(CASE WHEN transaction_type IN ('buy', 'drp') THEN shares * price_per_share
                      ELSE 0 END) /
-            NULLIF(SUM(CASE WHEN transaction_type = 'BUY' THEN quantity
-                            ELSE 0 END), 0)               AS avg_cost
+            NULLIF(SUM(CASE WHEN transaction_type IN ('buy', 'drp') THEN shares
+                            ELSE 0 END), 0)                         AS avg_cost
         FROM users.portfolio_transactions
         GROUP BY portfolio_id, asx_code
-        HAVING SUM(CASE WHEN transaction_type = 'BUY'  THEN quantity
-                        WHEN transaction_type = 'SELL' THEN -quantity
+        HAVING SUM(CASE WHEN transaction_type IN ('buy', 'drp') THEN shares
+                        WHEN transaction_type = 'sell'          THEN -shares
                         ELSE 0 END) > 0
     )
 """

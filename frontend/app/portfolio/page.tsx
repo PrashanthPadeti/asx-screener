@@ -751,34 +751,47 @@ const RISK_COLOR: Record<string, string> = {
 }
 
 function AiInsightsView({ portfolioId }: { portfolioId: string }) {
-  const [result, setResult]   = useState<PortfolioInsightsResult | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState<string | null>(null)
+  const [result, setResult]     = useState<PortfolioInsightsResult | null>(null)
+  const [loading, setLoading]   = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [error, setError]       = useState<string | null>(null)
 
-  const generate = () => {
-    setLoading(true)
+  const load = (forceRefresh = false) => {
+    if (forceRefresh) setRefreshing(true)
+    else setLoading(true)
     setError(null)
-    getPortfolioInsights(portfolioId)
+    getPortfolioInsights(portfolioId, forceRefresh)
       .then(setResult)
       .catch(e => {
         const detail = e?.response?.data?.detail
         setError(typeof detail === 'string' ? detail : (e?.message ?? 'Failed to generate insights'))
       })
-      .finally(() => setLoading(false))
+      .finally(() => { setLoading(false); setRefreshing(false) })
   }
 
-  if (!result && !loading) {
+  useEffect(() => { load() }, [portfolioId])
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-slate-500">Loading insights…</p>
+      </div>
+    )
+  }
+
+  if (error && !result) {
     return (
       <div className="flex flex-col items-center justify-center py-16 gap-4">
         <div className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center text-2xl">✨</div>
         <div className="text-center">
           <p className="font-semibold text-slate-800">AI Portfolio Analysis</p>
           <p className="text-sm text-slate-500 mt-1 max-w-sm">
-            Get a personalised analysis of your portfolio — concentration risk, sector exposure, income coverage, and actionable recommendations.
+            Get a personalised analysis — concentration risk, sector exposure, income coverage, and actionable recommendations.
           </p>
         </div>
-        {error && <p className="text-sm text-red-500">{error}</p>}
-        <button onClick={generate}
+        <p className="text-sm text-red-500">{error}</p>
+        <button onClick={() => load(true)}
           className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
           Generate Insights
         </button>
@@ -787,17 +800,13 @@ function AiInsightsView({ portfolioId }: { portfolioId: string }) {
     )
   }
 
-  if (loading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 gap-3">
-        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-        <p className="text-sm text-slate-500">Analysing your portfolio…</p>
-      </div>
-    )
-  }
-
   if (!result) return null
   const ins = result.insights
+
+  const genDate    = new Date(result.generated_at)
+  const expDate    = new Date(result.expires_at)
+  const daysLeft   = Math.ceil((expDate.getTime() - Date.now()) / 86_400_000)
+  const genRelative = Math.floor((Date.now() - genDate.getTime()) / 86_400_000)
 
   return (
     <div className="space-y-5">
@@ -893,13 +902,22 @@ function AiInsightsView({ portfolioId }: { portfolioId: string }) {
         </div>
       </div>
 
-      <div className="flex items-center justify-between pt-2">
-        <p className="text-xs text-slate-400">
-          Generated {new Date(result.generated_at).toLocaleString('en-AU')} · AI analysis is indicative only, not financial advice.
-        </p>
-        <button onClick={generate}
-          className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">
-          Regenerate
+      <div className="flex items-center justify-between pt-2 flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {result.cached ? (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              ✓ Cached · {genRelative === 0 ? 'generated today' : `${genRelative}d ago`} · refreshes in {daysLeft}d
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+              ✨ Freshly generated · valid for {daysLeft}d
+            </span>
+          )}
+          <p className="text-xs text-slate-400">AI analysis is indicative only, not financial advice.</p>
+        </div>
+        <button onClick={() => load(true)} disabled={refreshing}
+          className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1">
+          {refreshing ? <><span className="w-3 h-3 border border-slate-400 border-t-transparent rounded-full animate-spin inline-block" /> Regenerating…</> : '↺ Regenerate'}
         </button>
       </div>
     </div>

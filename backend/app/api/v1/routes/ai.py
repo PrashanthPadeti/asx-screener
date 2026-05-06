@@ -8,9 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
+import hashlib
 import json
 import math
 import logging
+from datetime import datetime, timedelta, timezone
 
 from app.db.session import get_db
 from app.core.config import settings
@@ -204,13 +206,30 @@ async def nl_screener(
 
 # ── v1.4: Portfolio AI Insights ──────────────────────────────────────────────
 
+INSIGHTS_TTL_DAYS = 7
+
+
+def _holdings_hash(holdings: dict) -> str:
+    """MD5 fingerprint of sorted (code, qty, avg_cost) — changes on any buy/sell/DRP."""
+    items = sorted(
+        (code, round(h["quantity"], 2), round(h["avg_cost"], 3))
+        for code, h in holdings.items()
+    )
+    return hashlib.md5(str(items).encode()).hexdigest()
+
+
 @router.get("/portfolio-insights/{portfolio_id}")
 async def get_portfolio_insights(
     portfolio_id: str,
+    refresh: bool = False,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Claude analysis of a portfolio: concentration risk, sector exposure, dividend coverage."""
+    """
+    Claude analysis of a portfolio.
+    Returns cached insights (up to 7 days) when holdings haven't changed.
+    Pass ?refresh=true to force regeneration.
+    """
     if not get_limits(current_user.get("plan", "free"))["nl_screener"]:
         raise HTTPException(status_code=403, detail="AI Insights requires a Pro plan or higher.")
     if not settings.ANTHROPIC_API_KEY:
@@ -262,6 +281,50 @@ async def get_portfolio_insights(
 
     if not holdings:
         raise HTTPException(status_code=400, detail="Portfolio has no current holdings")
+
+    # ── Cache check ───────────────────────────────────────────────────────────
+    h_hash = _holdings_hash(holdings)
+
+    if not refresh:
+        cached = (await db.execute(text("""
+            SELECT insights_json, holdings_json, sector_allocation_json,
+                   total_value, total_cost, total_return_pct, annual_income,
+                   portfolio_yield, top3_concentration, num_holdings,
+                   generated_at, expires_at, holdings_hash
+            FROM users.portfolio_insights
+            WHERE portfolio_id = :pid
+        """), {"pid": portfolio_id})).mappings().fetchone()
+
+        if cached:
+            now = datetime.now(timezone.utc)
+            exp = cached["expires_at"]
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            still_fresh   = exp > now
+            same_holdings = cached["holdings_hash"] == h_hash
+
+            if still_fresh and same_holdings:
+                log.info("portfolio-insights cache hit for %s", portfolio_id)
+                return {
+                    "portfolio_id":       portfolio_id,
+                    "portfolio_name":     p["name"],
+                    "total_value":        float(cached["total_value"] or 0),
+                    "total_return_pct":   float(cached["total_return_pct"] or 0),
+                    "portfolio_yield":    float(cached["portfolio_yield"] or 0),
+                    "annual_income":      float(cached["annual_income"] or 0),
+                    "num_holdings":       cached["num_holdings"] or 0,
+                    "top3_concentration": float(cached["top3_concentration"] or 0),
+                    "sector_allocation":  cached["sector_allocation_json"] or {},
+                    "holdings":           cached["holdings_json"] or [],
+                    "insights":           cached["insights_json"],
+                    "cached":             True,
+                    "generated_at":       cached["generated_at"].isoformat(),
+                    "expires_at":         exp.isoformat(),
+                    "cache_reason":       "same_holdings" if same_holdings else "fresh",
+                }
+            else:
+                reason = "holdings_changed" if not same_holdings else "expired"
+                log.info("portfolio-insights cache miss (%s) for %s", reason, portfolio_id)
 
     codes = list(holdings.keys())
     placeholders = ', '.join(f':c{i}' for i in range(len(codes)))
@@ -368,7 +431,6 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
 
     try:
         import anthropic
-        from datetime import datetime
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -390,6 +452,61 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
         log.error("Invalid JSON from Claude for portfolio-insights: %s", raw)
         raise HTTPException(status_code=500, detail="AI returned an unreadable response.")
 
+    # ── Cache write (upsert) ──────────────────────────────────────────────────
+    now        = datetime.now(timezone.utc)
+    expires_at = now + timedelta(days=INSIGHTS_TTL_DAYS)
+    try:
+        await db.execute(text("""
+            INSERT INTO users.portfolio_insights (
+                portfolio_id, user_id, holdings_hash,
+                total_value, total_cost, total_return_pct, annual_income,
+                portfolio_yield, top3_concentration, num_holdings,
+                sector_allocation_json, holdings_json, insights_json,
+                generated_at, expires_at
+            ) VALUES (
+                :pid, :uid, :hash,
+                :val, :cost, :ret_pct, :income,
+                :yield_, :top3, :n_hold,
+                :sector_json::jsonb, :hold_json::jsonb, :ins_json::jsonb,
+                :gen_at, :exp_at
+            )
+            ON CONFLICT (portfolio_id) DO UPDATE SET
+                holdings_hash          = EXCLUDED.holdings_hash,
+                total_value            = EXCLUDED.total_value,
+                total_cost             = EXCLUDED.total_cost,
+                total_return_pct       = EXCLUDED.total_return_pct,
+                annual_income          = EXCLUDED.annual_income,
+                portfolio_yield        = EXCLUDED.portfolio_yield,
+                top3_concentration     = EXCLUDED.top3_concentration,
+                num_holdings           = EXCLUDED.num_holdings,
+                sector_allocation_json = EXCLUDED.sector_allocation_json,
+                holdings_json          = EXCLUDED.holdings_json,
+                insights_json          = EXCLUDED.insights_json,
+                generated_at           = EXCLUDED.generated_at,
+                expires_at             = EXCLUDED.expires_at
+        """), {
+            "pid":        portfolio_id,
+            "uid":        current_user["id"],
+            "hash":       h_hash,
+            "val":        round(total_value, 2),
+            "cost":       round(total_cost, 2),
+            "ret_pct":    round(total_gl_pct, 2),
+            "income":     round(total_income, 2),
+            "yield_":     round(portfolio_yield, 2),
+            "top3":       round(top3_weight, 1),
+            "n_hold":     len(holdings_data),
+            "sector_json": json.dumps(sector_alloc),
+            "hold_json":   json.dumps(holdings_data),
+            "ins_json":    json.dumps(insights),
+            "gen_at":     now,
+            "exp_at":     expires_at,
+        })
+        await db.commit()
+        log.info("portfolio-insights cached for %s (expires %s)", portfolio_id, expires_at.date())
+    except Exception as e:
+        log.warning("Failed to cache portfolio-insights for %s: %s", portfolio_id, e)
+        await db.rollback()
+
     return {
         "portfolio_id":       portfolio_id,
         "portfolio_name":     p["name"],
@@ -402,7 +519,9 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
         "sector_allocation":  sector_alloc,
         "holdings":           holdings_data,
         "insights":           insights,
-        "generated_at":       datetime.utcnow().isoformat(),
+        "cached":             False,
+        "generated_at":       now.isoformat(),
+        "expires_at":         expires_at.isoformat(),
     }
 
 

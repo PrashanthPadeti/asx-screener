@@ -1437,13 +1437,17 @@ export interface PortfolioInsightsResult {
   sector_allocation:  Record<string, number>
   holdings:           PortfolioHoldingInsight[]
   insights:           PortfolioAiInsights
+  cached:             boolean
   generated_at:       string
+  expires_at:         string
 }
 
 export const getPortfolioInsights = async (
   portfolioId: string,
+  refresh = false,
 ): Promise<PortfolioInsightsResult> => {
-  const { data } = await api.get(`/api/v1/ai/portfolio-insights/${portfolioId}`)
+  const params = refresh ? { refresh: true } : {}
+  const { data } = await api.get(`/api/v1/ai/portfolio-insights/${portfolioId}`, { params })
   return data
 }
 

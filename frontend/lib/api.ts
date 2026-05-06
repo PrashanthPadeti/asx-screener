@@ -1370,6 +1370,83 @@ export const getTaxReport = async (portfolioId: string, taxYear?: number): Promi
   return data
 }
 
+// ── AI & Anomalies ────────────────────────────────────────────────────────────
+
+export interface AnomalyFlag {
+  asx_code:     string
+  company_name: string | null
+  sector:       string | null
+  flag_type:    string
+  description:  string
+  severity:     'low' | 'medium' | 'high'
+  detected_at:  string
+  price:        number | null
+  return_1d:    number | null
+  return_1w:    number | null
+  volume:       number | null
+}
+
+export interface AnomalyFeed {
+  flags: AnomalyFlag[]
+  total: number
+}
+
+export const getMarketAnomalies = async (
+  limit = 50,
+  flagType?: string,
+): Promise<AnomalyFeed> => {
+  const params: Record<string, unknown> = { limit }
+  if (flagType) params.flag_type = flagType
+  const { data } = await api.get('/api/v1/ai/anomalies', { params })
+  return data
+}
+
+export interface PortfolioHoldingInsight {
+  code:         string
+  name:         string
+  sector:       string
+  quantity:     number
+  avg_cost:     number
+  cur_price:    number
+  cur_value:    number
+  gain_pct:     number
+  weight_pct:   number
+  div_yield:    number
+  franking_pct: number
+}
+
+export interface PortfolioAiInsights {
+  summary: string
+  concentration_risk: { level: 'low' | 'medium' | 'high'; comment: string }
+  sector_analysis:    { dominant_sector: string; comment: string }
+  income_analysis:    { comment: string }
+  key_risks:          string[]
+  opportunities:      string[]
+  recommendations:    string[]
+}
+
+export interface PortfolioInsightsResult {
+  portfolio_id:       string
+  portfolio_name:     string
+  total_value:        number
+  total_return_pct:   number
+  portfolio_yield:    number
+  annual_income:      number
+  num_holdings:       number
+  top3_concentration: number
+  sector_allocation:  Record<string, number>
+  holdings:           PortfolioHoldingInsight[]
+  insights:           PortfolioAiInsights
+  generated_at:       string
+}
+
+export const getPortfolioInsights = async (
+  portfolioId: string,
+): Promise<PortfolioInsightsResult> => {
+  const { data } = await api.get(`/api/v1/ai/portfolio-insights/${portfolioId}`)
+  return data
+}
+
 // ── Notifications ─────────────────────────────────────────────────────────────
 
 export interface NotificationPreferences {

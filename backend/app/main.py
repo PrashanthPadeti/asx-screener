@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     from app.workers.alert_worker import check_alerts
     from app.workers.portfolio_worker import check_portfolio_thresholds, send_weekly_portfolio_summaries
     from app.workers.announcement_worker import fetch_announcements
+    from app.workers.watchlist_digest_worker import send_watchlist_digests
 
     scheduler = AsyncIOScheduler()
 
@@ -44,8 +45,13 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(fetch_announcements, trigger="interval", minutes=10,
                       id="announcement_fetcher", replace_existing=True)
 
+    # Watchlist daily digest — 7:30am AEST
+    scheduler.add_job(send_watchlist_digests,
+                      CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
+                      id="watchlist_digest", replace_existing=True)
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am)")
 
     yield
 

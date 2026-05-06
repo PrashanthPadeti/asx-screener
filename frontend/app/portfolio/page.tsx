@@ -15,6 +15,7 @@ import {
   getPortfolioHistory,
   getPortfolioDividends,
   getTaxReport,
+  getPortfolioInsights,
   listTransactions,
   addTransaction,
   deleteTransaction,
@@ -25,6 +26,7 @@ import {
   PortfolioHistory,
   PortfolioDividends,
   TaxReport,
+  PortfolioInsightsResult,
   TransactionOut,
   ImportResult,
 } from '@/lib/api'
@@ -740,9 +742,173 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
   )
 }
 
+// ── AI Insights ───────────────────────────────────────────────
+
+const RISK_COLOR: Record<string, string> = {
+  low:    'bg-emerald-100 text-emerald-700',
+  medium: 'bg-amber-100 text-amber-700',
+  high:   'bg-red-100 text-red-700',
+}
+
+function AiInsightsView({ portfolioId }: { portfolioId: string }) {
+  const [result, setResult]   = useState<PortfolioInsightsResult | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  const generate = () => {
+    setLoading(true)
+    setError(null)
+    getPortfolioInsights(portfolioId)
+      .then(setResult)
+      .catch(e => {
+        const detail = e?.response?.data?.detail
+        setError(typeof detail === 'string' ? detail : (e?.message ?? 'Failed to generate insights'))
+      })
+      .finally(() => setLoading(false))
+  }
+
+  if (!result && !loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-4">
+        <div className="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center text-2xl">✨</div>
+        <div className="text-center">
+          <p className="font-semibold text-slate-800">AI Portfolio Analysis</p>
+          <p className="text-sm text-slate-500 mt-1 max-w-sm">
+            Get a personalised analysis of your portfolio — concentration risk, sector exposure, income coverage, and actionable recommendations.
+          </p>
+        </div>
+        {error && <p className="text-sm text-red-500">{error}</p>}
+        <button onClick={generate}
+          className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+          Generate Insights
+        </button>
+        <p className="text-xs text-slate-400">Powered by Claude AI · takes ~5 seconds</p>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm text-slate-500">Analysing your portfolio…</p>
+      </div>
+    )
+  }
+
+  if (!result) return null
+  const ins = result.insights
+
+  return (
+    <div className="space-y-5">
+      {/* Header stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <SummaryCard label="Portfolio Value"    value={fmtMoney(result.total_value)} />
+        <SummaryCard label="Total Return"       value={fmtPct(result.total_return_pct)}
+          subColor={glColor(result.total_return_pct)} sub={result.total_return_pct >= 0 ? 'gain' : 'loss'} />
+        <SummaryCard label="Annual Income"      value={fmtMoney(result.annual_income)}
+          sub={`${result.portfolio_yield.toFixed(1)}% yield`} />
+        <SummaryCard label="Top 3 Holdings"     value={`${result.top3_concentration.toFixed(1)}%`}
+          sub="of portfolio" />
+      </div>
+
+      {/* Summary */}
+      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+        <p className="text-sm font-semibold text-blue-800 mb-1">Portfolio Summary</p>
+        <p className="text-sm text-blue-700">{ins.summary}</p>
+      </div>
+
+      {/* Risk & Sector cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Concentration Risk</p>
+            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${RISK_COLOR[ins.concentration_risk.level] ?? 'bg-slate-100 text-slate-600'}`}>
+              {ins.concentration_risk.level.toUpperCase()}
+            </span>
+          </div>
+          <p className="text-sm text-slate-600">{ins.concentration_risk.comment}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+          <div className="flex items-center gap-2">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Sector Exposure</p>
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+              {ins.sector_analysis.dominant_sector}
+            </span>
+          </div>
+          <p className="text-sm text-slate-600">{ins.sector_analysis.comment}</p>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Income &amp; Dividends</p>
+          <p className="text-sm text-slate-600">{ins.income_analysis.comment}</p>
+        </div>
+        {/* Sector allocation mini-bar */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
+          <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Sector Allocation</p>
+          <div className="space-y-1.5">
+            {Object.entries(result.sector_allocation).slice(0, 5).map(([sector, pct]) => (
+              <div key={sector} className="flex items-center gap-2 text-xs">
+                <span className="text-slate-500 w-28 truncate">{sector}</span>
+                <div className="flex-1 bg-slate-100 rounded-full h-1.5">
+                  <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${pct}%` }} />
+                </div>
+                <span className="text-slate-600 font-medium w-10 text-right">{pct.toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Risks / Opportunities / Recommendations */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-3">Key Risks</p>
+          <ul className="space-y-2">
+            {ins.key_risks.map((r, i) => (
+              <li key={i} className="flex gap-2 text-sm text-slate-600">
+                <span className="text-red-400 mt-0.5">▸</span>{r}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-3">Opportunities</p>
+          <ul className="space-y-2">
+            {ins.opportunities.map((o, i) => (
+              <li key={i} className="flex gap-2 text-sm text-slate-600">
+                <span className="text-emerald-500 mt-0.5">▸</span>{o}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-3">Recommendations</p>
+          <ul className="space-y-2">
+            {ins.recommendations.map((rec, i) => (
+              <li key={i} className="flex gap-2 text-sm text-slate-600">
+                <span className="text-blue-400 mt-0.5">▸</span>{rec}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-2">
+        <p className="text-xs text-slate-400">
+          Generated {new Date(result.generated_at).toLocaleString('en-AU')} · AI analysis is indicative only, not financial advice.
+        </p>
+        <button onClick={generate}
+          className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">
+          Regenerate
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Main page ─────────────────────────────────────────────────
 
-type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends' | 'tax'
+type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends' | 'tax' | 'insights'
 
 export default function PortfolioPage() {
   const { user, loading: authLoading } = useAuth()
@@ -864,6 +1030,7 @@ export default function PortfolioPage() {
     { key: 'allocation',   label: 'Allocation' },
     { key: 'dividends',    label: 'Dividends' },
     { key: 'tax',          label: 'Tax Report' },
+    { key: 'insights',     label: 'AI Insights ✨' },
     { key: 'transactions', label: `Transactions${txns.length ? ` (${txns.length})` : ''}` },
   ]
 
@@ -1060,7 +1227,8 @@ export default function PortfolioPage() {
               {view === 'dividends' && <DividendCalendar portfolioId={activeId} />}
 
               {/* Tax Report */}
-              {view === 'tax' && <TaxReportView portfolioId={activeId} />}
+              {view === 'tax'      && <TaxReportView portfolioId={activeId} />}
+              {view === 'insights' && <AiInsightsView portfolioId={activeId} />}
 
               {/* Transactions table */}
               {view === 'transactions' && (

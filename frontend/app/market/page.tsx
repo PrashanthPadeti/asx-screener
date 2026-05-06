@@ -3,12 +3,12 @@ import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
   TrendingUp, TrendingDown, Activity, BarChart2,
-  Calendar, RefreshCw, ArrowUp, ArrowDown, Zap,
+  Calendar, RefreshCw, ArrowUp, ArrowDown, Zap, AlertTriangle,
 } from 'lucide-react'
 import {
-  getMarketDashboard, getMarketMovers, getMarketSignals,
+  getMarketDashboard, getMarketMovers, getMarketSignals, getMarketAnomalies,
   MarketDashboard, DashboardStock, ActiveStock, ShortedStock,
-  ExDivStock, MoverStock, SignalStock,
+  ExDivStock, MoverStock, SignalStock, AnomalyFlag,
 } from '@/lib/api'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -276,6 +276,10 @@ export default function MarketPage() {
 
   const [sigTab, setSigTab]     = useState<'high' | 'low' | 'volume'>('high')
 
+  const [anomalies, setAnomalies]         = useState<AnomalyFlag[]>([])
+  const [anomaliesLoading, setAnomaliesLoading] = useState(false)
+  const [anomalyFilter, setAnomalyFilter] = useState<string>('all')
+
   const loadDashboard = async () => {
     setLoading(true); setError(null)
     try { setData(await getMarketDashboard()) }
@@ -297,10 +301,19 @@ export default function MarketPage() {
     finally { setSignalsLoading(false) }
   }, [])
 
-  useEffect(() => { loadDashboard(); loadSignals('1d') }, [loadSignals])
+  const loadAnomalies = async (flagType?: string) => {
+    setAnomaliesLoading(true)
+    try {
+      const res = await getMarketAnomalies(100, flagType === 'all' ? undefined : flagType)
+      setAnomalies(res.flags)
+    } catch { /* keep previous */ }
+    finally { setAnomaliesLoading(false) }
+  }
+
+  useEffect(() => { loadDashboard(); loadSignals('1d'); loadAnomalies() }, [loadSignals])
   useEffect(() => { loadMovers(moverPeriod); loadSignals(moverPeriod) }, [moverPeriod, loadMovers, loadSignals])
 
-  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals(moverPeriod) }
+  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals(moverPeriod); loadAnomalies(anomalyFilter) }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -534,6 +547,76 @@ export default function MarketPage() {
             </tbody>
           </table>
         </TableCard>
+      </div>
+
+      {/* Anomaly Feed */}
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <h2 className="text-sm font-semibold text-slate-700">Market Anomalies</h2>
+            {anomalies.length > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
+                {anomalies.length} active
+              </span>
+            )}
+          </div>
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+            {(['all', 'volume_spike', 'price_gap', 'short_squeeze', 'reversal'] as const).map(f => (
+              <button key={f} onClick={() => { setAnomalyFilter(f); loadAnomalies(f) }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${anomalyFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                {f === 'all' ? 'All' : f.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}
+              </button>
+            ))}
+          </div>
+        </div>
+        {anomaliesLoading ? (
+          <div className="h-40 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+        ) : anomalies.length === 0 ? (
+          <div className="py-8 text-center text-sm text-slate-400">No active anomalies detected</div>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-xs text-slate-400 bg-slate-50">
+                <th className="py-2 px-3 text-left">Stock</th>
+                <th className="py-2 px-3 text-left hidden sm:table-cell">Type</th>
+                <th className="py-2 px-3 text-left">Description</th>
+                <th className="py-2 px-3 text-right">Price</th>
+                <th className="py-2 px-3 text-right">1D</th>
+                <th className="py-2 px-3 text-right hidden md:table-cell">Severity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {anomalies.slice(0, 30).map((a, i) => {
+                const sevColor =
+                  a.severity === 'high'   ? 'bg-red-100 text-red-700' :
+                  a.severity === 'medium' ? 'bg-amber-100 text-amber-700' :
+                                            'bg-slate-100 text-slate-600'
+                return (
+                  <tr key={i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td className="py-2 px-3">
+                      <Link href={`/company/${a.asx_code}`} className="font-semibold text-blue-600 hover:underline">{a.asx_code}</Link>
+                      <div className="text-xs text-slate-500 truncate max-w-[90px]">{a.company_name}</div>
+                    </td>
+                    <td className="py-2 px-3 hidden sm:table-cell">
+                      <span className="text-xs text-slate-500">{a.flag_type.replace(/_/g, ' ')}</span>
+                    </td>
+                    <td className="py-2 px-3 text-xs text-slate-600 max-w-[200px]">{a.description}</td>
+                    <td className="py-2 px-3 text-right text-sm">{a.price != null ? `$${a.price.toFixed(3)}` : '—'}</td>
+                    <td className={`py-2 px-3 text-right text-sm font-medium ${a.return_1d != null ? (a.return_1d >= 0 ? 'text-emerald-600' : 'text-red-500') : 'text-slate-400'}`}>
+                      {a.return_1d != null ? `${a.return_1d >= 0 ? '+' : ''}${a.return_1d.toFixed(2)}%` : '—'}
+                    </td>
+                    <td className="py-2 px-3 text-right hidden md:table-cell">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sevColor}`}>
+                        {a.severity}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
 
       {/* Upcoming Ex-Div Dates */}

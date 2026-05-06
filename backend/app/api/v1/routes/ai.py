@@ -453,6 +453,8 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
         raise HTTPException(status_code=500, detail="AI returned an unreadable response.")
 
     # ── Cache write (upsert) ──────────────────────────────────────────────────
+    # Note: use CAST(x AS jsonb) / CAST(x AS uuid) — asyncpg doesn't support
+    # the ::type shorthand in parameterised text() queries.
     now        = datetime.now(timezone.utc)
     expires_at = now + timedelta(days=INSIGHTS_TTL_DAYS)
     try:
@@ -464,10 +466,10 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
                 sector_allocation_json, holdings_json, insights_json,
                 generated_at, expires_at
             ) VALUES (
-                :pid, :uid, :hash,
+                CAST(:pid AS uuid), CAST(:uid AS uuid), :hash,
                 :val, :cost, :ret_pct, :income,
                 :yield_, :top3, :n_hold,
-                :sector_json::jsonb, :hold_json::jsonb, :ins_json::jsonb,
+                CAST(:sector_json AS jsonb), CAST(:hold_json AS jsonb), CAST(:ins_json AS jsonb),
                 :gen_at, :exp_at
             )
             ON CONFLICT (portfolio_id) DO UPDATE SET
@@ -485,26 +487,26 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
                 generated_at           = EXCLUDED.generated_at,
                 expires_at             = EXCLUDED.expires_at
         """), {
-            "pid":        portfolio_id,
-            "uid":        current_user["id"],
-            "hash":       h_hash,
-            "val":        round(total_value, 2),
-            "cost":       round(total_cost, 2),
-            "ret_pct":    round(total_gl_pct, 2),
-            "income":     round(total_income, 2),
-            "yield_":     round(portfolio_yield, 2),
-            "top3":       round(top3_weight, 1),
-            "n_hold":     len(holdings_data),
+            "pid":         portfolio_id,
+            "uid":         current_user["id"],
+            "hash":        h_hash,
+            "val":         round(total_value, 2),
+            "cost":        round(total_cost, 2),
+            "ret_pct":     round(total_gl_pct, 2),
+            "income":      round(total_income, 2),
+            "yield_":      round(portfolio_yield, 2),
+            "top3":        round(top3_weight, 1),
+            "n_hold":      len(holdings_data),
             "sector_json": json.dumps(sector_alloc),
             "hold_json":   json.dumps(holdings_data),
             "ins_json":    json.dumps(insights),
-            "gen_at":     now,
-            "exp_at":     expires_at,
+            "gen_at":      now,
+            "exp_at":      expires_at,
         })
         await db.commit()
         log.info("portfolio-insights cached for %s (expires %s)", portfolio_id, expires_at.date())
     except Exception as e:
-        log.warning("Failed to cache portfolio-insights for %s: %s", portfolio_id, e)
+        log.error("Failed to cache portfolio-insights for %s: %s", portfolio_id, e)
         await db.rollback()
 
     return {

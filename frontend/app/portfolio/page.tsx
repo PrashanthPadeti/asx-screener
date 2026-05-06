@@ -750,18 +750,27 @@ const RISK_COLOR: Record<string, string> = {
   high:   'bg-red-100 text-red-700',
 }
 
-function AiInsightsView({ portfolioId }: { portfolioId: string }) {
-  const [result, setResult]     = useState<PortfolioInsightsResult | null>(null)
-  const [loading, setLoading]   = useState(true)
+function AiInsightsView({
+  portfolioId,
+  cached,
+  onResult,
+}: {
+  portfolioId: string
+  cached: PortfolioInsightsResult | null
+  onResult: (r: PortfolioInsightsResult) => void
+}) {
+  const [loading, setLoading]       = useState(!cached)
   const [refreshing, setRefreshing] = useState(false)
-  const [error, setError]       = useState<string | null>(null)
+  const [error, setError]           = useState<string | null>(null)
+
+  const result = cached
 
   const load = (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true)
     else setLoading(true)
     setError(null)
     getPortfolioInsights(portfolioId, forceRefresh)
-      .then(setResult)
+      .then(r => { onResult(r) })
       .catch(e => {
         const detail = e?.response?.data?.detail
         setError(typeof detail === 'string' ? detail : (e?.message ?? 'Failed to generate insights'))
@@ -769,7 +778,10 @@ function AiInsightsView({ portfolioId }: { portfolioId: string }) {
       .finally(() => { setLoading(false); setRefreshing(false) })
   }
 
-  useEffect(() => { load() }, [portfolioId])
+  // Only fetch on mount if we don't already have a result for this portfolio
+  useEffect(() => {
+    if (!cached) load()
+  }, [portfolioId])
 
   if (loading) {
     return (
@@ -936,6 +948,8 @@ export default function PortfolioPage() {
   const [perf, setPerf]               = useState<PortfolioPerformance | null>(null)
   const [txns, setTxns]               = useState<TransactionOut[]>([])
   const [view, setView]               = useState<ViewTab>('holdings')
+  // Keyed by portfolioId — survives tab navigation within the same page session
+  const [insightsCache, setInsightsCache] = useState<Record<string, PortfolioInsightsResult>>({})
 
   const [loading, setLoading]         = useState(false)
   const [perfLoading, setPerfLoading] = useState(false)
@@ -1246,7 +1260,13 @@ export default function PortfolioPage() {
 
               {/* Tax Report */}
               {view === 'tax'      && <TaxReportView portfolioId={activeId} />}
-              {view === 'insights' && <AiInsightsView portfolioId={activeId} />}
+              {view === 'insights' && (
+                <AiInsightsView
+                  portfolioId={activeId}
+                  cached={insightsCache[activeId] ?? null}
+                  onResult={r => setInsightsCache(prev => ({ ...prev, [activeId]: r }))}
+                />
+              )}
 
               {/* Transactions table */}
               {view === 'transactions' && (

@@ -199,8 +199,9 @@ function ExDivRow({ s }: { s: ExDivStock }) {
   )
 }
 
-function SignalHighLowRow({ s, type }: { s: SignalStock; type: 'high' | 'low' }) {
+function SignalHighLowRow({ s, type, period }: { s: SignalStock; type: 'high' | 'low'; period: Period }) {
   const pct = type === 'high' ? s.pct_from_high : s.pct_from_low
+  const ret = (period === '1m' || period === '3m') ? s.return_1m : s.return_1w
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3">
@@ -214,12 +215,13 @@ function SignalHighLowRow({ s, type }: { s: SignalStock; type: 'high' | 'low' })
       <td className={`py-2 px-3 text-sm text-right font-semibold ${type === 'high' ? 'text-emerald-600' : 'text-red-500'}`}>
         {pct != null ? fmtPctRaw(pct) : '—'}
       </td>
-      <td className={`py-2 px-3 text-sm text-right ${retColor(s.return_1w)}`}>{fmtPct(s.return_1w)}</td>
+      <td className={`py-2 px-3 text-sm text-right ${retColor(ret)}`}>{fmtPct(ret)}</td>
     </tr>
   )
 }
 
-function VolSurgeRow({ s }: { s: SignalStock }) {
+function VolSurgeRow({ s, period }: { s: SignalStock; period: Period }) {
+  const ret = (period === '1m' || period === '3m') ? s.return_1m : s.return_1w
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3">
@@ -236,7 +238,7 @@ function VolSurgeRow({ s }: { s: SignalStock }) {
           </span>
         ) : '—'}
       </td>
-      <td className={`py-2 px-3 text-sm text-right ${retColor(s.return_1w)}`}>{fmtPct(s.return_1w)}</td>
+      <td className={`py-2 px-3 text-sm text-right ${retColor(ret)}`}>{fmtPct(ret)}</td>
     </tr>
   )
 }
@@ -430,61 +432,68 @@ export default function MarketPage() {
           <div className="h-48 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
         ) : signals ? (
           <>
-            {sigTab === 'high' && (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-400 bg-slate-50">
-                    <th className="py-2 px-3 text-left">Stock</th>
-                    <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} High</th>
-                    <th className="py-2 px-3 text-right">From High</th>
-                    <th className="py-2 px-3 text-right">1W</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signals.near_period_high.length === 0
-                    ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period high</td></tr>
-                    : signals.near_period_high.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="high" />)}
-                </tbody>
-              </table>
-            )}
-            {sigTab === 'low' && (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-400 bg-slate-50">
-                    <th className="py-2 px-3 text-left">Stock</th>
-                    <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} Low</th>
-                    <th className="py-2 px-3 text-right">From Low</th>
-                    <th className="py-2 px-3 text-right">1W</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signals.near_period_low.length === 0
-                    ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period low</td></tr>
-                    : signals.near_period_low.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="low" />)}
-                </tbody>
-              </table>
-            )}
-            {sigTab === 'volume' && (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-400 bg-slate-50">
-                    <th className="py-2 px-3 text-left">Stock</th>
-                    <th className="py-2 px-3 text-left hidden sm:table-cell">Sector</th>
-                    <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">Volume</th>
-                    <th className="py-2 px-3 text-right">vs 20D Avg</th>
-                    <th className="py-2 px-3 text-right">1W</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {signals.volume_surge.length === 0
-                    ? <tr><td colSpan={6} className="py-6 text-center text-slate-400 text-xs">No volume surges detected today</td></tr>
-                    : signals.volume_surge.map(s => <VolSurgeRow key={s.asx_code} s={s} />)}
-                </tbody>
-              </table>
-            )}
+            {(() => {
+              const retLabel = (moverPeriod === '1m' || moverPeriod === '3m') ? '1M' : '1W'
+              return (
+                <>
+                  {sigTab === 'high' && (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-slate-400 bg-slate-50">
+                          <th className="py-2 px-3 text-left">Stock</th>
+                          <th className="py-2 px-3 text-right">Price</th>
+                          <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} High</th>
+                          <th className="py-2 px-3 text-right">From High</th>
+                          <th className="py-2 px-3 text-right">{retLabel}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signals.near_period_high.length === 0
+                          ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period high</td></tr>
+                          : signals.near_period_high.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="high" period={moverPeriod} />)}
+                      </tbody>
+                    </table>
+                  )}
+                  {sigTab === 'low' && (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-slate-400 bg-slate-50">
+                          <th className="py-2 px-3 text-left">Stock</th>
+                          <th className="py-2 px-3 text-right">Price</th>
+                          <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} Low</th>
+                          <th className="py-2 px-3 text-right">From Low</th>
+                          <th className="py-2 px-3 text-right">{retLabel}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signals.near_period_low.length === 0
+                          ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period low</td></tr>
+                          : signals.near_period_low.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="low" period={moverPeriod} />)}
+                      </tbody>
+                    </table>
+                  )}
+                  {sigTab === 'volume' && (
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-slate-400 bg-slate-50">
+                          <th className="py-2 px-3 text-left">Stock</th>
+                          <th className="py-2 px-3 text-left hidden sm:table-cell">Sector</th>
+                          <th className="py-2 px-3 text-right">Price</th>
+                          <th className="py-2 px-3 text-right">Volume</th>
+                          <th className="py-2 px-3 text-right">vs 20D Avg</th>
+                          <th className="py-2 px-3 text-right">{retLabel}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {signals.volume_surge.length === 0
+                          ? <tr><td colSpan={6} className="py-6 text-center text-slate-400 text-xs">No volume surges detected today</td></tr>
+                          : signals.volume_surge.map(s => <VolSurgeRow key={s.asx_code} s={s} period={moverPeriod} />)}
+                      </tbody>
+                    </table>
+                  )}
+                </>
+              )
+            })()}
           </>
         ) : (
           <div className="py-6 text-center text-slate-400 text-sm">Failed to load signals</div>

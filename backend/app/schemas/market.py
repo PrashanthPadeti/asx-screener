@@ -26,6 +26,8 @@ class MoverStock(BaseModel):
     return_1w: Optional[float] = None   # decimal ratio
     return_1m: Optional[float] = None   # decimal ratio
     market_cap: Optional[float] = None  # AUD millions
+    period_high: Optional[float] = None # period high price
+    period_low: Optional[float] = None  # period low price
 
 
 class MoversResponse(BaseModel):

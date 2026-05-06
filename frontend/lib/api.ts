@@ -558,6 +558,8 @@ export interface MoverStock {
   return_1w: number | null   // decimal ratio
   return_1m: number | null   // decimal ratio
   market_cap: number | null  // AUD millions
+  period_high: number | null
+  period_low: number | null
 }
 
 export interface MoversResponse {

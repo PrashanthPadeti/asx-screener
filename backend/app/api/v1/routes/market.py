@@ -67,27 +67,50 @@ async def market_movers(
 ):
     """
     Top gainers and losers for a given period (1d / 1w / 1m / 3m).
+    Includes period high/low from market.daily_prices.
     Filters to stocks with price > $0.10 and market cap > $50M.
     """
-    col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
-    ret_col = col_map[period]
+    col_map  = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
+    # calendar days to look back (padded for weekends/holidays)
+    days_map = {"1d": 3, "1w": 10, "1m": 35, "3m": 100}
+    ret_col  = col_map[period]
+    look_days = days_map[period]
 
     base_where = f"""
         WHERE {ret_col} IS NOT NULL
           AND price > 0.10
           AND market_cap > 50
     """
-    cols = "asx_code, company_name, sector, price, return_1d, return_1w, return_1m, return_3m, market_cap"
 
-    gainers_rows = (await db.execute(text(f"""
-        SELECT {cols} FROM screener.universe
-        {base_where} ORDER BY {ret_col} DESC LIMIT :lim
-    """), {"lim": limit})).mappings().all()
+    def mover_sql(order: str) -> str:
+        return f"""
+            WITH top AS (
+                SELECT asx_code, company_name, sector, price,
+                       return_1d, return_1w, return_1m, return_3m, market_cap
+                FROM screener.universe
+                {base_where}
+                ORDER BY {ret_col} {order} LIMIT :lim
+            )
+            SELECT t.*,
+                   ph.period_high,
+                   ph.period_low
+            FROM top t
+            LEFT JOIN LATERAL (
+                SELECT MAX(dp.high) AS period_high,
+                       MIN(dp.low)  AS period_low
+                FROM market.daily_prices dp
+                WHERE dp.asx_code = t.asx_code
+                  AND dp.time >= CURRENT_DATE - :look_days
+            ) ph ON TRUE
+        """
 
-    losers_rows = (await db.execute(text(f"""
-        SELECT {cols} FROM screener.universe
-        {base_where} ORDER BY {ret_col} ASC LIMIT :lim
-    """), {"lim": limit})).mappings().all()
+    gainers_rows = (await db.execute(
+        text(mover_sql("DESC")), {"lim": limit, "look_days": look_days}
+    )).mappings().all()
+
+    losers_rows = (await db.execute(
+        text(mover_sql("ASC")), {"lim": limit, "look_days": look_days}
+    )).mappings().all()
 
     def to_mover(r) -> MoverStock:
         return MoverStock(
@@ -99,6 +122,8 @@ async def market_movers(
             return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
             return_1m=float(r["return_1m"]) if r["return_1m"] is not None else None,
             market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
+            period_high=float(r["period_high"]) if r["period_high"] is not None else None,
+            period_low=float(r["period_low"]) if r["period_low"] is not None else None,
         )
 
     return MoversResponse(
@@ -117,7 +142,7 @@ async def market_signals(
     Market signals: 52-week highs/lows and volume surges.
     All sourced live from screener.universe.
     """
-    base = "price > 0.10 AND market_cap > 20"
+    base = "price > 0.10 AND market_cap > 50"
 
     cols = """
         asx_code, company_name, sector, price, market_cap,
@@ -125,31 +150,35 @@ async def market_signals(
         return_1w, return_1m
     """
 
-    # Near 52W high (within 5%)
+    # Near 52W high (within 3%) — require meaningful annual range (≥10%) to filter stale/flat data
     high_rows = (await db.execute(text(f"""
         SELECT {cols},
-               ROUND(((price - high_52w) / NULLIF(high_52w,0) * 100)::numeric, 1) AS pct_from_high
+               ROUND(((price - high_52w) / NULLIF(high_52w,0) * 100)::numeric, 2) AS pct_from_high
         FROM screener.universe
         WHERE {base}
           AND high_52w IS NOT NULL AND high_52w > 0
-          AND price >= high_52w * 0.95
+          AND low_52w IS NOT NULL  AND low_52w > 0
+          AND (high_52w - low_52w) / NULLIF(low_52w,0) >= 0.10
+          AND price >= high_52w * 0.97
         ORDER BY price / NULLIF(high_52w,0) DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
-    # Near 52W low (within 5%)
+    # Near 52W low (within 3%) — same range filter
     low_rows = (await db.execute(text(f"""
         SELECT {cols},
-               ROUND(((price - low_52w) / NULLIF(low_52w,0) * 100)::numeric, 1) AS pct_from_low
+               ROUND(((price - low_52w) / NULLIF(low_52w,0) * 100)::numeric, 2) AS pct_from_low
         FROM screener.universe
         WHERE {base}
-          AND low_52w IS NOT NULL AND low_52w > 0
-          AND price <= low_52w * 1.05
+          AND high_52w IS NOT NULL AND high_52w > 0
+          AND low_52w IS NOT NULL  AND low_52w > 0
+          AND (high_52w - low_52w) / NULLIF(low_52w,0) >= 0.10
+          AND price <= low_52w * 1.03
         ORDER BY price / NULLIF(low_52w,0) ASC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 
-    # Volume surge (volume > 2× 20D average)
+    # Volume surge (volume > 2× 20D average) — sorted by absolute volume DESC
     vol_rows = (await db.execute(text(f"""
         SELECT {cols},
                ROUND((volume::numeric / NULLIF(avg_volume_20d,0)), 1) AS vol_ratio
@@ -158,7 +187,7 @@ async def market_signals(
           AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL
           AND avg_volume_20d > 10000
           AND volume > avg_volume_20d * 2
-        ORDER BY volume::numeric / NULLIF(avg_volume_20d,0) DESC
+        ORDER BY volume::numeric DESC
         LIMIT :lim
     """), {"lim": limit})).mappings().all()
 

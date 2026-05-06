@@ -99,18 +99,38 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
 }
 
 type MoverRetKey = 'return_1d' | 'return_1w' | 'return_1m'
-function MoverRow({ s, rank, retKey }: { s: MoverStock; rank: number; retKey: MoverRetKey }) {
+function MoverRow({ s, rank, retKey, period }: { s: MoverStock; rank: number; retKey: MoverRetKey; period: Period }) {
   const ret = s[retKey]
+  const periodLabel = period.toUpperCase()
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3 text-xs text-slate-400 w-6">{rank}</td>
       <td className="py-2 px-3">
         <Link href={`/company/${s.asx_code}`} className="font-semibold text-blue-600 hover:underline text-sm">{s.asx_code}</Link>
-        <div className="text-xs text-slate-500 truncate max-w-[120px]">{s.company_name}</div>
+        <div className="text-xs text-slate-500 truncate max-w-[100px]">{s.company_name}</div>
       </td>
-      <td className="py-2 px-3 text-sm text-slate-500 hidden sm:table-cell truncate max-w-[100px]">{s.sector ?? '—'}</td>
       <td className="py-2 px-3 text-sm text-right">{fmtPrice(s.price)}</td>
+      <td className="py-2 px-3 text-sm text-right text-emerald-600 hidden md:table-cell">
+        {s.period_high != null ? fmtPrice(s.period_high) : '—'}
+      </td>
+      <td className="py-2 px-3 text-sm text-right text-red-500 hidden md:table-cell">
+        {s.period_low != null ? fmtPrice(s.period_low) : '—'}
+      </td>
       <td className={`py-2 px-3 text-sm text-right font-semibold ${retColor(ret)}`}>{fmtPct(ret)}</td>
+    </tr>
+  )
+}
+
+function MoverTableHeader({ period, retKey }: { period: Period; retKey: MoverRetKey }) {
+  const p = period.toUpperCase()
+  return (
+    <tr className="text-xs text-slate-400 bg-slate-50">
+      <th className="py-2 px-3 text-left w-6">#</th>
+      <th className="py-2 px-3 text-left">Stock</th>
+      <th className="py-2 px-3 text-right">Price</th>
+      <th className="py-2 px-3 text-right text-emerald-600 hidden md:table-cell">{p} High</th>
+      <th className="py-2 px-3 text-right text-red-500 hidden md:table-cell">{p} Low</th>
+      <th className="py-2 px-3 text-right">{p} Chg</th>
     </tr>
   )
 }
@@ -366,17 +386,9 @@ export default function MarketPage() {
                 <span className="text-xs font-semibold text-emerald-700">Top Gainers — {PERIOD_LABELS[moverPeriod]}</span>
               </div>
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-400 bg-slate-50">
-                    <th className="py-2 px-3 text-left w-6">#</th>
-                    <th className="py-2 px-3 text-left">Stock</th>
-                    <th className="py-2 px-3 text-left hidden sm:table-cell">Sector</th>
-                    <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">{moverPeriod.toUpperCase()}</th>
-                  </tr>
-                </thead>
+                <thead><MoverTableHeader period={moverPeriod} retKey={retKey} /></thead>
                 <tbody>
-                  {movers.gainers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} />)}
+                  {movers.gainers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} period={moverPeriod} />)}
                 </tbody>
               </table>
             </div>
@@ -387,17 +399,9 @@ export default function MarketPage() {
                 <span className="text-xs font-semibold text-red-700">Top Losers — {PERIOD_LABELS[moverPeriod]}</span>
               </div>
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-400 bg-slate-50">
-                    <th className="py-2 px-3 text-left w-6">#</th>
-                    <th className="py-2 px-3 text-left">Stock</th>
-                    <th className="py-2 px-3 text-left hidden sm:table-cell">Sector</th>
-                    <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">{moverPeriod.toUpperCase()}</th>
-                  </tr>
-                </thead>
+                <thead><MoverTableHeader period={moverPeriod} retKey={retKey} /></thead>
                 <tbody>
-                  {movers.losers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} />)}
+                  {movers.losers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} period={moverPeriod} />)}
                 </tbody>
               </table>
             </div>

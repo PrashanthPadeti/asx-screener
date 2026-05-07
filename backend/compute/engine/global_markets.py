@@ -172,13 +172,14 @@ def fetch_eodhd_data(
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
 
-        # Normalise column names
-        rename = {"open": "open", "high": "high", "low": "low",
-                  "close": "close", "adjusted_close": "close", "volume": "volume"}
-        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+        # Use adjusted_close preferentially; drop it after so no duplicate columns
+        if "adjusted_close" in df.columns:
+            df["close"] = df["adjusted_close"]
+            df = df.drop(columns=["adjusted_close"])
+        elif "close" not in df.columns:
+            df["close"] = float("nan")
 
-        # Prefer adjusted_close if both present (already renamed to close above)
-        for col in ["open", "high", "low", "close", "volume"]:
+        for col in ["open", "high", "low", "volume"]:
             if col not in df.columns:
                 df[col] = float("nan")
 

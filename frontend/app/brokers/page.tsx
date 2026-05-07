@@ -1,5 +1,6 @@
 'use client'
 import { ExternalLink, Check, X, Minus, Shield, Zap, DollarSign, Globe, Star } from 'lucide-react'
+import { PlanGate } from '@/components/PlanGate'
 
 interface Broker {
   name: string
@@ -153,6 +154,7 @@ function TrileanIcon({ value }: { value: boolean | null }) {
 
 export default function BrokersPage() {
   return (
+    <PlanGate required="premium" feature="Broker Compare">
     <div className="max-w-6xl mx-auto space-y-10 pb-16">
 
       {/* Hero */}
@@ -364,5 +366,6 @@ export default function BrokersPage() {
       </div>
 
     </div>
+    </PlanGate>
   )
 }

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Globe, RefreshCw, ArrowLeft } from 'lucide-react'
 import { getGlobalMarkets, GlobalMarketsResponse, GlobalIndexPrice, GlobalFxRate } from '@/lib/api'
+import { PlanGate } from '@/components/PlanGate'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -163,6 +164,7 @@ export default function GlobalMarketsPage() {
   const audusd = data?.fx_rates.find(f => f.fx_pair === 'AUDUSD')
 
   return (
+    <PlanGate required="premium" feature="Global Markets">
     <div className="min-h-screen bg-slate-950 text-slate-100">
 
       {/* ── Hero ─────────────────────────────────────────────────────────────── */}
@@ -266,5 +268,6 @@ export default function GlobalMarketsPage() {
         )}
       </div>
     </div>
+    </PlanGate>
   )
 }

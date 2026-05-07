@@ -18,14 +18,14 @@ const NAV_LINKS = [
 ]
 
 const MARKET_DATA_LINKS = [
-  { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices' },
-  { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds' },
-  { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX' },
+  { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices', premium: true },
+  { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',         premium: true },
+  { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX', premium: true },
 ]
 
 const RESOURCES_LINKS = [
-  { href: '/learn',   label: 'Education Hub',  icon: BookOpen,    desc: 'Guides, tutorials & courses' },
-  { href: '/brokers', label: 'Broker Compare', icon: DollarSign,  desc: 'Best ASX trading platforms 2026' },
+  { href: '/learn',   label: 'Education Hub',  icon: BookOpen,   desc: 'Guides, tutorials & courses',         premium: true },
+  { href: '/brokers', label: 'Broker Compare', icon: DollarSign, desc: 'Best ASX trading platforms 2026',     premium: true },
 ]
 
 const PLAN_BADGE: Record<string, string> = {
@@ -116,8 +116,8 @@ export default function Navbar() {
               </button>
 
               {marketDropOpen && (
-                <div className="absolute left-0 mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, desc }) => (
+                <div className="absolute left-0 mt-1 w-60 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, desc, premium }) => (
                     <Link
                       key={href}
                       href={href}
@@ -125,8 +125,11 @@ export default function Navbar() {
                       className="flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors"
                     >
                       <Icon className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
-                      <div>
-                        <div className="text-sm font-medium text-gray-800">{label}</div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-gray-800">{label}</span>
+                          {premium && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
+                        </div>
                         <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
                       </div>
                     </Link>
@@ -152,8 +155,8 @@ export default function Navbar() {
               </button>
 
               {resourceDropOpen && (
-                <div className="absolute left-0 mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {RESOURCES_LINKS.map(({ href, label, icon: Icon, desc }) => (
+                <div className="absolute left-0 mt-1 w-60 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {RESOURCES_LINKS.map(({ href, label, icon: Icon, desc, premium }) => (
                     <Link
                       key={href}
                       href={href}
@@ -161,8 +164,11 @@ export default function Navbar() {
                       className="flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors"
                     >
                       <Icon className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
-                      <div>
-                        <div className="text-sm font-medium text-gray-800">{label}</div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-medium text-gray-800">{label}</span>
+                          {premium && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
+                        </div>
                         <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
                       </div>
                     </Link>

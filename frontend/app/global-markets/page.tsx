@@ -1,7 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import Link from 'next/link'
 import { Globe, RefreshCw, ArrowLeft } from 'lucide-react'
 import { getGlobalMarkets, GlobalMarketsResponse, GlobalIndexPrice, GlobalFxRate } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'

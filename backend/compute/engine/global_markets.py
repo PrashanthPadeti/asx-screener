@@ -1,18 +1,18 @@
 """
 Global Markets Engine
 =====================
-Fetches daily OHLCV for global equity indices and AUD FX rates from Yahoo Finance,
+Fetches daily OHLCV for global equity indices and AUD FX rates from EODHD,
 computes period returns and 52W range, then upserts into:
   market.global_index_prices  and  market.fx_rates
 
-Global Indices (our code → Yahoo Finance ticker):
-    SP500   → ^GSPC      NDX100 → ^NDX      DJIA   → ^DJI
-    FTSE100 → ^FTSE      DAX    → ^GDAXI    CAC40  → ^FCHI
-    NKY225  → ^N225      HSI    → ^HSI      SHCOMP → 000001.SS    KOSPI → ^KS11
+Global Indices (our code → EODHD ticker):
+    SP500   → GSPC.INDX     NDX100 → NDX.INDX      DJIA   → DJI.INDX
+    FTSE100 → FTSE.INDX     DAX    → GDAXI.INDX     CAC40  → FCHI.INDX
+    NKY225  → N225.INDX     HSI    → HSI.INDX       SHCOMP → SSEC.INDX    KOSPI  → KS11.INDX
 
-FX pairs (AUD base):
-    AUDUSD → AUDUSD=X    AUDEUR → AUDEUR=X    AUDGBP → AUDGBP=X
-    AUDJPY → AUDJPY=X    AUDCNY → AUDCNY=X
+FX pairs (AUD base, EODHD FOREX exchange):
+    AUDUSD → AUDUSD.FOREX    AUDEUR → AUDEUR.FOREX    AUDGBP → AUDGBP.FOREX
+    AUDJPY → AUDJPY.FOREX    AUDCNY → AUDCNY.FOREX
 
 Usage (standalone):
     python -m compute.engine.global_markets [--date YYYY-MM-DD] [--backfill-days N] [--dry-run]
@@ -23,41 +23,43 @@ import asyncio
 import logging
 import os
 import sys
-import time
 from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+EODHD_BASE = "https://eodhd.com/api"
+
 # ── Config ────────────────────────────────────────────────────────────────────
 
 GLOBAL_INDICES = [
     # US
-    {"code": "SP500",   "name": "S&P 500",           "region": "US",     "country": "United States",  "currency": "USD", "ticker": "^GSPC"},
-    {"code": "NDX100",  "name": "NASDAQ 100",         "region": "US",     "country": "United States",  "currency": "USD", "ticker": "^NDX"},
-    {"code": "DJIA",    "name": "Dow Jones",          "region": "US",     "country": "United States",  "currency": "USD", "ticker": "^DJI"},
+    {"code": "SP500",   "name": "S&P 500",           "region": "US",     "country": "United States",  "currency": "USD", "ticker": "GSPC.INDX"},
+    {"code": "NDX100",  "name": "NASDAQ 100",         "region": "US",     "country": "United States",  "currency": "USD", "ticker": "NDX.INDX"},
+    {"code": "DJIA",    "name": "Dow Jones",          "region": "US",     "country": "United States",  "currency": "USD", "ticker": "DJI.INDX"},
     # Europe
-    {"code": "FTSE100", "name": "FTSE 100",           "region": "Europe", "country": "United Kingdom", "currency": "GBP", "ticker": "^FTSE"},
-    {"code": "DAX",     "name": "DAX",                "region": "Europe", "country": "Germany",        "currency": "EUR", "ticker": "^GDAXI"},
-    {"code": "CAC40",   "name": "CAC 40",             "region": "Europe", "country": "France",         "currency": "EUR", "ticker": "^FCHI"},
+    {"code": "FTSE100", "name": "FTSE 100",           "region": "Europe", "country": "United Kingdom", "currency": "GBP", "ticker": "FTSE.INDX"},
+    {"code": "DAX",     "name": "DAX",                "region": "Europe", "country": "Germany",        "currency": "EUR", "ticker": "GDAXI.INDX"},
+    {"code": "CAC40",   "name": "CAC 40",             "region": "Europe", "country": "France",         "currency": "EUR", "ticker": "FCHI.INDX"},
     # Asia
-    {"code": "NKY225",  "name": "Nikkei 225",         "region": "Asia",   "country": "Japan",          "currency": "JPY", "ticker": "^N225"},
-    {"code": "HSI",     "name": "Hang Seng",          "region": "Asia",   "country": "Hong Kong",      "currency": "HKD", "ticker": "^HSI"},
-    {"code": "SHCOMP",  "name": "Shanghai Composite", "region": "Asia",   "country": "China",          "currency": "CNY", "ticker": "000001.SS"},
-    {"code": "KOSPI",   "name": "KOSPI",              "region": "Asia",   "country": "South Korea",    "currency": "KRW", "ticker": "^KS11"},
+    {"code": "NKY225",  "name": "Nikkei 225",         "region": "Asia",   "country": "Japan",          "currency": "JPY", "ticker": "N225.INDX"},
+    {"code": "HSI",     "name": "Hang Seng",          "region": "Asia",   "country": "Hong Kong",      "currency": "HKD", "ticker": "HSI.INDX"},
+    {"code": "SHCOMP",  "name": "Shanghai Composite", "region": "Asia",   "country": "China",          "currency": "CNY", "ticker": "SSEC.INDX"},
+    {"code": "KOSPI",   "name": "KOSPI",              "region": "Asia",   "country": "South Korea",    "currency": "KRW", "ticker": "KS11.INDX"},
 ]
 
 FX_PAIRS = [
-    {"pair": "AUDUSD", "name": "AUD/USD", "ticker": "AUDUSD=X"},
-    {"pair": "AUDEUR", "name": "AUD/EUR", "ticker": "AUDEUR=X"},
-    {"pair": "AUDGBP", "name": "AUD/GBP", "ticker": "AUDGBP=X"},
-    {"pair": "AUDJPY", "name": "AUD/JPY", "ticker": "AUDJPY=X"},
-    {"pair": "AUDCNY", "name": "AUD/CNY", "ticker": "AUDCNY=X"},
+    {"pair": "AUDUSD", "name": "AUD/USD", "ticker": "AUDUSD.FOREX"},
+    {"pair": "AUDEUR", "name": "AUD/EUR", "ticker": "AUDEUR.FOREX"},
+    {"pair": "AUDGBP", "name": "AUD/GBP", "ticker": "AUDGBP.FOREX"},
+    {"pair": "AUDJPY", "name": "AUD/JPY", "ticker": "AUDJPY.FOREX"},
+    {"pair": "AUDCNY", "name": "AUD/CNY", "ticker": "AUDCNY.FOREX"},
 ]
 
 # ── Return computation ────────────────────────────────────────────────────────
@@ -141,49 +143,50 @@ def compute_fx_rows(df: pd.DataFrame) -> list[dict]:
     return rows
 
 
-# ── Fetch from Yahoo Finance ──────────────────────────────────────────────────
+# ── Fetch from EODHD ──────────────────────────────────────────────────────────
 
-def fetch_yf_data(
+def fetch_eodhd_data(
     ticker: str,
     start_date: date,
     end_date: date,
-    retries: int = 3,
+    api_key: str,
 ) -> pd.DataFrame | None:
-    """Download OHLCV from Yahoo Finance with retry on rate limit."""
+    """Download OHLCV from EODHD EOD API. Returns None on failure."""
+    url = f"{EODHD_BASE}/eod/{ticker}"
+    params = {
+        "api_token": api_key,
+        "fmt":       "json",
+        "period":    "d",
+        "from":      (start_date - timedelta(days=400)).isoformat(),
+        "to":        (end_date + timedelta(days=1)).isoformat(),
+    }
     try:
-        import yfinance as yf
-    except ImportError:
-        log.error("yfinance not installed — run: pip install yfinance")
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data or not isinstance(data, list):
+            log.warning(f"{ticker}: empty or unexpected response from EODHD")
+            return None
+
+        df = pd.DataFrame(data)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date").sort_index()
+
+        # Normalise column names
+        rename = {"open": "open", "high": "high", "low": "low",
+                  "close": "close", "adjusted_close": "close", "volume": "volume"}
+        df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+
+        # Prefer adjusted_close if both present (already renamed to close above)
+        for col in ["open", "high", "low", "close", "volume"]:
+            if col not in df.columns:
+                df[col] = float("nan")
+
+        return df[["open", "high", "low", "close", "volume"]]
+
+    except Exception as exc:
+        log.warning(f"{ticker}: EODHD fetch failed — {exc}")
         return None
-
-    for attempt in range(retries):
-        try:
-            t = yf.Ticker(ticker)
-            hist = t.history(
-                start=(start_date - timedelta(days=400)).isoformat(),
-                end=(end_date + timedelta(days=1)).isoformat(),
-                auto_adjust=True,
-            )
-            if hist.empty:
-                log.warning(f"{ticker}: no data returned from Yahoo Finance")
-                return None
-            hist.index = hist.index.tz_localize(None)
-            df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
-            df.columns = ["open", "high", "low", "close", "volume"]
-            return df.sort_index()
-
-        except Exception as exc:
-            msg = str(exc)
-            if "Too Many Requests" in msg or "rate limit" in msg.lower():
-                wait = 30 * (attempt + 1)
-                log.warning(f"{ticker}: rate limited — waiting {wait}s (attempt {attempt+1}/{retries})")
-                time.sleep(wait)
-            else:
-                log.warning(f"{ticker}: fetch failed — {exc}")
-                return None
-
-    log.warning(f"{ticker}: all {retries} attempts failed")
-    return None
 
 
 # ── DB upsert ─────────────────────────────────────────────────────────────────
@@ -275,21 +278,24 @@ async def run(
     backfill_days: int = 3,
     dry_run: bool = False,
 ) -> None:
-    """
-    Fetch and store global market data.
-
-    Args:
-        target_date:   End date (inclusive). Defaults to today.
-        backfill_days: Calendar days back to fetch. Use 1825 for initial 5Y backfill.
-        dry_run:       Print what would be written without touching the DB.
-    """
     from app.db.session import AsyncSessionLocal
+
+    # Resolve API key: settings (when called from worker) or env var (standalone)
+    try:
+        from app.core.config import settings
+        api_key = settings.EODHD_API_KEY
+    except Exception:
+        api_key = os.environ.get("EODHD_API_KEY", "")
+
+    if not api_key:
+        log.error("EODHD_API_KEY not set — cannot fetch global market data")
+        return
 
     if target_date is None:
         target_date = date.today()
     start_date = target_date - timedelta(days=backfill_days)
 
-    log.info(f"Global markets: fetching {start_date} → {target_date} (dry_run={dry_run})")
+    log.info(f"Global markets (EODHD): fetching {start_date} → {target_date} (dry_run={dry_run})")
 
     async with AsyncSessionLocal() as db:
         if not dry_run:
@@ -300,9 +306,7 @@ async def run(
         # Indices
         for i, idx in enumerate(GLOBAL_INDICES):
             log.info(f"  [{i+1}/{len(GLOBAL_INDICES)}] {idx['code']} ({idx['ticker']}) …")
-            if i > 0:
-                time.sleep(2)
-            df = fetch_yf_data(idx["ticker"], start_date, target_date)
+            df = fetch_eodhd_data(idx["ticker"], start_date, target_date, api_key)
             if df is None:
                 continue
             df = df[df.index.date >= start_date]
@@ -318,8 +322,7 @@ async def run(
         # FX pairs
         for j, fx in enumerate(FX_PAIRS):
             log.info(f"  [{j+1}/{len(FX_PAIRS)}] {fx['pair']} ({fx['ticker']}) …")
-            time.sleep(2)
-            df = fetch_yf_data(fx["ticker"], start_date, target_date)
+            df = fetch_eodhd_data(fx["ticker"], start_date, target_date, api_key)
             if df is None:
                 continue
             df = df[df.index.date >= start_date]
@@ -337,7 +340,7 @@ async def run(
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Ingest global index and AUD FX data from Yahoo Finance")
+    parser = argparse.ArgumentParser(description="Ingest global index and AUD FX data from EODHD")
     parser.add_argument("--date",          default=None, help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--backfill-days", type=int, default=3,
                         help="Calendar days to backfill (default: 3; use 1825 for 5Y backfill)")

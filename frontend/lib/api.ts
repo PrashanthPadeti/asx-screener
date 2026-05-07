@@ -1609,3 +1609,36 @@ export const getGlobalMarkets = async (): Promise<GlobalMarketsResponse> => {
   const { data } = await api.get('/api/v1/global-markets/')
   return data
 }
+
+// ── Commodities ───────────────────────────────────────────────
+
+export interface CommodityPrice {
+  commodity_code: string
+  commodity_name: string
+  category:       string
+  unit:           string | null
+  price_date:     string | null
+  close_price:    number | null
+  open_price:     number | null
+  high_price:     number | null
+  low_price:      number | null
+  return_1d:      number | null
+  return_1w:      number | null
+  return_1m:      number | null
+  return_3m:      number | null
+  return_6m:      number | null
+  return_1y:      number | null
+  return_ytd:     number | null
+  high_52w:       number | null
+  low_52w:        number | null
+}
+
+export interface CommoditiesResponse {
+  as_of:      string | null
+  categories: { category: string; commodities: CommodityPrice[] }[]
+}
+
+export const getCommodities = async (): Promise<CommoditiesResponse> => {
+  const { data } = await api.get('/api/v1/commodities/')
+  return data
+}

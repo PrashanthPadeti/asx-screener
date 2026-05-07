@@ -6,7 +6,7 @@ from fastapi import APIRouter
 from app.api.v1.routes import (
     companies, screener, market, auth, watchlist, alerts,
     stripe_routes, ai, portfolio, indices_funds,
-    notifications, announcements, global_markets,
+    notifications, announcements, global_markets, commodities,
 )
 
 api_router = APIRouter()
@@ -24,3 +24,4 @@ api_router.include_router(indices_funds.router,  prefix="/market-data",    tags=
 api_router.include_router(notifications.router,  prefix="/notifications",  tags=["Notifications"])
 api_router.include_router(announcements.router,   prefix="/announcements",   tags=["Announcements"])
 api_router.include_router(global_markets.router,  prefix="/global-markets",  tags=["Global Markets"])
+api_router.include_router(commodities.router,     prefix="/commodities",     tags=["Commodities"])

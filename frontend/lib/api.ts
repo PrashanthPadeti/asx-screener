@@ -1560,3 +1560,52 @@ export const getCompanyAnnouncementsFeed = async (
   const { data } = await api.get(`/api/v1/announcements/${code}`, { params: { limit, offset } })
   return data
 }
+
+// ── Global Markets ────────────────────────────────────────────
+
+export interface GlobalIndexPrice {
+  index_code:  string
+  index_name:  string
+  region:      string
+  country:     string
+  currency:    string
+  price_date:  string | null
+  close_price: number | null
+  open_price:  number | null
+  high_price:  number | null
+  low_price:   number | null
+  return_1d:   number | null
+  return_1w:   number | null
+  return_1m:   number | null
+  return_3m:   number | null
+  return_6m:   number | null
+  return_1y:   number | null
+  return_ytd:  number | null
+  high_52w:    number | null
+  low_52w:     number | null
+}
+
+export interface GlobalFxRate {
+  fx_pair:    string
+  name:       string
+  rate_date:  string | null
+  rate:       number | null
+  open_rate:  number | null
+  high_rate:  number | null
+  low_rate:   number | null
+  return_1d:  number | null
+  return_1w:  number | null
+  return_1m:  number | null
+  return_ytd: number | null
+}
+
+export interface GlobalMarketsResponse {
+  as_of:    string | null
+  regions:  { region: string; indices: GlobalIndexPrice[] }[]
+  fx_rates: GlobalFxRate[]
+}
+
+export const getGlobalMarkets = async (): Promise<GlobalMarketsResponse> => {
+  const { data } = await api.get('/api/v1/global-markets/')
+  return data
+}

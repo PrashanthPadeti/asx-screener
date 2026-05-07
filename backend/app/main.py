@@ -26,6 +26,7 @@ async def lifespan(app: FastAPI):
     from app.workers.watchlist_digest_worker import send_watchlist_digests
     from app.workers.index_prices_worker import compute_index_prices
     from app.workers.fund_prices_worker import compute_fund_prices
+    from app.workers.global_markets_worker import compute_global_markets
 
     scheduler = AsyncIOScheduler()
 
@@ -62,8 +63,13 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=17, minute=35, timezone="Australia/Sydney"),
                       id="fund_prices", replace_existing=True)
 
+    # Global market indices + AUD FX — daily at 5:40pm AEST
+    scheduler.add_job(compute_global_markets,
+                      CronTrigger(hour=17, minute=40, timezone="Australia/Sydney"),
+                      id="global_markets", replace_existing=True)
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), index-prices(5:30pm), fund-prices(5:35pm)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm)")
 
     yield
 

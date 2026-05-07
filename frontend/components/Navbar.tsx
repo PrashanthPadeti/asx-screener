@@ -18,8 +18,9 @@ const NAV_LINKS = [
 ]
 
 const MARKET_DATA_LINKS = [
-  { href: '/indices', label: 'ASX Indices', icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices' },
-  { href: '/funds',   label: 'ETFs & Funds', icon: Layers,    desc: 'ETFs, LICs & managed funds' },
+  { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices' },
+  { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds' },
+  { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX' },
 ]
 
 const RESOURCES_LINKS = [

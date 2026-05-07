@@ -182,6 +182,7 @@ def fetch_eodhd_data(
             if col not in df.columns:
                 df[col] = float("nan")
 
+        df = df[~df.index.duplicated(keep="last")]
         return df[["open", "high", "low", "close", "volume"]]
 
     except Exception as exc:

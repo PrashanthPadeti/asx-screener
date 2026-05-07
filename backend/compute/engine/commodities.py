@@ -1,18 +1,17 @@
 """
 Commodities Engine
 ==================
-Fetches daily OHLCV for key global commodities from EODHD (.COMM exchange),
+Fetches daily OHLCV for key global commodities from stooq.com (free, no API key),
 computes period returns and 52W range, then upserts into market.commodity_prices.
 
-Commodities (our code → EODHD ticker):
-    GC  → GC.COMM   (Gold, USD/oz)
-    SI  → SI.COMM   (Silver, USD/oz)
-    PL  → PL.COMM   (Platinum, USD/oz)
-    HG  → HG.COMM   (Copper, USD/lb)
-    CL  → CL.COMM   (WTI Crude Oil, USD/bbl)
-    BZ  → BZ.COMM   (Brent Crude Oil, USD/bbl)
-    NG  → NG.COMM   (Natural Gas, USD/MMBtu)
-    IO  → SCOA.COMM (Iron Ore 62% Fe, USD/t)
+Commodities (our code → stooq ticker):
+    GC  → gc.f   (Gold futures,           USD/oz)
+    SI  → si.f   (Silver futures,         USD/oz)
+    PL  → pl.f   (Platinum futures,       USD/oz)
+    HG  → hg.f   (Copper futures,         USD/lb)
+    CL  → cl.f   (WTI Crude Oil futures,  USD/bbl)
+    BZ  → cb.f   (Brent Crude futures,    USD/bbl)
+    NG  → ng.f   (Natural Gas futures,    USD/MMBtu)
 
 Usage (standalone):
     python -m compute.engine.commodities [--date YYYY-MM-DD] [--backfill-days N] [--dry-run]
@@ -24,6 +23,7 @@ import logging
 import os
 import sys
 from datetime import date, timedelta
+from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -34,23 +34,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-EODHD_BASE = "https://eodhd.com/api"
+STOOQ_BASE = "https://stooq.com/q/d/l/"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 COMMODITIES = [
     # Precious Metals
-    {"code": "GC", "name": "Gold",            "category": "Precious Metals", "unit": "USD/oz",    "ticker": "GC.COMM"},
-    {"code": "SI", "name": "Silver",           "category": "Precious Metals", "unit": "USD/oz",    "ticker": "SI.COMM"},
-    {"code": "PL", "name": "Platinum",         "category": "Precious Metals", "unit": "USD/oz",    "ticker": "PL.COMM"},
+    {"code": "GC", "name": "Gold",           "category": "Precious Metals", "unit": "USD/oz",    "ticker": "gc.f"},
+    {"code": "SI", "name": "Silver",          "category": "Precious Metals", "unit": "USD/oz",    "ticker": "si.f"},
+    {"code": "PL", "name": "Platinum",        "category": "Precious Metals", "unit": "USD/oz",    "ticker": "pl.f"},
     # Base Metals
-    {"code": "HG", "name": "Copper",           "category": "Base Metals",     "unit": "USD/lb",    "ticker": "HG.COMM"},
+    {"code": "HG", "name": "Copper",          "category": "Base Metals",     "unit": "USD/lb",    "ticker": "hg.f"},
     # Energy
-    {"code": "CL", "name": "WTI Crude Oil",    "category": "Energy",          "unit": "USD/bbl",   "ticker": "CL.COMM"},
-    {"code": "BZ", "name": "Brent Crude Oil",  "category": "Energy",          "unit": "USD/bbl",   "ticker": "BZ.COMM"},
-    {"code": "NG", "name": "Natural Gas",      "category": "Energy",          "unit": "USD/MMBtu", "ticker": "NG.COMM"},
-    # Bulk (ASX-relevant)
-    {"code": "IO", "name": "Iron Ore 62% Fe",  "category": "Bulk",            "unit": "USD/t",     "ticker": "SCOA.COMM"},
+    {"code": "CL", "name": "WTI Crude Oil",   "category": "Energy",          "unit": "USD/bbl",   "ticker": "cl.f"},
+    {"code": "BZ", "name": "Brent Crude Oil", "category": "Energy",          "unit": "USD/bbl",   "ticker": "cb.f"},
+    {"code": "NG", "name": "Natural Gas",     "category": "Energy",          "unit": "USD/MMBtu", "ticker": "ng.f"},
 ]
 
 # ── Return computation ────────────────────────────────────────────────────────
@@ -114,40 +112,40 @@ def compute_price_rows(df: pd.DataFrame, meta: dict) -> list[dict]:
     return rows
 
 
-# ── Fetch from EODHD ──────────────────────────────────────────────────────────
+# ── Fetch from stooq ─────────────────────────────────────────────────────────
 
-def fetch_eodhd_data(
+def fetch_stooq_data(
     ticker:     str,
     start_date: date,
     end_date:   date,
-    api_key:    str,
 ) -> pd.DataFrame | None:
-    url    = f"{EODHD_BASE}/eod/{ticker}"
+    """Download OHLCV from stooq.com (free, no API key). Returns None on failure."""
     params = {
-        "api_token": api_key,
-        "fmt":       "json",
-        "period":    "d",
-        "from":      (start_date - timedelta(days=400)).isoformat(),
-        "to":        (end_date + timedelta(days=1)).isoformat(),
+        "s":  ticker,
+        "d1": (start_date - timedelta(days=400)).strftime("%Y%m%d"),
+        "d2": (end_date + timedelta(days=1)).strftime("%Y%m%d"),
+        "i":  "d",
     }
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; ASX-Screener/1.0)"}
     try:
-        resp = requests.get(url, params=params, timeout=30)
+        resp = requests.get(STOOQ_BASE, params=params, headers=headers, timeout=30)
         resp.raise_for_status()
-        data = resp.json()
-        if not data or not isinstance(data, list):
-            log.warning(f"{ticker}: empty or unexpected response from EODHD")
+        text = resp.text.strip()
+        if not text or text.startswith("No data"):
+            log.warning(f"{ticker}: no data returned from stooq")
             return None
 
-        df = pd.DataFrame(data)
+        df = pd.read_csv(StringIO(text))
+        if df.empty or "Date" not in df.columns:
+            log.warning(f"{ticker}: unexpected stooq response format")
+            return None
+
+        df.columns = [c.lower() for c in df.columns]
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
 
-        if "adjusted_close" in df.columns:
-            df["close"] = df["adjusted_close"]
-            df = df.drop(columns=["adjusted_close"])
-        elif "close" not in df.columns:
+        if "close" not in df.columns:
             df["close"] = float("nan")
-
         for col in ["open", "high", "low", "volume"]:
             if col not in df.columns:
                 df[col] = float("nan")
@@ -156,7 +154,7 @@ def fetch_eodhd_data(
         return df[["open", "high", "low", "close", "volume"]]
 
     except Exception as exc:
-        log.warning(f"{ticker}: EODHD fetch failed — {exc}")
+        log.warning(f"{ticker}: stooq fetch failed — {exc}")
         return None
 
 
@@ -207,41 +205,29 @@ async def upsert_rows(db, rows: list[dict], dry_run: bool) -> int:
 # ── Main entry ────────────────────────────────────────────────────────────────
 
 async def run(
-    target_date:  date | None = None,
+    target_date:   date | None = None,
     backfill_days: int = 3,
-    dry_run:      bool = False,
+    dry_run:       bool = False,
 ) -> None:
     from app.db.session import AsyncSessionLocal
-
-    try:
-        from app.core.config import settings
-        api_key = settings.EODHD_API_KEY
-    except Exception:
-        api_key = os.environ.get("EODHD_API_KEY", "")
-
-    if not api_key:
-        log.error("EODHD_API_KEY not set — cannot fetch commodity data")
-        return
 
     if target_date is None:
         target_date = date.today()
     start_date = target_date - timedelta(days=backfill_days)
 
-    log.info(f"Commodities (EODHD): fetching {start_date} → {target_date} (dry_run={dry_run})")
+    log.info(f"Commodities (stooq): fetching {start_date} → {target_date} (dry_run={dry_run})")
 
     async with AsyncSessionLocal() as db:
         total_rows = 0
         for i, commodity in enumerate(COMMODITIES):
             log.info(f"  [{i+1}/{len(COMMODITIES)}] {commodity['code']} ({commodity['ticker']}) …")
-            df = fetch_eodhd_data(commodity["ticker"], start_date, target_date, api_key)
+            df = fetch_stooq_data(commodity["ticker"], start_date, target_date)
             if df is None:
                 log.warning(f"  {commodity['code']}: skipped (fetch failed)")
                 continue
-            df_range = df[(df.index.date >= start_date) & (df.index.date <= target_date)]
-            if df_range.empty:
-                log.info(f"  {commodity['code']}: no rows in date range")
+            if df.empty:
+                log.info(f"  {commodity['code']}: no rows returned")
                 continue
-            # Use full df for return lookbacks but only upsert date-range rows
             rows = compute_price_rows(df, commodity)
             rows_in_range = [r for r in rows if start_date <= r["price_date"] <= target_date]
             count = await upsert_rows(db, rows_in_range, dry_run)

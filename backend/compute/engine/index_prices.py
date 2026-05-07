@@ -122,34 +122,45 @@ def fetch_index_data(
     ticker: str,
     start_date: date,
     end_date: date,
+    retries: int = 3,
 ) -> pd.DataFrame | None:
     """Download OHLCV from Yahoo Finance. Returns None on failure."""
+    import time
     try:
         import yfinance as yf
     except ImportError:
         log.error("yfinance not installed — run: pip install yfinance")
         return None
 
-    try:
-        # Download enough history to compute 1Y return and 52W range
-        t = yf.Ticker(ticker)
-        hist = t.history(
-            start=(start_date - timedelta(days=400)).isoformat(),
-            end=(end_date + timedelta(days=1)).isoformat(),
-            auto_adjust=True,
-        )
-        if hist.empty:
-            log.warning(f"{ticker}: no data returned from Yahoo Finance")
-            return None
+    for attempt in range(retries):
+        try:
+            t = yf.Ticker(ticker)
+            hist = t.history(
+                start=(start_date - timedelta(days=400)).isoformat(),
+                end=(end_date + timedelta(days=1)).isoformat(),
+                auto_adjust=True,
+            )
+            if hist.empty:
+                log.warning(f"{ticker}: no data returned from Yahoo Finance")
+                return None
 
-        hist.index = hist.index.tz_localize(None)
-        df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
-        df.columns = ["open", "high", "low", "close", "volume"]
-        df = df.sort_index()
-        return df
-    except Exception as exc:
-        log.warning(f"{ticker}: fetch failed — {exc}")
-        return None
+            hist.index = hist.index.tz_localize(None)
+            df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
+            df.columns = ["open", "high", "low", "close", "volume"]
+            return df.sort_index()
+
+        except Exception as exc:
+            msg = str(exc)
+            if "Too Many Requests" in msg or "rate limit" in msg.lower():
+                wait = 30 * (attempt + 1)
+                log.warning(f"{ticker}: rate limited — waiting {wait}s (attempt {attempt+1}/{retries})")
+                time.sleep(wait)
+            else:
+                log.warning(f"{ticker}: fetch failed — {exc}")
+                return None
+
+    log.warning(f"{ticker}: all {retries} attempts failed")
+    return None
 
 
 # ── DB upsert ─────────────────────────────────────────────────────────────────

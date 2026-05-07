@@ -131,13 +131,17 @@ async def search_companies(
     """
     sql = """
         SELECT asx_code, company_name, gics_sector, is_reit, is_miner
-        FROM market.companies
-        WHERE status = 'active'
-          AND (
-              asx_code ILIKE :code_query
-              OR company_name ILIKE :name_query
-              OR similarity(company_name, :q) > 0.15
-          )
+        FROM (
+            SELECT DISTINCT ON (asx_code) asx_code, company_name, gics_sector, is_reit, is_miner
+            FROM market.companies
+            WHERE status = 'active'
+              AND (
+                  asx_code ILIKE :code_query
+                  OR company_name ILIKE :name_query
+                  OR similarity(company_name, :q) > 0.15
+              )
+            ORDER BY asx_code
+        ) deduped
         ORDER BY
             CASE WHEN asx_code ILIKE :code_query THEN 0 ELSE 1 END,
             similarity(company_name, :q) DESC,

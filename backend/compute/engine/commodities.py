@@ -1,17 +1,24 @@
 """
 Commodities Engine
 ==================
-Fetches daily OHLCV for key global commodities from stooq.com (free, no API key),
-computes period returns and 52W range, then upserts into market.commodity_prices.
+Fetches daily commodity prices from two sources:
+  • EODHD FOREX  — precious metals (Gold, Silver, Platinum) as XAU/XAG/XPT vs USD
+  • Alpha Vantage — energy & base metals (WTI, Brent, Natural Gas, Copper)
 
-Commodities (our code → stooq ticker):
-    GC  → gc.f   (Gold futures,           USD/oz)
-    SI  → si.f   (Silver futures,         USD/oz)
-    PL  → pl.f   (Platinum futures,       USD/oz)
-    HG  → hg.f   (Copper futures,         USD/lb)
-    CL  → cl.f   (WTI Crude Oil futures,  USD/bbl)
-    BZ  → cb.f   (Brent Crude futures,    USD/bbl)
-    NG  → ng.f   (Natural Gas futures,    USD/MMBtu)
+EODHD FOREX pairs (confirmed working on all plans):
+    GC  → XAUUSD.FOREX   (Gold spot,      USD/oz)
+    SI  → XAGUSD.FOREX   (Silver spot,    USD/oz)
+    PL  → XPTUSD.FOREX   (Platinum spot,  USD/oz)
+
+Alpha Vantage commodity functions (free tier: 25 req/day; we use 4):
+    CL  → WTI            (WTI Crude Oil,  USD/bbl)
+    BZ  → BRENT          (Brent Crude,    USD/bbl)
+    NG  → NATURAL_GAS    (Natural Gas,    USD/MMBtu)
+    HG  → COPPER         (Copper,         USD/lb)
+
+Requires:
+    EODHD_API_KEY         (already in .env)
+    ALPHA_VANTAGE_API_KEY (free key from alphavantage.co/support/#api-key)
 
 Usage (standalone):
     python -m compute.engine.commodities [--date YYYY-MM-DD] [--backfill-days N] [--dry-run]
@@ -23,7 +30,6 @@ import logging
 import os
 import sys
 from datetime import date, timedelta
-from io import StringIO
 from pathlib import Path
 
 import pandas as pd
@@ -34,21 +40,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-STOOQ_BASE = "https://stooq.com/q/d/l/"
+EODHD_BASE  = "https://eodhd.com/api"
+AV_BASE     = "https://www.alphavantage.co/query"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+# source="eodhd"  → fetched as FOREX pair via EODHD
+# source="av"     → fetched via Alpha Vantage commodity function
 COMMODITIES = [
-    # Precious Metals
-    {"code": "GC", "name": "Gold",           "category": "Precious Metals", "unit": "USD/oz",    "ticker": "gc.f"},
-    {"code": "SI", "name": "Silver",          "category": "Precious Metals", "unit": "USD/oz",    "ticker": "si.f"},
-    {"code": "PL", "name": "Platinum",        "category": "Precious Metals", "unit": "USD/oz",    "ticker": "pl.f"},
-    # Base Metals
-    {"code": "HG", "name": "Copper",          "category": "Base Metals",     "unit": "USD/lb",    "ticker": "hg.f"},
-    # Energy
-    {"code": "CL", "name": "WTI Crude Oil",   "category": "Energy",          "unit": "USD/bbl",   "ticker": "cl.f"},
-    {"code": "BZ", "name": "Brent Crude Oil", "category": "Energy",          "unit": "USD/bbl",   "ticker": "cb.f"},
-    {"code": "NG", "name": "Natural Gas",     "category": "Energy",          "unit": "USD/MMBtu", "ticker": "ng.f"},
+    # Precious Metals — EODHD FOREX
+    {"code": "GC", "name": "Gold",           "category": "Precious Metals", "unit": "USD/oz",    "source": "eodhd", "ticker": "XAUUSD.FOREX"},
+    {"code": "SI", "name": "Silver",          "category": "Precious Metals", "unit": "USD/oz",    "source": "eodhd", "ticker": "XAGUSD.FOREX"},
+    {"code": "PL", "name": "Platinum",        "category": "Precious Metals", "unit": "USD/oz",    "source": "eodhd", "ticker": "XPTUSD.FOREX"},
+    # Energy — Alpha Vantage
+    {"code": "CL", "name": "WTI Crude Oil",   "category": "Energy",          "unit": "USD/bbl",   "source": "av",    "ticker": "WTI"},
+    {"code": "BZ", "name": "Brent Crude Oil", "category": "Energy",          "unit": "USD/bbl",   "source": "av",    "ticker": "BRENT"},
+    {"code": "NG", "name": "Natural Gas",     "category": "Energy",          "unit": "USD/MMBtu", "source": "av",    "ticker": "NATURAL_GAS"},
+    # Base Metals — Alpha Vantage
+    {"code": "HG", "name": "Copper",          "category": "Base Metals",     "unit": "USD/lb",    "source": "av",    "ticker": "COPPER"},
 ]
 
 # ── Return computation ────────────────────────────────────────────────────────
@@ -112,40 +121,41 @@ def compute_price_rows(df: pd.DataFrame, meta: dict) -> list[dict]:
     return rows
 
 
-# ── Fetch from stooq ─────────────────────────────────────────────────────────
+# ── Fetch from EODHD FOREX ────────────────────────────────────────────────────
 
-def fetch_stooq_data(
+def fetch_eodhd_forex(
     ticker:     str,
     start_date: date,
     end_date:   date,
+    api_key:    str,
 ) -> pd.DataFrame | None:
-    """Download OHLCV from stooq.com (free, no API key). Returns None on failure."""
+    """Fetch a FOREX pair from EODHD (e.g. XAUUSD.FOREX for gold spot)."""
+    url    = f"{EODHD_BASE}/eod/{ticker}"
     params = {
-        "s":  ticker,
-        "d1": (start_date - timedelta(days=400)).strftime("%Y%m%d"),
-        "d2": (end_date + timedelta(days=1)).strftime("%Y%m%d"),
-        "i":  "d",
+        "api_token": api_key,
+        "fmt":       "json",
+        "period":    "d",
+        "from":      (start_date - timedelta(days=400)).isoformat(),
+        "to":        (end_date + timedelta(days=1)).isoformat(),
     }
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; ASX-Screener/1.0)"}
     try:
-        resp = requests.get(STOOQ_BASE, params=params, headers=headers, timeout=30)
+        resp = requests.get(url, params=params, timeout=30)
         resp.raise_for_status()
-        text = resp.text.strip()
-        if not text or text.startswith("No data"):
-            log.warning(f"{ticker}: no data returned from stooq")
+        data = resp.json()
+        if not data or not isinstance(data, list):
+            log.warning(f"{ticker}: empty EODHD response")
             return None
 
-        df = pd.read_csv(StringIO(text))
-        if df.empty or "Date" not in df.columns:
-            log.warning(f"{ticker}: unexpected stooq response format")
-            return None
-
-        df.columns = [c.lower() for c in df.columns]
+        df = pd.DataFrame(data)
         df["date"] = pd.to_datetime(df["date"])
         df = df.set_index("date").sort_index()
 
-        if "close" not in df.columns:
+        if "adjusted_close" in df.columns:
+            df["close"] = df["adjusted_close"]
+            df = df.drop(columns=["adjusted_close"])
+        elif "close" not in df.columns:
             df["close"] = float("nan")
+
         for col in ["open", "high", "low", "volume"]:
             if col not in df.columns:
                 df[col] = float("nan")
@@ -154,7 +164,61 @@ def fetch_stooq_data(
         return df[["open", "high", "low", "close", "volume"]]
 
     except Exception as exc:
-        log.warning(f"{ticker}: stooq fetch failed — {exc}")
+        log.warning(f"{ticker}: EODHD fetch failed — {exc}")
+        return None
+
+
+# ── Fetch from Alpha Vantage ──────────────────────────────────────────────────
+
+def fetch_av_commodity(
+    function:   str,
+    start_date: date,
+    end_date:   date,
+    api_key:    str,
+) -> pd.DataFrame | None:
+    """
+    Fetch daily commodity data from Alpha Vantage.
+    function: WTI | BRENT | NATURAL_GAS | COPPER | GOLD | SILVER | etc.
+    Free tier: 25 req/day. Response: {data: [{date, value}, ...]}
+    """
+    params = {
+        "function":  function,
+        "interval":  "daily",
+        "apikey":    api_key,
+        "datatype":  "json",
+    }
+    try:
+        resp = requests.get(AV_BASE, params=params, timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+
+        if "Information" in payload:
+            log.warning(f"{function}: Alpha Vantage rate limit — {payload['Information'][:80]}")
+            return None
+        if "data" not in payload:
+            log.warning(f"{function}: unexpected Alpha Vantage response: {list(payload.keys())}")
+            return None
+
+        rows = payload["data"]
+        if not rows:
+            return None
+
+        df = pd.DataFrame(rows)
+        df["date"]  = pd.to_datetime(df["date"])
+        df["close"] = pd.to_numeric(df["value"], errors="coerce")
+        df = df.set_index("date").sort_index()
+
+        # Alpha Vantage commodity endpoint returns close only — fill OHLV with NaN
+        df["open"]   = float("nan")
+        df["high"]   = float("nan")
+        df["low"]    = float("nan")
+        df["volume"] = float("nan")
+
+        df = df[~df.index.duplicated(keep="last")]
+        return df[["open", "high", "low", "close", "volume"]]
+
+    except Exception as exc:
+        log.warning(f"{function}: Alpha Vantage fetch failed — {exc}")
         return None
 
 
@@ -211,27 +275,59 @@ async def run(
 ) -> None:
     from app.db.session import AsyncSessionLocal
 
+    # Resolve API keys
+    try:
+        from app.core.config import settings
+        eodhd_key = settings.EODHD_API_KEY
+    except Exception:
+        eodhd_key = os.environ.get("EODHD_API_KEY", "")
+
+    av_key = os.environ.get("ALPHA_VANTAGE_API_KEY", "")
+    try:
+        from app.core.config import settings
+        av_key = av_key or getattr(settings, "ALPHA_VANTAGE_API_KEY", "")
+    except Exception:
+        pass
+
+    if not eodhd_key:
+        log.error("EODHD_API_KEY not set")
+        return
+    if not av_key:
+        log.warning("ALPHA_VANTAGE_API_KEY not set — energy/base metals will be skipped")
+
     if target_date is None:
         target_date = date.today()
     start_date = target_date - timedelta(days=backfill_days)
 
-    log.info(f"Commodities (stooq): fetching {start_date} → {target_date} (dry_run={dry_run})")
+    log.info(f"Commodities: fetching {start_date} → {target_date} (dry_run={dry_run})")
 
     async with AsyncSessionLocal() as db:
         total_rows = 0
         for i, commodity in enumerate(COMMODITIES):
-            log.info(f"  [{i+1}/{len(COMMODITIES)}] {commodity['code']} ({commodity['ticker']}) …")
-            df = fetch_stooq_data(commodity["ticker"], start_date, target_date)
-            if df is None:
-                log.warning(f"  {commodity['code']}: skipped (fetch failed)")
+            code   = commodity["code"]
+            source = commodity["source"]
+            ticker = commodity["ticker"]
+            log.info(f"  [{i+1}/{len(COMMODITIES)}] {code} ({ticker}, {source}) …")
+
+            if source == "eodhd":
+                df = fetch_eodhd_forex(ticker, start_date, target_date, eodhd_key)
+            elif source == "av":
+                if not av_key:
+                    log.warning(f"  {code}: skipped (no ALPHA_VANTAGE_API_KEY)")
+                    continue
+                df = fetch_av_commodity(ticker, start_date, target_date, av_key)
+            else:
+                log.warning(f"  {code}: unknown source '{source}'")
                 continue
-            if df.empty:
-                log.info(f"  {commodity['code']}: no rows returned")
+
+            if df is None or df.empty:
+                log.warning(f"  {code}: skipped (no data)")
                 continue
+
             rows = compute_price_rows(df, commodity)
             rows_in_range = [r for r in rows if start_date <= r["price_date"] <= target_date]
             count = await upsert_rows(db, rows_in_range, dry_run)
-            log.info(f"  {commodity['code']}: {count} rows upserted")
+            log.info(f"  {code}: {count} rows upserted")
             total_rows += count
 
     log.info(f"Commodities complete — {total_rows} total rows")

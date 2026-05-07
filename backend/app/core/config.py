@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     # EODHD (market data)
     EODHD_API_KEY: str = ""
 
+    # Alpha Vantage (commodities — free tier: 25 req/day)
+    ALPHA_VANTAGE_API_KEY: str = ""
+
     # Rate limiting (requests per minute by plan)
     RATE_LIMIT_FREE: int = 30
     RATE_LIMIT_PRO: int = 120

@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import Link from 'next/link'
 import { Globe, RefreshCw, ArrowLeft } from 'lucide-react'
 import { getGlobalMarkets, GlobalMarketsResponse, GlobalIndexPrice, GlobalFxRate } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
@@ -63,12 +64,12 @@ const FX_META: Record<string, { flag: string; desc: string }> = {
 function IndexRow({ idx }: { idx: GlobalIndexPrice }) {
   const isLargePrice = (idx.close_price ?? 0) >= 1000
   return (
-    <div className="grid grid-cols-8 gap-2 px-5 py-4 border-b border-slate-700/40 hover:bg-slate-700/20 transition-colors last:border-0">
+    <Link href={`/global-markets/${idx.index_code.toLowerCase()}`} className="grid grid-cols-8 gap-2 px-5 py-4 border-b border-slate-700/40 hover:bg-slate-700/20 transition-colors last:border-0 group">
       {/* Name + country */}
       <div className="col-span-2 flex items-center gap-2.5">
         <span className="text-xl leading-none">{COUNTRY_FLAGS[idx.country] ?? '🌐'}</span>
         <div>
-          <div className="text-sm font-semibold text-slate-100">{idx.index_name}</div>
+          <div className="text-sm font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">{idx.index_name}</div>
           <div className="text-xs text-slate-500">{idx.country} · {idx.currency}</div>
         </div>
       </div>
@@ -95,7 +96,7 @@ function IndexRow({ idx }: { idx: GlobalIndexPrice }) {
       <div className={`text-right text-sm font-medium ${retColor(idx.return_ytd)}`}>
         {fmtPct(idx.return_ytd)}
       </div>
-    </div>
+    </Link>
   )
 }
 

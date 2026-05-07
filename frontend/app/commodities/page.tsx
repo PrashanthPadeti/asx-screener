@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import { getCommodities, CommoditiesResponse, CommodityPrice } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
@@ -58,7 +59,7 @@ function CommodityCard({ c }: { c: CommodityPrice }) {
   const down  = c.return_1d != null && c.return_1d < 0
 
   return (
-    <div className={`bg-slate-800/60 rounded-xl border ${meta.border} hover:border-slate-500/50 transition-colors p-5`}>
+    <Link href={`/commodities/${c.commodity_code.toLowerCase()}`} className={`bg-slate-800/60 rounded-xl border ${meta.border} hover:border-slate-500/50 transition-colors p-5 block`}>
       {/* Header */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2.5">
@@ -109,7 +110,7 @@ function CommodityCard({ c }: { c: CommodityPrice }) {
           </div>
         ))}
       </div>
-    </div>
+    </Link>
   )
 }
 

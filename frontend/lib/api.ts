@@ -1610,6 +1610,15 @@ export const getGlobalMarkets = async (): Promise<GlobalMarketsResponse> => {
   return data
 }
 
+export interface GlobalIndexDetail extends GlobalIndexPrice {
+  history: { date: string; close: number | null }[]
+}
+
+export const getGlobalIndexDetail = async (code: string, days = 365): Promise<GlobalIndexDetail> => {
+  const { data } = await api.get(`/api/v1/global-markets/${code}?days=${days}`)
+  return data
+}
+
 // ── Commodities ───────────────────────────────────────────────
 
 export interface CommodityPrice {
@@ -1640,5 +1649,14 @@ export interface CommoditiesResponse {
 
 export const getCommodities = async (): Promise<CommoditiesResponse> => {
   const { data } = await api.get('/api/v1/commodities/')
+  return data
+}
+
+export interface CommodityDetail extends CommodityPrice {
+  history: { date: string; close: number | null }[]
+}
+
+export const getCommodityDetail = async (code: string, days = 365): Promise<CommodityDetail> => {
+  const { data } = await api.get(`/api/v1/commodities/${code}?days=${days}`)
   return data
 }

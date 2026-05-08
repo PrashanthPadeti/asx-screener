@@ -2,7 +2,7 @@
 import { useState, FormEvent } from 'react'
 import Link from 'next/link'
 import { BarChart2, Loader2, ArrowLeft, CheckCircle } from 'lucide-react'
-import api from '@/lib/api'
+import { api } from '@/lib/api'
 
 export default function ForgotPasswordPage() {
   const [email,   setEmail]   = useState('')

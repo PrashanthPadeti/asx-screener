@@ -3,7 +3,7 @@ import { useState, FormEvent, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { BarChart2, Eye, EyeOff, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
-import api from '@/lib/api'
+import { api } from '@/lib/api'
 
 function ResetPasswordForm() {
   const router       = useRouter()

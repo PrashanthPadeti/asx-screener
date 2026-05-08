@@ -32,20 +32,56 @@ DB_URL = os.getenv(
     "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener"
 )
 
-# ── GICS sector → our simplified sector mapping ───────────────
-GICS_TO_SECTOR = {
-    "Energy":                             "Energy",
-    "Materials":                          "Materials",
-    "Industrials":                        "Industrials",
-    "Consumer Discretionary":             "Consumer Discretionary",
-    "Consumer Staples":                   "Consumer Staples",
-    "Health Care":                        "Healthcare",
-    "Financials":                         "Financials",
-    "Information Technology":             "Technology",
-    "Communication Services":             "Communication Services",
-    "Utilities":                          "Utilities",
-    "Real Estate":                        "Real Estate",
-    "Not Applic":                         "Other",
+# ── GICS industry group → sector mapping ─────────────────────
+# The ASX CSV provides GICS industry group (not sector), so we map at that level.
+GICS_TO_SECTOR: dict[str, str] = {
+    # Energy
+    "Energy":                                   "Energy",
+    # Materials
+    "Materials":                                "Materials",
+    # Industrials
+    "Industrials":                              "Industrials",
+    "Capital Goods":                            "Industrials",
+    "Commercial & Professional Services":       "Industrials",
+    "Transportation":                           "Industrials",
+    # Consumer Discretionary
+    "Consumer Discretionary":                   "Consumer Discretionary",
+    "Automobiles & Components":                 "Consumer Discretionary",
+    "Consumer Durables & Apparel":              "Consumer Discretionary",
+    "Consumer Services":                        "Consumer Discretionary",
+    "Retailing":                                "Consumer Discretionary",
+    # Consumer Staples
+    "Consumer Staples":                         "Consumer Staples",
+    "Food & Staples Retailing":                 "Consumer Staples",
+    "Food, Beverage & Tobacco":                 "Consumer Staples",
+    "Household & Personal Products":            "Consumer Staples",
+    # Healthcare
+    "Health Care":                              "Healthcare",
+    "Health Care Equipment & Services":         "Healthcare",
+    "Pharmaceuticals, Biotechnology & Life Sciences": "Healthcare",
+    "Pharmaceuticals Biotechnology & Life Sciences":  "Healthcare",
+    # Financials
+    "Financials":                               "Financials",
+    "Banks":                                    "Financials",
+    "Diversified Financials":                   "Financials",
+    "Insurance":                                "Financials",
+    # Technology
+    "Information Technology":                   "Technology",
+    "Software & Services":                      "Technology",
+    "Technology Hardware & Equipment":          "Technology",
+    "Semiconductors & Semiconductor Equipment": "Technology",
+    # Communication Services
+    "Communication Services":                   "Communication Services",
+    "Telecommunication Services":               "Communication Services",
+    "Media & Entertainment":                    "Communication Services",
+    # Utilities
+    "Utilities":                                "Utilities",
+    # Real Estate
+    "Real Estate":                              "Real Estate",
+    "Equity Real Estate Investment Trusts (REITs)": "Real Estate",
+    "Real Estate Management & Development":     "Real Estate",
+    # Other / unmapped
+    "Not Applic":                               "Other",
 }
 
 # ASX codes known to be REITs (A-REITs listed on ASX)
@@ -58,6 +94,8 @@ KNOWN_REITS = {
     "SUL", "TCL", "TGR", "VVI", "WEB",
 }
 
+# Materials GICS industry group = predominantly miners on ASX
+MINING_GICS = {"Materials"}
 MINING_KEYWORDS = {"Mining", "Resources", "Metals", "Gold", "Silver", "Copper",
                    "Iron", "Coal", "Mineral", "Nickel", "Zinc", "Lithium",
                    "Uranium", "Bauxite", "Diamonds", "Exploration"}
@@ -114,8 +152,8 @@ def transform(rows: list[dict]) -> list[dict]:
             continue
 
         sector = GICS_TO_SECTOR.get(gics, "Other")
-        is_reit = asx_code in KNOWN_REITS or gics == "Real Estate"
-        is_miner = any(kw in gics for kw in MINING_KEYWORDS)
+        is_reit = asx_code in KNOWN_REITS or "Real Estate" in gics
+        is_miner = gics in MINING_GICS or any(kw in gics for kw in MINING_KEYWORDS)
 
         sector_counts[sector] = sector_counts.get(sector, 0) + 1
 

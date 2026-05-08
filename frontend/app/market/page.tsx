@@ -620,7 +620,6 @@ export default function MarketPage() {
               ['OVERBOUGHT_WEAK',          'Overbought Weak'],
               ['PRICE_EARNINGS_DIVERGENCE','PE Divergence'],
               ['DIVIDEND_YIELD_SPIKE',     'Yield Spike'],
-              ['SHORT_SQUEEZE_RISK',       'Short Squeeze'],
             ] as const).map(([f, label]) => (
               <button key={f} onClick={() => { setAnomalyFilter(f); loadAnomalies(f) }}
                 className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${anomalyFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>

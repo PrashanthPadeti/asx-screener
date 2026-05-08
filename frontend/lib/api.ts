@@ -683,7 +683,7 @@ export const getMarketMovers = async (period: '1d' | '1w' | '1m' | '3m', limit =
   return data
 }
 
-export const getMarketSignals = async (period: '1d' | '1w' | '1m' | '3m' = '1w'): Promise<MarketSignals> => {
+export const getMarketSignals = async (period: '1d' | '1w' | '1m' | '3m' | '52w' = '1w'): Promise<MarketSignals> => {
   const { data } = await api.get('/api/v1/market/signals', { params: { period } })
   return data
 }

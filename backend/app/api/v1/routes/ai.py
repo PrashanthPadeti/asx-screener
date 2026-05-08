@@ -551,7 +551,7 @@ async def list_market_anomalies(
     rows = (await db.execute(text(f"""
         SELECT a.asx_code, a.flag_type, a.description, a.severity, a.detected_at,
                u.company_name, u.sector,
-               u.price, u.return_1d, u.return_1w, u.volume
+               u.price, u.return_1w, u.volume
         FROM market.anomalies a
         LEFT JOIN screener.universe u ON u.asx_code = a.asx_code
         WHERE {where}
@@ -566,9 +566,10 @@ async def list_market_anomalies(
         f = dict(r)
         if f.get("detected_at"):
             f["detected_at"] = f["detected_at"].isoformat()
-        for k in ("price", "return_1d", "return_1w"):
+        for k in ("price", "return_1w"):
             if f.get(k) is not None:
                 f[k] = float(f[k])
+        f["return_1d"] = None  # not available in screener.universe
         flags.append(f)
 
     return {"flags": flags, "total": len(flags)}

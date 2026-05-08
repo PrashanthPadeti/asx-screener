@@ -67,7 +67,7 @@ INSERT INTO screener.universe (
     ev, ev_to_ebitda, ev_to_revenue,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
-    dividend_yield, dps_ttm, ex_div_date, franking_pct,
+    dividend_yield, dps_ttm, ex_div_date, franking_pct, payout_ratio,
 
     -- ── Profitability (computed_metrics → yearly_metrics → valuation_snapshot)
     revenue_ttm, gross_profit_ttm, ebitda_ttm,
@@ -178,6 +178,8 @@ SELECT
     vs.dividend_per_share   AS dps_ttm,
     div_latest.ex_date,
     div_latest.franking_pct,
+    CASE WHEN pnl0.eps IS NOT NULL AND pnl0.eps > 0 AND vs.dividend_per_share IS NOT NULL
+         THEN ROUND((vs.dividend_per_share / pnl0.eps)::numeric, 4) END AS payout_ratio,
 
     -- ── Profitability TTM ─────────────────────────────────────────────────────
     -- Priority: computed_metrics (daily) → valuation_snapshot (weekly)
@@ -530,6 +532,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     dps_ttm                 = EXCLUDED.dps_ttm,
     ex_div_date             = EXCLUDED.ex_div_date,
     franking_pct            = EXCLUDED.franking_pct,
+    payout_ratio            = EXCLUDED.payout_ratio,
     -- Profitability
     revenue_ttm             = EXCLUDED.revenue_ttm,
     gross_profit_ttm        = EXCLUDED.gross_profit_ttm,

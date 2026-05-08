@@ -105,7 +105,7 @@ async def create_screen(
     result = await db.execute(text("""
         INSERT INTO screener.saved_screens
             (user_id, name, description, filters, sort_by, sort_dir, is_public)
-        VALUES (:uid, :name, :desc, :filters::jsonb, :sort_by, :sort_dir, :is_public)
+        VALUES (:uid, :name, :desc, CAST(:filters AS jsonb), :sort_by, :sort_dir, :is_public)
         RETURNING id, user_id, name, description, filters, sort_by, sort_dir,
                   is_public, use_count, created_at, updated_at
     """), {
@@ -162,7 +162,7 @@ async def update_screen(
         raise HTTPException(status_code=400, detail="Nothing to update")
 
     set_clauses = ", ".join(
-        f"{k} = :{k}" + ("::jsonb" if k == "filters" else "")
+        f"{k} = CAST(:{k} AS jsonb)" if k == "filters" else f"{k} = :{k}"
         for k in updates
     )
     updates["id"] = str(screen_id)

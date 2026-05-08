@@ -85,6 +85,47 @@ def send_alert_email(
         return False
 
 
+def send_password_reset_email(to_email: str, reset_url: str, name: Optional[str] = None) -> bool:
+    """Send a password reset link email."""
+    resend = _client()
+    if resend is None:
+        log.info(f"[email no-op] Password reset for {to_email}: {reset_url}")
+        return False
+
+    greeting = f"Hi {name}," if name else "Hi,"
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+      <h2 style="color:#1d4ed8;margin-bottom:4px">Reset your password</h2>
+      <p>{greeting}</p>
+      <p style="color:#374151">We received a request to reset your ASX Screener password.
+         Click the button below — this link expires in 1 hour.</p>
+      <a href="{reset_url}"
+         style="display:inline-block;margin-top:16px;padding:12px 24px;
+                background:#2563eb;color:white;border-radius:8px;text-decoration:none;font-weight:600">
+        Reset Password
+      </a>
+      <p style="margin-top:24px;font-size:13px;color:#6b7280">
+        If you didn't request this, you can safely ignore this email.
+        Your password won't change until you click the link above.
+      </p>
+      <hr style="margin-top:32px;border-color:#e5e7eb"/>
+      <p style="font-size:12px;color:#9ca3af">ASX Screener · asxscreener.com.au</p>
+    </div>
+    """
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [to_email],
+            "subject": "Reset your ASX Screener password",
+            "html":    html,
+        })
+        log.info(f"Password reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send password reset email: {e}")
+        return False
+
+
 def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
     """Send a welcome email to a new user."""
     resend = _client()

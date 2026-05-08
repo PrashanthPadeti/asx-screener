@@ -8,9 +8,11 @@ POST /api/v1/auth/logout    — revoke refresh token
 GET  /api/v1/auth/me        — return current user profile
 """
 import logging
-from datetime import datetime, timezone
+import secrets
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.main import limiter
@@ -32,6 +34,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserProfile,
 )
+from app.services.email import send_password_reset_email
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -228,6 +231,99 @@ async def logout(
         {"tok": body.refresh_token},
     )
     await db.commit()
+
+
+# ── Forgot Password ───────────────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+@limiter.limit("3/minute")
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send a password-reset email. Always returns 200 to prevent email enumeration."""
+    result = await db.execute(
+        text("SELECT id, name FROM users.users WHERE email = :email"),
+        {"email": body.email.lower()},
+    )
+    user = result.fetchone()
+
+    if user:
+        token   = secrets.token_urlsafe(48)
+        expires = datetime.now(timezone.utc) + timedelta(hours=1)
+        await db.execute(
+            text("""
+                UPDATE users.users
+                SET password_reset_token = :tok, password_reset_expires_at = :exp
+                WHERE id = :id
+            """),
+            {"tok": token, "exp": expires, "id": str(user.id)},
+        )
+        await db.commit()
+
+        frontend_url = getattr(settings, "FRONTEND_URL", "https://asxscreener.com.au")
+        reset_url = f"{frontend_url}/auth/reset-password?token={token}"
+        send_password_reset_email(body.email.lower(), reset_url, user.name)
+        log.info(f"Password reset requested for {body.email}")
+
+    return {"message": "If that email is registered, a reset link has been sent."}
+
+
+# ── Reset Password ────────────────────────────────────────────────────────────
+
+class ResetPasswordRequest(BaseModel):
+    token:        str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+    body: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify reset token and update password."""
+    result = await db.execute(
+        text("""
+            SELECT id, password_reset_expires_at
+            FROM users.users
+            WHERE password_reset_token = :tok
+        """),
+        {"tok": body.token},
+    )
+    user = result.fetchone()
+
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+    expires = user.password_reset_expires_at
+    if expires is None or expires.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Reset link has expired — please request a new one")
+
+    new_hash = hash_password(body.new_password)
+    await db.execute(
+        text("""
+            UPDATE users.users
+            SET password_hash             = :pw,
+                password_reset_token      = NULL,
+                password_reset_expires_at = NULL,
+                updated_at                = NOW()
+            WHERE id = :id
+        """),
+        {"pw": new_hash, "id": str(user.id)},
+    )
+    # Revoke all existing sessions so old devices must re-login
+    await db.execute(
+        text("UPDATE users.sessions SET revoked = TRUE, revoked_at = NOW() WHERE user_id = :id AND NOT revoked"),
+        {"id": str(user.id)},
+    )
+    await db.commit()
+    log.info(f"Password reset completed for user {user.id}")
+    return {"message": "Password updated successfully. You can now sign in."}
 
 
 # ── Me ────────────────────────────────────────────────────────────────────────

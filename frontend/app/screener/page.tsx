@@ -1,5 +1,6 @@
 'use client'
 import { useState, useCallback, useEffect, useRef } from 'react'
+import { useSearchParams } from 'next/navigation'
 import {
   runScreener, getScreenerFields, getScreenerPresets, exportScreener,
   nlScreener,
@@ -364,6 +365,7 @@ export default function ScreenerPage() {
   const { user } = useAuth()
   const userPlan = user?.plan ?? 'free'
   const isPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+  const searchParams = useSearchParams()
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
 
@@ -441,8 +443,14 @@ export default function ScreenerPage() {
 
     getScreenerPresets().then(d => {
       setPresets(d.presets)
+      // Auto-apply preset from URL ?preset=id
+      const presetId = searchParams.get('preset')
+      if (presetId) {
+        const found = d.presets.find((p: ScreenerPreset) => p.id === presetId)
+        if (found) applyPresetDirect(found)
+      }
     }).catch(console.error)
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter operations
   const addFilter = () => {
@@ -474,11 +482,7 @@ export default function ScreenerPage() {
     setActivePreset(null)
   }
 
-  const applyPreset = (preset: ScreenerPreset) => {
-    if (preset.premium && !isPro) {
-      setShowUpgradeModal(true)
-      return
-    }
+  const applyPresetDirect = (preset: ScreenerPreset) => {
     const rows: FilterRow[] = preset.filters.map(f => ({
       id:       nextId++,
       field:    f.field,
@@ -489,6 +493,14 @@ export default function ScreenerPage() {
     setSortBy(preset.sort_by)
     setSortDir(preset.sort_dir as 'asc' | 'desc')
     setActivePreset(preset.id)
+  }
+
+  const applyPreset = (preset: ScreenerPreset) => {
+    if (preset.premium && !isPro) {
+      setShowUpgradeModal(true)
+      return
+    }
+    applyPresetDirect(preset)
   }
 
   const clearAll = () => {

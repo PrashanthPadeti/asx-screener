@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.main import limiter
 
 from app.core.deps import get_current_user
 from app.core.security import (
@@ -76,6 +77,7 @@ async def _store_session(
 
 # ── Register ─────────────────────────────────────────────────────────────────
 
+@limiter.limit("3/minute")
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
@@ -119,6 +121,7 @@ async def register(
 
 # ── Login ─────────────────────────────────────────────────────────────────────
 
+@limiter.limit("5/minute")
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,

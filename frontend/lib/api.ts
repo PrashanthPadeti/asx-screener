@@ -1720,3 +1720,51 @@ export const incrementScreenUse = async (id: string): Promise<void> => {
   await api.post(`/api/v1/screens/${id}/use`).catch(() => {})
 }
 
+// ── Billing ───────────────────────────────────────────────────────────────────
+
+export interface PlanFeatures {
+  portfolios:    number
+  watchlists:    number
+  stocks_per_wl: number
+  alerts:        number
+  nl_screener:   boolean
+  csv_export:    boolean
+  seat_limit:    number
+}
+
+export interface SeatOption {
+  seats:             number
+  monthly_aud:       number
+  yearly_aud:        number
+  price_id_monthly:  string | null
+  price_id_yearly:   string | null
+}
+
+export interface BillingPlan {
+  id:                string
+  name:              string
+  monthly_aud:       number | null
+  yearly_aud:        number | null
+  price_id_monthly:  string | null
+  price_id_yearly:   string | null
+  seats?:            number
+  seats_options?:    SeatOption[]
+  features:          PlanFeatures
+  highlight:         boolean
+}
+
+export const getBillingPlans = async (): Promise<{ plans: BillingPlan[] }> => {
+  const { data } = await api.get('/api/v1/billing/plans')
+  return data
+}
+
+export const createCheckoutSession = async (price_id: string, seats = 1): Promise<{ url: string }> => {
+  const { data } = await api.post('/api/v1/billing/checkout', { price_id, seats })
+  return data
+}
+
+export const createBillingPortal = async (): Promise<{ url: string }> => {
+  const { data } = await api.post('/api/v1/billing/portal')
+  return data
+}
+

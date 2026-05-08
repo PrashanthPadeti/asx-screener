@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
@@ -227,6 +227,14 @@ export default function Navbar() {
                       Account settings
                     </Link>
                     <Link
+                      href="/pricing"
+                      onClick={() => setUserDropOpen(false)}
+                      className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Zap className="w-4 h-4" />
+                      Plans & Pricing
+                    </Link>
+                    <Link
                       href="/notifications"
                       onClick={() => setUserDropOpen(false)}
                       className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
@@ -247,6 +255,17 @@ export default function Navbar() {
             ) : (
               /* Logged-out buttons */
               <>
+                <Link
+                  href="/pricing"
+                  className={cn(
+                    'px-3 py-1.5 text-sm font-medium rounded-lg transition-colors',
+                    pathname === '/pricing'
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  )}
+                >
+                  Pricing
+                </Link>
                 <Link
                   href="/auth/login"
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium
@@ -328,6 +347,13 @@ export default function Navbar() {
             <div className="border-t border-gray-100 mt-2 pt-2">
               {!loading && !user && (
                 <>
+                  <Link
+                    href="/pricing"
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 font-medium"
+                  >
+                    Pricing
+                  </Link>
                   <Link
                     href="/auth/login"
                     onClick={() => setMenuOpen(false)}

@@ -6,7 +6,7 @@ import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
   Tooltip, CartesianGrid,
 } from 'recharts'
-import { GlobalIndexDetail, getGlobalIndexDetail } from '@/lib/api'
+import { type GlobalIndexDetail, getGlobalIndexDetail } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 // ── Config ────────────────────────────────────────────────────────────────────

@@ -93,6 +93,7 @@ Use correct JSON types: numbers as numbers (not strings), booleans as true/false
 
 class NLScreenerRequest(BaseModel):
     query: str
+    page:  int = 1
 
 
 @router.post("/nl-screener")
@@ -179,7 +180,7 @@ async def nl_screener(
         filters=valid,
         sort_by=sort_by,
         sort_dir=sort_dir,
-        page=1,
+        page=max(1, body.page),
         page_size=50,
     )
     try:
@@ -549,10 +550,9 @@ async def list_market_anomalies(
     where = " AND ".join(where_parts)
     rows = (await db.execute(text(f"""
         SELECT a.asx_code, a.flag_type, a.description, a.severity, a.detected_at,
-               c.company_name, c.sector,
+               u.company_name, u.sector,
                u.price, u.return_1d, u.return_1w, u.volume
         FROM market.anomalies a
-        LEFT JOIN market.companies c ON c.asx_code = a.asx_code
         LEFT JOIN screener.universe u ON u.asx_code = a.asx_code
         WHERE {where}
         ORDER BY

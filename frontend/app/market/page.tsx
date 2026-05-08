@@ -199,9 +199,9 @@ function ExDivRow({ s }: { s: ExDivStock }) {
   )
 }
 
-function SignalHighLowRow({ s, type, period }: { s: SignalStock; type: 'high' | 'low'; period: Period }) {
+function SignalHighLowRow({ s, type, period }: { s: SignalStock; type: 'high' | 'low'; period: SigPeriod }) {
   const pct = type === 'high' ? s.pct_from_high : s.pct_from_low
-  const ret = (period === '1m' || period === '3m') ? s.return_1m : s.return_1w
+  const ret = (period === '1m' || period === '3m' || period === '52w') ? s.return_1m : s.return_1w
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3">
@@ -220,8 +220,8 @@ function SignalHighLowRow({ s, type, period }: { s: SignalStock; type: 'high' | 
   )
 }
 
-function VolSurgeRow({ s, period }: { s: SignalStock; period: Period }) {
-  const ret = (period === '1m' || period === '3m') ? s.return_1m : s.return_1w
+function VolSurgeRow({ s, period }: { s: SignalStock; period: SigPeriod }) {
+  const ret = (period === '1m' || period === '3m' || period === '52w') ? s.return_1m : s.return_1w
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3">
@@ -257,8 +257,10 @@ function TableCard({ title, icon: Icon, children, className }: {
   )
 }
 
-type Period = '1d' | '1w' | '1m' | '3m'
-const PERIOD_LABELS: Record<Period, string> = { '1d': '1 Day', '1w': '1 Week', '1m': '1 Month', '3m': '3 Month' }
+type Period   = '1d' | '1w' | '1m' | '3m'
+type SigPeriod = '1d' | '1w' | '1m' | '3m' | '52w'
+const PERIOD_LABELS: Record<Period, string>    = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M' }
+const SIG_PERIOD_LABELS: Record<SigPeriod, string> = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M', '52w': '52W' }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -271,6 +273,7 @@ export default function MarketPage() {
   const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
 
+  const [sigPeriod, setSigPeriod] = useState<SigPeriod>('52w')
   const [signals, setSignals]   = useState<{ near_period_high: SignalStock[]; near_period_low: SignalStock[]; volume_surge: SignalStock[] } | null>(null)
   const [signalsLoading, setSignalsLoading] = useState(false)
 
@@ -294,7 +297,7 @@ export default function MarketPage() {
     finally { setMoversLoading(false) }
   }, [])
 
-  const loadSignals = useCallback(async (period: Period) => {
+  const loadSignals = useCallback(async (period: SigPeriod) => {
     setSignalsLoading(true)
     try { setSignals(await getMarketSignals(period)) }
     catch { /* keep previous */ }
@@ -310,10 +313,11 @@ export default function MarketPage() {
     finally { setAnomaliesLoading(false) }
   }
 
-  useEffect(() => { loadDashboard(); loadSignals('1d'); loadAnomalies() }, [loadSignals])
-  useEffect(() => { loadMovers(moverPeriod); loadSignals(moverPeriod) }, [moverPeriod, loadMovers, loadSignals])
+  useEffect(() => { loadDashboard(); loadSignals('52w'); loadMovers('1d'); loadAnomalies() }, [loadSignals, loadMovers])
+  useEffect(() => { loadMovers(moverPeriod) }, [moverPeriod, loadMovers])
+  useEffect(() => { loadSignals(sigPeriod) }, [sigPeriod, loadSignals])
 
-  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals(moverPeriod); loadAnomalies(anomalyFilter) }
+  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals(sigPeriod); loadAnomalies(anomalyFilter) }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -430,15 +434,26 @@ export default function MarketPage() {
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-semibold text-slate-700">Market Signals</h2>
-            <span className="text-xs text-slate-400">{PERIOD_LABELS[moverPeriod]}</span>
           </div>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-            {([['high', 'Highs'], ['low', 'Lows'], ['volume', 'Volume Surge']] as const).map(([k, label]) => (
-              <button key={k} onClick={() => setSigTab(k)}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${sigTab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                {label}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Signal type tabs */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+              {([['high', '↑ Highs'], ['low', '↓ Lows'], ['volume', '⚡ Volume']] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setSigTab(k)}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${sigTab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {/* Period selector — independent from movers, includes 52W */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+              {(Object.keys(SIG_PERIOD_LABELS) as SigPeriod[]).map(p => (
+                <button key={p} onClick={() => setSigPeriod(p)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${sigPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {SIG_PERIOD_LABELS[p]}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {signalsLoading ? (
@@ -446,7 +461,7 @@ export default function MarketPage() {
         ) : signals ? (
           <>
             {(() => {
-              const retLabel = (moverPeriod === '1m' || moverPeriod === '3m') ? '1M' : '1W'
+              const retLabel = (sigPeriod === '1m' || sigPeriod === '3m' || sigPeriod === '52w') ? '1M' : '1W'
               return (
                 <>
                   {sigTab === 'high' && (
@@ -455,7 +470,7 @@ export default function MarketPage() {
                         <tr className="text-xs text-slate-400 bg-slate-50">
                           <th className="py-2 px-3 text-left">Stock</th>
                           <th className="py-2 px-3 text-right">Price</th>
-                          <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} High</th>
+                          <th className="py-2 px-3 text-right">{SIG_PERIOD_LABELS[sigPeriod]} High</th>
                           <th className="py-2 px-3 text-right">From High</th>
                           <th className="py-2 px-3 text-right">{retLabel}</th>
                         </tr>
@@ -463,7 +478,7 @@ export default function MarketPage() {
                       <tbody>
                         {signals.near_period_high.length === 0
                           ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period high</td></tr>
-                          : signals.near_period_high.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="high" period={moverPeriod} />)}
+                          : signals.near_period_high.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="high" period={sigPeriod} />)}
                       </tbody>
                     </table>
                   )}
@@ -473,7 +488,7 @@ export default function MarketPage() {
                         <tr className="text-xs text-slate-400 bg-slate-50">
                           <th className="py-2 px-3 text-left">Stock</th>
                           <th className="py-2 px-3 text-right">Price</th>
-                          <th className="py-2 px-3 text-right">{PERIOD_LABELS[moverPeriod]} Low</th>
+                          <th className="py-2 px-3 text-right">{SIG_PERIOD_LABELS[sigPeriod]} Low</th>
                           <th className="py-2 px-3 text-right">From Low</th>
                           <th className="py-2 px-3 text-right">{retLabel}</th>
                         </tr>
@@ -481,7 +496,7 @@ export default function MarketPage() {
                       <tbody>
                         {signals.near_period_low.length === 0
                           ? <tr><td colSpan={5} className="py-6 text-center text-slate-400 text-xs">No stocks near period low</td></tr>
-                          : signals.near_period_low.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="low" period={moverPeriod} />)}
+                          : signals.near_period_low.map(s => <SignalHighLowRow key={s.asx_code} s={s} type="low" period={sigPeriod} />)}
                       </tbody>
                     </table>
                   )}
@@ -500,7 +515,7 @@ export default function MarketPage() {
                       <tbody>
                         {signals.volume_surge.length === 0
                           ? <tr><td colSpan={6} className="py-6 text-center text-slate-400 text-xs">No volume surges detected today</td></tr>
-                          : signals.volume_surge.map(s => <VolSurgeRow key={s.asx_code} s={s} period={moverPeriod} />)}
+                          : signals.volume_surge.map(s => <VolSurgeRow key={s.asx_code} s={s} period={sigPeriod} />)}
                       </tbody>
                     </table>
                   )}

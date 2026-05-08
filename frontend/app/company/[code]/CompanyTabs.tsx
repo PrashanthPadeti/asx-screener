@@ -1184,12 +1184,102 @@ function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
   )
 }
 
+// ── Key Metrics Snapshot ──────────────────────────────────────
+
+function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
+  type KMRow = { label: string; value: string; highlight?: 'green' | 'red' | 'neutral' }
+
+  const valuation: KMRow[] = [
+    { label: 'P/E Ratio',     value: fmtX(o.pe_ratio),
+      highlight: o.pe_ratio == null ? 'neutral' : o.pe_ratio > 0 && o.pe_ratio < 20 ? 'green' : o.pe_ratio > 40 ? 'red' : 'neutral' },
+    { label: 'Forward P/E',   value: fmtX(o.forward_pe),
+      highlight: o.forward_pe == null ? 'neutral' : o.forward_pe > 0 && o.forward_pe < 18 ? 'green' : o.forward_pe > 35 ? 'red' : 'neutral' },
+    { label: 'PEG Ratio',     value: fmtX(o.peg_ratio),
+      highlight: o.peg_ratio == null ? 'neutral' : o.peg_ratio < 1 ? 'green' : o.peg_ratio > 2 ? 'red' : 'neutral' },
+    { label: 'P/B Ratio',     value: fmtX(o.price_to_book),
+      highlight: o.price_to_book == null ? 'neutral' : o.price_to_book < 1.5 ? 'green' : o.price_to_book > 5 ? 'red' : 'neutral' },
+    { label: 'EV / EBITDA',   value: fmtX(o.ev_to_ebitda),
+      highlight: o.ev_to_ebitda == null ? 'neutral' : o.ev_to_ebitda < 10 ? 'green' : o.ev_to_ebitda > 25 ? 'red' : 'neutral' },
+    { label: 'EV / Revenue',  value: fmtX(o.ev_to_revenue) },
+  ]
+
+  const earnings: KMRow[] = [
+    { label: 'EPS (FY0 actual)',  value: o.eps_fy0 != null ? `$${o.eps_fy0.toFixed(2)}` : '—',
+      highlight: o.eps_fy0 == null ? 'neutral' : o.eps_fy0 > 0 ? 'green' : 'red' },
+    { label: 'EPS (FY1 est.)',    value: o.eps_fy1 != null ? `$${o.eps_fy1.toFixed(2)}` : '—',
+      highlight: o.eps_fy1 == null ? 'neutral' : o.eps_fy1 > 0 ? 'green' : 'red' },
+    { label: 'Dividend Yield',    value: o.dividend_yield != null ? `${(o.dividend_yield * 100).toFixed(2)}%` : '—',
+      highlight: o.dividend_yield != null && o.dividend_yield > 0.04 ? 'green' : 'neutral' },
+    { label: 'Grossed-Up Yield ★', value: o.grossed_up_yield != null ? `${(o.grossed_up_yield * 100).toFixed(2)}%` : '—',
+      highlight: o.grossed_up_yield != null && o.grossed_up_yield > 0.06 ? 'green' : 'neutral' },
+    { label: 'Franking',          value: o.franking_pct != null ? `${o.franking_pct.toFixed(0)}%` : '—',
+      highlight: o.franking_pct === 100 ? 'green' : 'neutral' },
+    { label: 'FCF Yield',         value: o.fcf_yield != null ? `${(o.fcf_yield * 100).toFixed(2)}%` : '—',
+      highlight: o.fcf_yield != null && o.fcf_yield > 0.04 ? 'green' : o.fcf_yield != null && o.fcf_yield < 0 ? 'red' : 'neutral' },
+  ]
+
+  const growth: KMRow[] = [
+    { label: 'Revenue Growth (1Y)', value: signedPct(o.revenue_growth_1y),
+      highlight: o.revenue_growth_1y == null ? 'neutral' : o.revenue_growth_1y > 0 ? 'green' : 'red' },
+    { label: 'Earnings Growth (1Y)', value: signedPct(o.earnings_growth_1y),
+      highlight: o.earnings_growth_1y == null ? 'neutral' : o.earnings_growth_1y > 0 ? 'green' : 'red' },
+    ...(o.revenue_growth_hoh != null ? [{
+      label: 'Revenue Growth HoH ★', value: signedPct(o.revenue_growth_hoh),
+      highlight: (o.revenue_growth_hoh > 0 ? 'green' : 'red') as 'green' | 'red',
+    }] : []),
+    { label: 'D/E Ratio',           value: fmtX(o.debt_to_equity),
+      highlight: o.debt_to_equity == null ? 'neutral' : o.debt_to_equity < 0.3 ? 'green' : o.debt_to_equity > 2 ? 'red' : 'neutral' },
+    { label: 'Free Cash Flow (FY0)', value: fmtM(o.fcf_fy0),
+      highlight: o.fcf_fy0 == null ? 'neutral' : o.fcf_fy0 > 0 ? 'green' : 'red' },
+    { label: 'CFO (FY0)',            value: fmtM(o.cfo_fy0) },
+  ]
+
+  const col = (rows: KMRow[]) => (
+    <div className="divide-y divide-gray-50">
+      {rows.map(r => (
+        <div key={r.label} className="flex items-baseline justify-between py-1.5 group hover:bg-blue-50/30 -mx-1 px-1 rounded transition-colors">
+          <span className="text-xs text-gray-400 font-medium mr-2">{r.label}</span>
+          <span className={`text-sm font-semibold whitespace-nowrap ${
+            r.highlight === 'green' ? 'text-emerald-600' :
+            r.highlight === 'red'   ? 'text-red-500' :
+            'text-gray-800'
+          }`}>{r.value}</span>
+        </div>
+      ))}
+    </div>
+  )
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100">
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Fundamental Snapshot</h3>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-gray-100 p-4 gap-0">
+        <div className="sm:pr-4 pb-4 sm:pb-0">
+          <p className="text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-2">Valuation</p>
+          {col(valuation)}
+        </div>
+        <div className="sm:px-4 py-4 sm:py-0">
+          <p className="text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-2">Earnings &amp; Income</p>
+          {col(earnings)}
+        </div>
+        <div className="sm:pl-4 pt-4 sm:pt-0">
+          <p className="text-[10px] font-bold text-gray-300 uppercase tracking-wider mb-2">Growth &amp; Cash Flow</p>
+          {col(growth)}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FinancialsTab({
+  overview,
   financials,
   halfYearly,
   period,
   onPeriodChange,
 }: {
+  overview: CompanyOverview | null
   financials: FinancialsResponse | null
   halfYearly: HalfYearlyResponse | null
   period: FinancialPeriod
@@ -1201,6 +1291,9 @@ function FinancialsTab({
 
   return (
     <div className="space-y-3">
+      {/* Key Metrics Snapshot */}
+      {overview && <KeyMetricsPanel o={overview} />}
+
       {/* Period toggle */}
       <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5 w-fit">
         {([
@@ -2447,6 +2540,7 @@ export default function CompanyTabs({ code }: { code: string }) {
               isLoading('financials')
                 ? <div className="grid grid-cols-1 gap-4">{[1,2,3].map(i=><LoadingCard key={i}/>)}</div>
                 : <FinancialsTab
+                    overview={overview}
                     financials={financials}
                     halfYearly={halfYearly}
                     period={financialPeriod}

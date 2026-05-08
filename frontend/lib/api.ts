@@ -1660,3 +1660,63 @@ export const getCommodityDetail = async (code: string, days = 365): Promise<Comm
   const { data } = await api.get(`/api/v1/commodities/${code}?days=${days}`)
   return data
 }
+
+// ── Saved Screens ─────────────────────────────────────────────────────────────
+
+export interface SavedScreen {
+  id:          string
+  user_id:     string
+  user_name:   string
+  name:        string
+  description: string | null
+  filters:     ScreenerFilter[]
+  sort_by:     string
+  sort_dir:    string
+  is_public:   boolean
+  use_count:   number
+  created_at:  string | null
+  updated_at:  string | null
+}
+
+export const getCommunityScreens = async (): Promise<{ screens: SavedScreen[] }> => {
+  const { data } = await api.get('/api/v1/screens/community')
+  return data
+}
+
+export const getMyScreens = async (): Promise<{ screens: SavedScreen[] }> => {
+  const { data } = await api.get('/api/v1/screens/mine')
+  return data
+}
+
+export const saveScreen = async (payload: {
+  name: string
+  description?: string
+  filters: ScreenerFilter[]
+  sort_by: string
+  sort_dir: string
+  is_public: boolean
+}): Promise<SavedScreen> => {
+  const { data } = await api.post('/api/v1/screens', payload)
+  return data
+}
+
+export const updateScreen = async (id: string, payload: Partial<{
+  name: string
+  description: string
+  filters: ScreenerFilter[]
+  sort_by: string
+  sort_dir: string
+  is_public: boolean
+}>): Promise<SavedScreen> => {
+  const { data } = await api.put(`/api/v1/screens/${id}`, payload)
+  return data
+}
+
+export const deleteScreen = async (id: string): Promise<void> => {
+  await api.delete(`/api/v1/screens/${id}`)
+}
+
+export const incrementScreenUse = async (id: string): Promise<void> => {
+  await api.post(`/api/v1/screens/${id}/use`).catch(() => {})
+}
+

@@ -4,8 +4,9 @@ import Link from 'next/link'
 import {
   Shield, Zap, Award, RotateCcw, DollarSign, Search,
   TrendingUp, BarChart2, ArrowUp, Star, Activity, Lock,
+  Globe, Users, Play,
 } from 'lucide-react'
-import { getScreenerPresets, type ScreenerPreset } from '@/lib/api'
+import { getScreenerPresets, getCommunityScreens, incrementScreenUse, type ScreenerPreset, type SavedScreen } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
@@ -143,11 +144,15 @@ export default function ScansPage() {
   const isPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(user?.plan ?? 'free')
   const [presets, setPresets] = useState<ScreenerPreset[]>([])
   const [loading, setLoading] = useState(true)
+  const [community, setCommunity] = useState<SavedScreen[]>([])
 
   useEffect(() => {
     getScreenerPresets()
       .then(d => setPresets(d.presets))
       .finally(() => setLoading(false))
+    getCommunityScreens()
+      .then(d => setCommunity(d.screens))
+      .catch(() => {})
   }, [])
 
   const presetMap = Object.fromEntries(presets.map(p => [p.id, p]))
@@ -200,23 +205,86 @@ export default function ScansPage() {
             <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          CATEGORIES.map(cat => {
-            const catPresets = cat.ids.map(id => presetMap[id]).filter(Boolean)
-            if (!catPresets.length) return null
-            return (
-              <section key={cat.key}>
-                <div className="mb-4">
-                  <h2 className="text-base font-bold text-gray-900">{cat.label}</h2>
-                  <p className="text-xs text-gray-500 mt-0.5">{cat.description}</p>
+          <>
+            {CATEGORIES.map(cat => {
+              const catPresets = cat.ids.map(id => presetMap[id]).filter(Boolean)
+              if (!catPresets.length) return null
+              return (
+                <section key={cat.key}>
+                  <div className="mb-4">
+                    <h2 className="text-base font-bold text-gray-900">{cat.label}</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">{cat.description}</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {catPresets.map(p => (
+                      <ScanCard key={p.id} preset={p} isPro={isPro} />
+                    ))}
+                  </div>
+                </section>
+              )
+            })}
+
+            {/* Community Screens */}
+            <section>
+              <div className="mb-4 flex items-center gap-2">
+                <Users className="w-4 h-4 text-blue-500" />
+                <div>
+                  <h2 className="text-base font-bold text-gray-900">Community Screens</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Screens created and shared by ASX Screener users</p>
                 </div>
+              </div>
+              {community.length === 0 ? (
+                <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
+                  <Globe className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                  <p className="text-sm text-gray-500">No community screens yet.</p>
+                  <p className="text-xs text-gray-400 mt-1">Save a screen in the Screener and make it public to share with others.</p>
+                </div>
+              ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {catPresets.map(p => (
-                    <ScanCard key={p.id} preset={p} isPro={isPro} />
+                  {community.map(s => (
+                    <Link
+                      key={s.id}
+                      href={`/screener?screen=${s.id}`}
+                      onClick={() => incrementScreenUse(s.id)}
+                      className="group relative flex flex-col gap-3 p-5 rounded-xl border border-gray-200 bg-white
+                                 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center shrink-0 transition-colors">
+                          <Globe className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <span className="text-xs text-gray-400 shrink-0">
+                          {s.use_count > 0 && `${s.use_count} run${s.use_count !== 1 ? 's' : ''}`}
+                        </span>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-sm text-gray-900 mb-0.5">{s.name}</h3>
+                        {s.description && <p className="text-xs text-gray-500 leading-relaxed">{s.description}</p>}
+                        <p className="text-[11px] text-gray-400 mt-1">by {s.user_name}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-1 mt-auto pt-1">
+                        {s.filters.slice(0, 3).map((f, i) => (
+                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                            {(f.field as string).replace(/_/g, ' ')}
+                          </span>
+                        ))}
+                        {s.filters.length > 3 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                            +{s.filters.length - 3} more
+                          </span>
+                        )}
+                      </div>
+                      <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center">
+                          <Play className="w-3 h-3 text-white" />
+                        </div>
+                      </div>
+                    </Link>
                   ))}
                 </div>
-              </section>
-            )
-          })
+              )}
+            </section>
+          </>
         )}
       </div>
     </div>

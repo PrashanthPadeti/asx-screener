@@ -14,11 +14,16 @@ import {
 import {
   Plus, Trash2, Play, ChevronUp, ChevronDown,
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
-  Sparkles, Search, Lock,
+  Sparkles, Search, Lock, Bookmark, Globe, Eye, EyeOff, Pencil,
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
 import { useAuth } from '@/lib/auth'
+import {
+  saveScreen, getMyScreens, updateScreen, deleteScreen,
+  getCommunityScreens, incrementScreenUse,
+  type SavedScreen,
+} from '@/lib/api'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -398,6 +403,16 @@ export default function ScreenerPage() {
   const [nlError, setNlError]               = useState<string | null>(null)
   const [nlResult, setNlResult]             = useState<NLScreenerResponse | null>(null)
 
+  // Saved screens state
+  const [myScreens, setMyScreens]           = useState<SavedScreen[]>([])
+  const [showSaveModal, setShowSaveModal]   = useState(false)
+  const [saveName, setSaveName]             = useState('')
+  const [saveDesc, setSaveDesc]             = useState('')
+  const [savePublic, setSavePublic]         = useState(false)
+  const [saving, setSaving]                 = useState(false)
+  const [showMyScreens, setShowMyScreens]   = useState(false)
+  const [editingScreen, setEditingScreen]   = useState<SavedScreen | null>(null)
+
   // Column visibility — persisted to localStorage
   const STORAGE_KEY = 'screener_visible_columns_v1'
   const defaultVisible = new Set(
@@ -450,6 +465,18 @@ export default function ScreenerPage() {
         if (found) applyPresetDirect(found)
       }
     }).catch(console.error)
+
+    // Auto-load community screen from URL ?screen=id
+    const screenId = searchParams.get('screen')
+    if (screenId) {
+      getCommunityScreens().then(d => {
+        const found = d.screens.find(s => s.id === screenId)
+        if (found) {
+          loadSavedScreen(found)
+          incrementScreenUse(screenId)
+        }
+      }).catch(console.error)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter operations
@@ -508,6 +535,64 @@ export default function ScreenerPage() {
     setActivePreset(null)
     setResults([])
     setRan(false)
+  }
+
+  // Load my screens when panel opens
+  const loadMyScreens = async () => {
+    if (!user) return
+    try {
+      const d = await getMyScreens()
+      setMyScreens(d.screens)
+    } catch { /* ignore */ }
+  }
+
+  const handleSaveScreen = async () => {
+    if (!saveName.trim()) return
+    setSaving(true)
+    try {
+      const screen = await saveScreen({
+        name:      saveName.trim(),
+        description: saveDesc.trim() || undefined,
+        filters:   buildApiFilters(),
+        sort_by:   sortBy,
+        sort_dir:  sortDir,
+        is_public: savePublic,
+      })
+      setMyScreens(s => [screen, ...s])
+      setShowSaveModal(false)
+      setSaveName('')
+      setSaveDesc('')
+      setSavePublic(false)
+    } catch { /* ignore */ } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUpdateScreen = async (id: string, patch: Partial<SavedScreen>) => {
+    try {
+      const updated = await updateScreen(id, patch)
+      setMyScreens(s => s.map(x => x.id === id ? updated : x))
+    } catch { /* ignore */ }
+  }
+
+  const handleDeleteScreen = async (id: string) => {
+    try {
+      await deleteScreen(id)
+      setMyScreens(s => s.filter(x => x.id !== id))
+    } catch { /* ignore */ }
+  }
+
+  const loadSavedScreen = (screen: SavedScreen) => {
+    const rows: FilterRow[] = screen.filters.map(f => ({
+      id:       nextId++,
+      field:    f.field,
+      operator: f.operator,
+      value:    String(f.value),
+    }))
+    setFilters(rows)
+    setSortBy(screen.sort_by)
+    setSortDir(screen.sort_dir as 'asc' | 'desc')
+    setActivePreset(null)
   }
 
   // Build API filters from current filter rows
@@ -762,6 +847,72 @@ export default function ScreenerPage() {
         </div>
       )}
 
+      {/* Save Screen modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-900">Save Screen</h2>
+              <button onClick={() => setShowSaveModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
+                <input
+                  value={saveName}
+                  onChange={e => setSaveName(e.target.value)}
+                  placeholder="e.g. High Yield Franked Miners"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
+                <textarea
+                  value={saveDesc}
+                  onChange={e => setSaveDesc(e.target.value)}
+                  placeholder="What does this screen look for?"
+                  rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSavePublic(v => !v)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
+                    savePublic
+                      ? 'bg-green-50 border-green-300 text-green-700'
+                      : 'bg-gray-50 border-gray-300 text-gray-600'
+                  )}>
+                  {savePublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  {savePublic ? 'Public — visible to all' : 'Private — only you'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">
+                {filters.filter(f => f.value !== '').length} filter{filters.filter(f => f.value !== '').length !== 1 ? 's' : ''} will be saved
+              </p>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowSaveModal(false)}
+                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveScreen}
+                disabled={saving || !saveName.trim()}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white
+                           rounded-lg font-semibold disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save Screen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter builder */}
       <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -857,19 +1008,81 @@ export default function ScreenerPage() {
           )
         })}
 
-        <div className="pt-2 flex items-center gap-3">
+        <div className="pt-2 flex items-center gap-3 flex-wrap">
           <button onClick={() => runScreen(1)} disabled={loading}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold
                        rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
             <Play className="w-4 h-4" />
             {loading ? 'Running…' : 'Run Screen'}
           </button>
+          {user && filters.length > 0 && (
+            <button
+              onClick={() => setShowSaveModal(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm border border-gray-300 rounded-lg
+                         bg-white hover:bg-gray-50 text-gray-700 font-medium">
+              <Bookmark className="w-4 h-4" /> Save Screen
+            </button>
+          )}
+          {user && (
+            <button
+              onClick={() => { setShowMyScreens(v => !v); if (!showMyScreens) loadMyScreens() }}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-sm border rounded-lg font-medium transition-colors',
+                showMyScreens
+                  ? 'bg-blue-50 border-blue-300 text-blue-700'
+                  : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+              )}>
+              <Eye className="w-4 h-4" /> My Screens
+            </button>
+          )}
           {ran && !loading && (
             <span className="text-sm text-gray-500">
               {total.toLocaleString()} stocks matched
             </span>
           )}
         </div>
+
+        {/* My Screens panel */}
+        {showMyScreens && user && (
+          <div className="border-t border-gray-100 pt-3 mt-1">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">My Saved Screens</p>
+            {myScreens.length === 0 ? (
+              <p className="text-sm text-gray-400">No saved screens yet. Run a screen and click &quot;Save Screen&quot;.</p>
+            ) : (
+              <div className="space-y-2">
+                {myScreens.map(s => (
+                  <div key={s.id} className="flex items-center gap-2 group">
+                    <button
+                      onClick={() => loadSavedScreen(s)}
+                      className="flex-1 text-left px-3 py-2 rounded-lg border border-gray-200
+                                 hover:border-blue-300 hover:bg-blue-50 transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                        {s.is_public
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-100 text-green-700 font-semibold">Public</span>
+                          : <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-semibold">Private</span>
+                        }
+                      </div>
+                      {s.description && <p className="text-xs text-gray-400 mt-0.5">{s.description}</p>}
+                    </button>
+                    <button
+                      onClick={() => handleUpdateScreen(s.id, { is_public: !s.is_public })}
+                      title={s.is_public ? 'Make private' : 'Make public'}
+                      className="p-1.5 text-gray-400 hover:text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                      {s.is_public ? <EyeOff className="w-4 h-4" /> : <Globe className="w-4 h-4" />}
+                    </button>
+                    <button
+                      onClick={() => handleDeleteScreen(s.id)}
+                      title="Delete"
+                      className="p-1.5 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Results table */}

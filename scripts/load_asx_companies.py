@@ -72,19 +72,30 @@ def download_asx_list() -> list[dict]:
     resp.raise_for_status()
 
     lines = resp.text.splitlines()
-    # First line is: "ASX listed companies as at ..."
-    # Second line is the CSV header: "Company name,ASX code,GICS industry group"
-    csv_lines = "\n".join(lines[1:])  # skip first description line
+    print(f"  First 3 raw lines: {lines[:3]}")
 
+    # Find the header row (contains "ASX code" or "asx code")
+    header_idx = 0
+    for i, line in enumerate(lines[:5]):
+        if "asx" in line.lower() and ("code" in line.lower() or "company" in line.lower()):
+            header_idx = i
+            break
+
+    csv_lines = "\n".join(lines[header_idx:])
     reader = csv.DictReader(StringIO(csv_lines))
-    # Normalise header names
+    print(f"  CSV fieldnames: {reader.fieldnames}")
+
     rows = []
     for row in reader:
-        normalised = {(k or "").strip().lower().replace(" ", "_"): (v or "").strip() for k, v in row.items() if k}
+        normalised = {}
+        for k, v in row.items():
+            if k is not None:
+                normalised[k.strip().lower().replace(" ", "_")] = (v or "").strip()
         rows.append(normalised)
 
     if rows:
-        print(f"  CSV columns detected: {list(rows[0].keys())}")
+        print(f"  First row keys: {list(rows[0].keys())}")
+        print(f"  First row sample: {rows[0]}")
     print(f"  Downloaded {len(rows)} companies")
     return rows
 

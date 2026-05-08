@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
 from app.core.plans import PLAN_RANK as _PLAN_RANK
+from app.core.config import settings
 from app.db.session import get_db
 
 # ── Bearer scheme (auto_error=False so optional use works) ───────────────────
@@ -79,6 +80,16 @@ async def get_optional_user(
     authenticated and anonymous users.
     """
     return await _resolve_user(credentials, db)
+
+
+async def require_admin(
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Raise 403 if the user is not in the ADMIN_EMAILS list."""
+    admin_list = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
+    if user["email"].lower() not in admin_list:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return user
 
 
 def require_plan(minimum: str):

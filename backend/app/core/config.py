@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     # Email (Resend)
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "noreply@asxscreener.com.au"
+    SUPPORT_EMAIL: str = "asxscreener@gmail.com"
+    ADMIN_EMAILS: str = "asxscreener@gmail.com"   # comma-separated list
 
     # SMS (Twilio)
     TWILIO_ACCOUNT_SID:  str = ""

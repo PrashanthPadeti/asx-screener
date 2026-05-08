@@ -85,6 +85,64 @@ def send_alert_email(
         return False
 
 
+def send_support_notification(
+    ticket_number: int,
+    name: str,
+    email: str,
+    phone: Optional[str],
+    category: str,
+    subject: str,
+    description: str,
+    user_id: Optional[str] = None,
+) -> bool:
+    """Send a new support ticket notification to the support team."""
+    resend = _client()
+    support_to = settings.SUPPORT_EMAIL
+
+    cat_label = category.replace("_", " ").title()
+    html = f"""
+    <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
+      <h2 style="color:#1d4ed8;margin-bottom:4px">🎫 New Support Ticket #{ticket_number}</h2>
+      <table style="width:100%;border-collapse:collapse;margin-top:16px">
+        <tr><td style="padding:6px 0;color:#6b7280;width:120px">Category</td>
+            <td style="padding:6px 0;font-weight:600">{cat_label}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">Subject</td>
+            <td style="padding:6px 0;font-weight:600">{subject}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">From</td>
+            <td style="padding:6px 0">{name} &lt;{email}&gt;</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">Phone</td>
+            <td style="padding:6px 0">{phone or '—'}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">User ID</td>
+            <td style="padding:6px 0;font-size:12px;color:#9ca3af">{user_id or 'Not logged in'}</td></tr>
+      </table>
+      <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+        <p style="margin:0;white-space:pre-wrap;color:#374151">{description}</p>
+      </div>
+      <a href="https://asxscreener.com.au/admin/support"
+         style="display:inline-block;margin-top:16px;padding:10px 20px;
+                background:#2563eb;color:white;border-radius:8px;text-decoration:none">
+        View in Admin Panel
+      </a>
+    </div>
+    """
+    if resend is None:
+        log.info(f"[email no-op] Support ticket #{ticket_number}: {subject} from {email}")
+        return False
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [support_to],
+            "reply_to": email,
+            "subject": f"[Ticket #{ticket_number}] {subject}",
+            "html":    html,
+        })
+        log.info(f"Support notification sent for ticket #{ticket_number}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send support notification: {e}")
+        return False
+
+
 def send_password_reset_email(to_email: str, reset_url: str, name: Optional[str] = None) -> bool:
     """Send a password reset link email."""
     resend = _client()

@@ -26,8 +26,9 @@ const MARKET_DATA_LINKS = [
 ]
 
 const RESOURCES_LINKS = [
-  { href: '/learn',   label: 'Education Hub',  icon: BookOpen,   desc: 'Guides, tutorials & courses',         premium: true },
-  { href: '/brokers', label: 'Broker Compare', icon: DollarSign, desc: 'Best ASX trading platforms 2026',     premium: true },
+  { href: '/learn',   label: 'Education Hub',  icon: BookOpen,   desc: 'Guides, tutorials & courses',     premium: true },
+  { href: '/brokers', label: 'Broker Compare', icon: DollarSign, desc: 'Best ASX trading platforms 2026', premium: true },
+  { href: '/contact', label: 'Contact Support', icon: Bell,      desc: 'Get help or report an issue',      premium: false },
 ]
 
 const PLAN_BADGE: Record<string, string> = {

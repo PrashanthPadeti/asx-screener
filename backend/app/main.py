@@ -35,6 +35,10 @@ async def lifespan(app: FastAPI):
     from app.workers.fund_prices_worker import compute_fund_prices
     from app.workers.global_markets_worker import compute_global_markets
     from app.workers.commodities_worker import compute_commodities
+    from app.workers.market_snapshot_worker import run_market_snapshot
+    from app.workers.asx_indices_worker import run_asx_indices
+    from app.workers.short_positions_worker import run_short_positions
+    from app.workers.anomaly_worker import run_anomaly_detect
 
     scheduler = AsyncIOScheduler()
 
@@ -81,8 +85,29 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=17, minute=45, timezone="Australia/Sydney"),
                       id="commodities", replace_existing=True)
 
+    # ASX index constituent flags (is_asx200/300) — daily at 5:50pm AEST
+    scheduler.add_job(run_asx_indices,
+                      CronTrigger(hour=17, minute=50, timezone="Australia/Sydney"),
+                      id="asx_indices", replace_existing=True)
+
+    # ASIC short positions — daily at 6:30pm AEST (ASIC publishes ~6pm)
+    scheduler.add_job(run_short_positions,
+                      CronTrigger(hour=18, minute=30, timezone="Australia/Sydney"),
+                      id="short_positions", replace_existing=True)
+
+    # Market snapshot (ASX200/300, movers, shorted) — daily at 6:45pm AEST
+    # Runs after index flags + short data are updated
+    scheduler.add_job(run_market_snapshot,
+                      CronTrigger(hour=18, minute=45, timezone="Australia/Sydney"),
+                      id="market_snapshot", replace_existing=True)
+
+    # Anomaly detection — daily at 7:00pm AEST (after snapshot)
+    scheduler.add_job(run_anomaly_detect,
+                      CronTrigger(hour=19, minute=0, timezone="Australia/Sydney"),
+                      id="anomaly_detect", replace_existing=True)
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), short-positions(6:30pm), market-snapshot(6:45pm), anomaly-detect(7:00pm)")
 
     yield
 

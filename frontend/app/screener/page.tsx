@@ -568,7 +568,7 @@ export default function ScreenerPage() {
     }
   }
 
-  const handleUpdateScreen = async (id: string, patch: Partial<SavedScreen>) => {
+  const handleUpdateScreen = async (id: string, patch: { is_public?: boolean; name?: string; description?: string }) => {
     try {
       const updated = await updateScreen(id, patch)
       setMyScreens(s => s.map(x => x.id === id ? updated : x))

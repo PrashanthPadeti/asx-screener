@@ -80,7 +80,7 @@ def download_asx_list() -> list[dict]:
     # Normalise header names
     rows = []
     for row in reader:
-        normalised = {k.strip().lower().replace(" ", "_"): (v or "").strip() for k, v in row.items()}
+        normalised = {(k or "").strip().lower().replace(" ", "_"): (v or "").strip() for k, v in row.items() if k}
         rows.append(normalised)
 
     print(f"  Downloaded {len(rows)} companies")

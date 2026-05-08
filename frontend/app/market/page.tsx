@@ -285,7 +285,7 @@ export default function MarketPage() {
 
   const [anomalies, setAnomalies]         = useState<AnomalyFlag[]>([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(false)
-  const [anomalyFilter, setAnomalyFilter] = useState<string>('all')
+  const [anomalyFilter, setAnomalyFilter] = useState('all')
 
   const loadDashboard = async () => {
     setLoading(true); setError(null)
@@ -612,11 +612,19 @@ export default function MarketPage() {
               </span>
             )}
           </div>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-            {(['all', 'volume_spike', 'price_gap', 'short_squeeze', 'reversal'] as const).map(f => (
+          <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+            {([
+              ['all',                      'All'],
+              ['VALUE_GROWTH',             'Value Growth'],
+              ['OVERSOLD_QUALITY',         'Oversold Quality'],
+              ['OVERBOUGHT_WEAK',          'Overbought Weak'],
+              ['PRICE_EARNINGS_DIVERGENCE','PE Divergence'],
+              ['DIVIDEND_YIELD_SPIKE',     'Yield Spike'],
+              ['SHORT_SQUEEZE_RISK',       'Short Squeeze'],
+            ] as const).map(([f, label]) => (
               <button key={f} onClick={() => { setAnomalyFilter(f); loadAnomalies(f) }}
                 className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${anomalyFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                {f === 'all' ? 'All' : f.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}
+                {label}
               </button>
             ))}
           </div>

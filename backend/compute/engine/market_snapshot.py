@@ -172,12 +172,27 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
             LIMIT {TOP_N}
         """))).mappings().all()
 
-        movers["SHORTED"] = (await session.execute(text(f"""
+        # Heavy buying: volume surge + price rising
+        movers["BUYING"] = (await session.execute(text(f"""
             SELECT {mover_base}
             FROM screener.universe
-            WHERE {liquid_filter} AND short_pct IS NOT NULL AND short_pct > 0
-              AND market_cap > 50
-            ORDER BY short_pct DESC NULLS LAST
+            WHERE {liquid_filter}
+              AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
+              AND return_1w > 0
+              AND volume::float / avg_volume_20d >= 1.5
+            ORDER BY volume::float / avg_volume_20d DESC NULLS LAST
+            LIMIT {TOP_N}
+        """))).mappings().all()
+
+        # Heavy selling: volume surge + price falling
+        movers["SELLING"] = (await session.execute(text(f"""
+            SELECT {mover_base}
+            FROM screener.universe
+            WHERE {liquid_filter}
+              AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
+              AND return_1w < 0
+              AND volume::float / avg_volume_20d >= 1.5
+            ORDER BY volume::float / avg_volume_20d DESC NULLS LAST
             LIMIT {TOP_N}
         """))).mappings().all()
 

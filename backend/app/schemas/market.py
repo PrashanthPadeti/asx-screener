@@ -74,8 +74,10 @@ class ActiveStock(DashboardStock):
     avg_volume_20d: Optional[int] = None
 
 
-class ShortedStock(DashboardStock):
-    short_pct: Optional[float] = None
+class VolumePressureStock(DashboardStock):
+    volume: Optional[int] = None
+    avg_volume_20d: Optional[int] = None
+    volume_ratio: Optional[float] = None   # volume / avg_volume_20d
 
 
 class SectorHeatmapItem(BaseModel):
@@ -102,7 +104,8 @@ class MarketDashboard(BaseModel):
     top_gainers: list[DashboardStock]
     top_losers: list[DashboardStock]
     most_active: list[ActiveStock]
-    most_shorted: list[ShortedStock]
+    heavy_buying: list[VolumePressureStock]
+    heavy_selling: list[VolumePressureStock]
     upcoming_exdiv: list[ExDivStock]
     period: str = "1w"
     universe_built_at: Optional[datetime] = None

@@ -19,7 +19,7 @@ from app.schemas.market import (
     IndexSnapshot,
     DashboardStock,
     ActiveStock,
-    ShortedStock,
+    VolumePressureStock,
     SectorHeatmapItem,
     ExDivStock,
 )
@@ -368,7 +368,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
         ORDER BY snapshot_type, rank
     """), {"d": snap_date})).mappings().all()
 
-    by_type: dict[str, list] = {"GAINER": [], "LOSER": [], "ACTIVE": [], "SHORTED": []}
+    by_type: dict[str, list] = {"GAINER": [], "LOSER": [], "ACTIVE": [], "BUYING": [], "SELLING": []}
     for r in mover_rows:
         by_type.setdefault(r["snapshot_type"], []).append(r)
 
@@ -380,6 +380,22 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
             price=float(r["price"]) if r["price"] is not None else None,
             return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
             market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
+        )
+
+    def _vol_pressure(r) -> VolumePressureStock:
+        vol = int(r["volume"]) if r["volume"] is not None else None
+        avg = int(r["avg_volume_20d"]) if r["avg_volume_20d"] is not None else None
+        ratio = (r["volume"] / r["avg_volume_20d"]) if (r["volume"] and r["avg_volume_20d"]) else None
+        return VolumePressureStock(
+            asx_code=r["asx_code"],
+            company_name=r["company_name"],
+            sector=r["sector"],
+            price=float(r["price"]) if r["price"] is not None else None,
+            return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
+            market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
+            volume=vol,
+            avg_volume_20d=avg,
+            volume_ratio=float(ratio) if ratio is not None else None,
         )
 
     # Ex-div snapshots
@@ -420,18 +436,8 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
             )
             for r in by_type["ACTIVE"]
         ],
-        most_shorted=[
-            ShortedStock(
-                asx_code=r["asx_code"],
-                company_name=r["company_name"],
-                sector=r["sector"],
-                price=float(r["price"]) if r["price"] is not None else None,
-                return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
-                market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
-                short_pct=float(r["short_pct"]) if r["short_pct"] is not None else None,
-            )
-            for r in by_type["SHORTED"]
-        ],
+        heavy_buying=[_vol_pressure(r) for r in by_type["BUYING"]],
+        heavy_selling=[_vol_pressure(r) for r in by_type["SELLING"]],
         upcoming_exdiv=[
             ExDivStock(
                 asx_code=r["asx_code"],

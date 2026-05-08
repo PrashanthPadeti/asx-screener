@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import {
   getMarketDashboard, getMarketMovers, getMarketSignals, getMarketAnomalies,
-  MarketDashboard, DashboardStock, ActiveStock, ShortedStock,
+  MarketDashboard, DashboardStock, ActiveStock, VolumePressureStock,
   ExDivStock, MoverStock, SignalStock, AnomalyFlag,
 } from '@/lib/api'
 
@@ -157,16 +157,20 @@ function ActiveRow({ s, rank }: { s: ActiveStock; rank: number }) {
   )
 }
 
-function ShortedRow({ s, rank }: { s: ShortedStock; rank: number }) {
+function VolumePressureRow({ s, rank, type }: { s: VolumePressureStock; rank: number; type: 'buying' | 'selling' }) {
+  const ratioColor = type === 'buying'
+    ? (s.volume_ratio ?? 0) >= 3 ? 'text-emerald-700 font-bold' : 'text-emerald-600 font-semibold'
+    : (s.volume_ratio ?? 0) >= 3 ? 'text-red-700 font-bold' : 'text-red-500 font-semibold'
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3 text-xs text-slate-400 w-6">{rank}</td>
       <td className="py-2 px-3">
         <Link href={`/company/${s.asx_code}`} className="font-semibold text-blue-600 hover:underline text-sm">{s.asx_code}</Link>
-        <div className="text-xs text-slate-500 truncate max-w-[120px]">{s.company_name}</div>
+        <div className="text-xs text-slate-500 truncate max-w-[110px]">{s.company_name}</div>
       </td>
-      <td className="py-2 px-3 text-sm text-right font-semibold text-red-600">
-        {s.short_pct != null ? s.short_pct.toFixed(1) + '%' : '—'}
+      <td className="py-2 px-3 text-sm text-right">{fmtPrice(s.price)}</td>
+      <td className={`py-2 px-3 text-sm text-right ${ratioColor}`}>
+        {s.volume_ratio != null ? s.volume_ratio.toFixed(1) + '×' : '—'}
       </td>
       <td className={`py-2 px-3 text-sm text-right ${retColor(s.return_1w)}`}>{fmtPct(s.return_1w)}</td>
     </tr>
@@ -528,8 +532,8 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* Most Active + Most Shorted */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Most Active + Heavy Buying + Heavy Selling */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <TableCard title="Most Active by Volume" icon={Activity}>
           <table className="w-full text-sm">
             <thead>
@@ -538,7 +542,7 @@ export default function MarketPage() {
                 <th className="py-2 px-3 text-left">Stock</th>
                 <th className="py-2 px-3 text-right">Price</th>
                 <th className="py-2 px-3 text-right">Volume</th>
-                <th className="py-2 px-3 text-right">vs 20D Avg</th>
+                <th className="py-2 px-3 text-right">vs 20D</th>
               </tr>
             </thead>
             <tbody>
@@ -547,20 +551,52 @@ export default function MarketPage() {
           </table>
         </TableCard>
 
-        <TableCard title="Most Heavily Shorted" icon={TrendingDown}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-xs text-slate-400 bg-slate-50">
-                <th className="py-2 px-3 text-left w-6">#</th>
-                <th className="py-2 px-3 text-left">Stock</th>
-                <th className="py-2 px-3 text-right">Short %</th>
-                <th className="py-2 px-3 text-right">1W Return</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.most_shorted.map((s, i) => <ShortedRow key={s.asx_code} s={s} rank={i + 1} />)}
-            </tbody>
-          </table>
+        <TableCard title="Heavy Buying" icon={ArrowUp}>
+          <div className="px-4 py-1.5 bg-emerald-50 border-b border-emerald-100">
+            <p className="text-xs text-emerald-700">Volume surge + price rising — potential overbought</p>
+          </div>
+          {data.heavy_buying.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-400">No heavy buying detected today</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-400 bg-slate-50">
+                  <th className="py-2 px-3 text-left w-6">#</th>
+                  <th className="py-2 px-3 text-left">Stock</th>
+                  <th className="py-2 px-3 text-right">Price</th>
+                  <th className="py-2 px-3 text-right">Vol Ratio</th>
+                  <th className="py-2 px-3 text-right">1W</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.heavy_buying.map((s, i) => <VolumePressureRow key={s.asx_code} s={s} rank={i + 1} type="buying" />)}
+              </tbody>
+            </table>
+          )}
+        </TableCard>
+
+        <TableCard title="Heavy Selling" icon={ArrowDown}>
+          <div className="px-4 py-1.5 bg-red-50 border-b border-red-100">
+            <p className="text-xs text-red-700">Volume surge + price falling — potential oversold bounce</p>
+          </div>
+          {data.heavy_selling.length === 0 ? (
+            <div className="py-8 text-center text-sm text-slate-400">No heavy selling detected today</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-400 bg-slate-50">
+                  <th className="py-2 px-3 text-left w-6">#</th>
+                  <th className="py-2 px-3 text-left">Stock</th>
+                  <th className="py-2 px-3 text-right">Price</th>
+                  <th className="py-2 px-3 text-right">Vol Ratio</th>
+                  <th className="py-2 px-3 text-right">1W</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.heavy_selling.map((s, i) => <VolumePressureRow key={s.asx_code} s={s} rank={i + 1} type="selling" />)}
+              </tbody>
+            </table>
+          )}
         </TableCard>
       </div>
 

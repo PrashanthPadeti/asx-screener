@@ -616,8 +616,10 @@ export interface ActiveStock extends DashboardStock {
   avg_volume_20d: number | null
 }
 
-export interface ShortedStock extends DashboardStock {
-  short_pct: number | null
+export interface VolumePressureStock extends DashboardStock {
+  volume: number | null
+  avg_volume_20d: number | null
+  volume_ratio: number | null
 }
 
 export interface SectorHeatmapItem {
@@ -644,7 +646,8 @@ export interface MarketDashboard {
   top_gainers: DashboardStock[]
   top_losers: DashboardStock[]
   most_active: ActiveStock[]
-  most_shorted: ShortedStock[]
+  heavy_buying: VolumePressureStock[]
+  heavy_selling: VolumePressureStock[]
   upcoming_exdiv: ExDivStock[]
   period: string
   universe_built_at: string | null
@@ -881,8 +884,8 @@ export interface NLScreenerResponse {
   data:           ScreenerRow[]
 }
 
-export const nlScreener = async (query: string): Promise<NLScreenerResponse> => {
-  const { data } = await api.post('/api/v1/ai/nl-screener', { query })
+export const nlScreener = async (query: string, page = 1): Promise<NLScreenerResponse> => {
+  const { data } = await api.post('/api/v1/ai/nl-screener', { query, page })
   return data
 }
 

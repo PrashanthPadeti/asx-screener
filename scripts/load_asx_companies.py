@@ -5,8 +5,7 @@ Downloads the full ASX company list (~2,200 stocks) from the ASX website
 and inserts them into market.companies.
 
 Usage:
-    pip install requests psycopg2-binary python-dotenv pandas
-    python scripts/load_asx_companies.py
+    python3 scripts/load_asx_companies.py
 
 Source:
     https://www.asx.com.au/asx/research/ASXListedCompanies.csv
@@ -15,12 +14,12 @@ Source:
 
 import os
 import sys
+import csv
 import requests
-import pandas as pd
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
-from datetime import date
+from io import StringIO
 
 load_dotenv()
 
@@ -59,82 +58,80 @@ KNOWN_REITS = {
     "SUL", "TCL", "TGR", "VVI", "WEB",
 }
 
-# ASX codes known to be miners/resources
-MINING_INDUSTRIES = {
-    "Gold Mining", "Silver Mining", "Copper Mining", "Iron Ore Mining",
-    "Coal Mining", "Mineral Sands Mining", "Nickel Mining", "Zinc Mining",
-    "Lithium Mining", "Uranium Mining", "Bauxite Mining", "Diversified Metals",
-    "Diamonds & Gemstones Mining", "Exploration & Mining",
-}
+MINING_KEYWORDS = {"Mining", "Resources", "Metals", "Gold", "Silver", "Copper",
+                   "Iron", "Coal", "Mineral", "Nickel", "Zinc", "Lithium",
+                   "Uranium", "Bauxite", "Diamonds", "Exploration"}
 
 
-def download_asx_list() -> pd.DataFrame:
-    """Download and parse ASX listed companies CSV."""
+def download_asx_list() -> list[dict]:
+    """Download and parse ASX listed companies CSV without pandas."""
     print(f"Downloading ASX company list from {ASX_CSV_URL} ...")
 
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; ASXScreener/1.0)"
-    }
-
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; ASXScreener/1.0)"}
     resp = requests.get(ASX_CSV_URL, headers=headers, timeout=30)
     resp.raise_for_status()
 
-    # ASX CSV has 2 header rows — skip first row (title), use second as header
-    from io import StringIO
-    content = resp.text
-
-    # Find where the real CSV data starts (skip the first description line)
-    lines = content.split("\n")
+    lines = resp.text.splitlines()
     # First line is: "ASX listed companies as at ..."
-    # Second line is: "Company name,ASX code,GICS industry group"
-    csv_start = 1  # skip the first description line
+    # Second line is the CSV header: "Company name,ASX code,GICS industry group"
+    csv_lines = "\n".join(lines[1:])  # skip first description line
 
-    df = pd.read_csv(
-        StringIO("\n".join(lines[csv_start:])),
-        skipinitialspace=True,
-        dtype=str,
-    )
+    reader = csv.DictReader(StringIO(csv_lines))
+    # Normalise header names
+    rows = []
+    for row in reader:
+        normalised = {k.strip().lower().replace(" ", "_"): v.strip() for k, v in row.items()}
+        rows.append(normalised)
 
-    # Clean column names
-    df.columns = [c.strip().lower().replace(" ", "_") for c in df.columns]
-
-    print(f"  Downloaded {len(df)} companies")
-    return df
+    print(f"  Downloaded {len(rows)} companies")
+    return rows
 
 
-def transform(df: pd.DataFrame) -> list[dict]:
+def transform(rows: list[dict]) -> list[dict]:
     """Transform raw CSV rows to company dicts ready for DB insert."""
     companies = []
+    sector_counts: dict[str, int] = {}
 
-    for _, row in df.iterrows():
-        asx_code = str(row.get("asx_code", "")).strip().upper()
-        company_name = str(row.get("company_name", "")).strip()
-        gics = str(row.get("gics_industry_group", "")).strip()
+    for row in rows:
+        asx_code = row.get("asx_code", "").strip().upper()
+        company_name = row.get("company_name", "").strip()
+        gics = row.get("gics_industry_group", "").strip()
 
         if not asx_code or not company_name or asx_code == "NAN":
             continue
 
         sector = GICS_TO_SECTOR.get(gics, "Other")
         is_reit = asx_code in KNOWN_REITS or gics == "Real Estate"
-        is_miner = gics in MINING_INDUSTRIES or "Mining" in gics or "Resources" in gics
+        is_miner = any(kw in gics for kw in MINING_KEYWORDS)
+
+        sector_counts[sector] = sector_counts.get(sector, 0) + 1
 
         companies.append({
-            "asx_code":           asx_code,
-            "company_name":       company_name,
-            "gics_sector":        sector,
+            "asx_code":            asx_code,
+            "company_name":        company_name,
+            "gics_sector":         sector,
             "gics_industry_group": gics if gics and gics != "Not Applic" else None,
-            "is_reit":            is_reit,
-            "is_miner":           is_miner,
-            "listing_date":       None,   # Not in ASX CSV — enriched later
-            "status":             "active",
+            "is_reit":             is_reit,
+            "is_miner":            is_miner,
+            "status":              "active",
         })
+
+    print("\n── Sector Breakdown ─────────────────────────────────────")
+    for sector, count in sorted(sector_counts.items(), key=lambda x: -x[1]):
+        print(f"  {sector:<30} {count}")
+    reits = sum(1 for c in companies if c["is_reit"])
+    miners = sum(1 for c in companies if c["is_miner"])
+    print(f"\n── REITs: {reits}")
+    print(f"── Miners: {miners}")
+    print(f"── Total: {len(companies)}")
+    print("─────────────────────────────────────────────────────────\n")
 
     return companies
 
 
 def upsert_companies(companies: list[dict], db_url: str) -> None:
     """Upsert all companies into market.companies."""
-    print(f"\nConnecting to database...")
+    print("Connecting to database...")
 
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()
@@ -147,7 +144,6 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
             c["gics_industry_group"],
             c["is_reit"],
             c["is_miner"],
-            c["listing_date"],
             c["status"],
         )
         for c in companies
@@ -156,7 +152,7 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
     sql = """
         INSERT INTO market.companies (
             asx_code, company_name, gics_sector, gics_industry_group,
-            is_reit, is_miner, listing_date, status
+            is_reit, is_miner, status
         )
         VALUES %s
         ON CONFLICT (asx_code) DO UPDATE SET
@@ -181,22 +177,10 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
     conn.close()
 
 
-def print_summary(companies: list[dict]) -> None:
-    """Print a breakdown of what we loaded."""
-    df = pd.DataFrame(companies)
-    print("\n── Sector Breakdown ─────────────────────────────────────")
-    print(df["gics_sector"].value_counts().to_string())
-    print(f"\n── REITs: {df['is_reit'].sum()}")
-    print(f"── Miners: {df['is_miner'].sum()}")
-    print(f"── Total: {len(df)}")
-    print("─────────────────────────────────────────────────────────\n")
-
-
 def main():
     try:
-        df = download_asx_list()
-        companies = transform(df)
-        print_summary(companies)
+        rows = download_asx_list()
+        companies = transform(rows)
         upsert_companies(companies, DB_URL)
         print("Done! ✅\n")
     except requests.RequestException as e:

@@ -864,9 +864,9 @@ async def get_screener_presets():
                 "premium":     True,
                 "min_plan":    "pro",
                 "filters": [
-                    {"field": "revenue_growth_hoh", "operator": "gte", "value": 10},
-                    {"field": "eps_growth_hoh",     "operator": "gte", "value": 10},
-                    {"field": "net_margin",         "operator": "gt",  "value": 0},
+                    {"field": "revenue_growth_hoh",    "operator": "gte", "value": 10},
+                    {"field": "net_income_growth_hoh", "operator": "gte", "value": 10},
+                    {"field": "net_margin",            "operator": "gt",  "value": 0},
                 ],
                 "sort_by": "revenue_growth_hoh", "sort_dir": "desc",
             },

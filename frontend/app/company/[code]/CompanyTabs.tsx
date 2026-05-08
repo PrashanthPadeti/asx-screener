@@ -1728,52 +1728,110 @@ function DividendsTab({ data }: { data: DividendsResponse | null }) {
 
       {/* Upcoming Dividend */}
       {(() => {
-        const nextExDiv = summary.ex_div_date
+        if (history.length === 0) return null
         const today = new Date().toISOString().slice(0, 10)
-        // Most recent future or current dividend record
-        const upcoming = history.find(d => d.ex_date >= today)
-        // Fall back to summary ex_div_date + most recent historical amount/franking
+
+        // Check for a confirmed future record already in the data
+        const confirmed = history.find(d => d.ex_date >= today)
+
+        // Frequency analysis: compute median gap between ex-dates (days)
+        const sortedDates = [...history].map(d => d.ex_date).sort()
+        let freqDays = 182 // default semi-annual
+        if (sortedDates.length >= 2) {
+          const gaps: number[] = []
+          for (let i = 1; i < Math.min(sortedDates.length, 8); i++) {
+            const gap = Math.round(
+              (new Date(sortedDates[i]).getTime() - new Date(sortedDates[i - 1]).getTime()) / 86400000
+            )
+            if (gap > 0) gaps.push(gap)
+          }
+          if (gaps.length) freqDays = Math.round(gaps.reduce((a, b) => a + b) / gaps.length)
+        }
+
+        const freqLabel =
+          freqDays <= 45  ? 'Monthly' :
+          freqDays <= 100 ? 'Quarterly' :
+          freqDays <= 200 ? 'Semi-Annual' : 'Annual'
+
+        // Estimate next ex-div = last ex-date + frequency (if no confirmed future date)
         const lastDiv = history[0]
-        const showUpcoming = nextExDiv != null || upcoming != null
+        let exDate: string | null = null
+        let isEstimated = false
 
-        if (!showUpcoming) return null
+        if (confirmed) {
+          exDate = confirmed.ex_date
+        } else if (lastDiv?.ex_date) {
+          const lastMs = new Date(lastDiv.ex_date).getTime()
+          const nextMs = lastMs + freqDays * 86400000
+          exDate = new Date(nextMs).toISOString().slice(0, 10)
+          isEstimated = true
+        }
 
-        const exDate = upcoming?.ex_date ?? nextExDiv
-        const payDate = upcoming?.payment_date ?? null
-        const amount = upcoming?.amount ?? lastDiv?.amount ?? null
-        const franking = upcoming?.franking_pct ?? lastDiv?.franking_pct ?? null
+        if (!exDate) return null
 
-        // Estimate grossed-up amount
+        // Estimate payment date = ex-date + avg historical ex→pay lag
+        let payDate: string | null = confirmed?.payment_date ?? null
+        if (!payDate && !confirmed) {
+          const lags = history
+            .filter(d => d.ex_date && d.payment_date)
+            .slice(0, 6)
+            .map(d => Math.round((new Date(d.payment_date!).getTime() - new Date(d.ex_date).getTime()) / 86400000))
+            .filter(l => l > 0 && l < 120)
+          if (lags.length) {
+            const avgLag = Math.round(lags.reduce((a, b) => a + b) / lags.length)
+            const payMs = new Date(exDate).getTime() + avgLag * 86400000
+            payDate = new Date(payMs).toISOString().slice(0, 10)
+          }
+        }
+
+        const amount = confirmed?.amount ?? lastDiv?.amount ?? null
+        const franking = confirmed?.franking_pct ?? lastDiv?.franking_pct ?? null
         const grossedUp = amount != null && franking != null
           ? amount * (1 + (franking / 100) * (30 / 70))
           : null
 
-        const daysToEx = exDate
-          ? Math.ceil((new Date(exDate).getTime() - new Date(today).getTime()) / 86400000)
-          : null
+        const daysToEx = Math.ceil((new Date(exDate).getTime() - new Date(today).getTime()) / 86400000)
+        const isPast = daysToEx < 0
 
         return (
-          <div className="bg-gradient-to-br from-emerald-50 to-green-50 border border-emerald-100 rounded-xl overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-emerald-100 flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <h3 className="text-xs font-bold text-emerald-700 uppercase tracking-widest">Upcoming Dividend</h3>
-              {daysToEx != null && daysToEx >= 0 && daysToEx <= 90 && (
+          <div className={`border rounded-xl overflow-hidden ${
+            isPast ? 'bg-gray-50 border-gray-200' : 'bg-gradient-to-br from-emerald-50 to-green-50 border-emerald-100'
+          }`}>
+            <div className={`px-4 py-2.5 border-b flex items-center gap-2 ${
+              isPast ? 'border-gray-200' : 'border-emerald-100'
+            }`}>
+              {!isPast && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />}
+              <h3 className={`text-xs font-bold uppercase tracking-widest ${
+                isPast ? 'text-gray-400' : 'text-emerald-700'
+              }`}>
+                {isPast ? 'Last Dividend' : 'Upcoming Dividend'}
+              </h3>
+              <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ml-1 ${
+                isEstimated
+                  ? 'bg-amber-100 text-amber-600'
+                  : 'bg-emerald-100 text-emerald-600'
+              }`}>
+                {isEstimated ? `Est. · ${freqLabel}` : 'Confirmed'}
+              </span>
+              {!isPast && daysToEx <= 90 && (
                 <span className="ml-auto text-xs font-semibold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
                   {daysToEx === 0 ? 'Today' : daysToEx === 1 ? 'Tomorrow' : `In ${daysToEx} days`}
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-emerald-100 p-0">
+            <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-emerald-100/60 p-0">
               <div className="px-4 py-3 flex flex-col gap-0.5">
-                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Ex-Dividend Date</span>
-                <span className="text-sm font-bold text-gray-800">{exDate ?? '—'}</span>
+                <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Ex-Dividend Date</span>
+                <span className="text-sm font-bold text-gray-800">{exDate}</span>
+                {isEstimated && <span className="text-[10px] text-amber-500">estimated</span>}
               </div>
               <div className="px-4 py-3 flex flex-col gap-0.5">
-                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Payment Date</span>
+                <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Payment Date</span>
                 <span className="text-sm font-bold text-gray-800">{payDate ?? '—'}</span>
+                {isEstimated && payDate && <span className="text-[10px] text-amber-500">estimated</span>}
               </div>
               <div className="px-4 py-3 flex flex-col gap-0.5">
-                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Est. DPS</span>
+                <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Est. DPS</span>
                 <span className="text-sm font-bold text-gray-800">
                   {amount != null ? `$${amount.toFixed(4)}` : '—'}
                   {franking != null && (
@@ -1786,15 +1844,15 @@ function DividendsTab({ data }: { data: DividendsResponse | null }) {
                 </span>
               </div>
               <div className="px-4 py-3 flex flex-col gap-0.5">
-                <span className="text-[10px] text-emerald-600 font-medium uppercase tracking-wide">Grossed-Up DPS</span>
-                <span className="text-sm font-bold text-emerald-700">
+                <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Grossed-Up DPS</span>
+                <span className={`text-sm font-bold ${isPast ? 'text-gray-700' : 'text-emerald-700'}`}>
                   {grossedUp != null ? `$${grossedUp.toFixed(4)}` : '—'}
                 </span>
               </div>
             </div>
-            {upcoming == null && (
-              <div className="px-4 pb-2.5 text-[10px] text-emerald-500">
-                * Estimated based on most recent historical payment. Confirm via company announcements.
+            {isEstimated && (
+              <div className="px-4 pb-2.5 text-[10px] text-amber-500">
+                * Next ex-date estimated based on {freqLabel.toLowerCase()} payment frequency. Confirm via company announcements.
               </div>
             )}
           </div>

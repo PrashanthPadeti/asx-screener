@@ -29,7 +29,7 @@ ASX_CSV_URL = "https://www.asx.com.au/asx/research/ASXListedCompanies.csv"
 
 DB_URL = os.getenv(
     "DATABASE_URL_SYNC",
-    "postgresql://asx_user:changeme@localhost:5432/asx_screener"
+    "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener"
 )
 
 # ── GICS sector → our simplified sector mapping ───────────────
@@ -83,6 +83,8 @@ def download_asx_list() -> list[dict]:
         normalised = {(k or "").strip().lower().replace(" ", "_"): (v or "").strip() for k, v in row.items() if k}
         rows.append(normalised)
 
+    if rows:
+        print(f"  CSV columns detected: {list(rows[0].keys())}")
     print(f"  Downloaded {len(rows)} companies")
     return rows
 

@@ -149,6 +149,8 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()
 
+    from datetime import date
+    today = date.today()
     rows = [
         (
             c["asx_code"],
@@ -158,6 +160,8 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
             c["is_reit"],
             c["is_miner"],
             c["status"],
+            True,   # is_current
+            today,  # valid_from
         )
         for c in companies
     ]
@@ -165,10 +169,10 @@ def upsert_companies(companies: list[dict], db_url: str) -> None:
     sql = """
         INSERT INTO market.companies (
             asx_code, company_name, gics_sector, gics_industry_group,
-            is_reit, is_miner, status
+            is_reit, is_miner, status, is_current, valid_from
         )
         VALUES %s
-        ON CONFLICT (asx_code) DO UPDATE SET
+        ON CONFLICT (asx_code) WHERE is_current = TRUE DO UPDATE SET
             company_name         = EXCLUDED.company_name,
             gics_sector          = EXCLUDED.gics_sector,
             gics_industry_group  = EXCLUDED.gics_industry_group,

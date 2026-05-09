@@ -7,7 +7,7 @@ from app.api.v1.routes import (
     companies, screener, market, auth, watchlist, alerts,
     stripe_routes, ai, portfolio, indices_funds,
     notifications, announcements, global_markets, commodities,
-    saved_screens, support,
+    saved_screens, support, admin,
 )
 
 api_router = APIRouter()
@@ -28,3 +28,4 @@ api_router.include_router(global_markets.router,  prefix="/global-markets",  tag
 api_router.include_router(commodities.router,     prefix="/commodities",     tags=["Commodities"])
 api_router.include_router(saved_screens.router,   prefix="/screens",         tags=["Saved Screens"])
 api_router.include_router(support.router,         prefix="/support",          tags=["Support"])
+api_router.include_router(admin.router,           prefix="/admin",            tags=["Admin"])

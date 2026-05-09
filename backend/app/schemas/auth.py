@@ -52,5 +52,6 @@ class UserProfile(BaseModel):
     subscription_ends_at: Optional[str]  = None
     email_verified:       bool           = False
     created_at:           Optional[str]  = None
+    is_admin:             bool           = False
 
     model_config = {"from_attributes": True}

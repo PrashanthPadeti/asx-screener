@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
@@ -38,6 +38,11 @@ const PLAN_BADGE: Record<string, string> = {
   enterprise: 'bg-amber-100 text-amber-700',
 }
 
+const ADMIN_LINKS = [
+  { href: '/admin/pipeline', label: 'Pipeline Monitor', icon: Activity, desc: 'Daily job health & last-run status' },
+  { href: '/admin/support',  label: 'Support Tickets',  icon: LifeBuoy, desc: 'User support requests & inquiries' },
+]
+
 export default function Navbar() {
   const pathname = usePathname()
   const router   = useRouter()
@@ -47,9 +52,11 @@ export default function Navbar() {
   const [userDropOpen,     setUserDropOpen]     = useState(false)
   const [marketDropOpen,   setMarketDropOpen]   = useState(false)
   const [resourceDropOpen, setResourceDropOpen] = useState(false)
+  const [adminDropOpen,    setAdminDropOpen]    = useState(false)
   const dropRef         = useRef<HTMLDivElement>(null)
   const marketDropRef   = useRef<HTMLDivElement>(null)
   const resourceDropRef = useRef<HTMLDivElement>(null)
+  const adminDropRef    = useRef<HTMLDivElement>(null)
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -62,6 +69,9 @@ export default function Navbar() {
       }
       if (resourceDropRef.current && !resourceDropRef.current.contains(e.target as Node)) {
         setResourceDropOpen(false)
+      }
+      if (adminDropRef.current && !adminDropRef.current.contains(e.target as Node)) {
+        setAdminDropOpen(false)
       }
     }
     document.addEventListener('mousedown', handle)
@@ -179,6 +189,47 @@ export default function Navbar() {
                 </div>
               )}
             </div>
+
+            {/* Admin dropdown — only for admin users */}
+            {user?.is_admin && (
+              <div className="relative" ref={adminDropRef}>
+                <button
+                  onClick={() => setAdminDropOpen(v => !v)}
+                  className={cn(
+                    'flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                    (pathname.startsWith('/admin'))
+                      ? 'bg-red-50 text-red-700'
+                      : 'text-red-600 hover:text-red-700 hover:bg-red-50'
+                  )}
+                >
+                  <Shield className="w-3.5 h-3.5" />
+                  Admin
+                  <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', adminDropOpen && 'rotate-180')} />
+                </button>
+
+                {adminDropOpen && (
+                  <div className="absolute left-0 mt-1 w-60 bg-white border border-red-100 rounded-xl shadow-lg py-1 z-50">
+                    <div className="px-3 py-1.5 border-b border-red-50">
+                      <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Admin Tools</p>
+                    </div>
+                    {ADMIN_LINKS.map(({ href, label, icon: Icon, desc }) => (
+                      <Link
+                        key={href}
+                        href={href}
+                        onClick={() => setAdminDropOpen(false)}
+                        className="flex items-start gap-3 px-3 py-2.5 hover:bg-red-50 transition-colors"
+                      >
+                        <Icon className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                        <div className="flex-1">
+                          <span className="text-sm font-medium text-gray-800">{label}</span>
+                          <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Search bar */}
@@ -243,6 +294,27 @@ export default function Navbar() {
                       <Settings className="w-4 h-4" />
                       Notifications
                     </Link>
+                    {user.is_admin && (
+                      <>
+                        <div className="border-t border-gray-100 mt-1 pt-1">
+                          <div className="px-3 py-1">
+                            <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Admin</p>
+                          </div>
+                          {ADMIN_LINKS.map(({ href, label, icon: Icon }) => (
+                            <Link
+                              key={href}
+                              href={href}
+                              onClick={() => setUserDropOpen(false)}
+                              className="flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
+                            >
+                              <Icon className="w-4 h-4" />
+                              {label}
+                            </Link>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                    <div className="border-t border-gray-100 mt-1 pt-1">
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50"
@@ -250,6 +322,7 @@ export default function Navbar() {
                       <LogOut className="w-4 h-4" />
                       Sign out
                     </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -343,6 +416,27 @@ export default function Navbar() {
                 {label}
               </Link>
             ))}
+
+            {/* Admin section — mobile */}
+            {user?.is_admin && (
+              <>
+                <div className="px-4 py-1 text-[10px] font-bold text-red-400 uppercase tracking-wider mt-1">Admin</div>
+                {ADMIN_LINKS.map(({ href, label, icon: Icon }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    onClick={() => setMenuOpen(false)}
+                    className={cn(
+                      'flex items-center gap-2 px-4 py-2 text-sm',
+                      pathname === href ? 'text-red-700 font-medium' : 'text-red-600'
+                    )}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {label}
+                  </Link>
+                ))}
+              </>
+            )}
 
             {/* Mobile auth */}
             <div className="border-t border-gray-100 mt-2 pt-2">

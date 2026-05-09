@@ -37,6 +37,7 @@ export interface AuthUser {
   subscription_status:  'active' | 'inactive' | 'past_due' | 'cancelled' | 'trialing'
   subscription_ends_at: string | null
   email_verified:       boolean
+  is_admin:             boolean
 }
 
 interface TokenPair {

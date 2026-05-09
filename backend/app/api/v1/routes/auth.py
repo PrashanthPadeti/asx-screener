@@ -347,6 +347,7 @@ async def me(
     if row is None:
         raise HTTPException(status_code=404, detail="User not found")
 
+    admin_list = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
     return UserProfile(
         id=str(row.id),
         email=row.email,
@@ -356,4 +357,5 @@ async def me(
         subscription_ends_at=row.subscription_ends_at.isoformat() if row.subscription_ends_at else None,
         email_verified=row.email_verified or False,
         created_at=row.created_at.isoformat() if row.created_at else None,
+        is_admin=row.email.lower() in admin_list,
     )

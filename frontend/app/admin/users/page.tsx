@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/api'
@@ -72,7 +72,7 @@ function fmtAge(iso: string | null) {
   return 'Just now'
 }
 
-export default function AdminUsersPage() {
+function AdminUsersContent() {
   const searchParams  = useSearchParams()
   const router        = useRouter()
 
@@ -338,5 +338,21 @@ export default function AdminUsersPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function AdminUsersPage() {
+  return (
+    <Suspense fallback={
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        <div className="space-y-4 animate-pulse">
+          <div className="h-8 bg-slate-100 rounded w-40" />
+          <div className="h-16 bg-slate-100 rounded-xl" />
+          <div className="h-96 bg-slate-100 rounded-xl" />
+        </div>
+      </div>
+    }>
+      <AdminUsersContent />
+    </Suspense>
   )
 }

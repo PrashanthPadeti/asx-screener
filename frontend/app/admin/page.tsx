@@ -36,13 +36,18 @@ interface Stats {
 const PLAN_COLORS: Record<string, string> = {
   free:              'bg-slate-100 text-slate-700',
   pro:               'bg-blue-100 text-blue-700',
+  pro_monthly:       'bg-blue-100 text-blue-700',
+  pro_annual:        'bg-blue-200 text-blue-800',
   premium:           'bg-purple-100 text-purple-700',
+  premium_monthly:   'bg-purple-100 text-purple-700',
+  premium_annual:    'bg-purple-200 text-purple-800',
   enterprise_pro:    'bg-amber-100 text-amber-700',
   enterprise_premium:'bg-orange-100 text-orange-700',
 }
 
 const PLAN_LABEL: Record<string, string> = {
-  free: 'Free', pro: 'Pro', premium: 'Premium',
+  free: 'Free', pro: 'Pro', pro_monthly: 'Pro (mo)', pro_annual: 'Pro (yr)',
+  premium: 'Premium', premium_monthly: 'Premium (mo)', premium_annual: 'Premium (yr)',
   enterprise_pro: 'Ent. Pro', enterprise_premium: 'Ent. Premium',
 }
 
@@ -175,9 +180,10 @@ export default function AdminDashboard() {
                 {Object.entries(stats.users.by_plan).map(([plan, count]) => {
                   const pct = stats.users.total > 0 ? (count / stats.users.total * 100) : 0
                   const barColors: Record<string, string> = {
-                    free: 'bg-slate-400', pro: 'bg-blue-500',
-                    premium: 'bg-purple-500', enterprise_pro: 'bg-amber-500',
-                    enterprise_premium: 'bg-orange-500',
+                    free: 'bg-slate-400',
+                    pro: 'bg-blue-500', pro_monthly: 'bg-blue-400', pro_annual: 'bg-blue-600',
+                    premium: 'bg-purple-500', premium_monthly: 'bg-purple-400', premium_annual: 'bg-purple-600',
+                    enterprise_pro: 'bg-amber-500', enterprise_premium: 'bg-orange-500',
                   }
                   return pct > 0 ? (
                     <div

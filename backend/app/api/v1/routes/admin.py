@@ -27,12 +27,20 @@ router = APIRouter()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _scalar(db, sql, params=None):
-    """Return first column of first row, or None."""
+async def _scalar(db: AsyncSession, sql, params=None):
+    """Return first column of first row, or None.
+
+    Uses a SAVEPOINT so a query failure doesn't abort the outer transaction
+    (PostgreSQL marks a transaction as aborted after any error, causing all
+    subsequent statements to fail with 'InFailedSQLTransaction' until rolled
+    back).  begin_nested() creates a SAVEPOINT and auto-rolls back on error,
+    leaving the parent transaction intact.
+    """
     try:
-        result = await db.execute(text(sql), params or {})
-        row = result.fetchone()
-        return row[0] if row else None
+        async with db.begin_nested():
+            result = await db.execute(text(sql), params or {})
+            row = result.fetchone()
+            return row[0] if row else None
     except Exception:
         return None
 
@@ -226,9 +234,9 @@ async def admin_stats(
 
     # Support tickets
     open_tickets = int(await _scalar(db, """
-        SELECT COUNT(*) FROM users.support_tickets WHERE status IN ('open', 'pending')
+        SELECT COUNT(*) FROM support.tickets WHERE status IN ('open', 'pending')
     """) or 0)
-    total_tickets = int(await _scalar(db, "SELECT COUNT(*) FROM users.support_tickets") or 0)
+    total_tickets = int(await _scalar(db, "SELECT COUNT(*) FROM support.tickets") or 0)
 
     # Platform data
     total_alerts    = int(await _scalar(db, "SELECT COUNT(*) FROM users.alerts WHERE is_active = TRUE") or 0)
@@ -325,7 +333,7 @@ async def list_users(
             (SELECT COUNT(*) FROM users.alerts    a    WHERE a.user_id = u.id AND a.is_active) AS alert_count,
             (SELECT COUNT(*) FROM users.portfolios p   WHERE p.user_id = u.id)              AS portfolio_count,
             (SELECT COUNT(*) FROM screener.saved_screens s WHERE s.user_id = u.id)          AS screen_count,
-            (SELECT COUNT(*) FROM users.support_tickets t WHERE t.user_id = u.id)           AS ticket_count,
+            (SELECT COUNT(*) FROM support.tickets t WHERE t.user_id = u.id)           AS ticket_count,
             (SELECT ip_address FROM users.sessions si
              WHERE si.user_id = u.id ORDER BY si.created_at DESC LIMIT 1)                   AS last_ip
         FROM users.users u
@@ -380,7 +388,7 @@ async def get_user(
             (SELECT COUNT(*) FROM users.alerts    a     WHERE a.user_id = u.id AND a.is_active) AS alert_count,
             (SELECT COUNT(*) FROM users.alerts    a2    WHERE a2.user_id = u.id)              AS total_alerts,
             (SELECT COUNT(*) FROM users.portfolios p    WHERE p.user_id = u.id)              AS portfolio_count,
-            (SELECT COUNT(*) FROM users.support_tickets t WHERE t.user_id = u.id)           AS ticket_count,
+            (SELECT COUNT(*) FROM support.tickets t WHERE t.user_id = u.id)           AS ticket_count,
             (SELECT COUNT(*) FROM screener.saved_screens s WHERE s.user_id = u.id)          AS screen_count,
             (SELECT COUNT(*) FROM screener.saved_screens s WHERE s.user_id = u.id AND s.is_public) AS public_screen_count,
             (SELECT COUNT(*) FROM users.notification_history n WHERE n.user_id = u.id)      AS notification_count
@@ -415,7 +423,7 @@ async def get_user(
     # Recent support tickets (last 5)
     tickets_result = await db.execute(text("""
         SELECT id, subject, status, category, created_at, updated_at
-        FROM users.support_tickets
+        FROM support.tickets
         WHERE user_id = :uid
         ORDER BY created_at DESC
         LIMIT 5

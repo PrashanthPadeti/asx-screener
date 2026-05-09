@@ -60,13 +60,18 @@ interface UserDetail {
 const PLAN_BADGE: Record<string, string> = {
   free:               'bg-slate-100 text-slate-700',
   pro:                'bg-blue-100 text-blue-700',
+  pro_monthly:        'bg-blue-100 text-blue-700',
+  pro_annual:         'bg-blue-100 text-blue-800',
   premium:            'bg-purple-100 text-purple-700',
+  premium_monthly:    'bg-purple-100 text-purple-700',
+  premium_annual:     'bg-purple-100 text-purple-800',
   enterprise_pro:     'bg-amber-100 text-amber-700',
   enterprise_premium: 'bg-orange-100 text-orange-700',
 }
 
 const PLAN_LABEL: Record<string, string> = {
-  free: 'Free', pro: 'Pro', premium: 'Premium',
+  free: 'Free', pro: 'Pro', pro_monthly: 'Pro Monthly', pro_annual: 'Pro Annual',
+  premium: 'Premium', premium_monthly: 'Premium Monthly', premium_annual: 'Premium Annual',
   enterprise_pro: 'Enterprise Pro', enterprise_premium: 'Enterprise Premium',
 }
 

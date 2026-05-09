@@ -37,13 +37,18 @@ interface UserListResponse {
 const PLAN_BADGE: Record<string, string> = {
   free:               'bg-slate-100 text-slate-700',
   pro:                'bg-blue-100 text-blue-700',
+  pro_monthly:        'bg-blue-100 text-blue-700',
+  pro_annual:         'bg-blue-100 text-blue-800',
   premium:            'bg-purple-100 text-purple-700',
+  premium_monthly:    'bg-purple-100 text-purple-700',
+  premium_annual:     'bg-purple-100 text-purple-800',
   enterprise_pro:     'bg-amber-100 text-amber-700',
   enterprise_premium: 'bg-orange-100 text-orange-700',
 }
 
 const PLAN_LABEL: Record<string, string> = {
-  free: 'Free', pro: 'Pro', premium: 'Premium',
+  free: 'Free', pro: 'Pro', pro_monthly: 'Pro (mo)', pro_annual: 'Pro (yr)',
+  premium: 'Premium', premium_monthly: 'Premium (mo)', premium_annual: 'Premium (yr)',
   enterprise_pro: 'Ent Pro', enterprise_premium: 'Ent Premium',
 }
 
@@ -168,7 +173,11 @@ function AdminUsersContent() {
             <option value="">All Plans</option>
             <option value="free">Free</option>
             <option value="pro">Pro</option>
+            <option value="pro_monthly">Pro Monthly</option>
+            <option value="pro_annual">Pro Annual</option>
             <option value="premium">Premium</option>
+            <option value="premium_monthly">Premium Monthly</option>
+            <option value="premium_annual">Premium Annual</option>
             <option value="enterprise_pro">Enterprise Pro</option>
             <option value="enterprise_premium">Enterprise Premium</option>
           </select>

@@ -194,7 +194,7 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
             b.book_value_per_share, b.shares_outstanding,
             b.trade_receivables,  b.inventory,
             cf.cfo,   cf.capex,  cf.fcf,
-            cf.equity_raised, cf.cfi,
+            cf.equity_raised, cf.cfi, cf.dividends_paid,
             -- Derive DPS from market.dividends (12-month window per FY)
             COALESCE(div.total_dps, p.dps)  AS derived_dps,
             div.avg_franking_pct            AS derived_franking_pct
@@ -233,7 +233,7 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
         "retained_earnings", "working_capital",
         "book_value_per_share", "shares_outstanding",
         "trade_receivables", "inventory",
-        "cfo", "capex", "fcf", "equity_raised", "cfi",
+        "cfo", "capex", "fcf", "equity_raised", "cfi", "dividends_paid",
         "derived_dps", "derived_franking_pct",
     ]
     df = pd.DataFrame(rows, columns=cols)
@@ -435,6 +435,9 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
     roe_l = []; roa_l  = []; roce_l = []
     gm_l  = []; em_l   = []; om_l   = []; nm_l = []
     epsg_l = []
+    eps_l  = []   # for eps_volatility_5y
+    fcf_l  = []   # for fcf_positive_years
+    roic_l = []   # for avg_roic_3y / avg_roic_5y
 
     for i, row in enumerate(yearly):
         fy  = int(row["fiscal_year"])
@@ -454,9 +457,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         ebit   = _f(row.get("ebit"))
         ebitda = _f(row.get("ebitda"))
         ni     = _f(row.get("net_profit"))
-        cfo    = _f(row.get("cfo"))
-        capex  = _f(row.get("capex"))
-        fcf    = _f(row.get("fcf"))
+        cfo      = _f(row.get("cfo"))
+        capex    = _f(row.get("capex"))
+        fcf      = _f(row.get("fcf"))
+        div_paid = _f(row.get("dividends_paid"))
         # Prefer derived_dps (summed from market.dividends) over raw dps
         # which is NULL in EODHD's ASX income statement feed
         dps    = _f(row.get("derived_dps")) or _f(row.get("dps"))
@@ -575,9 +579,118 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
 
         # ── Rolling averages ──────────────────────────────────────────────
         roe_l .append(roe);   roa_l .append(roa)
-        roce_l.append(roce);  gm_l  .append(gross_margin)
+        roce_l.append(roce);  roic_l.append(roic)
+        gm_l  .append(gross_margin)
         em_l  .append(ebitda_margin); om_l.append(ebit_margin)
         nm_l  .append(net_margin);    epsg_l.append(eps_g1)
+
+        # ── ROIC rolling averages ─────────────────────────────────────────
+        avg_roic_3y = _avg(roic_l, 3)
+        avg_roic_5y = _avg(roic_l, 5)
+
+        # ── Quick-win metrics ─────────────────────────────────────────────
+        # 1. OCF / Net Profit (cash conversion quality)
+        ocf_to_net_profit = _clamp(_div(cfo, ni))
+
+        # 2. FCF Payout Ratio (dividends_paid / FCF)
+        #    dividends_paid is typically negative in cashflow statements;
+        #    use absolute values so ratio is always positive when FCF > 0.
+        div_paid_abs = abs(div_paid) if div_paid is not None else None
+        fcf_abs      = abs(fcf)      if fcf      is not None else None
+        fcf_payout_ratio = (
+            _clamp(_div(div_paid_abs, fcf_abs))
+            if (div_paid_abs is not None and fcf_abs is not None and fcf_abs > 0)
+            else None
+        )
+
+        # 3. Shares Dilution 3Y (CAGR of shares outstanding over 3 years)
+        sh3 = _f(yearly[i - 3].get("shares_outstanding")) if i >= 3 else None
+        shares_dilution_3y = (
+            _cagr(shares, sh3, 3)
+            if (shares is not None and sh3 is not None and sh3 > 0 and shares > 0)
+            else None
+        )
+
+        # 4. EPS Volatility 5Y (coefficient of variation over last 5 years)
+        eps_l.append(eps)
+        eps_vals = [v for v in [_f(x) for x in eps_l[-5:]] if v is not None]
+        if len(eps_vals) >= 3:
+            mean_eps = np.mean(eps_vals)
+            eps_volatility_5y = (
+                round(float(np.std(eps_vals, ddof=1) / abs(mean_eps)), 4)
+                if mean_eps != 0 else None
+            )
+        else:
+            eps_volatility_5y = None
+        # Clamp: CV > 9999 is noise (near-zero mean)
+        eps_volatility_5y = _clamp(eps_volatility_5y)
+
+        # 5. FCF Positive Years (consecutive years of positive FCF, newest first)
+        fcf_l.append(fcf)
+        fcf_pos_count = 0
+        for _fv in reversed(fcf_l):
+            if _fv is not None and _fv > 0:
+                fcf_pos_count += 1
+            else:
+                break
+        fcf_positive_years = fcf_pos_count
+
+        # 6. Asset-Light Score (0–3 composite)
+        #    +1 if capex_intensity < 5%  (minimal physical investment)
+        #    +1 if fcf_margin > 10%      (strong cash generation)
+        #    +1 if asset_turnover > 0.5  (efficient use of assets)
+        _als = 0
+        if capex_int is not None and capex_int < 0.05:  _als += 1
+        if fcf_margin is not None and fcf_margin > 0.10: _als += 1
+        if asset_turn is not None and asset_turn > 0.5:  _als += 1
+        # Only meaningful if we have at least one of the three inputs
+        asset_light_score = (
+            _als
+            if any(v is not None for v in [capex_int, fcf_margin, asset_turn])
+            else None
+        )
+
+        # ── Quality proxy scores ───────────────────────────────────────────
+        # All thresholds use ratio-form metrics (0–1 range), not percentages.
+
+        # 7. Brand / Pricing Power proxy (0–3)
+        #    Sustained high ROE + high ROIC + strong FCF generation
+        _bps = 0
+        _avg_roe5  = _avg(roe_l, 5)
+        _avg_roic5 = avg_roic_5y   # already computed above
+        if _avg_roe5  is not None and _avg_roe5  > 0.15: _bps += 1
+        if _avg_roic5 is not None and _avg_roic5 > 0.12: _bps += 1
+        if fcf_margin is not None and fcf_margin > 0.10:  _bps += 1
+        brand_proxy_score = (
+            _bps
+            if any(v is not None for v in [_avg_roe5, _avg_roic5, fcf_margin])
+            else None
+        )
+
+        # 8. Capital Efficiency / Scalability proxy (0–3)
+        #    High revenue growth + asset-light + high ROIC
+        _ces = 0
+        _rev_cagr5 = cn("revenue", 5)
+        if _rev_cagr5 is not None and _rev_cagr5 > 0.10:  _ces += 1
+        if capex_int  is not None and capex_int  < 0.05:   _ces += 1
+        if roic       is not None and roic       > 0.15:   _ces += 1
+        capital_efficiency_score = (
+            _ces
+            if any(v is not None for v in [_rev_cagr5, capex_int, roic])
+            else None
+        )
+
+        # 9. Earnings Stability / Predictability proxy (0–3)
+        #    Low earnings volatility + consecutive positive FCF + growing revenue
+        _ess = 0
+        if eps_volatility_5y  is not None and eps_volatility_5y  < 0.20: _ess += 1
+        if fcf_positive_years is not None and fcf_positive_years >= 4:   _ess += 1
+        if _rev_cagr5         is not None and _rev_cagr5         > 0:    _ess += 1
+        earnings_stability_score = (
+            _ess
+            if any(v is not None for v in [eps_volatility_5y, fcf_positive_years, _rev_cagr5])
+            else None
+        )
 
         # ── Quality ───────────────────────────────────────────────────────
         f_score = piotroski_f_score(row, prev)
@@ -660,6 +773,13 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             _f(row.get("inventory")),
             # Multi-year price returns
             ret_3y, ret_5y, ret_7y, ret_10y, ret_15y,
+            # Quick-win metrics
+            ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
+            eps_volatility_5y, fcf_positive_years,
+            # Partial metrics
+            avg_roic_3y, avg_roic_5y, asset_light_score,
+            # Quality proxy scores
+            brand_proxy_score, capital_efficiency_score, earnings_stability_score,
             COMPUTE_VERSION, now,
         ))
 
@@ -708,6 +828,10 @@ INSERT_SQL = """
         cfo, capex, cfi, fcf,
         total_debt, working_capital, cash, total_equity, inventory,
         return_3y, return_5y, return_7y, return_10y, return_15y,
+        ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
+        eps_volatility_5y, fcf_positive_years,
+        avg_roic_3y, avg_roic_5y, asset_light_score,
+        brand_proxy_score, capital_efficiency_score, earnings_stability_score,
         compute_version, computed_at
     ) VALUES %s
     ON CONFLICT (asx_code, fiscal_year) DO UPDATE SET
@@ -818,6 +942,17 @@ INSERT_SQL = """
         return_7y               = EXCLUDED.return_7y,
         return_10y              = EXCLUDED.return_10y,
         return_15y              = EXCLUDED.return_15y,
+        ocf_to_net_profit       = EXCLUDED.ocf_to_net_profit,
+        fcf_payout_ratio        = EXCLUDED.fcf_payout_ratio,
+        shares_dilution_3y      = EXCLUDED.shares_dilution_3y,
+        eps_volatility_5y       = EXCLUDED.eps_volatility_5y,
+        fcf_positive_years      = EXCLUDED.fcf_positive_years,
+        avg_roic_3y             = EXCLUDED.avg_roic_3y,
+        avg_roic_5y             = EXCLUDED.avg_roic_5y,
+        asset_light_score       = EXCLUDED.asset_light_score,
+        brand_proxy_score       = EXCLUDED.brand_proxy_score,
+        capital_efficiency_score = EXCLUDED.capital_efficiency_score,
+        earnings_stability_score = EXCLUDED.earnings_stability_score,
         compute_version         = EXCLUDED.compute_version,
         computed_at             = EXCLUDED.computed_at
 """

@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Frontend base URL (used in Stripe redirect URLs)
-    FRONTEND_URL: str = "http://209.38.84.102:3000"
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Stripe
     STRIPE_SECRET_KEY: str = ""
@@ -56,6 +56,7 @@ class Settings(BaseSettings):
 
     # Anthropic (Claude)
     ANTHROPIC_API_KEY: str = ""
+    CLAUDE_MODEL: str = "claude-haiku-4-5-20251001"  # update here when model changes
 
     # OpenAI (embeddings)
     OPENAI_API_KEY: str = ""

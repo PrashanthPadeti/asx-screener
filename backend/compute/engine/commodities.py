@@ -1,9 +1,10 @@
 """
 Commodities Engine
 ==================
-Fetches daily commodity prices from two sources:
+Fetches daily commodity prices from three sources:
   • EODHD FOREX  — precious metals (Gold, Silver, Platinum) as XAU/XAG/XPT vs USD
   • Alpha Vantage — energy & base metals (WTI, Brent, Natural Gas, Copper)
+  • Yahoo Finance — bulk commodities (Iron Ore 62% TIO=F futures, free, no key)
 
 EODHD FOREX pairs (confirmed working on all plans):
     GC  → XAUUSD.FOREX   (Gold spot,      USD/oz)
@@ -15,6 +16,9 @@ Alpha Vantage commodity functions (free tier: 25 req/day; we use 4):
     BZ  → BRENT          (Brent Crude,    USD/bbl)
     NG  → NATURAL_GAS    (Natural Gas,    USD/MMBtu)
     HG  → COPPER         (Copper,         USD/lb)
+
+Yahoo Finance (free, no API key, daily):
+    IO  → TIO=F          (SGX TSI Iron Ore 62% Fe CFR China futures, USD/t)
 
 Requires:
     EODHD_API_KEY         (already in .env)
@@ -42,11 +46,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 
 EODHD_BASE  = "https://eodhd.com/api"
 AV_BASE     = "https://www.alphavantage.co/query"
+YAHOO_BASE  = "https://query1.finance.yahoo.com/v8/finance/chart"
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
 # source="eodhd"  → fetched as FOREX pair via EODHD
 # source="av"     → fetched via Alpha Vantage commodity function
+# source="yahoo"  → fetched via Yahoo Finance v8 API (free, no key)
 COMMODITIES = [
     # Precious Metals — EODHD FOREX
     {"code": "GC", "name": "Gold",           "category": "Precious Metals", "unit": "USD/oz",    "source": "eodhd", "ticker": "XAUUSD.FOREX"},
@@ -58,6 +64,8 @@ COMMODITIES = [
     {"code": "NG", "name": "Natural Gas",     "category": "Energy",          "unit": "USD/MMBtu", "source": "av",    "ticker": "NATURAL_GAS"},
     # Base Metals — Alpha Vantage
     {"code": "HG", "name": "Copper",          "category": "Base Metals",     "unit": "USD/lb",    "source": "av",    "ticker": "COPPER"},
+    # Bulk — Yahoo Finance (SGX TSI Iron Ore 62% Fe CFR China, daily, no key)
+    {"code": "IO", "name": "Iron Ore 62%",    "category": "Bulk",            "unit": "USD/t",     "source": "yahoo", "ticker": "TIO=F"},
 ]
 
 # ── Return computation ────────────────────────────────────────────────────────
@@ -222,6 +230,64 @@ def fetch_av_commodity(
         return None
 
 
+# ── Fetch from Yahoo Finance ──────────────────────────────────────────────────
+
+def fetch_yahoo_commodity(
+    ticker:     str,
+    start_date: date,
+    end_date:   date,
+) -> pd.DataFrame | None:
+    """
+    Fetch daily commodity data from Yahoo Finance v8 API (free, no API key).
+    ticker: e.g. 'TIO=F' for SGX TSI Iron Ore 62% Fe CFR China futures.
+    """
+    import time as _time
+    period1 = int(pd.Timestamp(start_date - timedelta(days=400)).timestamp())
+    period2 = int(pd.Timestamp(end_date   + timedelta(days=1)  ).timestamp())
+    url     = f"{YAHOO_BASE}/{ticker}"
+    params  = {"period1": period1, "period2": period2, "interval": "1d"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept":     "application/json",
+    }
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=30)
+        resp.raise_for_status()
+        payload = resp.json()
+        result = payload.get("chart", {}).get("result")
+        if not result:
+            err = payload.get("chart", {}).get("error", {})
+            log.warning(f"{ticker}: Yahoo Finance error — {err}")
+            return None
+
+        r          = result[0]
+        timestamps = r.get("timestamp", [])
+        quote      = r["indicators"]["quote"][0]
+        if not timestamps:
+            log.warning(f"{ticker}: Yahoo Finance returned no timestamps")
+            return None
+
+        df = pd.DataFrame({
+            "date":   pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("UTC").tz_localize(None),
+            "open":   quote.get("open"),
+            "high":   quote.get("high"),
+            "low":    quote.get("low"),
+            "close":  quote.get("close"),
+            "volume": quote.get("volume"),
+        })
+        df = df.set_index("date").sort_index()
+        # Normalise index to date-only
+        df.index = df.index.normalize()
+        for col in ["open", "high", "low", "close"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df[df["close"].notna()]
+        df = df[~df.index.duplicated(keep="last")]
+        return df[["open", "high", "low", "close", "volume"]]
+    except Exception as exc:
+        log.warning(f"{ticker}: Yahoo Finance fetch failed — {exc}")
+        return None
+
+
 # ── DB upsert ─────────────────────────────────────────────────────────────────
 
 async def upsert_rows(db, rows: list[dict], dry_run: bool) -> int:
@@ -316,6 +382,8 @@ async def run(
                     log.warning(f"  {code}: skipped (no ALPHA_VANTAGE_API_KEY)")
                     continue
                 df = fetch_av_commodity(ticker, start_date, target_date, av_key)
+            elif source == "yahoo":
+                df = fetch_yahoo_commodity(ticker, start_date, target_date)
             else:
                 log.warning(f"  {code}: unknown source '{source}'")
                 continue

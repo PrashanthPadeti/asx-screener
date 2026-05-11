@@ -132,6 +132,24 @@ INSERT INTO screener.universe (
     -- ── Shares ───────────────────────────────────────────────────────────────
     shares_outstanding,
 
+    -- ── Quick-win metrics ────────────────────────────────────────────────────
+    ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
+    eps_volatility_5y, fcf_positive_years,
+    above_vwap,
+
+    -- ── Partial metrics ──────────────────────────────────────────────────────
+    dollar_volume_avg_20d,
+    avg_roic_3y, avg_roic_5y, asset_light_score,
+
+    -- ── Analyst-derived (from existing buy/sell/hold counts) ─────────────────
+    analyst_count, analyst_buy_pct, analyst_consensus_score,
+
+    -- ── Quality proxy scores (from yearly_metrics) ───────────────────────────
+    brand_proxy_score, capital_efficiency_score, earnings_stability_score,
+
+    -- ── Admin tags (from market.companies) ───────────────────────────────────
+    business_model_tag, commodity_exposure,
+
     universe_built_at
 )
 SELECT
@@ -303,6 +321,52 @@ SELECT
     -- ── Shares ───────────────────────────────────────────────────────────────
     ss.shares_outstanding,
 
+    -- ── Quick-win metrics (from yearly_metrics + daily_metrics) ──────────────
+    ym.ocf_to_net_profit,
+    ym.fcf_payout_ratio,
+    ym.shares_dilution_3y,
+    ym.eps_volatility_5y,
+    ym.fcf_positive_years,
+    dm.above_vwap,
+
+    -- ── Partial metrics ──────────────────────────────────────────────────────
+    dm.dollar_volume_avg_20d,
+    ym.avg_roic_3y,
+    ym.avg_roic_5y,
+    ym.asset_light_score,
+
+    -- ── Analyst-derived (computed from existing buy/sell/hold counts) ─────────
+    NULLIF(
+        COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0)
+        + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0), 0
+    )::SMALLINT                                                             AS analyst_count,
+
+    CASE WHEN (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0)
+               + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)) > 0
+         THEN ROUND(
+             (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0))::NUMERIC
+             / (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0)
+                + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)), 4)
+    END                                                                     AS analyst_buy_pct,
+
+    CASE WHEN (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0)
+               + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)) > 0
+         THEN ROUND(
+             (COALESCE(ar.strong_buy,0)*2 + COALESCE(ar.buy,0)
+              - COALESCE(ar.sell,0) - COALESCE(ar.strong_sell,0)*2)::NUMERIC
+             / (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0)
+                + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)), 4)
+    END                                                                     AS analyst_consensus_score,
+
+    -- ── Quality proxy scores (from yearly_metrics) ────────────────────────────
+    ym.brand_proxy_score,
+    ym.capital_efficiency_score,
+    ym.earnings_stability_score,
+
+    -- ── Admin tags (from market.companies) ───────────────────────────────────
+    mc.business_model_tag,
+    mc.commodity_exposure,
+
     NOW()
 
 FROM market.companies_current c
@@ -418,7 +482,8 @@ LEFT JOIN LATERAL (
            sma_20, sma_50, sma_200, ema_20,
            bb_upper, bb_lower, atr_14, adx_14, obv,
            hv_20d, hv_60d, pct_from_ath,
-           return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y
+           return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y,
+           above_vwap, dollar_volume_avg_20d
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
     ORDER BY date DESC
@@ -437,7 +502,14 @@ LEFT JOIN LATERAL (
            sharpe_1y, max_drawdown_1y,
            beta_1y,
            dividend_cagr_3y, dividend_consecutive_yrs,
-           return_3y, return_5y, return_7y, return_10y, return_15y
+           return_3y, return_5y, return_7y, return_10y, return_15y,
+           -- Quick-win metrics
+           ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
+           eps_volatility_5y, fcf_positive_years,
+           -- Partial metrics
+           avg_roic_3y, avg_roic_5y, asset_light_score,
+           -- Quality proxy scores
+           brand_proxy_score, capital_efficiency_score, earnings_stability_score
     FROM market.yearly_metrics
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -472,6 +544,15 @@ LEFT JOIN LATERAL (
     WHERE asx_code = c.asx_code
     LIMIT 1
 ) ss ON TRUE
+
+-- ── market.companies (admin-maintained tags) ─────────────────────────────────
+LEFT JOIN LATERAL (
+    SELECT business_model_tag, commodity_exposure
+    FROM market.companies
+    WHERE asx_code = c.asx_code
+      AND is_current = TRUE
+    LIMIT 1
+) mc ON TRUE
 
 -- ── ASIC short interest (latest report date per stock) ──────────────────────
 -- Prefer market.short_positions (has WoW change); fall back to short_interest.
@@ -638,6 +719,29 @@ ON CONFLICT (asx_code) DO UPDATE SET
     short_interest_chg_1w   = EXCLUDED.short_interest_chg_1w,
     -- Shares
     shares_outstanding      = EXCLUDED.shares_outstanding,
+    -- Quick-win metrics
+    ocf_to_net_profit       = EXCLUDED.ocf_to_net_profit,
+    fcf_payout_ratio        = EXCLUDED.fcf_payout_ratio,
+    shares_dilution_3y      = EXCLUDED.shares_dilution_3y,
+    eps_volatility_5y       = EXCLUDED.eps_volatility_5y,
+    fcf_positive_years      = EXCLUDED.fcf_positive_years,
+    above_vwap              = EXCLUDED.above_vwap,
+    -- Partial metrics
+    dollar_volume_avg_20d   = EXCLUDED.dollar_volume_avg_20d,
+    avg_roic_3y             = EXCLUDED.avg_roic_3y,
+    avg_roic_5y             = EXCLUDED.avg_roic_5y,
+    asset_light_score       = EXCLUDED.asset_light_score,
+    -- Analyst-derived
+    analyst_count           = EXCLUDED.analyst_count,
+    analyst_buy_pct         = EXCLUDED.analyst_buy_pct,
+    analyst_consensus_score = EXCLUDED.analyst_consensus_score,
+    -- Quality proxy scores
+    brand_proxy_score       = EXCLUDED.brand_proxy_score,
+    capital_efficiency_score = EXCLUDED.capital_efficiency_score,
+    earnings_stability_score = EXCLUDED.earnings_stability_score,
+    -- Admin tags
+    business_model_tag      = EXCLUDED.business_model_tag,
+    commodity_exposure      = EXCLUDED.commodity_exposure,
     universe_built_at       = NOW()
 """
 

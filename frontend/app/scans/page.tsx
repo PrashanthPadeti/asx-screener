@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import {
   Shield, Zap, Award, RotateCcw, DollarSign, Search,
-  TrendingUp, BarChart2, ArrowUp, Star, Activity, Lock,
+  TrendingUp, TrendingDown, BarChart2, ArrowUp, ArrowDown,
+  Star, Activity, Flame, Lock,
   Globe, Users, Play,
 } from 'lucide-react'
 import { getScreenerPresets, getCommunityScreens, incrementScreenUse, type ScreenerPreset, type SavedScreen } from '@/lib/api'
@@ -13,17 +14,20 @@ import { cn } from '@/lib/utils'
 // ── Icon map ──────────────────────────────────────────────────────────────────
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  'shield':      Shield,
-  'zap':         Zap,
-  'award':       Award,
-  'rotate-ccw':  RotateCcw,
-  'dollar-sign': DollarSign,
-  'search':      Search,
-  'trending-up': TrendingUp,
-  'bar-chart-2': BarChart2,
-  'arrow-up':    ArrowUp,
-  'star':        Star,
-  'activity':    Activity,
+  'shield':        Shield,
+  'zap':           Zap,
+  'award':         Award,
+  'rotate-ccw':    RotateCcw,
+  'dollar-sign':   DollarSign,
+  'search':        Search,
+  'trending-up':   TrendingUp,
+  'trending-down': TrendingDown,
+  'bar-chart-2':   BarChart2,
+  'arrow-up':      ArrowUp,
+  'arrow-down':    ArrowDown,
+  'star':          Star,
+  'activity':      Activity,
+  'flame':         Flame,
 }
 
 // ── Category config ───────────────────────────────────────────────────────────
@@ -50,8 +54,8 @@ const CATEGORIES: { key: string; label: string; description: string; ids: string
   {
     key: 'technical',
     label: 'Technical Signals',
-    description: 'Chart-based breakout and trend-following signals',
-    ids: ['ma_crossover', 'new_52w_highs', 'turnaround'],
+    description: 'Chart-based breakout, trend-following and mean-reversion signals',
+    ids: ['ma_crossover', 'new_52w_highs', 'new_52w_lows', 'volume_breakout', 'rsi_oversold', 'rsi_overbought', 'turnaround'],
   },
 ]
 

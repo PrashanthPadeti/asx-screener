@@ -161,9 +161,9 @@ export default function BrokersPage() {
       <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-8 text-white">
         <div className="flex items-center gap-2 text-blue-200 text-sm mb-3">
           <Shield className="w-4 h-4" />
-          Independent comparison · Last updated May 2026
+          Independent comparison · Fees verified May 2025
         </div>
-        <h1 className="text-3xl font-bold mb-3">Best ASX Brokers 2026</h1>
+        <h1 className="text-3xl font-bold mb-3">Best ASX Brokers 2025</h1>
         <p className="text-blue-100 max-w-2xl text-lg">
           Compare Australia's top share trading platforms on fees, features, and CHESS sponsorship.
           Find the right broker for your investing style.

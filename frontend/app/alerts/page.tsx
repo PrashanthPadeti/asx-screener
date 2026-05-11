@@ -248,7 +248,12 @@ export default function AlertsPage() {
   }
 
   const activeCount = alerts.filter(a => a.is_active).length
-  const freeLimit   = user.plan === 'free' ? 3 : 50
+  const alertLimit  =
+    user.plan === 'free'              ? 5   :
+    user.plan === 'pro'               ? 50  :
+    user.plan === 'premium'           ? 100 :
+    user.plan === 'enterprise_pro'    ? 50  :
+    user.plan === 'enterprise_premium'? 100 : 5
 
   return (
     <div className="space-y-6 max-w-4xl">
@@ -260,8 +265,8 @@ export default function AlertsPage() {
             Price Alerts
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            {activeCount} of {freeLimit} active alerts used
-            {user.plan === 'free' && activeCount >= freeLimit && (
+            {activeCount} of {alertLimit} active alerts used
+            {user.plan === 'free' && activeCount >= alertLimit && (
               <Link href="/account" className="ml-2 text-blue-600 hover:underline font-medium">
                 Upgrade for more →
               </Link>

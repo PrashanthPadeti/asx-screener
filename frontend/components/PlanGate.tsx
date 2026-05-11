@@ -13,7 +13,8 @@
  */
 
 import Link from 'next/link'
-import { Lock, Zap } from 'lucide-react'
+import { usePathname } from 'next/navigation'
+import { Lock, Zap, LogIn } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const PLAN_RANK: Record<string, number> = {
@@ -56,8 +57,38 @@ interface Props {
 
 export function PlanGate({ required, feature, children }: Props) {
   const { user } = useAuth()
+  const pathname  = usePathname()
 
-  if (!user) return null
+  if (!user) return (
+    <div className="flex flex-col items-center justify-center min-h-[60vh] px-4 py-16">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-8 max-w-md w-full text-center">
+        <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-4">
+          <Lock className="w-7 h-7 text-slate-400" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900 mb-1">Sign in required</h2>
+        <p className="text-sm text-slate-500 mb-6">
+          {feature ? `${feature} is` : 'This feature is'} available on the{' '}
+          <span className="font-semibold text-slate-700">
+            {required === 'premium' ? 'Premium' : 'Pro'}
+          </span>{' '}
+          plan. Sign in to continue.
+        </p>
+        <Link
+          href={`/auth/login?redirect=${encodeURIComponent(pathname)}`}
+          className="flex items-center justify-center gap-2 w-full py-3 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 transition-colors"
+        >
+          <LogIn className="w-4 h-4" />
+          Sign in
+        </Link>
+        <p className="mt-3 text-xs text-slate-400">
+          Don&apos;t have an account?{' '}
+          <Link href="/auth/register" className="text-blue-600 hover:underline">
+            Create one free
+          </Link>
+        </p>
+      </div>
+    </div>
+  )
 
   const userRank = PLAN_RANK[user.plan] ?? 0
   const reqRank  = PLAN_RANK[required]  ?? 0

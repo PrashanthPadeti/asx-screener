@@ -92,7 +92,6 @@ function AccountPageInner() {
   const { user, loading } = useAuth()
   const searchParams      = useSearchParams()
   const upgradeStatus     = searchParams.get('upgrade')
-  const upgradeTarget     = searchParams.get('upgrade') // also used as target plan hint
 
   const [billing, setBilling]   = useState<'monthly' | 'yearly'>('monthly')
   const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null)

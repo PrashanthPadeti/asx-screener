@@ -234,8 +234,14 @@ def upsert_analyst_ratings(cur, asx_code: str, snapshot_date: date,
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (asx_code) DO UPDATE SET
             snapshot_date = EXCLUDED.snapshot_date,
-            rating = EXCLUDED.rating, target_price = EXCLUDED.target_price,
-            loaded_at = NOW()
+            rating        = EXCLUDED.rating,
+            target_price  = EXCLUDED.target_price,
+            strong_buy    = EXCLUDED.strong_buy,
+            buy           = EXCLUDED.buy,
+            hold          = EXCLUDED.hold,
+            sell          = EXCLUDED.sell,
+            strong_sell   = EXCLUDED.strong_sell,
+            loaded_at     = NOW()
     """, (
         asx_code, snapshot_date,
         sf(ar.get("Rating")), sf(ar.get("TargetPrice")),

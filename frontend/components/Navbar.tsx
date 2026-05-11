@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy, Trophy } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
@@ -23,12 +23,14 @@ const MARKET_DATA_LINKS = [
   { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',         premium: true },
   { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX', premium: true },
   { href: '/commodities',    label: 'Commodities',    icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more', premium: true },
+  { href: '/top5',           label: 'Top 5 Strategy', icon: Trophy,     desc: 'Monthly algo-ranked top 5 from ASX200', premium: true },
 ]
 
 const RESOURCES_LINKS = [
-  { href: '/learn',   label: 'Education Hub',  icon: BookOpen,   desc: 'Guides, tutorials & courses',     premium: true },
-  { href: '/brokers', label: 'Broker Compare', icon: DollarSign, desc: 'Best ASX trading platforms 2026', premium: true },
-  { href: '/contact', label: 'Contact Support', icon: Bell,      desc: 'Get help or report an issue',      premium: false },
+  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', premium: true },
+  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   desc: 'Guides, tutorials & courses',     premium: true },
+  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, desc: 'Best ASX trading platforms 2026', premium: true },
+  { href: '/contact',  label: 'Contact Support',  icon: Bell,       desc: 'Get help or report an issue',      premium: false },
 ]
 
 const PLAN_BADGE: Record<string, string> = {
@@ -157,7 +159,7 @@ export default function Navbar() {
                 onClick={() => setResourceDropOpen(v => !v)}
                 className={cn(
                   'flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  (pathname === '/learn' || pathname === '/brokers')
+                  (pathname === '/learn' || pathname === '/brokers' || pathname === '/glossary')
                     ? 'bg-blue-50 text-blue-700'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
                 )}

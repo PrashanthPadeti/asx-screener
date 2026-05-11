@@ -17,60 +17,66 @@ PLAN_RANK: dict[str, int] = {
 
 
 class PlanLimits(TypedDict):
-    portfolios:       int
-    watchlists:       int
-    stocks_per_wl:    int
-    alerts:           int
-    nl_screener:      bool
-    csv_export:       bool
-    seat_limit:       int   # max team seats (1 = individual)
+    portfolios:          int
+    watchlists:          int
+    stocks_per_wl:       int
+    alerts:              int
+    nl_screener:         bool
+    csv_export:          bool
+    portfolio_insights:  bool   # AI portfolio analysis (Premium+)
+    seat_limit:          int    # max team seats (1 = individual)
 
 
 PLAN_LIMITS: dict[str, PlanLimits] = {
     "free": {
-        "portfolios":    1,
-        "watchlists":    1,
-        "stocks_per_wl": 50,
-        "alerts":        3,
-        "nl_screener":   False,
-        "csv_export":    False,
-        "seat_limit":    1,
+        "portfolios":         1,
+        "watchlists":         1,
+        "stocks_per_wl":      50,
+        "alerts":             5,
+        "nl_screener":        False,
+        "csv_export":         False,
+        "portfolio_insights": False,
+        "seat_limit":         1,
     },
     "pro": {
-        "portfolios":    10,
-        "watchlists":    20,
-        "stocks_per_wl": 500,
-        "alerts":        50,
-        "nl_screener":   True,
-        "csv_export":    True,
-        "seat_limit":    1,
+        "portfolios":         10,
+        "watchlists":         20,
+        "stocks_per_wl":      500,
+        "alerts":             50,
+        "nl_screener":        True,
+        "csv_export":         True,
+        "portfolio_insights": False,
+        "seat_limit":         1,
     },
     "premium": {
-        "portfolios":    50,
-        "watchlists":    50,
-        "stocks_per_wl": 500,
-        "alerts":        100,
-        "nl_screener":   True,
-        "csv_export":    True,
-        "seat_limit":    1,
+        "portfolios":         50,
+        "watchlists":         50,
+        "stocks_per_wl":      500,
+        "alerts":             100,
+        "nl_screener":        True,
+        "csv_export":         True,
+        "portfolio_insights": True,
+        "seat_limit":         1,
     },
     "enterprise_pro": {
-        "portfolios":    10,
-        "watchlists":    20,
-        "stocks_per_wl": 500,
-        "alerts":        50,
-        "nl_screener":   True,
-        "csv_export":    True,
-        "seat_limit":    10,  # up to 10 seats
+        "portfolios":         10,
+        "watchlists":         20,
+        "stocks_per_wl":      500,
+        "alerts":             50,
+        "nl_screener":        True,
+        "csv_export":         True,
+        "portfolio_insights": False,
+        "seat_limit":         10,
     },
     "enterprise_premium": {
-        "portfolios":    50,
-        "watchlists":    50,
-        "stocks_per_wl": 500,
-        "alerts":        100,
-        "nl_screener":   True,
-        "csv_export":    True,
-        "seat_limit":    10,
+        "portfolios":         50,
+        "watchlists":         50,
+        "stocks_per_wl":      500,
+        "alerts":             100,
+        "nl_screener":        True,
+        "csv_export":         True,
+        "portfolio_insights": True,
+        "seat_limit":         10,
     },
 }
 

@@ -39,7 +39,7 @@ const ASX_RELEVANCE: Record<string, string> = {
   IO: 'Iron ore is Australia\'s most valuable export commodity. BHP (BHP), Rio Tinto (RIO) and Fortescue (FMG) are among the world\'s largest iron ore producers — their earnings are highly correlated with the iron ore price.',
 }
 
-const ALL_COMMODITIES = ['GC', 'SI', 'PL', 'HG', 'CL', 'BZ', 'NG']
+const ALL_COMMODITIES = ['GC', 'SI', 'PL', 'HG', 'CL', 'BZ', 'NG', 'IO']
 const COMPARE_COLORS  = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#f97316', '#06b6d4']
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ function CompareChart({ currentCode }: { currentCode: string }) {
 
   const NAMES: Record<string, string> = {
     GC: 'Gold', SI: 'Silver', PL: 'Platinum',
-    HG: 'Copper', CL: 'WTI', BZ: 'Brent', NG: 'Nat Gas',
+    HG: 'Copper', CL: 'WTI', BZ: 'Brent', NG: 'Nat Gas', IO: 'Iron Ore',
   }
 
   const allSelected = [currentCode, ...selected]

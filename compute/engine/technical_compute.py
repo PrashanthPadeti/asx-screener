@@ -390,7 +390,8 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["mfi_14"] = compute_mfi(h, l, c, v, 14)
 
     # ── Rolling VWAP (20d) ────────────────────────────────────────────────────
-    df["vwap"] = compute_vwap_rolling(c, v, 20)
+    df["vwap"]       = compute_vwap_rolling(c, v, 20)
+    df["above_vwap"] = (c > df["vwap"]).astype(int)   # 1 if close > 20d VWAP
 
     # ── Volume Averages ───────────────────────────────────────────────────────
     df["volume_avg_5d"]  = v.rolling(5).mean().round(0).astype("Int64")
@@ -398,6 +399,8 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["volume_avg_50d"] = v.rolling(50).mean().round(0).astype("Int64")
     avg20 = v.rolling(20).mean().replace(0, np.nan)
     df["relative_volume"] = (v / avg20).round(4)
+    # Average daily dollar turnover in AUD millions — primary liquidity filter
+    df["dollar_volume_avg_20d"] = (c * avg20 / 1_000_000).round(2)
 
     # ── 52-week & ATH/ATL ─────────────────────────────────────────────────────
     df["high_52w"]          = h.rolling(252).max().round(4)
@@ -476,9 +479,9 @@ INSERT_COLS = [
     "atr_14", "atr_pct", "true_range",
     "hv_20d", "hv_60d",
     # Volume
-    "obv", "obv_ema", "vwap", "cmf_20", "mfi_14",
+    "obv", "obv_ema", "vwap", "above_vwap", "cmf_20", "mfi_14",
     "volume_avg_5d", "volume_avg_20d", "volume_avg_50d",
-    "relative_volume",
+    "relative_volume", "dollar_volume_avg_20d",
     # Levels
     "high_52w", "low_52w", "ath_price", "atl_price",
     "pct_from_52w_high", "pct_from_52w_low", "pct_from_ath",
@@ -550,9 +553,9 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None) ->
             g("cci_20"), g("williams_r"), c("roc_10"), c("roc_20"),
             g("atr_14"), c("atr_pct"), g("true_range"),
             c("hv_20d"), c("hv_60d"),
-            gi("obv"), gi("obv_ema"), g("vwap"), c("cmf_20"), g("mfi_14"),
+            gi("obv"), gi("obv_ema"), g("vwap"), g("above_vwap"), c("cmf_20"), g("mfi_14"),
             gi("volume_avg_5d"), gi("volume_avg_20d"), gi("volume_avg_50d"),
-            c("relative_volume"),
+            c("relative_volume"), g("dollar_volume_avg_20d"),
             g("high_52w"), g("low_52w"), g("ath_price"), g("atl_price"),
             c("pct_from_52w_high"), c("pct_from_52w_low"), c("pct_from_ath"),
             g("above_sma20"), g("above_sma50"), g("above_sma100"), g("above_sma200"),

@@ -86,8 +86,22 @@ async def get_plans():
 # ── Checkout ──────────────────────────────────────────────────────────────────
 
 class CheckoutRequest(BaseModel):
-    price_id: str          # Stripe price ID chosen by frontend
+    plan: str              # e.g. "pro" | "premium"
+    interval: str = "monthly"  # "monthly" | "yearly"
     seats: int = 1         # 1, 5, or 10
+
+
+# Map (plan, interval) → price key name in _price_ids()
+_PLAN_INTERVAL_TO_KEY: dict[tuple[str, str], str] = {
+    ("pro",               "monthly"): "STRIPE_PRO_MONTHLY",
+    ("pro",               "yearly"):  "STRIPE_PRO_YEARLY",
+    ("premium",           "monthly"): "STRIPE_PREMIUM_MONTHLY",
+    ("premium",           "yearly"):  "STRIPE_PREMIUM_YEARLY",
+    ("enterprise_pro",    "monthly"): "STRIPE_ENT_PRO_5_MONTHLY",
+    ("enterprise_pro",    "yearly"):  "STRIPE_ENT_PRO_5_YEARLY",
+    ("enterprise_premium","monthly"): "STRIPE_ENT_PREM_5_MONTHLY",
+    ("enterprise_premium","yearly"):  "STRIPE_ENT_PREM_5_YEARLY",
+}
 
 
 @router.post("/checkout")
@@ -100,10 +114,13 @@ async def create_checkout(
     if not settings.STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Billing not configured")
 
-    # Validate price_id is one we know about
-    known = set(_price_ids().values()) - {""}
-    if body.price_id not in known:
-        raise HTTPException(status_code=400, detail="Invalid price ID")
+    # Resolve plan + interval → Stripe price ID
+    price_key = _PLAN_INTERVAL_TO_KEY.get((body.plan, body.interval))
+    if not price_key:
+        raise HTTPException(status_code=400, detail="Invalid plan or interval")
+    price_id = _price_ids().get(price_key, "")
+    if not price_id:
+        raise HTTPException(status_code=400, detail="Price not configured for this plan")
 
     import stripe as _stripe
     _stripe.api_key = settings.STRIPE_SECRET_KEY
@@ -128,11 +145,11 @@ async def create_checkout(
         )
         await db.commit()
 
-    base_url = getattr(settings, "FRONTEND_URL", "http://209.38.84.102:3000")
+    base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
     session = _stripe.checkout.Session.create(
         customer=customer_id,
         payment_method_types=["card"],
-        line_items=[{"price": body.price_id, "quantity": 1}],
+        line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
         success_url=f"{base_url}/account?upgrade=success",
         cancel_url=f"{base_url}/account?upgrade=cancelled",
@@ -162,7 +179,7 @@ async def create_portal(
     if not user or not user.stripe_customer_id:
         raise HTTPException(status_code=400, detail="No billing account found")
 
-    base_url = getattr(settings, "FRONTEND_URL", "http://209.38.84.102:3000")
+    base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
     session = _stripe.billing_portal.Session.create(
         customer=user.stripe_customer_id,
         return_url=f"{base_url}/account",

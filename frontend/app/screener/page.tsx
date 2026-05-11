@@ -366,6 +366,17 @@ function ColumnPicker({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+const NL_EXAMPLES = [
+  'Profitable miners under $1B market cap',
+  'High dividend yield with franking credit',
+  'REITs with low debt and positive earnings',
+  'Momentum stocks near 52-week high',
+  'Cheap banks with P/E under 12',
+  'Small caps with strong revenue growth',
+  'Energy stocks with low P/E and high yield',
+  'Healthcare companies with no debt',
+]
+
 export default function ScreenerPage() {
   const { user } = useAuth()
   const userPlan = user?.plan ?? 'free'
@@ -397,11 +408,18 @@ export default function ScreenerPage() {
   const [sortBy, setSortBy]         = useState('market_cap')
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
 
+  // Screener mode
+  const [screenerMode, setScreenerMode] = useState<'manual' | 'ai'>('manual')
+
   // NL screener state
   const [nlQuery, setNlQuery]               = useState('')
   const [nlLoading, setNlLoading]           = useState(false)
   const [nlError, setNlError]               = useState<string | null>(null)
   const [nlResult, setNlResult]             = useState<NLScreenerResponse | null>(null)
+  const [nlPage, setNlPage]                 = useState(1)
+  const [nlTotalPages, setNlTotalPages]     = useState(0)
+  const [nlTotal, setNlTotal]               = useState(0)
+  const [nlRows, setNlRows]                 = useState<ScreenerRow[]>([])
 
   // Saved screens state
   const [myScreens, setMyScreens]           = useState<SavedScreen[]>([])
@@ -668,31 +686,18 @@ export default function ScreenerPage() {
       : <ChevronDown className="w-3 h-3 inline ml-0.5" />
   }
 
-  // Run NL screener
-  const runNLScreen = async () => {
+  // Run NL screener — page=1 re-invokes Claude; page>1 re-uses the same query
+  const runNLScreen = async (page = 1) => {
     if (!nlQuery.trim()) return
     setNlLoading(true)
     setNlError(null)
-    setNlResult(null)
     try {
-      const res = await nlScreener(nlQuery.trim())
+      const res = await nlScreener(nlQuery.trim(), page)
       setNlResult(res)
-      setResults(res.data)
-      setTotal(res.total)
-      setTotalPages(res.total_pages)
-      setPage(1)
-      setRan(true)
-      // Populate the filter builder with the interpreted filters
-      const rows: FilterRow[] = res.filters.map(f => ({
-        id:       nextId++,
-        field:    f.field,
-        operator: f.operator,
-        value:    String(f.value),
-      }))
-      setFilters(rows)
-      setSortBy(res.sort_by)
-      setSortDir(res.sort_dir as 'asc' | 'desc')
-      setActivePreset(null)
+      setNlRows(res.data)
+      setNlTotal(res.total)
+      setNlTotalPages(res.total_pages)
+      setNlPage(page)
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
         || (e as Error).message
@@ -706,67 +711,220 @@ export default function ScreenerPage() {
   return (
     <div className="space-y-4">
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header + Mode Tabs */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>
-        <span className="text-sm text-gray-500">ASX-listed stocks</span>
-      </div>
-
-      {/* AI Natural Language Search */}
-      <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl p-5 border border-white/10">
-        <div className="flex items-center gap-2 mb-3">
-          <Sparkles className="w-4 h-4 text-blue-400" />
-          <span className="text-sm font-semibold text-white">AI Screen</span>
-          <span className="text-xs text-slate-400 ml-1">Powered by Claude</span>
-        </div>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={nlQuery}
-            onChange={e => setNlQuery(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && runNLScreen()}
-            placeholder='e.g. "profitable miners with low debt and high franked dividends"'
-            className="flex-1 bg-white/10 border border-white/20 text-white placeholder-slate-400
-                       rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-400
-                       focus:bg-white/15 transition-all"
-          />
+        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
           <button
-            onClick={runNLScreen}
-            disabled={nlLoading || !nlQuery.trim()}
-            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500
-                       disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm
-                       font-semibold rounded-xl transition-colors shrink-0">
-            {nlLoading
-              ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              : <Search className="w-4 h-4" />}
-            {nlLoading ? 'Thinking…' : 'Screen'}
+            onClick={() => setScreenerMode('manual')}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
+              screenerMode === 'manual'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            )}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            Filter Screen
+          </button>
+          <button
+            onClick={() => setScreenerMode('ai')}
+            className={cn(
+              'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
+              screenerMode === 'ai'
+                ? 'bg-white text-gray-900 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            )}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+            AI Query
+            {isPro
+              ? <span className="text-[10px] bg-blue-600 text-white rounded px-1.5 py-0.5 font-bold">PRO</span>
+              : <span className="text-[10px] bg-amber-500 text-white rounded px-1.5 py-0.5 font-bold">UPGRADE</span>
+            }
           </button>
         </div>
-
-        {nlError && (
-          <p className="mt-2 text-sm text-red-400">{nlError}</p>
-        )}
-
-        {nlResult && !nlLoading && (
-          <div className="mt-3 space-y-2">
-            <p className="text-sm text-blue-300 leading-snug">
-              <span className="font-semibold text-white">Interpreted as:</span> {nlResult.interpretation}
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {nlResult.filters.map((f, i) => (
-                <span key={i} className="text-xs bg-white/10 text-slate-300 border border-white/10
-                                          px-2 py-0.5 rounded-full font-mono">
-                  {f.field} {f.operator} {String(f.value)}
-                </span>
-              ))}
-            </div>
-            <p className="text-xs text-slate-500">{nlResult.total} stocks matched</p>
-          </div>
-        )}
       </div>
 
-      {/* Quick Presets */}
-      {presets.length > 0 && (
+      {/* ── AI Query Mode ────────────────────────────────────────── */}
+      {screenerMode === 'ai' && (
+        <>
+          {isPro ? (
+            <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl border border-white/10 overflow-hidden">
+              {/* Search area */}
+              <div className="p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Sparkles className="w-5 h-5 text-blue-400" />
+                  <span className="text-base font-bold text-white">AI Natural Language Query</span>
+                  <span className="text-xs text-slate-400">Powered by Claude</span>
+                </div>
+
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    value={nlQuery}
+                    onChange={e => setNlQuery(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && runNLScreen(1)}
+                    placeholder='e.g. "show me profitable miners under $1B"'
+                    className="flex-1 bg-white/10 border border-white/20 text-white placeholder-slate-400
+                               rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-blue-400
+                               focus:bg-white/15 transition-all"
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => runNLScreen(1)}
+                    disabled={nlLoading || !nlQuery.trim()}
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-500
+                               disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm
+                               font-semibold rounded-xl transition-colors shrink-0">
+                    {nlLoading
+                      ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      : <Search className="w-4 h-4" />}
+                    {nlLoading ? 'Thinking…' : 'Search'}
+                  </button>
+                </div>
+
+                {/* Example chips */}
+                <div className="mt-3">
+                  <p className="text-xs text-slate-500 mb-2">Try an example:</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {NL_EXAMPLES.map(q => (
+                      <button
+                        key={q}
+                        onClick={() => { setNlQuery(q); setTimeout(() => runNLScreen(1), 50) }}
+                        className="text-xs px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/20
+                                   text-slate-300 hover:text-white border border-white/10
+                                   hover:border-white/20 transition-colors"
+                      >
+                        {q}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {nlError && (
+                  <div className="mt-3 flex items-start gap-2 px-4 py-3 bg-red-900/30 border border-red-500/30 rounded-xl">
+                    <span className="text-sm text-red-400">{nlError}</span>
+                  </div>
+                )}
+
+                {nlResult && !nlLoading && (
+                  <div className="mt-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10 space-y-2">
+                    <p className="text-sm text-blue-300 leading-snug">
+                      <span className="font-semibold text-white">Interpreted as:</span> {nlResult.interpretation}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {nlResult.filters.map((f, i) => (
+                        <span key={i} className="text-xs bg-white/10 text-slate-300 border border-white/10
+                                                  px-2 py-0.5 rounded-full font-mono">
+                          {f.field} {f.operator} {String(f.value)}
+                        </span>
+                      ))}
+                    </div>
+                    <p className="text-xs text-slate-500">{nlTotal.toLocaleString()} stocks matched</p>
+                  </div>
+                )}
+              </div>
+
+              {/* AI Results table */}
+              {nlRows.length > 0 && (
+                <div className="border-t border-white/10">
+                  {/* Table header */}
+                  <div className="flex items-center justify-between px-6 py-3 bg-white/5">
+                    <span className="text-sm font-semibold text-white">
+                      {nlTotal.toLocaleString()} results
+                    </span>
+                    <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-white/5 border-b border-white/10">
+                        <tr>
+                          {visibleCols.map(col => (
+                            <th key={col.key as string}
+                              className={cn(
+                                'px-3 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap',
+                                col.align === 'right' ? 'text-right' : 'text-left',
+                              )}>
+                              {col.label}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {nlRows.map(r => (
+                          <tr key={r.asx_code} className="hover:bg-white/5 transition-colors">
+                            {visibleCols.map(col => (
+                              <td key={col.key as string}
+                                className={cn('px-3 py-2.5',
+                                  col.align === 'right' ? 'text-right' : 'text-left')}>
+                                {col.render(r)}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination */}
+                  {nlTotalPages > 1 && (
+                    <div className="flex items-center justify-between px-6 py-3 border-t border-white/10">
+                      <span className="text-sm text-slate-400">
+                        Page {nlPage} of {nlTotalPages}
+                      </span>
+                      <div className="flex gap-2">
+                        <button onClick={() => runNLScreen(nlPage - 1)} disabled={nlPage <= 1 || nlLoading}
+                          className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-white/20
+                                     disabled:opacity-40 hover:bg-white/10 font-medium text-slate-300">
+                          <ChevronLeft className="w-4 h-4" /> Prev
+                        </button>
+                        <button onClick={() => runNLScreen(nlPage + 1)} disabled={nlPage >= nlTotalPages || nlLoading}
+                          className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-white/20
+                                     disabled:opacity-40 hover:bg-white/10 font-medium text-slate-300">
+                          Next <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {nlResult && !nlLoading && nlRows.length === 0 && (
+                <div className="border-t border-white/10 px-6 py-10 text-center">
+                  <p className="text-slate-400">No stocks matched your query.</p>
+                  <p className="text-sm text-slate-500 mt-1">Try relaxing the criteria or rephrasing.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Upgrade CTA for non-pro users */
+            <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl p-8 border border-white/10 text-center">
+              <Sparkles className="w-10 h-10 text-blue-400 mx-auto mb-3" />
+              <h2 className="text-lg font-bold text-white mb-2">AI Natural Language Query</h2>
+              <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
+                Ask questions in plain English — <span className="text-white">&quot;show me profitable miners under $1B&quot;</span> — and AI instantly queries the ASX database for you.
+              </p>
+              <div className="flex flex-wrap justify-center gap-1.5 mb-6">
+                {['Profitable miners under $1B', 'High franked dividends', 'REITs with low debt', 'Momentum near 52W high'].map(q => (
+                  <span key={q} className="text-xs px-3 py-1.5 rounded-full bg-white/10 text-slate-400 border border-white/10">{q}</span>
+                ))}
+              </div>
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500
+                           text-white text-sm font-semibold rounded-xl transition-colors"
+              >
+                <Zap className="w-4 h-4" /> Upgrade to Pro
+              </Link>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Manual Filter Mode ───────────────────────────────────── */}
+      {screenerMode === 'manual' && presets.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-3">
             <Zap className="w-4 h-4 text-yellow-500" />
@@ -838,7 +996,7 @@ export default function ScreenerPage() {
                 className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
                 Maybe later
               </button>
-              <Link href="/account" onClick={() => setShowUpgradeModal(false)}
+              <Link href="/pricing" onClick={() => setShowUpgradeModal(false)}
                 className="flex-1 px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
                 Upgrade to Pro
               </Link>
@@ -913,8 +1071,8 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* Filter builder */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
+      {/* Filter builder — manual mode only */}
+      {screenerMode === 'manual' && <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-gray-800 text-sm">Filters</h2>
           <div className="flex items-center gap-3">
@@ -1083,10 +1241,10 @@ export default function ScreenerPage() {
             )}
           </div>
         )}
-      </div>
+      </div>}
 
-      {/* Results table */}
-      {results.length > 0 && (
+      {/* Results table — manual mode */}
+      {screenerMode === 'manual' && results.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
           {/* Table header bar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
@@ -1166,7 +1324,7 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {ran && !loading && results.length === 0 && (
+      {screenerMode === 'manual' && ran && !loading && results.length === 0 && (
         <div className="text-center py-12 bg-white border border-gray-200 rounded-xl">
           <p className="text-gray-500 font-medium">No stocks match your filters.</p>
           <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>

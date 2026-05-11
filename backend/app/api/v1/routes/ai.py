@@ -122,7 +122,7 @@ async def nl_screener(
         import anthropic
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=settings.CLAUDE_MODEL,
             max_tokens=1024,
             system=_NL_SYSTEM,
             messages=[{"role": "user", "content": prompt}],
@@ -231,8 +231,8 @@ async def get_portfolio_insights(
     Returns cached insights (up to 7 days) when holdings haven't changed.
     Pass ?refresh=true to force regeneration.
     """
-    if not get_limits(current_user.get("plan", "free"))["nl_screener"]:
-        raise HTTPException(status_code=403, detail="AI Insights requires a Pro plan or higher.")
+    if not get_limits(current_user.get("plan", "free"))["portfolio_insights"]:
+        raise HTTPException(status_code=403, detail="AI Portfolio Insights requires a Premium plan or higher.")
     if not settings.ANTHROPIC_API_KEY:
         raise HTTPException(status_code=503, detail="AI features not configured.")
 
@@ -434,7 +434,7 @@ Reference specific ASX codes where relevant. Keep each item under 2 sentences.""
         import anthropic
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=settings.CLAUDE_MODEL,
             max_tokens=1500,
             system="You are an expert Australian equities portfolio analyst. Return valid JSON only.",
             messages=[{"role": "user", "content": prompt}],
@@ -569,7 +569,6 @@ async def list_market_anomalies(
         for k in ("price", "return_1w"):
             if f.get(k) is not None:
                 f[k] = float(f[k])
-        f["return_1d"] = None  # not available in screener.universe
         flags.append(f)
 
     return {"flags": flags, "total": len(flags)}

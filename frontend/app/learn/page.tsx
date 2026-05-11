@@ -1,7 +1,6 @@
 'use client'
 import Link from 'next/link'
 import { ExternalLink, BookOpen, TrendingUp, PieChart, DollarSign, BarChart2, Zap, ChevronRight, Play } from 'lucide-react'
-import { PlanGate } from '@/components/PlanGate'
 
 interface Guide {
   title: string
@@ -215,7 +214,6 @@ function StarRating({ rating }: { rating: number }) {
 
 export default function LearnPage() {
   return (
-    <PlanGate required="premium" feature="Education Hub">
     <div className="max-w-5xl mx-auto space-y-12 pb-16">
 
       {/* Hero */}
@@ -373,6 +371,5 @@ export default function LearnPage() {
       </div>
 
     </div>
-    </PlanGate>
   )
 }

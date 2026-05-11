@@ -1255,16 +1255,28 @@ export default function ScreenerPage() {
               )}
             </span>
             <div className="flex items-center gap-2">
-              <button
-                onClick={handleExport}
-                disabled={exporting}
-                title="Download CSV (max 5,000 rows)"
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300
-                           text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50
-                           transition-colors font-medium bg-white">
-                <Download className="w-3.5 h-3.5" />
-                {exporting ? 'Exporting…' : 'Export CSV'}
-              </button>
+              {isPro ? (
+                <button
+                  onClick={handleExport}
+                  disabled={exporting}
+                  title="Download CSV (max 5,000 rows)"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300
+                             text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50
+                             transition-colors font-medium bg-white">
+                  <Download className="w-3.5 h-3.5" />
+                  {exporting ? 'Exporting…' : 'Export CSV'}
+                </button>
+              ) : (
+                <button
+                  title="Export CSV — Pro plan required"
+                  onClick={() => window.location.href = '/pricing'}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-amber-300
+                             text-amber-600 hover:border-amber-400 hover:bg-amber-50
+                             transition-colors font-medium bg-white">
+                  <Download className="w-3.5 h-3.5" />
+                  Export CSV 🔒
+                </button>
+              )}
               <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
             </div>
           </div>

@@ -8,7 +8,7 @@
 -- and quarterly report announcements for gold/copper/iron ore miners).
 
 CREATE TABLE IF NOT EXISTS market.mining_metrics (
-    asx_code            VARCHAR(10)   NOT NULL PRIMARY KEY REFERENCES market.companies(asx_code) ON DELETE CASCADE,
+    asx_code            VARCHAR(10)   NOT NULL PRIMARY KEY,
 
     -- Cost metrics (USD per oz / per tonne depending on commodity)
     aisc_per_oz         NUMERIC(10,2),   -- All-In Sustaining Cost (gold, silver) USD/oz
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS mining_metrics_primary_commodity_idx
 -- and half-year/annual results announcements).
 
 CREATE TABLE IF NOT EXISTS market.reit_metrics (
-    asx_code            VARCHAR(10)   NOT NULL PRIMARY KEY REFERENCES market.companies(asx_code) ON DELETE CASCADE,
+    asx_code            VARCHAR(10)   NOT NULL PRIMARY KEY,
 
     -- Funds From Operations
     ffo_per_unit        NUMERIC(10,4),   -- FFO per unit (AUD)
@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS reit_metrics_sector_idx
 
 CREATE TABLE IF NOT EXISTS market.capital_raises (
     id                  BIGSERIAL     PRIMARY KEY,
-    asx_code            VARCHAR(10)   NOT NULL REFERENCES market.companies(asx_code) ON DELETE CASCADE,
+    asx_code            VARCHAR(10)   NOT NULL,
 
     -- Raise type
     raise_type          VARCHAR(30)   NOT NULL,  -- 'placement', 'spp', 'rights_issue', 'entitlement_offer', 'ipo', 'drp'

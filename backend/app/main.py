@@ -24,6 +24,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
+    # ── Stripe env validation ──────────────────────────────────
+    _stripe_keys = [
+        "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET",
+        "STRIPE_PRO_MONTHLY", "STRIPE_PRO_YEARLY",
+        "STRIPE_PREMIUM_MONTHLY", "STRIPE_PREMIUM_YEARLY",
+    ]
+    _missing = [k for k in _stripe_keys if not getattr(settings, k, "")]
+    if _missing:
+        logger.warning("Stripe env vars not set (payments disabled): %s", ", ".join(_missing))
+
     # ── Start schedulers ──────────────────────────────────────
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger
@@ -39,6 +49,11 @@ async def lifespan(app: FastAPI):
     from app.workers.asx_indices_worker import run_asx_indices
     from app.workers.short_positions_worker import run_short_positions
     from app.workers.anomaly_worker import run_anomaly_detect
+    from app.workers.top5_strategy_worker import run_top5_strategy
+    from app.workers.asx_companies_worker import sync_asx_companies
+    from app.workers.anomaly_alert_worker import send_anomaly_alerts
+    from app.workers.capital_raise_worker import scan_capital_raises
+    from app.workers.mining_reit_worker import sync_mining_reit_metrics
 
     scheduler = AsyncIOScheduler()
 
@@ -106,8 +121,33 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=19, minute=0, timezone="Australia/Sydney"),
                       id="anomaly_detect", replace_existing=True)
 
+    # Anomaly alert emails — daily at 7:15pm AEST (15 min after anomaly detection)
+    scheduler.add_job(send_anomaly_alerts,
+                      CronTrigger(hour=19, minute=15, timezone="Australia/Sydney"),
+                      id="anomaly_alerts", replace_existing=True)
+
+    # Capital raise scanner — daily at 7:30am AEST (after announcement fetch settles)
+    scheduler.add_job(scan_capital_raises,
+                      CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
+                      id="capital_raise_scan", replace_existing=True)
+
+    # Mining & REIT metrics sync — weekly Sunday at 7:00am AEST
+    scheduler.add_job(sync_mining_reit_metrics,
+                      CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Australia/Sydney"),
+                      id="mining_reit_metrics", replace_existing=True)
+
+    # Top 5 monthly picks — 2nd of each month at 8pm AEST (after universe + composite scores settle)
+    scheduler.add_job(run_top5_strategy,
+                      CronTrigger(day=2, hour=20, minute=0, timezone="Australia/Sydney"),
+                      id="top5_strategy", replace_existing=True)
+
+    # ASX companies list sync — daily at 6:00am AEST (before universe build)
+    scheduler.add_job(sync_asx_companies,
+                      CronTrigger(hour=6, minute=0, timezone="Australia/Sydney"),
+                      id="asx_companies", replace_existing=True)
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), short-positions(6:30pm), market-snapshot(6:45pm), anomaly-detect(7:00pm)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), short-positions(6:30pm), market-snapshot(6:45pm), anomaly-detect(7:00pm), anomaly-alerts(7:15pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
 
     yield
 
@@ -132,7 +172,6 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
-        "http://209.38.84.102:3000",
         "https://asxscreener.com.au",
         "https://www.asxscreener.com.au",
     ],
@@ -146,10 +185,13 @@ app.add_middleware(
 
 @app.get("/health", tags=["System"])
 async def health():
+    from app.core.cache import cache_ping
+    redis_ok = await cache_ping()
     return {
         "status": "ok",
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
+        "redis": "connected" if redis_ok else "unavailable",
     }
 
 

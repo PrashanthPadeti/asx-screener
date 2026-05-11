@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { getStoredAccessToken } from './auth'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://209.38.84.102:8000'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -293,22 +293,17 @@ export const exportScreener = async (
   filters: ScreenerFilter[],
   options: { sort_by?: string; sort_dir?: string } = {}
 ): Promise<void> => {
-  const response = await fetch(`${API_BASE}/api/v1/screener/export`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      filters,
-      sort_by: options.sort_by || 'market_cap',
-      sort_dir: options.sort_dir || 'desc',
-      page: 1,
-      page_size: 50,  // ignored server-side for export
-    }),
-  })
-  if (!response.ok) throw new Error(`Export failed: ${response.statusText}`)
-  const blob = await response.blob()
-  const url  = URL.createObjectURL(blob)
-  const a    = document.createElement('a')
-  const cd   = response.headers.get('content-disposition') || ''
+  const response = await api.post('/api/v1/screener/export', {
+    filters,
+    sort_by: options.sort_by || 'market_cap',
+    sort_dir: options.sort_dir || 'desc',
+    page: 1,
+    page_size: 50,  // ignored server-side for export
+  }, { responseType: 'blob' })
+  const blob  = new Blob([response.data], { type: 'text/csv' })
+  const url   = URL.createObjectURL(blob)
+  const a     = document.createElement('a')
+  const cd    = (response.headers['content-disposition'] as string) || ''
   const match = cd.match(/filename="([^"]+)"/)
   a.href     = url
   a.download = match ? match[1] : 'asx_screener_export.csv'
@@ -557,6 +552,7 @@ export interface MoverStock {
   return_1d: number | null   // decimal ratio
   return_1w: number | null   // decimal ratio
   return_1m: number | null   // decimal ratio
+  return_3m: number | null   // decimal ratio
   market_cap: number | null  // AUD millions
   period_high: number | null
   period_low: number | null
@@ -891,7 +887,8 @@ export const nlScreener = async (query: string, page = 1): Promise<NLScreenerRes
 
 // ── Anomaly Flags ─────────────────────────────────────────────
 
-export interface AnomalyFlag {
+// Anomaly flag for a single company (company detail page)
+export interface CompanyAnomalyFlag {
   flag_type:   string
   description: string
   severity:    'low' | 'medium' | 'high'
@@ -900,7 +897,7 @@ export interface AnomalyFlag {
 
 export interface AnomaliesResponse {
   asx_code: string
-  flags:    AnomalyFlag[]
+  flags:    CompanyAnomalyFlag[]
 }
 
 export const getAnomalyFlags = async (asxCode: string): Promise<AnomaliesResponse> => {
@@ -1375,6 +1372,7 @@ export const getTaxReport = async (portfolioId: string, taxYear?: number): Promi
 
 // ── AI & Anomalies ────────────────────────────────────────────────────────────
 
+// Anomaly flag for market-wide feed (market page)
 export interface AnomalyFlag {
   asx_code:     string
   company_name: string | null
@@ -1384,7 +1382,6 @@ export interface AnomalyFlag {
   severity:     'low' | 'medium' | 'high'
   detected_at:  string
   price:        number | null
-  return_1d:    number | null
   return_1w:    number | null
   volume:       number | null
 }
@@ -1768,6 +1765,93 @@ export const createCheckoutSession = async (price_id: string, seats = 1): Promis
 
 export const createBillingPortal = async (): Promise<{ url: string }> => {
   const { data } = await api.post('/api/v1/billing/portal')
+  return data
+}
+
+// ── Mining Metrics ────────────────────────────────────────────────────────────
+
+export interface MiningMetrics {
+  asx_code:                  string
+  is_miner:                  boolean
+  has_data:                  boolean
+  primary_commodity:         string | null
+  aisc_per_oz:               number | null
+  cash_cost_per_oz:          number | null
+  aisc_per_tonne:            number | null
+  ore_reserves_mt:           number | null
+  mineral_resources_mt:      number | null
+  reserve_grade:             number | null
+  reserve_life_yrs:          number | null
+  production_oz_ttm:         number | null
+  production_kt_ttm:         number | null
+  production_guidance_low:   number | null
+  production_guidance_high:  number | null
+  sustaining_capex_m:        number | null
+  growth_capex_m:            number | null
+  commodity_price_ref:       number | null
+  report_period:             string | null
+  updated_at:                string | null
+}
+
+export const getMiningMetrics = async (code: string): Promise<MiningMetrics> => {
+  const { data } = await api.get(`/api/v1/companies/${code}/mining-metrics`)
+  return data
+}
+
+// ── REIT Metrics ──────────────────────────────────────────────────────────────
+
+export interface ReitMetrics {
+  asx_code:               string
+  is_reit:                boolean
+  has_data:               boolean
+  reit_sector:            string | null
+  ffo_per_unit:           number | null
+  affo_per_unit:          number | null
+  price_to_ffo:           number | null
+  nta_per_unit:           number | null
+  premium_to_nta:         number | null
+  wale_yrs:               number | null
+  occupancy_pct:          number | null
+  total_assets_bn:        number | null
+  gla_sqm:                number | null
+  num_properties:         number | null
+  distribution_per_unit:  number | null
+  distribution_yield:     number | null
+  payout_of_ffo:          number | null
+  gearing_pct:            number | null
+  interest_cover:         number | null
+  report_period:          string | null
+  updated_at:             string | null
+}
+
+export const getReitMetrics = async (code: string): Promise<ReitMetrics> => {
+  const { data } = await api.get(`/api/v1/companies/${code}/reit-metrics`)
+  return data
+}
+
+// ── Capital Raises ────────────────────────────────────────────────────────────
+
+export interface CapitalRaiseEvent {
+  raise_type:          string
+  amount_m:            number | null
+  price_per_share:     number | null
+  shares_issued:       number | null
+  discount_pct:        number | null
+  announcement_date:   string
+  record_date:         string | null
+  settlement_date:     string | null
+  title:               string | null
+  url:                 string | null
+}
+
+export interface CapitalRaisesResponse {
+  asx_code: string
+  raises:   CapitalRaiseEvent[]
+  total:    number
+}
+
+export const getCapitalRaises = async (code: string): Promise<CapitalRaisesResponse> => {
+  const { data } = await api.get(`/api/v1/companies/${code}/capital-raises`)
   return data
 }
 

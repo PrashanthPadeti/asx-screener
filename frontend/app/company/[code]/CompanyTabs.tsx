@@ -9,10 +9,12 @@ import {
   getCompanyOverview, getCompanyFinancials, getCompanyPrices,
   getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
   getCompanyAnnouncements, getAISummary, getAnomalyFlags,
+  getMiningMetrics, getReitMetrics, getCapitalRaises,
   type CompanyOverview, type FinancialsResponse, type AnnualFinancialsRow,
   type PricesResponse, type DividendsResponse, type PeersResponse,
   type HalfYearlyResponse, type Announcement, type AnnouncementsResponse,
-  type AISummary, type AnomalyFlag,
+  type AISummary, type CompanyAnomalyFlag,
+  type MiningMetrics, type ReitMetrics, type CapitalRaiseEvent,
 } from '@/lib/api'
 import {
   formatPrice, formatMarketCap, formatVolume,
@@ -310,8 +312,9 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
   const [aiError, setAiError]   = useState<string | null>(null)
   const [aiLoaded, setAiLoaded] = useState(false)
 
-  const loadAI = () => {
-    if (aiLoaded) return
+  // force=true bypasses the guard — needed on retry because setState is async
+  const loadAI = (force = false) => {
+    if (aiLoaded && !force) return
     setAiLoading(true)
     setAiError(null)
     getAISummary(code)
@@ -775,7 +778,7 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
         <div className="border border-dashed border-blue-200 rounded-xl p-5 text-center bg-blue-50/30">
           <p className="text-sm font-semibold text-gray-700 mb-1">AI Deep Analysis</p>
           <p className="text-xs text-gray-400 mb-3">Get Claude{"'"}s bull/bear case, key catalysts, and risks</p>
-          <button onClick={loadAI}
+          <button onClick={() => loadAI()}
             className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500
                        text-white text-sm font-semibold rounded-lg transition-colors">
             ⚡ Generate AI Analysis
@@ -792,7 +795,7 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
       {aiError && (
         <div className="border border-red-100 rounded-xl p-4 text-center">
           <p className="text-sm text-red-600">{aiError}</p>
-          <button onClick={() => { setAiLoaded(false); loadAI() }}
+          <button onClick={() => { setAiLoaded(false); loadAI(true) }}
             className="text-xs text-blue-600 hover:underline mt-1">Retry</button>
         </div>
       )}
@@ -826,6 +829,16 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
           </div>
         </div>
       )}
+
+      {/* ── Mining Metrics (miners only) ────────────────────────── */}
+      <MiningMetricsPanel code={code} />
+
+      {/* ── REIT Metrics (REITs only) ───────────────────────────── */}
+      <ReitMetricsPanel code={code} />
+
+      {/* ── Capital Raises ──────────────────────────────────────── */}
+      <CapitalRaisesPanel code={code} />
+
     </div>
   )
 }
@@ -1122,11 +1135,6 @@ function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
     { label: 'EBIT Margin',   key: 'ebitda_margin',fmt: formatRatio },
     { label: 'Net Margin',    key: 'npm',          fmt: formatRatio },
   ]
-  const signedPctFmt = (v: number | null) => {
-    if (v == null) return '—'
-    const pct = v * 100
-    return <span className={pct >= 0 ? 'text-green-600' : 'text-red-600'}>{pct >= 0 ? '+' : ''}{pct.toFixed(1)}%</span>
-  }
   const growthRows: HRow[] = [
     { label: 'Revenue HoH',     key: 'revenue_growth_hoh',      fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
     { label: 'Revenue YoY',     key: 'revenue_growth_yoy',      fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
@@ -1134,7 +1142,6 @@ function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
     { label: 'EPS HoH',         key: 'eps_growth_hoh',          fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
     { label: 'EPS YoY',         key: 'eps_growth_yoy',          fmt: v => v != null ? `${v >= 0 ? '+' : ''}${(v*100).toFixed(1)}%` : '—' },
   ]
-  void signedPctFmt // suppress unused warning
 
   const TableSection = ({ title, rows }: { title: string; rows: HRow[] }) => (
     <>
@@ -1271,6 +1278,225 @@ function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
     </div>
   )
 }
+
+// ── Mining Metrics Panel ──────────────────────────────────────
+
+function MiningMetricsPanel({ code }: { code: string }) {
+  const [data, setData] = useState<MiningMetrics | null>(null)
+
+  useEffect(() => {
+    getMiningMetrics(code).then(setData).catch(() => {})
+  }, [code])
+
+  if (!data || !data.is_miner) return null
+
+  const fmt = (v: number | null, prefix = '', suffix = '', dp = 2) =>
+    v != null ? `${prefix}${v.toFixed(dp)}${suffix}` : '—'
+
+  const metrics = [
+    ...(data.primary_commodity ? [{ label: 'Primary Commodity', value: data.primary_commodity }] : []),
+    { label: 'AISC', value: data.aisc_per_oz != null ? `US$${data.aisc_per_oz.toFixed(0)}/oz` : data.aisc_per_tonne != null ? `US$${data.aisc_per_tonne.toFixed(0)}/t` : '—' },
+    { label: 'Cash Cost', value: data.cash_cost_per_oz != null ? `US$${data.cash_cost_per_oz.toFixed(0)}/oz` : '—' },
+    { label: 'Ore Reserves', value: data.ore_reserves_mt != null ? `${data.ore_reserves_mt.toFixed(1)} Mt` : '—' },
+    { label: 'Mineral Resources', value: data.mineral_resources_mt != null ? `${data.mineral_resources_mt.toFixed(1)} Mt` : '—' },
+    { label: 'Reserve Grade', value: data.reserve_grade != null ? `${data.reserve_grade.toFixed(2)} g/t` : '—' },
+    { label: 'Reserve Life', value: data.reserve_life_yrs != null ? `${data.reserve_life_yrs.toFixed(1)} yrs` : '—' },
+    { label: 'Production (TTM)', value: data.production_oz_ttm != null ? `${(data.production_oz_ttm / 1000).toFixed(0)}k oz` : data.production_kt_ttm != null ? `${data.production_kt_ttm.toFixed(0)} kt` : '—' },
+    { label: 'Sustaining CapEx', value: data.sustaining_capex_m != null ? `A$${data.sustaining_capex_m.toFixed(0)}M` : '—' },
+    { label: 'Growth CapEx', value: data.growth_capex_m != null ? `A$${data.growth_capex_m.toFixed(0)}M` : '—' },
+  ]
+
+  const hasDetailedData = data.has_data && (data.aisc_per_oz != null || data.ore_reserves_mt != null)
+
+  return (
+    <div className="bg-white border border-amber-100 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-gradient-to-r from-amber-50 to-yellow-50/50 px-4 py-2.5 border-b border-amber-100 flex items-center gap-2">
+        <span className="text-base">⛏️</span>
+        <h3 className="text-xs font-bold text-amber-700 uppercase tracking-widest">Mining Metrics</h3>
+        {data.primary_commodity && (
+          <span className="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-semibold">
+            {data.primary_commodity}
+          </span>
+        )}
+      </div>
+      {!hasDetailedData ? (
+        <div className="px-4 py-6 text-center text-sm text-gray-400">
+          <p>Detailed mining metrics (AISC, reserves, production) not yet available.</p>
+          <p className="mt-1 text-xs">Data is added from quarterly reports as it becomes available.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-0 divide-x divide-y divide-gray-50 p-4">
+          {metrics.filter(m => m.value !== '—').map(m => (
+            <div key={m.label} className="px-3 py-2">
+              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">{m.label}</p>
+              <p className="text-sm font-bold text-gray-800 mt-0.5">{m.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {data.report_period && (
+        <div className="px-4 pb-2 text-right">
+          <span className="text-[10px] text-gray-300">As at {data.report_period}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── REIT Metrics Panel ────────────────────────────────────────
+
+function ReitMetricsPanel({ code }: { code: string }) {
+  const [data, setData] = useState<ReitMetrics | null>(null)
+
+  useEffect(() => {
+    getReitMetrics(code).then(setData).catch(() => {})
+  }, [code])
+
+  if (!data || !data.is_reit) return null
+
+  const fmtPct  = (v: number | null) => v != null ? `${(v * 100).toFixed(2)}%` : '—'
+  const fmtX    = (v: number | null) => v != null ? `${v.toFixed(1)}x` : '—'
+  const fmtDollar = (v: number | null, dp = 4) => v != null ? `$${v.toFixed(dp)}` : '—'
+
+  const premium = data.premium_to_nta
+  const premiumLabel = premium != null
+    ? premium >= 0
+      ? `+${(premium * 100).toFixed(1)}% premium`
+      : `${(premium * 100).toFixed(1)}% discount`
+    : '—'
+  const premiumColor = premium != null
+    ? premium >= 0.05 ? 'text-red-500' : premium <= -0.05 ? 'text-emerald-600' : 'text-gray-700'
+    : 'text-gray-400'
+
+  const metrics = [
+    { label: 'REIT Sector',      value: data.reit_sector ?? '—' },
+    { label: 'NTA/Unit',         value: fmtDollar(data.nta_per_unit) },
+    { label: 'Premium / Discount', value: premiumLabel, color: premiumColor },
+    { label: 'FFO/Unit',         value: fmtDollar(data.ffo_per_unit) },
+    { label: 'P/FFO',            value: fmtX(data.price_to_ffo) },
+    { label: 'WALE',             value: data.wale_yrs != null ? `${data.wale_yrs.toFixed(1)} yrs` : '—' },
+    { label: 'Occupancy',        value: data.occupancy_pct != null ? `${data.occupancy_pct.toFixed(1)}%` : '—' },
+    { label: 'Gearing',          value: data.gearing_pct != null ? `${data.gearing_pct.toFixed(1)}%` : '—' },
+    { label: 'Interest Cover',   value: fmtX(data.interest_cover) },
+    { label: 'Dist. Yield',      value: fmtPct(data.distribution_yield) },
+  ]
+
+  const hasDetailedData = data.has_data && (data.nta_per_unit != null || data.wale_yrs != null)
+
+  return (
+    <div className="bg-white border border-sky-100 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-gradient-to-r from-sky-50 to-blue-50/50 px-4 py-2.5 border-b border-sky-100 flex items-center gap-2">
+        <span className="text-base">🏢</span>
+        <h3 className="text-xs font-bold text-sky-700 uppercase tracking-widest">REIT Metrics</h3>
+        {data.reit_sector && (
+          <span className="ml-auto text-xs bg-sky-100 text-sky-700 px-2 py-0.5 rounded-full font-semibold">
+            {data.reit_sector}
+          </span>
+        )}
+      </div>
+      {!hasDetailedData ? (
+        <div className="px-4 py-6 text-center text-sm text-gray-400">
+          <p>Detailed REIT metrics (FFO, NTA, WALE, occupancy) not yet available.</p>
+          <p className="mt-1 text-xs">Data is added from half-year and annual results as it becomes available.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-0 divide-x divide-y divide-gray-50 p-4">
+          {metrics.filter(m => m.value !== '—').map(m => (
+            <div key={m.label} className="px-3 py-2">
+              <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">{m.label}</p>
+              <p className={`text-sm font-bold mt-0.5 ${(m as any).color ?? 'text-gray-800'}`}>{m.value}</p>
+            </div>
+          ))}
+        </div>
+      )}
+      {data.report_period && (
+        <div className="px-4 pb-2 text-right">
+          <span className="text-[10px] text-gray-300">As at {data.report_period}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── Capital Raises Panel ──────────────────────────────────────
+
+const RAISE_LABELS: Record<string, string> = {
+  placement:         'Placement',
+  spp:               'SPP',
+  rights_issue:      'Rights Issue',
+  entitlement_offer: 'Entitlement Offer',
+  ipo:               'IPO',
+  drp:               'DRP',
+}
+
+const RAISE_COLORS: Record<string, string> = {
+  placement:         'bg-purple-100 text-purple-700',
+  spp:               'bg-blue-100 text-blue-700',
+  rights_issue:      'bg-orange-100 text-orange-700',
+  entitlement_offer: 'bg-orange-100 text-orange-700',
+  ipo:               'bg-emerald-100 text-emerald-700',
+  drp:               'bg-slate-100 text-slate-600',
+}
+
+function CapitalRaisesPanel({ code }: { code: string }) {
+  const [raises, setRaises] = useState<CapitalRaiseEvent[]>([])
+  const [loaded, setLoaded] = useState(false)
+
+  useEffect(() => {
+    getCapitalRaises(code)
+      .then(r => { setRaises(r.raises); setLoaded(true) })
+      .catch(() => setLoaded(true))
+  }, [code])
+
+  if (!loaded || raises.length === 0) return null
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-gradient-to-r from-slate-50 to-gray-50/50 px-4 py-2.5 border-b border-gray-100 flex items-center gap-2">
+        <span className="text-base">💰</span>
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Capital Raises</h3>
+        <span className="ml-auto text-xs text-gray-300">{raises.length} event{raises.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="divide-y divide-gray-50">
+        {raises.map((r, i) => (
+          <div key={i} className="flex items-start gap-3 px-4 py-3">
+            <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full mt-0.5 ${RAISE_COLORS[r.raise_type] ?? 'bg-gray-100 text-gray-600'}`}>
+              {RAISE_LABELS[r.raise_type] ?? r.raise_type}
+            </span>
+            <div className="flex-1 min-w-0">
+              {r.title && (
+                <p className="text-xs text-gray-600 leading-snug truncate" title={r.title ?? undefined}>{r.title}</p>
+              )}
+              <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1">
+                {r.amount_m != null && (
+                  <span className="text-xs font-semibold text-gray-800">A${r.amount_m.toFixed(0)}M</span>
+                )}
+                {r.price_per_share != null && (
+                  <span className="text-xs text-gray-500">@ ${r.price_per_share.toFixed(3)}/share</span>
+                )}
+                {r.discount_pct != null && (
+                  <span className={`text-xs font-medium ${r.discount_pct > 0 ? 'text-red-500' : 'text-emerald-600'}`}>
+                    {r.discount_pct > 0 ? `-${r.discount_pct.toFixed(1)}% discount` : `+${Math.abs(r.discount_pct).toFixed(1)}% premium`}
+                  </span>
+                )}
+                <span className="text-xs text-gray-400">{r.announcement_date}</span>
+              </div>
+            </div>
+            {r.url && (
+              <a href={r.url} target="_blank" rel="noopener noreferrer"
+                 className="shrink-0 text-blue-400 hover:text-blue-600 mt-0.5">
+                <ExternalLink size={13} />
+              </a>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 
 function FinancialsTab({
   overview,
@@ -2443,7 +2669,7 @@ export default function CompanyTabs({ code }: { code: string }) {
   const [pricePeriod, setPricePeriod] = useState<PricePeriod>('1Y')
 
   // Anomaly flags (Week 13)
-  const [anomalyFlags, setAnomalyFlags] = useState<AnomalyFlag[]>([])
+  const [anomalyFlags, setAnomalyFlags] = useState<CompanyAnomalyFlag[]>([])
 
   // Fetch overview + anomaly flags on mount
   useEffect(() => {

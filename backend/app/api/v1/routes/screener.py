@@ -15,13 +15,16 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import csv
+import hashlib
 import io
+import json
 import math
 from datetime import date as date_type
 from typing import Any
 
 from app.db.session import get_db
 from app.schemas.screener import ScreenerRequest, ScreenerResponse, ScreenerRow
+from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
 
 router = APIRouter()
 
@@ -54,8 +57,11 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "market_cap":      {"col": "u.market_cap",      "scale": 1_000_000, "type": "number",  "label": "Market Cap (AUD M)",   "unit": "AUD M","cat": "Price"},
     "volume":          {"col": "u.volume",          "scale": 1,    "type": "number",  "label": "Volume",               "unit": "",     "cat": "Price"},
     "avg_volume_20d":  {"col": "u.avg_volume_20d",  "scale": 1,    "type": "number",  "label": "Avg Volume 20D",       "unit": "",     "cat": "Price"},
-    "high_52w":        {"col": "u.high_52w",        "scale": 1,    "type": "number",  "label": "52W High",             "unit": "AUD",  "cat": "Price"},
-    "low_52w":         {"col": "u.low_52w",         "scale": 1,    "type": "number",  "label": "52W Low",              "unit": "AUD",  "cat": "Price"},
+    "high_52w":           {"col": "u.high_52w",        "scale": 1,    "type": "number",  "label": "52W High",             "unit": "AUD",  "cat": "Price"},
+    "low_52w":            {"col": "u.low_52w",         "scale": 1,    "type": "number",  "label": "52W Low",              "unit": "AUD",  "cat": "Price"},
+    "pct_from_52w_high":  {"col": "((u.price - u.high_52w) / NULLIF(u.high_52w, 0) * 100)", "scale": 1, "type": "number", "label": "% from 52W High", "unit": "%", "cat": "Price"},
+    "pct_from_52w_low":   {"col": "((u.price - u.low_52w)  / NULLIF(u.low_52w,  0) * 100)", "scale": 1, "type": "number", "label": "% from 52W Low",  "unit": "%", "cat": "Price"},
+    "volume_ratio":       {"col": "(u.volume::float / NULLIF(u.avg_volume_20d, 0))",          "scale": 1, "type": "number", "label": "Volume Ratio (vs 20D Avg)", "unit": "x", "cat": "Price"},
 
     # ── Valuation ─────────────────────────────────────────────────────────────
     "pe_ratio":        {"col": "u.pe_ratio",        "scale": 1,    "type": "number",  "label": "P/E Ratio",            "unit": "x",    "cat": "Valuation"},
@@ -87,6 +93,11 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "roa":              {"col": "u.roa",             "scale": 0.01, "type": "number",  "label": "ROA %",                "unit": "%",   "cat": "Profitability"},
     "roce":             {"col": "u.roce",            "scale": 0.01, "type": "number",  "label": "ROCE %",               "unit": "%",   "cat": "Profitability"},
     "avg_roe_3y":       {"col": "u.avg_roe_3y",      "scale": 0.01, "type": "number",  "label": "Avg ROE 3Y %",         "unit": "%",   "cat": "Profitability"},
+    "roic":             {"col": "u.roic",            "scale": 0.01, "type": "number",  "label": "ROIC %",               "unit": "%",   "cat": "Profitability"},
+    "asset_turnover":   {"col": "u.asset_turnover",  "scale": 1,    "type": "number",  "label": "Asset Turnover",       "unit": "x",   "cat": "Profitability"},
+    "inventory_turnover":{"col":"u.inventory_turnover","scale": 1,  "type": "number",  "label": "Inventory Turnover",   "unit": "x",   "cat": "Profitability"},
+    "eps":              {"col": "u.eps",             "scale": 1,    "type": "number",  "label": "EPS (AUD)",            "unit": "AUD", "cat": "Profitability"},
+    "net_income":       {"col": "u.net_income",      "scale": 1_000_000, "type": "number", "label": "Net Profit (AUD M)",   "unit": "AUD M","cat": "Profitability"},
 
     # ── Growth ────────────────────────────────────────────────────────────────
     "revenue_growth_1y":       {"col": "u.revenue_growth_1y",       "scale": 0.01, "type": "number", "label": "Revenue Growth 1Y %",      "unit": "%",   "cat": "Growth"},
@@ -99,6 +110,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "revenue_growth_hoh":      {"col": "u.revenue_growth_hoh",      "scale": 0.01, "type": "number", "label": "Revenue Growth HoH % ★",  "unit": "%",   "cat": "Growth"},
     "net_income_growth_hoh":   {"col": "u.net_income_growth_hoh",   "scale": 0.01, "type": "number", "label": "Net Income Growth HoH % ★","unit": "%",  "cat": "Growth"},
     "eps_growth_hoh":          {"col": "u.eps_growth_hoh",          "scale": 0.01, "type": "number", "label": "EPS Growth HoH % ★",      "unit": "%",   "cat": "Growth"},
+    "eps_cagr_5y":             {"col": "u.eps_cagr_5y",             "scale": 0.01, "type": "number", "label": "EPS CAGR 5Y %",           "unit": "%",   "cat": "Growth"},
+    "revenue":                 {"col": "u.revenue",                 "scale": 1_000_000, "type": "number", "label": "Revenue (AUD M)",     "unit": "AUD M","cat": "Growth"},
 
     # ── Balance Sheet & Leverage ──────────────────────────────────────────────
     "debt_to_equity":      {"col": "u.debt_to_equity",      "scale": 1,    "type": "number", "label": "Debt / Equity",        "unit": "x",   "cat": "Financial Health"},
@@ -108,6 +121,11 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "book_value_per_share":{"col": "u.book_value_per_share","scale": 1,    "type": "number", "label": "Book Value Per Share", "unit": "AUD", "cat": "Financial Health"},
     "fcf_fy0":             {"col": "u.fcf_fy0",             "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)","unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":             {"col": "u.cfo_fy0",             "scale": 1,    "type": "number", "label": "Operating CF (AUD M)", "unit": "AUD M","cat": "Financial Health"},
+    "quick_ratio":         {"col": "u.quick_ratio",         "scale": 1,    "type": "number", "label": "Quick Ratio",          "unit": "x",   "cat": "Financial Health"},
+    "interest_coverage":   {"col": "u.interest_coverage",   "scale": 1,    "type": "number", "label": "Interest Coverage",    "unit": "x",   "cat": "Financial Health"},
+    "debt_to_ebitda":      {"col": "u.debt_to_ebitda",      "scale": 1,    "type": "number", "label": "Debt / EBITDA",        "unit": "x",   "cat": "Financial Health"},
+    "net_debt_to_ebitda":  {"col": "u.net_debt_to_ebitda",  "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",    "unit": "x",   "cat": "Financial Health"},
+    "cash_conversion_cycle":{"col":"u.cash_conversion_cycle","scale": 1,   "type": "number", "label": "Cash Conversion Cycle","unit": "days","cat": "Financial Health"},
 
     # ── Quality Scores ────────────────────────────────────────────────────────
     "piotroski_f_score":    {"col": "u.piotroski_f_score",   "scale": 1,    "type": "number", "label": "Piotroski F-Score",    "unit": "",    "cat": "Quality"},
@@ -115,6 +133,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "percent_insiders":     {"col": "u.percent_insiders",    "scale": 1,    "type": "number", "label": "Insider Holding %",    "unit": "%",   "cat": "Quality"},
     "percent_institutions": {"col": "u.percent_institutions","scale": 1,    "type": "number", "label": "Institutional Holding %","unit": "%", "cat": "Quality"},
     "short_pct":            {"col": "u.short_pct",           "scale": 1,    "type": "number", "label": "Short Interest %",     "unit": "%",   "cat": "Quality"},
+    "beneish_m_score":      {"col": "u.beneish_m_score",     "scale": 1,    "type": "number", "label": "Beneish M-Score",      "unit": "",    "cat": "Quality"},
 
     # ── Technicals ────────────────────────────────────────────────────────────
     "rsi_14":        {"col": "u.rsi_14",        "scale": 1,    "type": "number",  "label": "RSI (14)",             "unit": "",    "cat": "Technicals"},
@@ -129,7 +148,12 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "volatility_60d":{"col": "u.volatility_60d","scale": 0.01, "type": "number",  "label": "Volatility 60D %",     "unit": "%",   "cat": "Technicals"},
     "beta_1y":       {"col": "u.beta_1y",       "scale": 1,    "type": "number",  "label": "Beta (1Y)",            "unit": "",    "cat": "Technicals"},
     "sharpe_1y":     {"col": "u.sharpe_1y",     "scale": 1,    "type": "number",  "label": "Sharpe Ratio (1Y)",    "unit": "",    "cat": "Technicals"},
-    "drawdown_from_ath": {"col": "u.drawdown_from_ath", "scale": 0.01, "type": "number", "label": "Drawdown from ATH %", "unit": "%", "cat": "Technicals"},
+    "drawdown_from_ath":      {"col": "u.drawdown_from_ath",      "scale": 0.01, "type": "number", "label": "Drawdown from ATH %",       "unit": "%", "cat": "Technicals"},
+    "sharpe_3y":              {"col": "u.sharpe_3y",              "scale": 1,    "type": "number", "label": "Sharpe Ratio (3Y)",          "unit": "",  "cat": "Technicals"},
+    "sortino_1y":             {"col": "u.sortino_1y",             "scale": 1,    "type": "number", "label": "Sortino Ratio (1Y)",         "unit": "",  "cat": "Technicals"},
+    "beta_3y":                {"col": "u.beta_3y",                "scale": 1,    "type": "number", "label": "Beta (3Y)",                  "unit": "",  "cat": "Technicals"},
+    "max_drawdown_1y":        {"col": "u.max_drawdown_1y",        "scale": 0.01, "type": "number", "label": "Max Drawdown 1Y %",          "unit": "%", "cat": "Technicals"},
+    "relative_strength_xjo":  {"col": "u.relative_strength_xjo",  "scale": 0.01, "type": "number", "label": "Relative Strength vs XJO %", "unit": "%", "cat": "Technicals"},
 
     # ── Price Returns ─────────────────────────────────────────────────────────
     "return_1w":  {"col": "u.return_1w",  "scale": 0.01, "type": "number", "label": "Return 1W %",  "unit": "%", "cat": "Returns"},
@@ -140,6 +164,21 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "return_ytd": {"col": "u.return_ytd", "scale": 0.01, "type": "number", "label": "Return YTD %", "unit": "%", "cat": "Returns"},
     "return_3y":  {"col": "u.return_3y",  "scale": 0.01, "type": "number", "label": "Return 3Y %",  "unit": "%", "cat": "Returns"},
     "return_5y":  {"col": "u.return_5y",  "scale": 0.01, "type": "number", "label": "Return 5Y %",  "unit": "%", "cat": "Returns"},
+    "return_10y": {"col": "u.return_10y", "scale": 0.01, "type": "number", "label": "Return 10Y %", "unit": "%", "cat": "Returns"},
+
+    # ── Valuation (additional) ────────────────────────────────────────────────
+    "enterprise_value":  {"col": "u.enterprise_value",  "scale": 1_000_000, "type": "number", "label": "Enterprise Value (AUD M)", "unit": "AUD M","cat": "Valuation"},
+
+    # ── Dividends (additional) ────────────────────────────────────────────────
+    "dps":               {"col": "u.dps",               "scale": 1,    "type": "number", "label": "DPS (AUD cents)",          "unit": "¢",   "cat": "Dividends"},
+
+    # ── ASX-Specific ──────────────────────────────────────────────────────────
+    "nta_per_share":            {"col": "u.nta_per_share",            "scale": 1,    "type": "number", "label": "NTA Per Share (AUD)",      "unit": "AUD", "cat": "ASX-Specific"},
+    "nta_discount_premium":     {"col": "u.nta_discount_premium",     "scale": 0.01, "type": "number", "label": "NTA Discount/Premium %",   "unit": "%",   "cat": "ASX-Specific"},
+    "gearing_ratio":            {"col": "u.gearing_ratio",            "scale": 0.01, "type": "number", "label": "Gearing Ratio %",          "unit": "%",   "cat": "ASX-Specific"},
+    "wale_years":               {"col": "u.wale_years",               "scale": 1,    "type": "number", "label": "WALE (years)",             "unit": "yrs", "cat": "ASX-Specific"},
+    "management_expense_ratio": {"col": "u.management_expense_ratio", "scale": 0.01, "type": "number", "label": "MER %",                    "unit": "%",   "cat": "ASX-Specific"},
+    "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC Per Oz (USD)",        "unit": "USD", "cat": "ASX-Specific"},
 }
 
 OPERATOR_MAP = {
@@ -190,6 +229,32 @@ SORTABLE_COLS: dict[str, str] = {
     "low_52w":            "u.low_52w",
     "fcf_yield":          "u.fcf_yield",
     "ev_to_ebitda":       "u.ev_to_ebitda",
+    "ev_to_revenue":      "u.ev_to_revenue",
+    "roic":               "u.roic",
+    "asset_turnover":     "u.asset_turnover",
+    "eps":                "u.eps",
+    "net_income":         "u.net_income",
+    "revenue":            "u.revenue",
+    "eps_cagr_5y":        "u.eps_cagr_5y",
+    "quick_ratio":        "u.quick_ratio",
+    "interest_coverage":  "u.interest_coverage",
+    "debt_to_ebitda":     "u.debt_to_ebitda",
+    "net_debt_to_ebitda": "u.net_debt_to_ebitda",
+    "beneish_m_score":    "u.beneish_m_score",
+    "sharpe_3y":          "u.sharpe_3y",
+    "sortino_1y":         "u.sortino_1y",
+    "beta_3y":            "u.beta_3y",
+    "max_drawdown_1y":    "u.max_drawdown_1y",
+    "return_6m":          "u.return_6m",
+    "return_3y":          "u.return_3y",
+    "return_5y":          "u.return_5y",
+    "return_10y":         "u.return_10y",
+    "enterprise_value":   "u.enterprise_value",
+    "dps":                "u.dps",
+    "nta_per_share":      "u.nta_per_share",
+    "gearing_ratio":      "u.gearing_ratio",
+    "wale_years":         "u.wale_years",
+    "aisc_per_oz":        "u.aisc_per_oz",
 }
 
 
@@ -425,6 +490,15 @@ async def run_screener(
     except HTTPException:
         raise
 
+    # ── Cache check (skip for page > 1 to keep key space small) ─────────────
+    cache_key: str | None = None
+    if req.page == 1:
+        req_hash  = hashlib.md5(req.model_dump_json().encode()).hexdigest()
+        cache_key = make_key("screener", req_hash)
+        cached    = await cache_get(cache_key)
+        if cached:
+            return ScreenerResponse(**cached)
+
     result = await db.execute(text(count_sql), params)
     total = result.scalar() or 0
 
@@ -433,7 +507,7 @@ async def run_screener(
     result = await db.execute(text(data_sql), params)
     rows = result.mappings().all()
 
-    return ScreenerResponse(
+    response = ScreenerResponse(
         data=[ScreenerRow(**dict(r)) for r in rows],
         total=total,
         page=req.page,
@@ -441,6 +515,11 @@ async def run_screener(
         total_pages=math.ceil(total / req.page_size) if total else 0,
         filters_applied=len(req.filters),
     )
+
+    if cache_key:
+        await cache_set(cache_key, response.model_dump(), ttl=SCREENER_TTL)
+
+    return response
 
 
 # ── POST /screener/export ─────────────────────────────────────────────────────
@@ -795,7 +874,7 @@ async def get_screener_presets():
                     {"field": "debt_to_equity",    "operator": "lte", "value": 0.5},
                     {"field": "net_margin",        "operator": "gt",  "value": 5},
                 ],
-                "sort_by": "quality_score", "sort_dir": "desc",
+                "sort_by": "piotroski_f_score", "sort_dir": "desc",
             },
             {
                 "id":          "high_growth",
@@ -825,7 +904,7 @@ async def get_screener_presets():
                     {"field": "return_1m",    "operator": "gte", "value": 3},
                     {"field": "market_cap",   "operator": "gte", "value": 100},
                 ],
-                "sort_by": "momentum_score", "sort_dir": "desc",
+                "sort_by": "return_1m", "sort_dir": "desc",
             },
             {
                 "id":          "new_52w_highs",
@@ -869,6 +948,64 @@ async def get_screener_presets():
                     {"field": "net_margin",            "operator": "gt",  "value": 0},
                 ],
                 "sort_by": "revenue_growth_hoh", "sort_dir": "desc",
+            },
+            {
+                "id":          "new_52w_lows",
+                "name":        "Near 52-Week Lows",
+                "description": "Stocks hammered to multi-month lows — mean-reversion and recovery candidates",
+                "icon":        "arrow-down",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "pct_from_52w_low", "operator": "lte", "value": 10},
+                    {"field": "rsi_14",           "operator": "lte", "value": 40},
+                    {"field": "market_cap",       "operator": "gte", "value": 50},
+                    {"field": "volume",           "operator": "gte", "value": 50000},
+                ],
+                "sort_by": "rsi_14", "sort_dir": "asc",
+            },
+            {
+                "id":          "volume_breakout",
+                "name":        "Volume Breakout",
+                "description": "Unusual volume surge with positive price action — institutional accumulation signal",
+                "icon":        "bar-chart-2",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "volume_ratio", "operator": "gte", "value": 2.0},
+                    {"field": "return_1w",    "operator": "gte", "value": 3},
+                    {"field": "market_cap",   "operator": "gte", "value": 50},
+                    {"field": "adx_14",       "operator": "gte", "value": 20},
+                ],
+                "sort_by": "volume", "sort_dir": "desc",
+            },
+            {
+                "id":          "rsi_oversold",
+                "name":        "RSI Oversold (< 30)",
+                "description": "Technically oversold stocks — potential snap-back rally candidates",
+                "icon":        "trending-down",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "rsi_14",     "operator": "lte", "value": 30},
+                    {"field": "market_cap", "operator": "gte", "value": 100},
+                    {"field": "volume",     "operator": "gte", "value": 50000},
+                ],
+                "sort_by": "rsi_14", "sort_dir": "asc",
+            },
+            {
+                "id":          "rsi_overbought",
+                "name":        "RSI Overbought (> 70)",
+                "description": "Technically extended stocks — watch for profit-taking or confirm with strong trend",
+                "icon":        "flame",
+                "premium":     True,
+                "min_plan":    "pro",
+                "filters": [
+                    {"field": "rsi_14",     "operator": "gte", "value": 70},
+                    {"field": "market_cap", "operator": "gte", "value": 100},
+                    {"field": "return_3m",  "operator": "gte", "value": 5},
+                ],
+                "sort_by": "rsi_14", "sort_dir": "desc",
             },
         ]
     }

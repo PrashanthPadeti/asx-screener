@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.session import get_db
+from app.core.cache import cache_get, cache_set, make_key, MARKET_TTL, STATIC_TTL
 from app.schemas.market import (
     MarketSummary,
     MoversResponse,
@@ -33,6 +34,11 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
     Aggregate stats for the entire ASX universe.
     Used for the homepage stats bar.
     """
+    _key = make_key("market", "summary")
+    cached = await cache_get(_key)
+    if cached:
+        return MarketSummary(**cached)
+
     sql = text("""
         SELECT
             COUNT(*)                                                                    AS total_stocks,
@@ -48,7 +54,7 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
         WHERE status = 'Active'
     """)
     row = (await db.execute(sql)).mappings().one()
-    return MarketSummary(
+    result = MarketSummary(
         total_stocks=int(row["total_stocks"] or 0),
         asx200_stocks=int(row["asx200_stocks"] or 0),
         stocks_with_dividends=int(row["stocks_with_dividends"] or 0),
@@ -57,6 +63,8 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
         total_market_cap_bn=float(row["total_market_cap_bn"]) if row["total_market_cap_bn"] is not None else None,
         universe_built_at=row["universe_built_at"],
     )
+    await cache_set(_key, result.model_dump(), ttl=MARKET_TTL)
+    return result
 
 
 @router.get("/movers", response_model=MoversResponse)

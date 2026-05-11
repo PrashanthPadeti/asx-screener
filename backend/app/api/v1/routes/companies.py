@@ -16,6 +16,7 @@ import httpx
 
 from app.db.session import get_db
 from app.core.config import settings
+from app.core.cache import cache_get, cache_set, make_key, COMPANY_TTL
 from app.schemas.company import (
     CompanyListItem, CompanyDetail,
     CompanySearchResult, CompanyListResponse,
@@ -228,17 +229,25 @@ async def get_company_overview(
         FROM screener.universe
         WHERE asx_code = :asx_code
     """
-    result = await db.execute(text(sql), {"asx_code": asx_code.upper()})
+    code = asx_code.upper()
+    _key = make_key("company", "overview", code)
+    cached = await cache_get(_key)
+    if cached:
+        return CompanyOverview(**cached)
+
+    result = await db.execute(text(sql), {"asx_code": code})
     row = result.mappings().first()
 
     if not row:
         raise HTTPException(
             status_code=404,
-            detail=f"No screener data found for {asx_code.upper()}. "
+            detail=f"No screener data found for {code}. "
                    "Company may not be in the active universe."
         )
 
-    return CompanyOverview(**dict(row))
+    overview = CompanyOverview(**dict(row))
+    await cache_set(_key, overview.model_dump(), ttl=COMPANY_TTL)
+    return overview
 
 
 # ── Company Financials (multi-year annual) ────────────────────
@@ -871,7 +880,7 @@ sentiment must be exactly one of: bullish, bearish, neutral
 Mention franking credits where they add meaningful value for Australian investors."""
 
     # ── Call Claude ───────────────────────────────────────────
-    MODEL = "claude-haiku-4-5-20251001"
+    MODEL = settings.CLAUDE_MODEL
     try:
         import anthropic
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
@@ -952,3 +961,142 @@ Mention franking credits where they add meaningful value for Australian investor
         "model_used":    MODEL,
         "cached":        False,
     }
+
+
+# ── Mining Metrics ────────────────────────────────────────────────────────────
+
+@router.get("/{asx_code}/mining-metrics")
+async def get_mining_metrics(
+    asx_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Mining-specific metrics: AISC, ore reserves, reserve life, production.
+    Returns null fields where data has not yet been entered.
+    Only meaningful for is_miner=TRUE companies.
+    """
+    code = asx_code.upper()
+    row = (await db.execute(text("""
+        SELECT m.asx_code,
+               m.aisc_per_oz, m.cash_cost_per_oz, m.aisc_per_tonne,
+               m.ore_reserves_mt, m.mineral_resources_mt,
+               m.reserve_grade, m.reserve_life_yrs,
+               m.production_oz_ttm, m.production_kt_ttm,
+               m.production_guidance_low, m.production_guidance_high,
+               m.sustaining_capex_m, m.growth_capex_m,
+               m.primary_commodity, m.commodity_price_ref,
+               m.report_period, m.updated_at,
+               u.is_miner
+        FROM market.mining_metrics m
+        LEFT JOIN screener.universe u ON u.asx_code = m.asx_code
+        WHERE m.asx_code = :code
+    """), {"code": code})).mappings().fetchone()
+
+    if not row:
+        # Check if company is a miner at all — return empty shell with commodity=None
+        is_miner = (await db.execute(text(
+            "SELECT is_miner FROM screener.universe WHERE asx_code = :code"
+        ), {"code": code})).scalar()
+        return {
+            "asx_code":      code,
+            "is_miner":      bool(is_miner),
+            "has_data":      False,
+            "primary_commodity": None,
+        }
+
+    result = dict(row)
+    result["has_data"] = True
+    for k in ("report_period", "updated_at"):
+        if result.get(k):
+            result[k] = result[k].isoformat()
+    for k, v in result.items():
+        if hasattr(v, '__float__') and not isinstance(v, (int, bool, float)):
+            result[k] = float(v)
+    return result
+
+
+# ── REIT Metrics ──────────────────────────────────────────────────────────────
+
+@router.get("/{asx_code}/reit-metrics")
+async def get_reit_metrics(
+    asx_code: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    REIT-specific metrics: FFO, NTA, WALE, occupancy, gearing.
+    Returns null fields where data has not yet been entered.
+    Only meaningful for is_reit=TRUE companies.
+    """
+    code = asx_code.upper()
+    row = (await db.execute(text("""
+        SELECT r.asx_code,
+               r.ffo_per_unit, r.affo_per_unit, r.price_to_ffo,
+               r.nta_per_unit, r.premium_to_nta,
+               r.wale_yrs, r.occupancy_pct,
+               r.total_assets_bn, r.gla_sqm, r.num_properties,
+               r.distribution_per_unit, r.distribution_yield,
+               r.payout_of_ffo, r.gearing_pct, r.interest_cover,
+               r.reit_sector, r.report_period, r.updated_at,
+               u.is_reit
+        FROM market.reit_metrics r
+        LEFT JOIN screener.universe u ON u.asx_code = r.asx_code
+        WHERE r.asx_code = :code
+    """), {"code": code})).mappings().fetchone()
+
+    if not row:
+        is_reit = (await db.execute(text(
+            "SELECT is_reit FROM screener.universe WHERE asx_code = :code"
+        ), {"code": code})).scalar()
+        return {
+            "asx_code":    code,
+            "is_reit":     bool(is_reit),
+            "has_data":    False,
+            "reit_sector": None,
+        }
+
+    result = dict(row)
+    result["has_data"] = True
+    for k in ("report_period", "updated_at"):
+        if result.get(k):
+            result[k] = result[k].isoformat()
+    for k, v in result.items():
+        if hasattr(v, '__float__') and not isinstance(v, (int, bool, float)):
+            result[k] = float(v)
+    return result
+
+
+# ── Capital Raises ────────────────────────────────────────────────────────────
+
+@router.get("/{asx_code}/capital-raises")
+async def get_capital_raises(
+    asx_code: str,
+    limit: int = Query(10, ge=1, le=50),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Recent capital raise events (placements, SPPs, rights issues) for a company.
+    Sourced from ASX announcement parsing.
+    """
+    code = asx_code.upper()
+    rows = (await db.execute(text("""
+        SELECT raise_type, amount_m, price_per_share, shares_issued,
+               discount_pct, announcement_date, record_date, settlement_date,
+               title, url
+        FROM market.capital_raises
+        WHERE asx_code = :code
+        ORDER BY announcement_date DESC
+        LIMIT :limit
+    """), {"code": code, "limit": limit})).mappings().all()
+
+    data = []
+    for r in rows:
+        item = dict(r)
+        for k in ("announcement_date", "record_date", "settlement_date"):
+            if item.get(k):
+                item[k] = item[k].isoformat()
+        for k in ("amount_m", "price_per_share", "discount_pct"):
+            if item.get(k) is not None:
+                item[k] = float(item[k])
+        data.append(item)
+
+    return {"asx_code": code, "raises": data, "total": len(data)}

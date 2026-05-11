@@ -10,6 +10,7 @@ import {
   MarketDashboard, DashboardStock, ActiveStock, VolumePressureStock,
   ExDivStock, MoverStock, SignalStock, AnomalyFlag,
 } from '@/lib/api'
+import { ANOMALY_TYPES } from '@/lib/constants'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -98,7 +99,7 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
   )
 }
 
-type MoverRetKey = 'return_1d' | 'return_1w' | 'return_1m'
+type MoverRetKey = 'return_1d' | 'return_1w' | 'return_1m' | 'return_3m'
 function MoverRow({ s, rank, retKey, period }: { s: MoverStock; rank: number; retKey: MoverRetKey; period: Period }) {
   const ret = s[retKey]
   const periodLabel = period.toUpperCase()
@@ -342,7 +343,8 @@ export default function MarketPage() {
 
   const retKey: MoverRetKey =
     moverPeriod === '1d' ? 'return_1d' :
-    moverPeriod === '1w' ? 'return_1w' : 'return_1m'
+    moverPeriod === '1w' ? 'return_1w' :
+    moverPeriod === '3m' ? 'return_3m' : 'return_1m'
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -613,16 +615,9 @@ export default function MarketPage() {
             )}
           </div>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
-            {([
-              ['all',                      'All'],
-              ['VALUE_GROWTH',             'Value Growth'],
-              ['OVERSOLD_QUALITY',         'Oversold Quality'],
-              ['OVERBOUGHT_WEAK',          'Overbought Weak'],
-              ['PRICE_EARNINGS_DIVERGENCE','PE Divergence'],
-              ['DIVIDEND_YIELD_SPIKE',     'Yield Spike'],
-            ] as const).map(([f, label]) => (
-              <button key={f} onClick={() => { setAnomalyFilter(f); loadAnomalies(f) }}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${anomalyFilter === f ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+            {ANOMALY_TYPES.map(({ value, label }) => (
+              <button key={value} onClick={() => { setAnomalyFilter(value); loadAnomalies(value) }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${anomalyFilter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {label}
               </button>
             ))}
@@ -640,7 +635,7 @@ export default function MarketPage() {
                 <th className="py-2 px-3 text-left hidden sm:table-cell">Type</th>
                 <th className="py-2 px-3 text-left">Description</th>
                 <th className="py-2 px-3 text-right">Price</th>
-                <th className="py-2 px-3 text-right">1D</th>
+                <th className="py-2 px-3 text-right">1W</th>
                 <th className="py-2 px-3 text-right hidden md:table-cell">Severity</th>
               </tr>
             </thead>
@@ -661,8 +656,8 @@ export default function MarketPage() {
                     </td>
                     <td className="py-2 px-3 text-xs text-slate-600 max-w-[200px]">{a.description}</td>
                     <td className="py-2 px-3 text-right text-sm">{a.price != null ? `$${a.price.toFixed(3)}` : '—'}</td>
-                    <td className={`py-2 px-3 text-right text-sm font-medium ${a.return_1d != null ? (a.return_1d >= 0 ? 'text-emerald-600' : 'text-red-500') : 'text-slate-400'}`}>
-                      {a.return_1d != null ? `${a.return_1d >= 0 ? '+' : ''}${a.return_1d.toFixed(2)}%` : '—'}
+                    <td className={`py-2 px-3 text-right text-sm font-medium ${a.return_1w != null ? (a.return_1w >= 0 ? 'text-emerald-600' : 'text-red-500') : 'text-slate-400'}`}>
+                      {a.return_1w != null ? `${a.return_1w >= 0 ? '+' : ''}${(a.return_1w * 100).toFixed(2)}%` : '—'}
                     </td>
                     <td className="py-2 px-3 text-right hidden md:table-cell">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sevColor}`}>

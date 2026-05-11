@@ -153,10 +153,10 @@ async def run(dry_run: bool = False, days: int = 3) -> None:
     async with AsyncSession(engine) as session:
         # Fetch recent announcements
         rows = (await session.execute(text("""
-            SELECT ann.id, ann.asx_code, ann.title, ann.ann_date, ann.url
+            SELECT ann.id, ann.asx_code, ann.title, ann.document_date, ann.url
             FROM market.asx_announcements ann
-            WHERE ann.ann_date >= :cutoff
-            ORDER BY ann.ann_date DESC
+            WHERE ann.document_date >= :cutoff
+            ORDER BY ann.document_date DESC
         """), {"cutoff": cutoff})).mappings().all()
 
         log.info("Scanning %d announcements since %s", len(rows), cutoff)
@@ -173,7 +173,7 @@ async def run(dry_run: bool = False, days: int = 3) -> None:
             found += 1
             amount    = _extract_amount(title)
             price     = _extract_price(title)
-            ann_date  = r["ann_date"]
+            ann_date  = r["document_date"]
             asx_code  = r["asx_code"]
 
             if dry_run:

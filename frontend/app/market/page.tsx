@@ -27,8 +27,10 @@ function fmtPctRaw(v: number | null, decimals = 1): string {
 
 function fmtCap(v: number | null): string {
   if (v == null) return '—'
-  if (v >= 1000) return '$' + (v / 1000).toFixed(1) + 'T'
-  return '$' + v.toFixed(0) + 'B'
+  if (v >= 1_000_000_000) return '$' + (v / 1_000_000_000).toFixed(1) + 'T'
+  if (v >= 1_000_000)     return '$' + (v / 1_000_000).toFixed(0) + 'B'
+  if (v >= 1_000)         return '$' + (v / 1_000).toFixed(0) + 'M'
+  return '$' + v.toFixed(0) + 'K'
 }
 
 function fmtVol(v: number | null): string {

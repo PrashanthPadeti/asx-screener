@@ -72,14 +72,16 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
 
 @router.get("/movers", response_model=MoversResponse)
 async def market_movers(
-    period: str = Query("1w", pattern="^(1d|1w|1m|3m)$"),
-    limit: int  = Query(10, ge=5, le=25),
+    period:   str           = Query("1w", pattern="^(1d|1w|1m|3m)$"),
+    cap_tier: str | None    = Query(None, pattern="^(large|mid|small|micro)$"),
+    limit:    int           = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Top gainers and losers for a given period (1d / 1w / 1m / 3m).
-    Includes period high/low from market.daily_prices.
-    Filters to stocks with price > $0.10 and market cap > $50M.
+    Optional cap_tier filter: large | mid | small | micro.
+    When cap_tier is set, queries screener.universe directly (live).
+    Without cap_tier, uses pre-computed mover_snapshots.
     """
     col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
     ret_col = col_map[period]
@@ -87,15 +89,39 @@ async def market_movers(
     gainers_rows: list = []
     losers_rows:  list = []
 
-    # Map period to snapshot_type names (per-period stored by market_snapshot engine)
-    period_upper = period.upper()  # 1D, 1W, 1M, 3M
-    gainer_type  = f"GAINER_{period_upper}"
-    loser_type   = f"LOSER_{period_upper}"
-    # Fallback to legacy GAINER/LOSER (1W) if per-period types don't exist yet
+    # ── Cap-tier filter: always query screener.universe directly ──────────────
+    if cap_tier:
+        try:
+            cap_filter = "AND market_cap_tier = :cap_tier"
+            def cap_sql(order: str) -> str:
+                return f"""
+                    SELECT asx_code, company_name, sector,
+                           price, {ret_col} AS period_return, market_cap, market_cap_tier
+                    FROM screener.universe
+                    WHERE {ret_col} IS NOT NULL
+                      AND price > 0.05
+                      AND market_cap > 0
+                      {cap_filter}
+                    ORDER BY {ret_col} {order} NULLS LAST
+                    LIMIT :lim
+                """
+            gainers_rows = (await db.execute(text(cap_sql("DESC")), {"cap_tier": cap_tier, "lim": limit})).mappings().all()
+            losers_rows  = (await db.execute(text(cap_sql("ASC")),  {"cap_tier": cap_tier, "lim": limit})).mappings().all()
+        except Exception as e:
+            log.warning("cap_tier movers query failed: %s", e)
+        return MoversResponse(
+            gainers=[_to_mover(r, period) for r in gainers_rows],
+            losers =[_to_mover(r, period) for r in losers_rows],
+            period=period,
+        )
+
+    # ── No cap filter: use pre-computed mover_snapshots ───────────────────────
+    period_upper    = period.upper()
+    gainer_type     = f"GAINER_{period_upper}"
+    loser_type      = f"LOSER_{period_upper}"
     fallback_gainer = "GAINER"
     fallback_loser  = "LOSER"
 
-    # ── Primary: pre-computed mover_snapshots (guaranteed to have data after nightly run)
     try:
         snap_date_row = (await db.execute(text("""
             SELECT MAX(snapshot_date) AS latest
@@ -114,7 +140,6 @@ async def market_movers(
             """), {"d": snap_date, "gt": gainer_type, "lt": loser_type,
                    "fg": fallback_gainer, "fl": fallback_loser})).mappings().all()
 
-            # Prefer period-specific types; fall back to legacy 1W types
             gainers_rows = [r for r in snap_rows if r["snapshot_type"] == gainer_type] \
                         or [r for r in snap_rows if r["snapshot_type"] == fallback_gainer]
             losers_rows  = [r for r in snap_rows if r["snapshot_type"] == loser_type]  \
@@ -122,44 +147,42 @@ async def market_movers(
     except Exception as e:
         log.warning("mover_snapshots query failed: %s", e)
 
-    # ── Fallback: live query from screener.universe if snapshots empty
+    # Fallback: live universe query if snapshots empty
     if not gainers_rows and not losers_rows:
         try:
             def mover_sql(order: str) -> str:
                 return f"""
-                    SELECT asx_code, company_name, sector, price,
-                           return_1d, return_1w, return_1m, return_3m, market_cap
+                    SELECT asx_code, company_name, sector,
+                           price, {ret_col} AS period_return, market_cap
                     FROM screener.universe
-                    WHERE {ret_col} IS NOT NULL
-                      AND price > 0.05
-                      AND market_cap > 20
-                    ORDER BY {ret_col} {order} NULLS LAST
-                    LIMIT :lim
+                    WHERE {ret_col} IS NOT NULL AND price > 0.05 AND market_cap > 20
+                    ORDER BY {ret_col} {order} NULLS LAST LIMIT :lim
                 """
             gainers_rows = (await db.execute(text(mover_sql("DESC")), {"lim": limit})).mappings().all()
             losers_rows  = (await db.execute(text(mover_sql("ASC")),  {"lim": limit})).mappings().all()
         except Exception as e:
             log.warning("screener.universe movers query failed: %s", e)
 
-    # Map the stored period_return value to the correct return field for the requested period
-    def to_mover(r) -> MoverStock:
-        pr = float(r["period_return"]) if r.get("period_return") is not None else None
-        return MoverStock(
-            asx_code=r["asx_code"],
-            company_name=r["company_name"],
-            sector=r.get("sector"),
-            price=float(r["price"]) if r.get("price") is not None else None,
-            return_1d=pr if period == "1d" else (float(r["return_1d"]) if r.get("return_1d") is not None else None),
-            return_1w=pr if period == "1w" else (float(r["return_1w"]) if r.get("return_1w") is not None else None),
-            return_1m=pr if period == "1m" else (float(r["return_1m"]) if r.get("return_1m") is not None else None),
-            return_3m=pr if period == "3m" else (float(r["return_3m"]) if r.get("return_3m") is not None else None),
-            market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
-        )
-
     return MoversResponse(
-        gainers=[to_mover(r) for r in gainers_rows],
-        losers=[to_mover(r) for r in losers_rows],
+        gainers=[_to_mover(r, period) for r in gainers_rows],
+        losers =[_to_mover(r, period) for r in losers_rows],
         period=period,
+    )
+
+
+def _to_mover(r, period: str) -> MoverStock:
+    """Map a DB row (with period_return alias) to MoverStock schema."""
+    pr = float(r["period_return"]) if r.get("period_return") is not None else None
+    return MoverStock(
+        asx_code=r["asx_code"],
+        company_name=r["company_name"],
+        sector=r.get("sector"),
+        price=float(r["price"]) if r.get("price") is not None else None,
+        return_1d=pr if period == "1d" else None,
+        return_1w=pr if period == "1w" else None,
+        return_1m=pr if period == "1m" else None,
+        return_3m=pr if period == "3m" else None,
+        market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
     )
 
 

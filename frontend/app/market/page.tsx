@@ -276,7 +276,11 @@ export default function MarketPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
 
+  type CapTier = 'all' | 'large' | 'mid' | 'small' | 'micro'
+  const CAP_TIER_LABELS: Record<CapTier, string> = { all: 'All', large: 'Large', mid: 'Mid', small: 'Small', micro: 'Micro' }
+
   const [moverPeriod, setMoverPeriod] = useState<Period>('1d')
+  const [capTier, setCapTier]   = useState<CapTier>('all')
   const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
 
@@ -297,9 +301,9 @@ export default function MarketPage() {
     finally { setLoading(false) }
   }
 
-  const loadMovers = useCallback(async (period: Period) => {
+  const loadMovers = useCallback(async (period: Period, tier: CapTier = 'all') => {
     setMoversLoading(true)
-    try { setMovers(await getMarketMovers(period, 10)) }
+    try { setMovers(await getMarketMovers(period, 10, tier === 'all' ? undefined : tier)) }
     catch { /* keep previous */ }
     finally { setMoversLoading(false) }
   }, [])
@@ -321,10 +325,10 @@ export default function MarketPage() {
   }
 
   useEffect(() => { loadDashboard(); loadSignals('52w'); loadMovers('1d'); loadAnomalies() }, [loadSignals, loadMovers])
-  useEffect(() => { loadMovers(moverPeriod) }, [moverPeriod, loadMovers])
+  useEffect(() => { loadMovers(moverPeriod, capTier) }, [moverPeriod, capTier, loadMovers])
   useEffect(() => { loadSignals(sigPeriod) }, [sigPeriod, loadSignals])
 
-  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod); loadSignals(sigPeriod); loadAnomalies(anomalyFilter) }
+  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod, capTier); loadSignals(sigPeriod); loadAnomalies(anomalyFilter) }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -393,13 +397,25 @@ export default function MarketPage() {
             <TrendingUp className="w-4 h-4 text-slate-500" />
             <h2 className="text-sm font-semibold text-slate-700">Top Movers</h2>
           </div>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-            {(['1d', '1w', '1m', '3m'] as Period[]).map(p => (
-              <button key={p} onClick={() => setMoverPeriod(p)}
-                className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moverPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                {p.toUpperCase()}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Cap tier filter */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+              {(['all', 'large', 'mid', 'small', 'micro'] as CapTier[]).map(t => (
+                <button key={t} onClick={() => setCapTier(t)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${capTier === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {CAP_TIER_LABELS[t]}
+                </button>
+              ))}
+            </div>
+            {/* Period filter */}
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+              {(['1d', '1w', '1m', '3m'] as Period[]).map(p => (
+                <button key={p} onClick={() => setMoverPeriod(p)}
+                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moverPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                  {p.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         {moversLoading ? (

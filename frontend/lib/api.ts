@@ -677,8 +677,14 @@ export interface MarketSignals {
   volume_surge:     SignalStock[]
 }
 
-export const getMarketMovers = async (period: '1d' | '1w' | '1m' | '3m', limit = 10): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
-  const { data } = await api.get('/api/v1/market/movers', { params: { period, limit } })
+export const getMarketMovers = async (
+  period: '1d' | '1w' | '1m' | '3m',
+  limit = 10,
+  cap_tier?: 'large' | 'mid' | 'small' | 'micro',
+): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
+  const { data } = await api.get('/api/v1/market/movers', {
+    params: { period, limit, ...(cap_tier ? { cap_tier } : {}) }
+  })
   return data
 }
 

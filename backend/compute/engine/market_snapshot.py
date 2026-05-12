@@ -171,8 +171,14 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
         movers["GAINER"] = movers.get("GAINER_1W", [])
         movers["LOSER"]  = movers.get("LOSER_1W",  [])
 
+        vol_base = """
+            asx_code, company_name, sector,
+            price, return_1w AS period_return, market_cap,
+            volume, avg_volume_20d, short_pct
+        """
+
         movers["ACTIVE"] = (await session.execute(text(f"""
-            SELECT {mover_base}
+            SELECT {vol_base}
             FROM screener.universe
             WHERE {liquid_filter} AND volume IS NOT NULL AND volume > 0
             ORDER BY volume DESC NULLS LAST
@@ -181,7 +187,7 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
 
         # Heavy buying: volume surge + price rising
         movers["BUYING"] = (await session.execute(text(f"""
-            SELECT {mover_base}
+            SELECT {vol_base}
             FROM screener.universe
             WHERE {liquid_filter}
               AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
@@ -193,7 +199,7 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
 
         # Heavy selling: volume surge + price falling
         movers["SELLING"] = (await session.execute(text(f"""
-            SELECT {mover_base}
+            SELECT {vol_base}
             FROM screener.universe
             WHERE {liquid_filter}
               AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0

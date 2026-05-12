@@ -4,9 +4,12 @@ Dashboard reads from pre-computed snapshot tables populated by
 compute/engine/market_snapshot.py after each nightly universe build.
 screener.universe is never queried here — snapshot tables own market-level data.
 """
+import logging
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+
+log = logging.getLogger(__name__)
 
 from app.db.session import get_db
 from app.core.cache import cache_get, cache_set, make_key, MARKET_TTL, STATIC_TTL
@@ -81,29 +84,16 @@ async def market_movers(
     col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
     ret_col = col_map[period]
 
-    # ── Primary: query screener.universe directly (low cap filter to match snapshot engine)
-    def mover_sql(order: str) -> str:
-        return f"""
-            SELECT asx_code, company_name, sector, price,
-                   return_1d, return_1w, return_1m, return_3m, market_cap
-            FROM screener.universe
-            WHERE {ret_col} IS NOT NULL
-              AND price > 0.05
-              AND market_cap > 20
-            ORDER BY {ret_col} {order} NULLS LAST
-            LIMIT :lim
-        """
+    gainers_rows: list = []
+    losers_rows:  list = []
 
-    gainers_rows = (await db.execute(text(mover_sql("DESC")), {"lim": limit})).mappings().all()
-    losers_rows  = (await db.execute(text(mover_sql("ASC")),  {"lim": limit})).mappings().all()
-
-    # ── Fallback: use pre-computed mover_snapshots if universe returns empty for this period
-    if not gainers_rows and not losers_rows:
-        snap_type_gainer = f"GAINER_{period.upper()}" if period != "1w" else "GAINER"
-        snap_type_loser  = f"LOSER_{period.upper()}"  if period != "1w" else "LOSER"
+    # ── Primary: pre-computed mover_snapshots (guaranteed to have data after nightly run)
+    try:
         snap_date_row = (await db.execute(text("""
-            SELECT MAX(snapshot_date) AS latest FROM market.mover_snapshots
+            SELECT MAX(snapshot_date) AS latest
+            FROM market.mover_snapshots
             WHERE snapshot_type IN ('GAINER', 'LOSER')
+              AND snapshot_date >= CURRENT_DATE - 7
         """))).mappings().one()
         snap_date = snap_date_row["latest"]
         if snap_date:
@@ -117,6 +107,27 @@ async def market_movers(
             """), {"d": snap_date})).mappings().all()
             gainers_rows = [r for r in snap_rows if r["snapshot_type"] == "GAINER"]
             losers_rows  = [r for r in snap_rows if r["snapshot_type"] == "LOSER"]
+    except Exception as e:
+        log.warning("mover_snapshots query failed: %s", e)
+
+    # ── Fallback: live query from screener.universe if snapshots empty
+    if not gainers_rows and not losers_rows:
+        try:
+            def mover_sql(order: str) -> str:
+                return f"""
+                    SELECT asx_code, company_name, sector, price,
+                           return_1d, return_1w, return_1m, return_3m, market_cap
+                    FROM screener.universe
+                    WHERE {ret_col} IS NOT NULL
+                      AND price > 0.05
+                      AND market_cap > 20
+                    ORDER BY {ret_col} {order} NULLS LAST
+                    LIMIT :lim
+                """
+            gainers_rows = (await db.execute(text(mover_sql("DESC")), {"lim": limit})).mappings().all()
+            losers_rows  = (await db.execute(text(mover_sql("ASC")),  {"lim": limit})).mappings().all()
+        except Exception as e:
+            log.warning("screener.universe movers query failed: %s", e)
 
     def to_mover(r) -> MoverStock:
         return MoverStock(

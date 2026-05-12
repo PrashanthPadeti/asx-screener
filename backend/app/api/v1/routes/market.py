@@ -78,46 +78,27 @@ async def market_movers(
     Includes period high/low from market.daily_prices.
     Filters to stocks with price > $0.10 and market cap > $50M.
     """
-    col_map  = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
-    # calendar days to look back (padded for weekends/holidays)
-    days_map = {"1d": 3, "1w": 10, "1m": 35, "3m": 100}
-    ret_col  = col_map[period]
-    look_days = days_map[period]
-
-    base_where = f"""
-        WHERE {ret_col} IS NOT NULL
-          AND price > 0.10
-          AND market_cap > 50
-    """
+    col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
+    ret_col = col_map[period]
 
     def mover_sql(order: str) -> str:
         return f"""
-            WITH top AS (
-                SELECT asx_code, company_name, sector, price,
-                       return_1d, return_1w, return_1m, return_3m, market_cap
-                FROM screener.universe
-                {base_where}
-                ORDER BY {ret_col} {order} LIMIT :lim
-            )
-            SELECT t.*,
-                   ph.period_high,
-                   ph.period_low
-            FROM top t
-            LEFT JOIN LATERAL (
-                SELECT MAX(dp.high) AS period_high,
-                       MIN(dp.low)  AS period_low
-                FROM market.daily_prices dp
-                WHERE dp.asx_code = t.asx_code
-                  AND dp.time >= CURRENT_DATE - :look_days
-            ) ph ON TRUE
+            SELECT asx_code, company_name, sector, price,
+                   return_1d, return_1w, return_1m, return_3m, market_cap
+            FROM screener.universe
+            WHERE {ret_col} IS NOT NULL
+              AND price > 0.10
+              AND market_cap > 50
+            ORDER BY {ret_col} {order} NULLS LAST
+            LIMIT :lim
         """
 
     gainers_rows = (await db.execute(
-        text(mover_sql("DESC")), {"lim": limit, "look_days": look_days}
+        text(mover_sql("DESC")), {"lim": limit}
     )).mappings().all()
 
     losers_rows = (await db.execute(
-        text(mover_sql("ASC")), {"lim": limit, "look_days": look_days}
+        text(mover_sql("ASC")), {"lim": limit}
     )).mappings().all()
 
     def to_mover(r) -> MoverStock:
@@ -129,9 +110,8 @@ async def market_movers(
             return_1d=float(r["return_1d"]) if r["return_1d"] is not None else None,
             return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
             return_1m=float(r["return_1m"]) if r["return_1m"] is not None else None,
+            return_3m=float(r["return_3m"]) if r["return_3m"] is not None else None,
             market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
-            period_high=float(r["period_high"]) if r["period_high"] is not None else None,
-            period_low=float(r["period_low"]) if r["period_low"] is not None else None,
         )
 
     return MoversResponse(
@@ -326,9 +306,11 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
     All-in-one market overview sourced from pre-computed snapshot tables.
     Returns the latest available snapshot date (today or most recent prior day).
     """
-    # Resolve latest snapshot date available
+    # Resolve latest snapshot date with actual data (skip zero-stock weekend snapshots)
     date_row = (await db.execute(text("""
-        SELECT MAX(snapshot_date) AS latest FROM market.index_snapshots
+        SELECT MAX(snapshot_date) AS latest
+        FROM market.index_snapshots
+        WHERE stock_count > 0
     """))).mappings().one()
     snap_date = date_row["latest"]
 

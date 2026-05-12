@@ -404,7 +404,11 @@ export default function MarketPage() {
         </div>
         {moversLoading ? (
           <div className="h-48 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
-        ) : movers && (
+        ) : !movers || (movers.gainers.length === 0 && movers.losers.length === 0) ? (
+          <div className="h-32 flex items-center justify-center text-slate-400 text-sm">
+            No mover data available for this period
+          </div>
+        ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
             {/* Gainers */}
             <div>

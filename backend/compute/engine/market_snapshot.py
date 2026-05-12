@@ -146,20 +146,26 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
         movers: dict[str, list] = {}
 
         # Compute gainers/losers for each period separately
+        # Wrap each in try/except — some return columns may not exist in older universe schemas
         for snap_suffix, ret_col in [("1D", "return_1d"), ("1W", "return_1w"),
                                       ("1M", "return_1m"), ("3M", "return_3m")]:
             for snap_kind, order in [("GAINER", "DESC"), ("LOSER", "ASC")]:
                 snap_type = f"{snap_kind}_{snap_suffix}"
-                rows = (await session.execute(text(f"""
-                    SELECT asx_code, company_name, sector,
-                           price, {ret_col} AS period_return, market_cap,
-                           volume, avg_volume_20d, short_pct
-                    FROM screener.universe
-                    WHERE {liquid_filter} AND {ret_col} IS NOT NULL
-                    ORDER BY {ret_col} {order} NULLS LAST
-                    LIMIT {TOP_N}
-                """))).mappings().all()
-                movers[snap_type] = rows
+                try:
+                    rows = (await session.execute(text(f"""
+                        SELECT asx_code, company_name, sector,
+                               price, {ret_col} AS period_return, market_cap,
+                               volume, avg_volume_20d, short_pct
+                        FROM screener.universe
+                        WHERE {liquid_filter} AND {ret_col} IS NOT NULL
+                        ORDER BY {ret_col} {order} NULLS LAST
+                        LIMIT {TOP_N}
+                    """))).mappings().all()
+                    movers[snap_type] = rows
+                except Exception as e:
+                    log.warning("Skipping %s (column %s missing?): %s", snap_type, ret_col, e)
+                    movers[snap_type] = []
+                    await session.rollback()
 
         # Keep legacy GAINER/LOSER (1W) for backwards compat
         movers["GAINER"] = movers.get("GAINER_1W", [])

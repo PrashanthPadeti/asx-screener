@@ -395,14 +395,7 @@ export default function MarketPage() {
           </div>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             {(['1d', '1w', '1m', '3m'] as Period[]).map(p => (
-              <button key={p} onClick={() => {
-                setMoverPeriod(p)
-                // Sync Market Signals to matching period where possible
-                if (p === '1w') setSigPeriod('1w')
-                else if (p === '1m') setSigPeriod('1m')
-                else if (p === '3m') setSigPeriod('3m')
-                // 1d has no matching signal period — leave sigPeriod unchanged
-              }}
+              <button key={p} onClick={() => setMoverPeriod(p)}
                 className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moverPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {p.toUpperCase()}
               </button>

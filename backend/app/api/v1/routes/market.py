@@ -81,37 +81,54 @@ async def market_movers(
     col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
     ret_col = col_map[period]
 
+    # ── Primary: query screener.universe directly (low cap filter to match snapshot engine)
     def mover_sql(order: str) -> str:
         return f"""
             SELECT asx_code, company_name, sector, price,
                    return_1d, return_1w, return_1m, return_3m, market_cap
             FROM screener.universe
             WHERE {ret_col} IS NOT NULL
-              AND price > 0.10
-              AND market_cap > 50
+              AND price > 0.05
+              AND market_cap > 20
             ORDER BY {ret_col} {order} NULLS LAST
             LIMIT :lim
         """
 
-    gainers_rows = (await db.execute(
-        text(mover_sql("DESC")), {"lim": limit}
-    )).mappings().all()
+    gainers_rows = (await db.execute(text(mover_sql("DESC")), {"lim": limit})).mappings().all()
+    losers_rows  = (await db.execute(text(mover_sql("ASC")),  {"lim": limit})).mappings().all()
 
-    losers_rows = (await db.execute(
-        text(mover_sql("ASC")), {"lim": limit}
-    )).mappings().all()
+    # ── Fallback: use pre-computed mover_snapshots if universe returns empty for this period
+    if not gainers_rows and not losers_rows:
+        snap_type_gainer = f"GAINER_{period.upper()}" if period != "1w" else "GAINER"
+        snap_type_loser  = f"LOSER_{period.upper()}"  if period != "1w" else "LOSER"
+        snap_date_row = (await db.execute(text("""
+            SELECT MAX(snapshot_date) AS latest FROM market.mover_snapshots
+            WHERE snapshot_type IN ('GAINER', 'LOSER')
+        """))).mappings().one()
+        snap_date = snap_date_row["latest"]
+        if snap_date:
+            snap_rows = (await db.execute(text("""
+                SELECT snapshot_type, asx_code, company_name, sector,
+                       price, return_1w, market_cap
+                FROM market.mover_snapshots
+                WHERE snapshot_date = :d
+                  AND snapshot_type IN ('GAINER', 'LOSER')
+                ORDER BY snapshot_type, rank
+            """), {"d": snap_date})).mappings().all()
+            gainers_rows = [r for r in snap_rows if r["snapshot_type"] == "GAINER"]
+            losers_rows  = [r for r in snap_rows if r["snapshot_type"] == "LOSER"]
 
     def to_mover(r) -> MoverStock:
         return MoverStock(
             asx_code=r["asx_code"],
             company_name=r["company_name"],
-            sector=r["sector"],
-            price=float(r["price"]) if r["price"] is not None else None,
-            return_1d=float(r["return_1d"]) if r["return_1d"] is not None else None,
-            return_1w=float(r["return_1w"]) if r["return_1w"] is not None else None,
-            return_1m=float(r["return_1m"]) if r["return_1m"] is not None else None,
-            return_3m=float(r["return_3m"]) if r["return_3m"] is not None else None,
-            market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
+            sector=r.get("sector"),
+            price=float(r["price"]) if r.get("price") is not None else None,
+            return_1d=float(r["return_1d"]) if r.get("return_1d") is not None else None,
+            return_1w=float(r["return_1w"]) if r.get("return_1w") is not None else None,
+            return_1m=float(r["return_1m"]) if r.get("return_1m") is not None else None,
+            return_3m=float(r["return_3m"]) if r.get("return_3m") is not None else None,
+            market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
         )
 
     return MoversResponse(

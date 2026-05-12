@@ -12,13 +12,14 @@ Tables written:
 
 Usage:
     python -m compute.engine.market_snapshot [--date YYYY-MM-DD] [--dry-run]
+    python -m compute.engine.market_snapshot --backfill-days 30
 """
 import argparse
 import asyncio
 import logging
 import os
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -235,7 +236,6 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                     })
 
         # ── 4. Ex-dividend snapshots ──────────────────────────────────────────
-        from datetime import timedelta
         cutoff = snapshot_date + timedelta(days=EXDIV_DAYS)
         exdiv_rows = (await session.execute(text("""
             SELECT
@@ -292,7 +292,20 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ASX Market Snapshot")
-    parser.add_argument("--date", default=str(date.today()), help="Snapshot date YYYY-MM-DD (default: today)")
+    parser.add_argument("--date", default=None, help="Snapshot date YYYY-MM-DD (default: today)")
+    parser.add_argument("--backfill-days", type=int, default=None,
+                        help="Run for each of the last N calendar days (overrides --date)")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
-    asyncio.run(run(date.fromisoformat(args.date), dry_run=args.dry_run))
+
+    if args.backfill_days:
+        today = date.today()
+        dates = [today - timedelta(days=i) for i in range(args.backfill_days - 1, -1, -1)]
+        async def backfill():
+            for d in dates:
+                log.info("=== Backfilling %s ===", d)
+                await run(d, dry_run=args.dry_run)
+        asyncio.run(backfill())
+    else:
+        snapshot_date = date.fromisoformat(args.date) if args.date else date.today()
+        asyncio.run(run(snapshot_date, dry_run=args.dry_run))

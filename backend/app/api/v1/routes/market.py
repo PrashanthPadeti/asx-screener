@@ -87,26 +87,38 @@ async def market_movers(
     gainers_rows: list = []
     losers_rows:  list = []
 
+    # Map period to snapshot_type names (per-period stored by market_snapshot engine)
+    period_upper = period.upper()  # 1D, 1W, 1M, 3M
+    gainer_type  = f"GAINER_{period_upper}"
+    loser_type   = f"LOSER_{period_upper}"
+    # Fallback to legacy GAINER/LOSER (1W) if per-period types don't exist yet
+    fallback_gainer = "GAINER"
+    fallback_loser  = "LOSER"
+
     # ── Primary: pre-computed mover_snapshots (guaranteed to have data after nightly run)
     try:
         snap_date_row = (await db.execute(text("""
             SELECT MAX(snapshot_date) AS latest
             FROM market.mover_snapshots
-            WHERE snapshot_type IN ('GAINER', 'LOSER')
-              AND snapshot_date >= CURRENT_DATE - 7
+            WHERE snapshot_date >= CURRENT_DATE - 7
         """))).mappings().one()
         snap_date = snap_date_row["latest"]
         if snap_date:
             snap_rows = (await db.execute(text("""
                 SELECT snapshot_type, asx_code, company_name, sector,
-                       price, return_1w, market_cap
+                       price, return_1w AS period_return, market_cap
                 FROM market.mover_snapshots
                 WHERE snapshot_date = :d
-                  AND snapshot_type IN ('GAINER', 'LOSER')
+                  AND snapshot_type IN (:gt, :lt, :fg, :fl)
                 ORDER BY snapshot_type, rank
-            """), {"d": snap_date})).mappings().all()
-            gainers_rows = [r for r in snap_rows if r["snapshot_type"] == "GAINER"]
-            losers_rows  = [r for r in snap_rows if r["snapshot_type"] == "LOSER"]
+            """), {"d": snap_date, "gt": gainer_type, "lt": loser_type,
+                   "fg": fallback_gainer, "fl": fallback_loser})).mappings().all()
+
+            # Prefer period-specific types; fall back to legacy 1W types
+            gainers_rows = [r for r in snap_rows if r["snapshot_type"] == gainer_type] \
+                        or [r for r in snap_rows if r["snapshot_type"] == fallback_gainer]
+            losers_rows  = [r for r in snap_rows if r["snapshot_type"] == loser_type]  \
+                        or [r for r in snap_rows if r["snapshot_type"] == fallback_loser]
     except Exception as e:
         log.warning("mover_snapshots query failed: %s", e)
 
@@ -129,16 +141,18 @@ async def market_movers(
         except Exception as e:
             log.warning("screener.universe movers query failed: %s", e)
 
+    # Map the stored period_return value to the correct return field for the requested period
     def to_mover(r) -> MoverStock:
+        pr = float(r["period_return"]) if r.get("period_return") is not None else None
         return MoverStock(
             asx_code=r["asx_code"],
             company_name=r["company_name"],
             sector=r.get("sector"),
             price=float(r["price"]) if r.get("price") is not None else None,
-            return_1d=float(r["return_1d"]) if r.get("return_1d") is not None else None,
-            return_1w=float(r["return_1w"]) if r.get("return_1w") is not None else None,
-            return_1m=float(r["return_1m"]) if r.get("return_1m") is not None else None,
-            return_3m=float(r["return_3m"]) if r.get("return_3m") is not None else None,
+            return_1d=pr if period == "1d" else (float(r["return_1d"]) if r.get("return_1d") is not None else None),
+            return_1w=pr if period == "1w" else (float(r["return_1w"]) if r.get("return_1w") is not None else None),
+            return_1m=pr if period == "1m" else (float(r["return_1m"]) if r.get("return_1m") is not None else None),
+            return_3m=pr if period == "3m" else (float(r["return_3m"]) if r.get("return_3m") is not None else None),
             market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
         )
 

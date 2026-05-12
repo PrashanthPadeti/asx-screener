@@ -136,11 +136,7 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                 })
 
         # ── 3. Mover snapshots ────────────────────────────────────────────────
-        mover_base = """
-            asx_code, company_name, sector,
-            price, return_1w, market_cap,
-            volume, avg_volume_20d, short_pct
-        """
+        # Per-period base: select the relevant return column aliased as period_return
         liquid_filter = """
             status = 'active'
             AND price > 0.05
@@ -149,21 +145,25 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
 
         movers: dict[str, list] = {}
 
-        movers["GAINER"] = (await session.execute(text(f"""
-            SELECT {mover_base}
-            FROM screener.universe
-            WHERE {liquid_filter} AND return_1w IS NOT NULL
-            ORDER BY return_1w DESC NULLS LAST
-            LIMIT {TOP_N}
-        """))).mappings().all()
+        # Compute gainers/losers for each period separately
+        for snap_suffix, ret_col in [("1D", "return_1d"), ("1W", "return_1w"),
+                                      ("1M", "return_1m"), ("3M", "return_3m")]:
+            for snap_kind, order in [("GAINER", "DESC"), ("LOSER", "ASC")]:
+                snap_type = f"{snap_kind}_{snap_suffix}"
+                rows = (await session.execute(text(f"""
+                    SELECT asx_code, company_name, sector,
+                           price, {ret_col} AS period_return, market_cap,
+                           volume, avg_volume_20d, short_pct
+                    FROM screener.universe
+                    WHERE {liquid_filter} AND {ret_col} IS NOT NULL
+                    ORDER BY {ret_col} {order} NULLS LAST
+                    LIMIT {TOP_N}
+                """))).mappings().all()
+                movers[snap_type] = rows
 
-        movers["LOSER"] = (await session.execute(text(f"""
-            SELECT {mover_base}
-            FROM screener.universe
-            WHERE {liquid_filter} AND return_1w IS NOT NULL
-            ORDER BY return_1w ASC NULLS LAST
-            LIMIT {TOP_N}
-        """))).mappings().all()
+        # Keep legacy GAINER/LOSER (1W) for backwards compat
+        movers["GAINER"] = movers.get("GAINER_1W", [])
+        movers["LOSER"]  = movers.get("LOSER_1W",  [])
 
         movers["ACTIVE"] = (await session.execute(text(f"""
             SELECT {mover_base}
@@ -198,9 +198,13 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
         """))).mappings().all()
 
         for snap_type, rows in movers.items():
-            log.info("%-8s: %d rows", snap_type, len(rows))
+            log.info("%-12s: %d rows", snap_type, len(rows))
             if not dry_run:
                 for rank, r in enumerate(rows, start=1):
+                    # period_return is the aliased return column (return_1d/1w/1m/3m)
+                    # stored in the return_1w column for query consistency
+                    period_ret = r.get("period_return") if r.get("period_return") is not None \
+                                 else r.get("return_1w")
                     await session.execute(text("""
                         INSERT INTO market.mover_snapshots
                             (snapshot_date, snapshot_type, rank, asx_code, company_name,
@@ -228,7 +232,7 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                         "name":    r["company_name"],
                         "sec":     r["sector"],
                         "px":      r["price"],
-                        "r1w":     r["return_1w"],
+                        "r1w":     period_ret,
                         "vol":     r["volume"],
                         "avg_vol": r["avg_volume_20d"],
                         "shrt":    r["short_pct"],

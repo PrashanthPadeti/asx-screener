@@ -41,6 +41,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _flush_screener_cache() -> None:
+    """Flush all asx:screener:* keys from Redis after universe rebuild.
+    Fault-tolerant — silently skips if Redis is unavailable."""
+    try:
+        import redis as sync_redis
+        r = sync_redis.from_url(
+            os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            decode_responses=True,
+        )
+        deleted = 0
+        for key in r.scan_iter("asx:screener:*"):
+            r.delete(key)
+            deleted += 1
+        if deleted:
+            log.info(f"Cache invalidated: {deleted} asx:screener:* keys flushed")
+        else:
+            log.info("Cache invalidated: no asx:screener:* keys found (cache was cold)")
+    except Exception as e:
+        log.warning(f"Redis cache flush skipped (Redis unavailable): {e}")
+
 DB_URL = os.getenv("DATABASE_URL_SYNC",
            "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener")
 
@@ -799,6 +822,9 @@ def main():
     cur.close()
     conn.close()
     log.info(f"DONE — {n:,} rows upserted into screener.universe")
+
+    # Flush Redis screener cache so next request gets fresh data
+    _flush_screener_cache()
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ openai==1.58.1           # For embeddings (text-embedding-3-small)
 stripe==11.3.0
 
 # Email
-resend==2.5.0
+resend==2.30.0
 
 # SMS
 twilio==9.4.3

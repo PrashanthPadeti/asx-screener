@@ -73,42 +73,72 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
 @router.get("/movers", response_model=MoversResponse)
 async def market_movers(
     period:   str           = Query("1w", pattern="^(1d|1w|1m|3m)$"),
-    cap_tier: str | None    = Query(None, pattern="^(large|mid|small|micro)$"),
+    cap_tier: str | None    = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
     limit:    int           = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Top gainers and losers for a given period (1d / 1w / 1m / 3m).
-    Optional cap_tier filter: large | mid | small | micro.
-    When cap_tier is set, queries screener.universe directly (live).
+    Optional cap_tier filter: large | mid | small | micro (uses market_cap ranges).
     Without cap_tier, uses pre-computed mover_snapshots.
     """
     col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
     ret_col = col_map[period]
 
+    # Cap tier filter — uses pre-computed boolean flags (is_mega, is_large, etc.)
+    # populated by build_screener_universe.py from raw AUD market_cap thresholds.
+    # Falls back to market_cap_tier TEXT column if flag columns unavailable.
+    cap_flag_sql = {
+        "mega":  "AND is_mega  = TRUE",
+        "large": "AND is_large = TRUE",
+        "mid":   "AND is_mid   = TRUE",
+        "small": "AND is_small = TRUE",
+        "micro": "AND is_micro = TRUE",
+        "nano":  "AND is_nano  = TRUE",
+    }
+
     gainers_rows: list = []
     losers_rows:  list = []
 
-    # ── Cap-tier filter: always query screener.universe directly ──────────────
+    # ── Cap-tier filter: query screener.universe with market_cap ranges ───────
     if cap_tier:
-        try:
-            cap_filter = "AND market_cap_tier = :cap_tier"
-            def cap_sql(order: str) -> str:
-                return f"""
+        mcap_filter = cap_flag_sql[cap_tier]
+        # Try requested period column first; fall back to return_1w if column missing
+        for col in [ret_col, "return_1w"]:
+            try:
+                g_rows = (await db.execute(text(f"""
                     SELECT asx_code, company_name, sector,
-                           price, {ret_col} AS period_return, market_cap, market_cap_tier
+                           price, {col} AS period_return, market_cap
                     FROM screener.universe
-                    WHERE {ret_col} IS NOT NULL
+                    WHERE {col} IS NOT NULL
                       AND price > 0.05
                       AND market_cap > 0
-                      {cap_filter}
-                    ORDER BY {ret_col} {order} NULLS LAST
+                      {mcap_filter}
+                    ORDER BY {col} DESC NULLS LAST
                     LIMIT :lim
-                """
-            gainers_rows = (await db.execute(text(cap_sql("DESC")), {"cap_tier": cap_tier, "lim": limit})).mappings().all()
-            losers_rows  = (await db.execute(text(cap_sql("ASC")),  {"cap_tier": cap_tier, "lim": limit})).mappings().all()
-        except Exception as e:
-            log.warning("cap_tier movers query failed: %s", e)
+                """), {"lim": limit})).mappings().all()
+                l_rows = (await db.execute(text(f"""
+                    SELECT asx_code, company_name, sector,
+                           price, {col} AS period_return, market_cap
+                    FROM screener.universe
+                    WHERE {col} IS NOT NULL
+                      AND price > 0.05
+                      AND market_cap > 0
+                      {mcap_filter}
+                    ORDER BY {col} ASC NULLS LAST
+                    LIMIT :lim
+                """), {"lim": limit})).mappings().all()
+                gainers_rows = list(g_rows)
+                losers_rows  = list(l_rows)
+                break  # success — stop trying fallback columns
+            except Exception as e:
+                log.warning("cap_tier movers (%s, col=%s) failed: %s", cap_tier, col, e)
+                gainers_rows = []
+                losers_rows  = []
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
         return MoversResponse(
             gainers=[_to_mover(r, period) for r in gainers_rows],
             losers =[_to_mover(r, period) for r in losers_rows],
@@ -123,10 +153,10 @@ async def market_movers(
     fallback_loser  = "LOSER"
 
     try:
+        # Use MAX without date restriction so old snapshots still work
         snap_date_row = (await db.execute(text("""
             SELECT MAX(snapshot_date) AS latest
             FROM market.mover_snapshots
-            WHERE snapshot_date >= CURRENT_DATE - 7
         """))).mappings().one()
         snap_date = snap_date_row["latest"]
         if snap_date:
@@ -144,24 +174,43 @@ async def market_movers(
                         or [r for r in snap_rows if r["snapshot_type"] == fallback_gainer]
             losers_rows  = [r for r in snap_rows if r["snapshot_type"] == loser_type]  \
                         or [r for r in snap_rows if r["snapshot_type"] == fallback_loser]
+            log.info("movers snapshot=%s period=%s gainers=%d losers=%d",
+                     snap_date, period, len(gainers_rows), len(losers_rows))
     except Exception as e:
         log.warning("mover_snapshots query failed: %s", e)
 
     # Fallback: live universe query if snapshots empty
     if not gainers_rows and not losers_rows:
-        try:
-            def mover_sql(order: str) -> str:
-                return f"""
+        # Try the requested period col; if missing (e.g. return_1d), try return_1w
+        for col in [ret_col, "return_1w"]:
+            try:
+                g_rows = (await db.execute(text(f"""
                     SELECT asx_code, company_name, sector,
-                           price, {ret_col} AS period_return, market_cap
+                           price, {col} AS period_return, market_cap
                     FROM screener.universe
-                    WHERE {ret_col} IS NOT NULL AND price > 0.05 AND market_cap > 20
-                    ORDER BY {ret_col} {order} NULLS LAST LIMIT :lim
-                """
-            gainers_rows = (await db.execute(text(mover_sql("DESC")), {"lim": limit})).mappings().all()
-            losers_rows  = (await db.execute(text(mover_sql("ASC")),  {"lim": limit})).mappings().all()
-        except Exception as e:
-            log.warning("screener.universe movers query failed: %s", e)
+                    WHERE {col} IS NOT NULL AND price > 0.05 AND market_cap > 20
+                    ORDER BY {col} DESC NULLS LAST LIMIT :lim
+                """), {"lim": limit})).mappings().all()
+                l_rows = (await db.execute(text(f"""
+                    SELECT asx_code, company_name, sector,
+                           price, {col} AS period_return, market_cap
+                    FROM screener.universe
+                    WHERE {col} IS NOT NULL AND price > 0.05 AND market_cap > 20
+                    ORDER BY {col} ASC NULLS LAST LIMIT :lim
+                """), {"lim": limit})).mappings().all()
+                gainers_rows = list(g_rows)
+                losers_rows  = list(l_rows)
+                log.info("movers universe fallback col=%s gainers=%d losers=%d",
+                         col, len(gainers_rows), len(losers_rows))
+                break
+            except Exception as e:
+                log.warning("screener.universe movers (col=%s) failed: %s", col, e)
+                gainers_rows = []
+                losers_rows  = []
+                try:
+                    await db.rollback()
+                except Exception:
+                    pass
 
     return MoversResponse(
         gainers=[_to_mover(r, period) for r in gainers_rows],

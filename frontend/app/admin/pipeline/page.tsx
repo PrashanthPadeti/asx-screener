@@ -1,10 +1,11 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { api } from '@/lib/api'
-import { RefreshCw, CheckCircle, AlertTriangle, Clock, XCircle, Activity } from 'lucide-react'
+import { RefreshCw, CheckCircle, AlertTriangle, Clock, XCircle, Activity, Play, Loader2 } from 'lucide-react'
 
 interface JobStatus {
   job: string
+  job_id: string
   schedule: string
   type: 'apscheduler' | 'cron' | 'interval'
   last_run: string | null
@@ -12,6 +13,9 @@ interface JobStatus {
   table: string
   description: string
 }
+
+// Heavy cron jobs that can't be triggered via button
+const HEAVY_JOBS = new Set(['universe_build', 'weekly_fundamentals', 'eod_price_download', 'daily_metrics'])
 
 function staleness(lastRun: string | null, scheduleType: string): 'ok' | 'warn' | 'stale' | 'never' {
   if (!lastRun) return 'never'
@@ -58,11 +62,31 @@ const TYPE_COLORS: Record<string, string> = {
   interval:    'bg-slate-100 text-slate-600',
 }
 
+// ── Run sequence reference (order pipelines should run each day) ──────────────
+const RUN_ORDER: Record<string, number> = {
+  eod_price_download:  1,
+  daily_metrics:       2,
+  universe_build:      3,
+  index_prices:        4,
+  fund_prices:         5,
+  global_markets:      6,
+  commodities:         7,
+  asx_index_flags:     8,
+  short_positions:     9,
+  market_snapshot:     10,
+  anomaly_detection:   11,
+  asx_announcements:   12,
+  price_alerts:        13,
+  weekly_fundamentals: 14,
+}
+
 export default function PipelinePage() {
-  const [jobs, setJobs]       = useState<JobStatus[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState<string | null>(null)
+  const [jobs, setJobs]             = useState<JobStatus[]>([])
+  const [loading, setLoading]       = useState(true)
+  const [error, setError]           = useState<string | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [running, setRunning]       = useState<Record<string, 'running' | 'done' | 'error'>>({})
+  const [toast, setToast]           = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
 
   const load = async () => {
     setLoading(true); setError(null)
@@ -79,6 +103,29 @@ export default function PipelinePage() {
 
   useEffect(() => { load() }, [])
 
+  // Auto-dismiss toast after 4s
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  const triggerJob = async (jobId: string, jobName: string) => {
+    setRunning(prev => ({ ...prev, [jobId]: 'running' }))
+    try {
+      await api.post(`/api/v1/admin/run-job/${jobId}`)
+      setRunning(prev => ({ ...prev, [jobId]: 'done' }))
+      setToast({ msg: `${jobName} started — refresh in ~30s to see updated status`, type: 'ok' })
+      // Auto-refresh after 35s
+      setTimeout(() => load(), 35000)
+    } catch (e: any) {
+      setRunning(prev => ({ ...prev, [jobId]: 'error' }))
+      setToast({ msg: e?.response?.data?.detail || `Failed to start ${jobName}`, type: 'err' })
+    }
+    // Reset button state after 8s
+    setTimeout(() => setRunning(prev => { const n = { ...prev }; delete n[jobId]; return n }), 8000)
+  }
+
   const ok    = jobs.filter(j => staleness(j.last_run, j.type) === 'ok').length
   const warn  = jobs.filter(j => staleness(j.last_run, j.type) === 'warn').length
   const stale = jobs.filter(j => staleness(j.last_run, j.type) === 'stale').length
@@ -86,6 +133,15 @@ export default function PipelinePage() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 space-y-6">
+
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 transition-all
+          ${toast.type === 'ok' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'}`}>
+          {toast.type === 'ok' ? <CheckCircle className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}
+          {toast.msg}
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -111,10 +167,10 @@ export default function PipelinePage() {
       {!loading && jobs.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Healthy',  count: ok,    cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-            { label: 'Stale',    count: warn,  cls: 'border-amber-200  bg-amber-50  text-amber-700'  },
-            { label: 'Overdue',  count: stale, cls: 'border-red-200    bg-red-50    text-red-700'    },
-            { label: 'Never run',count: never, cls: 'border-slate-200  bg-slate-50  text-slate-600' },
+            { label: 'Healthy',   count: ok,    cls: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+            { label: 'Stale',     count: warn,  cls: 'border-amber-200  bg-amber-50  text-amber-700'  },
+            { label: 'Overdue',   count: stale, cls: 'border-red-200    bg-red-50    text-red-700'    },
+            { label: 'Never run', count: never, cls: 'border-slate-200  bg-slate-50  text-slate-600' },
           ].map(s => (
             <div key={s.label} className={`rounded-xl border p-4 text-center ${s.cls}`}>
               <div className="text-3xl font-bold">{s.count}</div>
@@ -123,6 +179,30 @@ export default function PipelinePage() {
           ))}
         </div>
       )}
+
+      {/* Run sequence guide */}
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <p className="text-xs font-semibold text-blue-700 mb-1.5 uppercase tracking-wide">Daily Run Sequence</p>
+        <p className="text-xs text-blue-600 leading-relaxed">
+          <strong>1.</strong> EOD Price Download &nbsp;→&nbsp;
+          <strong>2.</strong> Daily Metrics Compute &nbsp;→&nbsp;
+          <strong>3.</strong> Universe Build &nbsp;→&nbsp;
+          <strong>4.</strong> Index Prices &nbsp;→&nbsp;
+          <strong>5.</strong> Fund Prices &nbsp;→&nbsp;
+          <strong>6.</strong> Global Markets &nbsp;→&nbsp;
+          <strong>7.</strong> Commodities &nbsp;→&nbsp;
+          <strong>8.</strong> ASX Index Flags &nbsp;→&nbsp;
+          <strong>9.</strong> Short Positions &nbsp;→&nbsp;
+          <strong>10.</strong> Market Snapshot &nbsp;→&nbsp;
+          <strong>11.</strong> Anomaly Detection &nbsp;→&nbsp;
+          <strong>12.</strong> Announcements &nbsp;→&nbsp;
+          <strong>13.</strong> Price Alerts
+          <br />
+          <span className="text-blue-500">Steps 1–3 and Weekly Fundamentals are heavy cron jobs — run via server CLI:&nbsp;
+            <code className="bg-blue-100 px-1 rounded">python scripts/eodhd/v2/jobs/daily_pipeline.py</code>
+          </span>
+        </p>
+      </div>
 
       {/* Error */}
       {error && (
@@ -136,6 +216,7 @@ export default function PipelinePage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-slate-500 bg-slate-50 border-b border-slate-100">
+              <th className="py-3 px-4 text-left font-semibold w-6">#</th>
               <th className="py-3 px-4 text-left font-semibold">Job</th>
               <th className="py-3 px-4 text-left font-semibold hidden md:table-cell">Schedule</th>
               <th className="py-3 px-4 text-left font-semibold hidden lg:table-cell">Type</th>
@@ -143,13 +224,14 @@ export default function PipelinePage() {
               <th className="py-3 px-4 text-right font-semibold hidden sm:table-cell">Age</th>
               <th className="py-3 px-4 text-right font-semibold hidden md:table-cell">Rows</th>
               <th className="py-3 px-4 text-center font-semibold">Status</th>
+              <th className="py-3 px-4 text-center font-semibold">Run</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i} className="border-t border-slate-100">
-                  {Array.from({ length: 7 }).map((_, j) => (
+                  {Array.from({ length: 9 }).map((_, j) => (
                     <td key={j} className="py-3 px-4">
                       <div className="h-4 bg-slate-100 rounded animate-pulse w-3/4" />
                     </td>
@@ -157,10 +239,18 @@ export default function PipelinePage() {
                 </tr>
               ))
             ) : jobs.map(j => {
-              const status = staleness(j.last_run, j.type)
-              const rowCls = status === 'stale' ? 'bg-red-50/40' : status === 'warn' ? 'bg-amber-50/30' : ''
+              const status    = staleness(j.last_run, j.type)
+              const rowCls    = status === 'stale' ? 'bg-red-50/40' : status === 'warn' ? 'bg-amber-50/30' : ''
+              const runState  = running[j.job_id]
+              const isHeavy   = HEAVY_JOBS.has(j.job_id)
+              const seqNum    = RUN_ORDER[j.job_id]
+
               return (
                 <tr key={j.job} className={`border-t border-slate-100 hover:bg-slate-50 transition-colors ${rowCls}`}>
+                  {/* Sequence number */}
+                  <td className="py-3 px-4 text-xs text-slate-400 font-mono">
+                    {seqNum ? `${seqNum}` : '—'}
+                  </td>
                   <td className="py-3 px-4">
                     <div className="font-semibold text-slate-800">{j.job}</div>
                     <div className="text-xs text-slate-400 truncate max-w-[200px] hidden sm:block">{j.description}</div>
@@ -178,6 +268,34 @@ export default function PipelinePage() {
                   </td>
                   <td className="py-3 px-4 text-center">
                     <StatusBadge status={status} />
+                  </td>
+                  {/* Run Now button */}
+                  <td className="py-3 px-4 text-center">
+                    {isHeavy ? (
+                      <span className="text-xs text-slate-300 italic">CLI only</span>
+                    ) : (
+                      <button
+                        onClick={() => triggerJob(j.job_id, j.job)}
+                        disabled={!!runState}
+                        title={runState === 'running' ? 'Running…' : `Run ${j.job} now`}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all
+                          ${runState === 'running' ? 'bg-blue-100 text-blue-500 cursor-not-allowed' :
+                            runState === 'done'    ? 'bg-emerald-100 text-emerald-600 cursor-default' :
+                            runState === 'error'   ? 'bg-red-100 text-red-600 cursor-default' :
+                            'bg-slate-100 text-slate-600 hover:bg-blue-100 hover:text-blue-700 cursor-pointer'
+                          }`}
+                      >
+                        {runState === 'running' ? (
+                          <><Loader2 className="w-3 h-3 animate-spin" /> Running</>
+                        ) : runState === 'done' ? (
+                          <><CheckCircle className="w-3 h-3" /> Started</>
+                        ) : runState === 'error' ? (
+                          <><XCircle className="w-3 h-3" /> Failed</>
+                        ) : (
+                          <><Play className="w-3 h-3" /> Run</>
+                        )}
+                      </button>
+                    )}
                   </td>
                 </tr>
               )

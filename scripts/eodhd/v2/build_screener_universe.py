@@ -56,6 +56,8 @@ INSERT INTO screener.universe (
     stock_type, status, fiscal_year_end_month,
     is_reit, is_miner,
     is_asx20, is_asx50, is_asx100, is_asx200, is_asx300, is_all_ords,
+    is_mega, is_large, is_mid, is_small, is_micro, is_nano,
+    market_cap_tier,
     isin, website, description,
 
     -- ── Price ────────────────────────────────────────────────────────────────
@@ -167,6 +169,24 @@ SELECT
     c.is_miner,
     c.is_asx20,  c.is_asx50,  c.is_asx100,
     c.is_asx200, c.is_asx300, c.is_all_ords,
+
+    -- ── Market cap tier flags (derived from vs.market_cap, raw AUD) ───────────
+    (vs.market_cap >= 50000000000)                                           AS is_mega,
+    (vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000)          AS is_large,
+    (vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000)          AS is_mid,
+    (vs.market_cap >= 300000000   AND vs.market_cap < 2000000000)           AS is_small,
+    (vs.market_cap >= 50000000    AND vs.market_cap < 300000000)            AS is_micro,
+    (vs.market_cap > 0            AND vs.market_cap < 50000000)             AS is_nano,
+    CASE
+        WHEN vs.market_cap >= 50000000000                              THEN 'mega'
+        WHEN vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000 THEN 'large'
+        WHEN vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000 THEN 'mid'
+        WHEN vs.market_cap >= 300000000   AND vs.market_cap < 2000000000  THEN 'small'
+        WHEN vs.market_cap >= 50000000    AND vs.market_cap < 300000000   THEN 'micro'
+        WHEN vs.market_cap > 0                                            THEN 'nano'
+        ELSE NULL
+    END                                                                      AS market_cap_tier,
+
     c.isin,
     c.website,
     c.description,
@@ -581,6 +601,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     fiscal_year_end_month   = EXCLUDED.fiscal_year_end_month,
     is_reit                 = EXCLUDED.is_reit,
     is_miner                = EXCLUDED.is_miner,
+    is_mega                 = EXCLUDED.is_mega,
+    is_large                = EXCLUDED.is_large,
+    is_mid                  = EXCLUDED.is_mid,
+    is_small                = EXCLUDED.is_small,
+    is_micro                = EXCLUDED.is_micro,
+    is_nano                 = EXCLUDED.is_nano,
+    market_cap_tier         = EXCLUDED.market_cap_tier,
     is_asx20                = EXCLUDED.is_asx20,
     is_asx50                = EXCLUDED.is_asx50,
     is_asx100               = EXCLUDED.is_asx100,

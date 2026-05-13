@@ -5,6 +5,8 @@ import {
   TrendingUp, TrendingDown, Activity, BarChart2,
   Calendar, RefreshCw, ArrowUp, ArrowDown, Zap, AlertTriangle,
 } from 'lucide-react'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { MARKET_SECTIONS } from '@/lib/helpContent'
 import {
   getMarketDashboard, getMarketMovers, getMarketSignals, getMarketAnomalies,
   MarketDashboard, DashboardStock, ActiveStock, VolumePressureStock,
@@ -266,8 +268,18 @@ function TableCard({ title, icon: Icon, children, className }: {
 
 type Period   = '1d' | '1w' | '1m' | '3m'
 type SigPeriod = '1d' | '1w' | '1m' | '3m' | '52w'
+type CapTier  = 'all' | 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
 const PERIOD_LABELS: Record<Period, string>    = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M' }
 const SIG_PERIOD_LABELS: Record<SigPeriod, string> = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M', '52w': '52W' }
+const CAP_TIER_LABELS: Record<CapTier, string> = {
+  all:   'All',
+  mega:  'Mega ≥$50B',
+  large: 'Large $10B–$50B',
+  mid:   'Mid $2B–$10B',
+  small: 'Small $300M–$2B',
+  micro: 'Micro $50M–$300M',
+  nano:  'Nano <$50M',
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -276,10 +288,7 @@ export default function MarketPage() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState<string | null>(null)
 
-  type CapTier = 'all' | 'large' | 'mid' | 'small' | 'micro'
-  const CAP_TIER_LABELS: Record<CapTier, string> = { all: 'All', large: 'Large', mid: 'Mid', small: 'Small', micro: 'Micro' }
-
-  const [moverPeriod, setMoverPeriod] = useState<Period>('1d')
+  const [moverPeriod, setMoverPeriod] = useState<Period>('1w')
   const [capTier, setCapTier]   = useState<CapTier>('all')
   const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
@@ -324,7 +333,7 @@ export default function MarketPage() {
     finally { setAnomaliesLoading(false) }
   }
 
-  useEffect(() => { loadDashboard(); loadSignals('52w'); loadMovers('1d'); loadAnomalies() }, [loadSignals, loadMovers])
+  useEffect(() => { loadDashboard(); loadSignals('52w'); loadAnomalies() }, [loadSignals, loadMovers])
   useEffect(() => { loadMovers(moverPeriod, capTier) }, [moverPeriod, capTier, loadMovers])
   useEffect(() => { loadSignals(sigPeriod) }, [sigPeriod, loadSignals])
 
@@ -361,10 +370,13 @@ export default function MarketPage() {
           <h1 className="text-2xl font-bold text-slate-900">Market Overview</h1>
           {builtAt && <p className="text-xs text-slate-400 mt-0.5">Data as at {builtAt} AEST</p>}
         </div>
-        <button onClick={refreshAll}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
-          <RefreshCw className="w-3.5 h-3.5" />Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <HelpDrawer sections={MARKET_SECTIONS} />
+          <button onClick={refreshAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+            <RefreshCw className="w-3.5 h-3.5" />Refresh
+          </button>
+        </div>
       </div>
 
       {/* Index Snapshots */}
@@ -399,8 +411,8 @@ export default function MarketPage() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {/* Cap tier filter */}
-            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-              {(['all', 'large', 'mid', 'small', 'micro'] as CapTier[]).map(t => (
+            <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+              {(['all', 'mega', 'large', 'mid', 'small', 'micro', 'nano'] as CapTier[]).map(t => (
                 <button key={t} onClick={() => setCapTier(t)}
                   className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${capTier === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                   {CAP_TIER_LABELS[t]}

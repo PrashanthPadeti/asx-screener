@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.session import get_db
+from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 
 router = APIRouter()
 
@@ -30,6 +31,11 @@ async def get_global_markets(db: AsyncSession = Depends(get_db)):
     Latest global index prices grouped by region, plus latest AUD FX rates.
     Returns empty lists if no data has been ingested yet.
     """
+    _key = make_key("global_markets", "latest")
+    cached = await cache_get(_key)
+    if cached:
+        return cached
+
     def _f(v):
         return float(v) if v is not None else None
 
@@ -121,11 +127,13 @@ async def get_global_markets(db: AsyncSession = Depends(get_db)):
         for r in fx_rows
     ]
 
-    return {
+    result = {
         "as_of":    as_of,
         "regions":  regions,
         "fx_rates": fx_rates,
     }
+    await cache_set(_key, result, ttl=STATIC_TTL)
+    return result
 
 
 @router.get("/{index_code}")

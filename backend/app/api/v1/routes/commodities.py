@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.session import get_db
+from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 
 router = APIRouter()
 
@@ -21,6 +22,11 @@ async def get_commodities(db: AsyncSession = Depends(get_db)):
     Latest commodity prices grouped by category.
     Returns empty list if no data has been ingested yet.
     """
+    _key = make_key("commodities", "latest")
+    cached = await cache_get(_key)
+    if cached:
+        return cached
+
     def _f(v):
         return float(v) if v is not None else None
 
@@ -69,10 +75,12 @@ async def get_commodities(db: AsyncSession = Depends(get_db)):
         if cat in groups
     ]
 
-    return {
+    result = {
         "as_of":      as_of,
         "categories": categories,
     }
+    await cache_set(_key, result, ttl=STATIC_TTL)
+    return result
 
 
 @router.get("/{commodity_code}")

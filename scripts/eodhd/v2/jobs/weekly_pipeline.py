@@ -8,6 +8,7 @@ Steps:
   2. Transform valuation snapshot        → market.valuation_snapshot
   3. Transform analyst ratings           → market.analyst_ratings
   4. Compute yearly metrics              → market.yearly_metrics
+  4b. Compute quarterly metrics          → market.quarterly_metrics (QoQ/YoY growth rates)
   5. Compute half-yearly metrics         → market.halfyearly_metrics
   6. Compute weekly metrics              → market.weekly_metrics (incremental, last week)
   7. Compute monthly metrics             → market.monthly_metrics (1st Mon of month only)
@@ -124,6 +125,13 @@ def main():
     # ── Step 4: Yearly compute ────────────────────────────────────────────────
     run("Step 4: Yearly compute → market.yearly_metrics", [
         PYTHON, str(COMPUTE / "yearly_compute.py"),
+    ])
+
+    # ── Step 4b: Quarterly compute ────────────────────────────────────────────
+    # Computes QoQ/YoY growth rates and fills margin columns in
+    # market.quarterly_metrics. Depends on yearly_compute completing first.
+    run("Step 4b: Quarterly compute → market.quarterly_metrics", [
+        PYTHON, str(COMPUTE / "quarterly_compute.py"),
     ])
 
     # ── Step 5: Half-yearly compute ───────────────────────────────────────────

@@ -309,14 +309,12 @@ async def run(
         for i, idx in enumerate(GLOBAL_INDICES):
             log.info(f"  [{i+1}/{len(GLOBAL_INDICES)}] {idx['code']} ({idx['ticker']}) …")
             df = fetch_eodhd_data(idx["ticker"], start_date, target_date, api_key)
-            if df is None:
+            if df is None or df.empty:
                 continue
-            df = df[df.index.date >= start_date]
-            df = df[df.index.date <= target_date]
-            if df.empty:
-                log.info(f"  {idx['code']}: no rows in date range")
-                continue
-            rows = compute_price_rows(df)
+            # Compute on full history (needs 400-day context for 1Y returns),
+            # then filter output rows to the target window.
+            all_rows = compute_price_rows(df)
+            rows = [r for r in all_rows if start_date <= r["price_date"] <= target_date]
             count = await upsert_index_rows(db, idx["code"], rows, dry_run)
             log.info(f"  {idx['code']}: {count} rows upserted")
             total_rows += count
@@ -325,13 +323,11 @@ async def run(
         for j, fx in enumerate(FX_PAIRS):
             log.info(f"  [{j+1}/{len(FX_PAIRS)}] {fx['pair']} ({fx['ticker']}) …")
             df = fetch_eodhd_data(fx["ticker"], start_date, target_date, api_key)
-            if df is None:
+            if df is None or df.empty:
                 continue
-            df = df[df.index.date >= start_date]
-            df = df[df.index.date <= target_date]
-            if df.empty:
-                continue
-            rows = compute_fx_rows(df)
+            # Same fix: compute on full history, filter output to target window.
+            all_rows = compute_fx_rows(df)
+            rows = [r for r in all_rows if start_date <= r["rate_date"] <= target_date]
             count = await upsert_fx_rows(db, fx["pair"], rows, dry_run)
             log.info(f"  {fx['pair']}: {count} rows upserted")
             total_rows += count

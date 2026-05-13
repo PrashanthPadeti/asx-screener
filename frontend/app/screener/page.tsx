@@ -18,6 +18,8 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { SCREENER_SECTIONS } from '@/lib/helpContent'
 import { useAuth } from '@/lib/auth'
 import {
   saveScreen, getMyScreens, updateScreen, deleteScreen,
@@ -714,7 +716,9 @@ export default function ScreenerPage() {
       {/* Header + Mode Tabs */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>
-        <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+        <div className="flex items-center gap-2">
+          <HelpDrawer sections={SCREENER_SECTIONS} title="Screener Guide" subtitle="Filters, AI query, presets, and columns explained" />
+          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
           <button
             onClick={() => setScreenerMode('manual')}
             className={cn(
@@ -743,6 +747,7 @@ export default function ScreenerPage() {
               : <span className="text-[10px] bg-amber-500 text-white rounded px-1.5 py-0.5 font-bold">UPGRADE</span>
             }
           </button>
+        </div>
         </div>
       </div>
 

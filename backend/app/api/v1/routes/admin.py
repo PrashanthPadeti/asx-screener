@@ -6,21 +6,25 @@ All endpoints require require_admin dependency (email in ADMIN_EMAILS list).
 
 Endpoints:
   GET  /pipeline-status          – job health for all daily pipelines
+  POST /run-job/{job_id}         – trigger a pipeline job in the background
   GET  /stats                    – platform-level summary stats
   GET  /users                    – paginated user list (search / filter)
   GET  /users/{user_id}          – full user profile + activity
   PATCH /users/{user_id}         – update plan or subscription_status
 """
+import logging
 import math
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.core.deps import require_admin
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -61,36 +65,69 @@ async def pipeline_status(
 
     jobs = []
 
+    # ── Core daily pipeline (cron) ────────────────────────────────────────────
+
     jobs.append({
-        "job": "Universe Build",
+        "job": "EOD Price Download",
         "schedule": "Weekdays 6:30pm AEST",
         "type": "cron",
+        "job_id": "eod_price_download",
+        "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.daily_prices"),
+        "row_count": await _scalar(db, """
+            SELECT COUNT(*) FROM market.daily_prices
+            WHERE price_date = (SELECT MAX(price_date) FROM market.daily_prices)
+        """),
+        "table": "market.daily_prices",
+        "description": "Download bulk EOD prices from EODHD → staging → market.daily_prices",
+    })
+
+    jobs.append({
+        "job": "Daily Metrics Compute",
+        "schedule": "Weekdays ~6:40pm AEST",
+        "type": "cron",
+        "job_id": "daily_metrics",
+        "last_run": await _scalar(db, "SELECT MAX(computed_at) FROM market.computed_metrics"),
+        "row_count": await _scalar(db, """
+            SELECT COUNT(*) FROM market.computed_metrics
+            WHERE computed_at = (SELECT MAX(computed_at) FROM market.computed_metrics)
+        """),
+        "table": "market.computed_metrics",
+        "description": "P/E, EV, returns, yield + RSI/MACD/MA technical indicators",
+    })
+
+    jobs.append({
+        "job": "Universe Build",
+        "schedule": "Weekdays ~6:50pm AEST",
+        "type": "cron",
+        "job_id": "universe_build",
         "last_run": await _scalar(db, "SELECT MAX(universe_built_at) FROM screener.universe"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE status = 'active'"),
         "table": "screener.universe",
-        "description": "Daily EOD prices → metrics → screener.universe rebuild",
+        "description": "Golden Record rebuild — merges all metrics into screener.universe",
     })
 
     jobs.append({
         "job": "Weekly Fundamentals",
-        "schedule": "Sunday 10pm AEST",
+        "schedule": "Sunday 10pm + Monday 7am AEST",
         "type": "cron",
+        "job_id": "weekly_fundamentals",
         "last_run": await _scalar(db, """
             SELECT MAX(updated_at) FROM screener.universe
             WHERE pe_ratio IS NOT NULL OR revenue_ttm IS NOT NULL
         """),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE pe_ratio IS NOT NULL"),
         "table": "screener.universe (fundamentals)",
-        "description": "Download + load fundamentals, rebuild full universe",
+        "description": "Download fundamentals, yearly/half-yearly/weekly metrics + universe rebuild",
     })
 
     jobs.append({
         "job": "ASX Index Prices",
         "schedule": "Daily 5:30pm AEST",
         "type": "apscheduler",
-        "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.indices"),
-        "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.indices"),
-        "table": "market.indices",
+        "job_id": "index_prices",
+        "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.index_prices"),
+        "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.index_prices WHERE price_date = (SELECT MAX(price_date) FROM market.index_prices)"),
+        "table": "market.index_prices",
         "description": "ASX 200/300 and sector index OHLCV",
     })
 
@@ -98,6 +135,7 @@ async def pipeline_status(
         "job": "ETF / Fund Prices",
         "schedule": "Daily 5:35pm AEST",
         "type": "apscheduler",
+        "job_id": "fund_prices",
         "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.fund_prices"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.fund_prices WHERE price_date = (SELECT MAX(price_date) FROM market.fund_prices)"),
         "table": "market.fund_prices",
@@ -108,9 +146,10 @@ async def pipeline_status(
         "job": "Global Markets",
         "schedule": "Daily 5:40pm AEST",
         "type": "apscheduler",
-        "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.global_indices"),
-        "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.global_indices WHERE price_date = (SELECT MAX(price_date) FROM market.global_indices)"),
-        "table": "market.global_indices",
+        "job_id": "global_markets",
+        "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.global_index_prices"),
+        "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.global_index_prices WHERE price_date = (SELECT MAX(price_date) FROM market.global_index_prices)"),
+        "table": "market.global_index_prices",
         "description": "S&P500, FTSE, Nikkei etc + AUD FX rates",
     })
 
@@ -118,6 +157,7 @@ async def pipeline_status(
         "job": "Commodities",
         "schedule": "Daily 5:45pm AEST",
         "type": "apscheduler",
+        "job_id": "commodities",
         "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.commodity_prices"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.commodity_prices WHERE price_date = (SELECT MAX(price_date) FROM market.commodity_prices)"),
         "table": "market.commodity_prices",
@@ -128,6 +168,7 @@ async def pipeline_status(
         "job": "ASX Index Flags",
         "schedule": "Daily 5:50pm AEST",
         "type": "apscheduler",
+        "job_id": "asx_index_flags",
         "last_run": await _scalar(db, "SELECT MAX(computed_at) FROM market.asx_index_constituents") or
                     await _scalar(db, "SELECT MAX(universe_built_at) FROM screener.universe WHERE is_asx200 = TRUE"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE is_asx200 = TRUE"),
@@ -139,6 +180,7 @@ async def pipeline_status(
         "job": "ASIC Short Positions",
         "schedule": "Daily 6:30pm AEST",
         "type": "apscheduler",
+        "job_id": "short_positions",
         "last_run": await _scalar(db, "SELECT MAX(report_date) FROM market.short_positions"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE short_pct > 0"),
         "table": "market.short_positions",
@@ -149,6 +191,7 @@ async def pipeline_status(
         "job": "Market Snapshot",
         "schedule": "Daily 6:45pm AEST",
         "type": "apscheduler",
+        "job_id": "market_snapshot",
         "last_run": await _scalar(db, "SELECT MAX(snapshot_date) FROM market.index_snapshots"),
         "row_count": await _scalar(db, """
             SELECT COUNT(*) FROM market.mover_snapshots
@@ -162,6 +205,7 @@ async def pipeline_status(
         "job": "Anomaly Detection",
         "schedule": "Daily 7:00pm AEST",
         "type": "apscheduler",
+        "job_id": "anomaly_detection",
         "last_run": await _scalar(db, "SELECT MAX(detected_at) FROM market.anomalies WHERE is_active = TRUE"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.anomalies WHERE is_active = TRUE"),
         "table": "market.anomalies",
@@ -172,6 +216,7 @@ async def pipeline_status(
         "job": "ASX Announcements",
         "schedule": "Every 10 minutes",
         "type": "interval",
+        "job_id": "asx_announcements",
         "last_run": await _scalar(db, "SELECT MAX(released_at) FROM market.asx_announcements"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.asx_announcements"),
         "table": "market.asx_announcements",
@@ -182,6 +227,7 @@ async def pipeline_status(
         "job": "Price Alerts",
         "schedule": "Every 15 minutes",
         "type": "interval",
+        "job_id": "price_alerts",
         "last_run": await _scalar(db, """
             SELECT MAX(sent_at) FROM users.notification_history
             WHERE notification_type = 'price_alert'
@@ -198,6 +244,96 @@ async def pipeline_status(
             j["row_count"] = int(j["row_count"])
 
     return {"jobs": jobs, "total": len(jobs)}
+
+
+# ── Run Job Now ───────────────────────────────────────────────────────────────
+
+# Maps job_id → async callable (import deferred to avoid circular imports)
+async def _run_job(job_id: str) -> None:
+    """Background task dispatcher — calls the appropriate worker function."""
+    from datetime import date
+    try:
+        if job_id == "index_prices":
+            from compute.engine.index_prices import run
+            await run(target_date=date.today(), backfill_days=3)
+
+        elif job_id == "fund_prices":
+            from compute.engine.fund_prices import run
+            await run(target_date=date.today(), backfill_days=3)
+
+        elif job_id == "global_markets":
+            from compute.engine.global_markets import run
+            await run(target_date=date.today(), backfill_days=3)
+
+        elif job_id == "commodities":
+            from app.workers.commodities_worker import compute_commodities
+            await compute_commodities()
+
+        elif job_id == "market_snapshot":
+            from app.workers.market_snapshot_worker import run_market_snapshot
+            await run_market_snapshot()
+
+        elif job_id == "anomaly_detection":
+            from app.workers.anomaly_worker import run_anomaly_detect
+            await run_anomaly_detect()
+
+        elif job_id == "asx_announcements":
+            from app.workers.announcement_worker import fetch_announcements
+            await fetch_announcements()
+
+        elif job_id == "price_alerts":
+            from app.workers.alert_worker import check_alerts
+            await check_alerts()
+
+        elif job_id == "asx_index_flags":
+            from app.workers.asx_indices_worker import run_asx_indices
+            await run_asx_indices()
+
+        elif job_id == "short_positions":
+            from app.workers.short_positions_worker import run_short_positions
+            await run_short_positions()
+
+        elif job_id in ("universe_build", "weekly_fundamentals"):
+            log.warning(f"Job '{job_id}' is a heavy cron job — trigger via server CLI, not this endpoint.")
+            return
+
+        else:
+            log.warning(f"run-job: unknown job_id '{job_id}'")
+            return
+
+        log.info(f"run-job: '{job_id}' completed successfully")
+    except Exception as exc:
+        log.error(f"run-job: '{job_id}' failed — {exc}", exc_info=True)
+
+
+RUNNABLE_JOBS = {
+    "index_prices", "fund_prices", "global_markets", "commodities",
+    "market_snapshot", "anomaly_detection", "asx_announcements",
+    "price_alerts", "asx_index_flags", "short_positions",
+}
+
+
+@router.post("/run-job/{job_id}")
+async def trigger_job(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    admin: dict = Depends(require_admin),
+):
+    """
+    Trigger a pipeline job immediately in the background.
+    Returns instantly — check pipeline-status after ~30s to see the result.
+    """
+    if job_id in ("universe_build", "weekly_fundamentals"):
+        raise HTTPException(
+            status_code=400,
+            detail="Universe Build and Weekly Fundamentals are heavy cron jobs. Run via server CLI: python -m compute.pipeline.daily_pipeline",
+        )
+    if job_id not in RUNNABLE_JOBS:
+        raise HTTPException(status_code=404, detail=f"Unknown job '{job_id}'")
+
+    background_tasks.add_task(_run_job, job_id)
+    log.info(f"Admin triggered job: '{job_id}' (by {admin.get('email', 'unknown')})")
+    return {"status": "started", "job_id": job_id, "message": f"Job '{job_id}' is running in the background. Refresh pipeline status in ~30 seconds."}
 
 
 # ── Platform Stats ────────────────────────────────────────────────────────────

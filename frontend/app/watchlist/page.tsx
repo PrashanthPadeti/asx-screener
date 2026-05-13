@@ -6,6 +6,8 @@ import {
   Star, Trash2, ArrowUpRight, RefreshCw, Plus, Pencil,
   Check, X, LogIn, FolderOpen, Search,
 } from 'lucide-react'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { WATCHLIST_SECTIONS } from '@/lib/helpContent'
 import {
   getScreenerBatch, type ScreenerRow,
   getWatchlists, createWatchlist, getWatchlist, updateWatchlist,
@@ -327,6 +329,7 @@ function ServerWatchlists() {
               Refresh
             </button>
           )}
+          <HelpDrawer sections={WATCHLIST_SECTIONS} title="Watchlist Guide" subtitle="Managing lists, columns, and plan limits" />
           <Link href="/screener"
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-50">
             <ArrowUpRight className="w-3.5 h-3.5" />

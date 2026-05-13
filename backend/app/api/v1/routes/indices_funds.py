@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.session import get_db
+from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
     IndicesResponse, IndexPrice,
     FundsResponse, FundRow,
@@ -285,6 +286,11 @@ INDEX_NAME_TO_SECTOR: dict[str, str] = {
 @router.get("/indices", response_model=IndicesResponse)
 async def get_indices(db: AsyncSession = Depends(get_db)):
     """Latest daily performance for all active ASX indices."""
+    _key = make_key("indices", "list")
+    cached = await cache_get(_key)
+    if cached:
+        return cached
+
     date_row = (await db.execute(text(
         "SELECT MAX(price_date) AS latest FROM market.index_prices WHERE index_code = 'ASX200'"
     ))).mappings().fetchone()
@@ -329,7 +335,7 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
 
     def _f(v): return float(v) if v is not None else None
 
-    return IndicesResponse(
+    result = IndicesResponse(
         indices=[
             IndexPrice(
                 index_code=r["index_code"], display_name=r["display_name"],
@@ -344,6 +350,8 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
         ],
         as_of=as_of.isoformat() if as_of else None,
     )
+    await cache_set(_key, result.model_dump(), ttl=STATIC_TTL)
+    return result
 
 
 @router.get("/indices/{index_code}/history")
@@ -507,6 +515,11 @@ async def get_funds(
     db: AsyncSession = Depends(get_db),
 ):
     """ETF and managed fund list with latest price data."""
+    _key = make_key("funds", "list", fund_type or "all", asset_class or "all", sort, order, str(limit))
+    cached = await cache_get(_key)
+    if cached:
+        return cached
+
     date_row = (await db.execute(text(
         "SELECT MAX(price_date) AS latest FROM market.fund_prices"
     ))).mappings().fetchone()
@@ -555,7 +568,7 @@ async def get_funds(
     def _f(v): return float(v) if v is not None else None
     def _b(v): return bool(v) if v is not None else None
 
-    return FundsResponse(
+    result = FundsResponse(
         funds=[
             FundRow(
                 asx_code=r["asx_code"], fund_name=r["fund_name"], fund_type=r["fund_type"],
@@ -576,6 +589,8 @@ async def get_funds(
         total=len(rows),
         as_of=as_of.isoformat() if as_of else None,
     )
+    await cache_set(_key, result.model_dump(), ttl=STATIC_TTL)
+    return result
 
 
 @router.get("/funds/{asx_code}/similar")

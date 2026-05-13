@@ -329,13 +329,17 @@ async def run(
             if df is None:
                 continue
 
-            df = df[df.index.date >= start_date]
-            df = df[df.index.date <= target_date]
             if df.empty:
-                log.info(f"  {code}: no rows in date range")
+                log.info(f"  {code}: no data returned")
                 continue
 
-            rows  = compute_rows(df)
+            # Compute returns on the FULL fetched history (includes 400-day lookback
+            # context needed for 1Y returns), then filter rows to the target window.
+            all_rows = compute_rows(df)
+            rows = [
+                r for r in all_rows
+                if start_date <= r["price_date"] <= target_date
+            ]
             count = await upsert_price_rows(db, code, rows, dry_run)
             log.info(f"  {code}: {count} rows upserted")
             total_rows += count

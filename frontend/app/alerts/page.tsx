@@ -5,6 +5,8 @@ import { Bell, Plus, Trash2, ToggleLeft, ToggleRight, LogIn, Loader2 } from 'luc
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { ALERTS_SECTIONS } from '@/lib/helpContent'
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -273,6 +275,7 @@ export default function AlertsPage() {
             )}
           </p>
         </div>
+        <HelpDrawer sections={ALERTS_SECTIONS} title="Alerts Guide" subtitle="Conditions, repeat modes, and limits explained" />
       </div>
 
       {/* Create form */}

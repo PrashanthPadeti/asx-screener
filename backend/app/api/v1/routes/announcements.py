@@ -13,6 +13,7 @@ from typing import Optional
 
 from app.core.deps import get_current_user
 from app.db.session import get_db
+from app.core.cache import cache_get, cache_set, make_key, MARKET_TTL
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -122,6 +123,11 @@ async def get_latest_announcements(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    _key = make_key("announcements", "latest", str(limit))
+    cached = await cache_get(_key)
+    if cached:
+        return cached
+
     result = await db.execute(text("""
         SELECT
             a.id, a.asx_code, c.company_name, a.title,
@@ -134,7 +140,9 @@ async def get_latest_announcements(
         LIMIT :limit
     """), {"limit": limit})
     rows = result.fetchall()
-    return {"announcements": [_row_to_dict(r) for r in rows]}
+    data = {"announcements": [_row_to_dict(r) for r in rows]}
+    await cache_set(_key, data, ttl=MARKET_TTL)
+    return data
 
 
 # ── By company ────────────────────────────────────────────────────────────────

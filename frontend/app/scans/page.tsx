@@ -10,6 +10,8 @@ import {
 import { getScreenerPresets, getCommunityScreens, incrementScreenUse, type ScreenerPreset, type SavedScreen } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { SCANS_SECTIONS } from '@/lib/helpContent'
 
 // ── Icon map ──────────────────────────────────────────────────────────────────
 
@@ -174,12 +176,15 @@ export default function ScansPage() {
                 Click any scan to run it in the full screener.
               </p>
             </div>
-            <Link
-              href="/screener"
-              className="flex-shrink-0 text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
-            >
-              Custom Screener →
-            </Link>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <HelpDrawer sections={SCANS_SECTIONS} title="Scans Guide" subtitle="How pre-built screens and categories work" />
+              <Link
+                href="/screener"
+                className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+              >
+                Custom Screener →
+              </Link>
+            </div>
           </div>
 
           {/* Stats */}

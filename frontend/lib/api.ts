@@ -680,7 +680,7 @@ export interface MarketSignals {
 export const getMarketMovers = async (
   period: '1d' | '1w' | '1m' | '3m',
   limit = 10,
-  cap_tier?: 'large' | 'mid' | 'small' | 'micro',
+  cap_tier?: 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano',
 ): Promise<{ gainers: MoverStock[]; losers: MoverStock[]; period: string }> => {
   const { data } = await api.get('/api/v1/market/movers', {
     params: { period, limit, ...(cap_tier ? { cap_tier } : {}) }

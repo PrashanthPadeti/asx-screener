@@ -30,6 +30,8 @@ import {
   TransactionOut,
   ImportResult,
 } from '@/lib/api'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { PORTFOLIO_SECTIONS } from '@/lib/helpContent'
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -1075,6 +1077,7 @@ export default function PortfolioPage() {
           <p className="text-sm text-slate-500 mt-0.5">Track your ASX holdings, P&amp;L, and dividend income</p>
         </div>
         <div className="flex items-center gap-2">
+          <HelpDrawer sections={PORTFOLIO_SECTIONS} title="Portfolio Guide" subtitle="Transactions, performance, dividends, and AI insights" />
           {activeId && (
             <>
               <button onClick={() => setShowImport(true)}

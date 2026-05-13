@@ -5,6 +5,8 @@ import {
   Newspaper, Search, X, RefreshCw, AlertTriangle, Filter,
   ExternalLink, Clock, ChevronLeft, ChevronRight,
 } from 'lucide-react'
+import { HelpDrawer } from '@/components/HelpDrawer'
+import { NEWS_SECTIONS } from '@/lib/helpContent'
 import { getAnnouncements, AnnouncementFeedItem, AnnouncementFeed } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -226,6 +228,7 @@ export default function NewsPage() {
                   Updated {lastRefresh.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}
                 </span>
               )}
+              <HelpDrawer sections={NEWS_SECTIONS} title="News Guide" subtitle="Announcement types, filters, and the live ticker" />
               <button
                 onClick={() => load(page)}
                 disabled={loading}

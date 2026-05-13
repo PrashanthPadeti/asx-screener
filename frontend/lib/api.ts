@@ -1764,8 +1764,12 @@ export const getBillingPlans = async (): Promise<{ plans: BillingPlan[] }> => {
   return data
 }
 
-export const createCheckoutSession = async (price_id: string, seats = 1): Promise<{ url: string }> => {
-  const { data } = await api.post('/api/v1/billing/checkout', { price_id, seats })
+export const createCheckoutSession = async (
+  plan: string,
+  interval: 'monthly' | 'yearly',
+  seats = 1,
+): Promise<{ url: string }> => {
+  const { data } = await api.post('/api/v1/billing/checkout', { plan, interval, seats })
   return data
 }
 

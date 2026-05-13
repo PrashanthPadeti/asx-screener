@@ -19,8 +19,6 @@ const PLANS = [
     color:       'slate',
     highlight:   false,
     badge:       null,
-    priceIdMonthly: null,
-    priceIdYearly:  null,
     description: 'Everything you need to get started with ASX investing.',
     features: {
       portfolios:   1,
@@ -40,8 +38,6 @@ const PLANS = [
     color:       'blue',
     highlight:   true,
     badge:       'Most Popular',
-    priceIdMonthly: process.env.NEXT_PUBLIC_STRIPE_PRO_MONTHLY ?? null,
-    priceIdYearly:  process.env.NEXT_PUBLIC_STRIPE_PRO_YEARLY  ?? null,
     description: 'For active investors who want deeper data and automation.',
     features: {
       portfolios:   10,
@@ -61,8 +57,6 @@ const PLANS = [
     color:       'purple',
     highlight:   false,
     badge:       null,
-    priceIdMonthly: process.env.NEXT_PUBLIC_STRIPE_PREMIUM_MONTHLY ?? null,
-    priceIdYearly:  process.env.NEXT_PUBLIC_STRIPE_PREMIUM_YEARLY  ?? null,
     description: 'Unlimited data, priority access, and full feature set.',
     features: {
       portfolios:   50,
@@ -105,16 +99,11 @@ export default function PricingPage() {
     if (!user) { router.push(`/auth/login?next=/pricing`); return }
     if (currentPlan === plan.id) return
 
-    const priceId = yearly ? plan.priceIdYearly : plan.priceIdMonthly
-    if (!priceId) {
-      setError('Payments are not yet configured. Please contact support.')
-      return
-    }
-
     setLoading(plan.id)
     setError(null)
     try {
-      const { url } = await createCheckoutSession(priceId)
+      const interval = yearly ? 'yearly' : 'monthly'
+      const { url } = await createCheckoutSession(plan.id, interval)
       window.location.href = url
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail

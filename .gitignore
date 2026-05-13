@@ -77,3 +77,4 @@ airflow/plugins/__pycache__/
 .DS_Store
 ehthumbs.db
 Desktop.ini
+asx-venv/

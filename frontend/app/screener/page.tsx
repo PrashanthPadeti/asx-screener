@@ -532,7 +532,8 @@ export default function ScreenerPage() {
     const firstField = allFields[0]?.key || 'pe_ratio'
     const firstType  = allFields[0]?.type || 'number'
     const firstOp    = firstType === 'boolean' ? 'eq' : 'gte'
-    setFilters(f => [...f, { id: nextId++, field: firstField, operator: firstOp, value: '' }])
+    const firstValue = firstType === 'boolean' ? 'true' : ''
+    setFilters(f => [...f, { id: nextId++, field: firstField, operator: firstOp, value: firstValue }])
     setActivePreset(null)
   }
 
@@ -545,12 +546,13 @@ export default function ScreenerPage() {
     setFilters(f => f.map(r => {
       if (r.id !== id) return r
       const updated = { ...r, [key]: val }
-      // Auto-reset operator when field type changes
+      // Auto-reset operator + value when field type changes
       if (key === 'field') {
         const meta = allFields.find(x => x.key === val)
         const ops  = OPERATORS[meta?.type || 'number']
         updated.operator = ops[0].value
-        updated.value    = ''
+        // Boolean fields must default to 'true' so buildApiFilters doesn't skip them
+        updated.value    = meta?.type === 'boolean' ? 'true' : ''
       }
       return updated
     }))

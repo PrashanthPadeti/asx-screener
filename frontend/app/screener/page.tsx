@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   runScreener, getScreenerFields, getScreenerPresets, exportScreener,
@@ -286,6 +286,32 @@ const ALL_COLUMNS: ColDef[] = [
   },
 ]
 
+// ── Market Cap tier quick-filter ──────────────────────────────────────────────
+// Values are in AUD millions (market_cap field has scale=1_000_000 in the backend)
+
+type CapTierKey = 'all' | 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
+
+const CAP_TIER_LABELS: Record<CapTierKey, string> = {
+  all:   'All',
+  mega:  'Mega ≥$50B',
+  large: 'Large $10B–$50B',
+  mid:   'Mid $2B–$10B',
+  small: 'Small $300M–$2B',
+  micro: 'Micro $50M–$300M',
+  nano:  'Nano <$50M',
+}
+
+// gte / lt values in AUD millions (backend multiplies by 1_000_000)
+const CAP_TIER_RANGES: Record<CapTierKey, { gte?: number; lt?: number }> = {
+  all:   {},
+  mega:  { gte: 50_000 },
+  large: { gte: 10_000, lt: 50_000 },
+  mid:   { gte: 2_000,  lt: 10_000 },
+  small: { gte: 300,    lt: 2_000 },
+  micro: { gte: 50,     lt: 300 },
+  nano:  { lt: 50 },
+}
+
 // ── Filter row types ──────────────────────────────────────────────────────────
 
 interface FilterRow { id: number; field: string; operator: string; value: string }
@@ -550,6 +576,38 @@ export default function ScreenerPage() {
       return
     }
     applyPresetDirect(preset)
+  }
+
+  // Derive the active cap tier from the current market_cap filters (stays in sync automatically)
+  const derivedCapTier = useMemo<CapTierKey>(() => {
+    const mcap = filters.filter(f => f.field === 'market_cap')
+    if (mcap.length === 0) return 'all'
+    const gte = mcap.find(f => f.operator === 'gte')
+    const lt  = mcap.find(f => f.operator === 'lt')
+    const gteVal = gte ? Number(gte.value) : null
+    const ltVal  = lt  ? Number(lt.value)  : null
+    for (const [tier, range] of Object.entries(CAP_TIER_RANGES) as [CapTierKey, typeof CAP_TIER_RANGES[CapTierKey]][]) {
+      if (tier === 'all') continue
+      const matchGte = range.gte !== undefined ? gteVal === range.gte : gteVal == null
+      const matchLt  = range.lt  !== undefined ? ltVal  === range.lt  : ltVal  == null
+      if (matchGte && matchLt) return tier
+    }
+    return 'all' // custom range — no tier highlighted
+  }, [filters])
+
+  const applyCapTier = (tier: CapTierKey) => {
+    setFilters(prev => {
+      const withoutMcap = prev.filter(f => f.field !== 'market_cap')
+      if (tier === 'all') return withoutMcap
+      const range = CAP_TIER_RANGES[tier]
+      const newRows: FilterRow[] = []
+      if (range.gte !== undefined)
+        newRows.push({ id: nextId++, field: 'market_cap', operator: 'gte', value: String(range.gte) })
+      if (range.lt !== undefined)
+        newRows.push({ id: nextId++, field: 'market_cap', operator: 'lt',  value: String(range.lt) })
+      return [...withoutMcap, ...newRows]
+    })
+    setActivePreset(null)
   }
 
   const clearAll = () => {
@@ -1095,6 +1153,23 @@ export default function ScreenerPage() {
               className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700 font-medium">
               <Plus className="w-4 h-4" /> Add Filter
             </button>
+          </div>
+        </div>
+
+        {/* Market Cap Tier quick filter */}
+        <div className="flex items-center gap-2 flex-wrap pb-2 border-b border-gray-100">
+          <span className="text-xs font-medium text-gray-500 whitespace-nowrap">Market Cap</span>
+          <div className="flex gap-1 flex-wrap">
+            {(Object.keys(CAP_TIER_LABELS) as CapTierKey[]).map(t => (
+              <button key={t} onClick={() => applyCapTier(t)}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors ${
+                  derivedCapTier === t
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-blue-400 hover:text-blue-600'
+                }`}>
+                {CAP_TIER_LABELS[t]}
+              </button>
+            ))}
           </div>
         </div>
 

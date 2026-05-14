@@ -1,7 +1,7 @@
 """
 ASX Screener — Stripe Billing Routes
 ========================================
-POST /billing/checkout    — create Stripe Checkout session
+POST /billing/checkout    — create Stripe Checkout session (or upgrade existing sub)
 POST /billing/portal      — create Stripe Customer Portal session
 POST /billing/webhook     — Stripe webhook handler
 GET  /billing/plans       — list available plans + pricing
@@ -21,7 +21,6 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 
 # ── Stripe price ID map (populated from env) ──────────────────────────────────
-# Keys match the price_id_monthly / price_id_yearly references in PLANS_CATALOGUE
 
 def _price_ids() -> dict[str, str]:
     """Read all Stripe price IDs from settings at call time (not import time)."""
@@ -40,8 +39,9 @@ def _price_ids() -> dict[str, str]:
         "STRIPE_ENT_PREM_10_YEARLY":   getattr(settings, "STRIPE_ENT_PREM_10_YEARLY",   ""),
     }
 
-# Map Stripe price_id → (plan_code, seat_limit, billing_period)
+
 def _build_price_plan_map() -> dict[str, tuple[str, int, str]]:
+    """Map Stripe price_id → (plan_code, seat_limit, billing_period)."""
     ids = _price_ids()
     return {k: v for k, v in {
         ids["STRIPE_PRO_MONTHLY"]:         ("pro",               1,  "monthly"),
@@ -65,7 +65,6 @@ def _build_price_plan_map() -> dict[str, tuple[str, int, str]]:
 async def get_plans():
     """Return full plan catalogue with resolved Stripe price IDs."""
     ids = _price_ids()
-    # Inject actual price IDs into catalogue copy
     resolved = []
     for plan in PLANS_CATALOGUE:
         p = dict(plan)
@@ -103,6 +102,9 @@ _PLAN_INTERVAL_TO_KEY: dict[tuple[str, str], str] = {
     ("enterprise_premium","yearly"):  "STRIPE_ENT_PREM_5_YEARLY",
 }
 
+# Statuses that mean an existing subscription can be modified (upgraded/downgraded)
+_UPGRADEABLE_STATUSES = {"active", "trialing", "past_due"}
+
 
 @router.post("/checkout")
 async def create_checkout(
@@ -110,7 +112,11 @@ async def create_checkout(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a Stripe Checkout session for the selected plan + billing period."""
+    """
+    For new subscribers: create a Stripe Checkout session (redirect to Stripe).
+    For existing subscribers: modify the current subscription in-place (no redirect needed).
+    This prevents duplicate subscriptions when upgrading or changing billing interval.
+    """
     if not settings.STRIPE_SECRET_KEY:
         raise HTTPException(status_code=503, detail="Billing not configured")
 
@@ -126,17 +132,46 @@ async def create_checkout(
     _stripe.api_key = settings.STRIPE_SECRET_KEY
 
     result = await db.execute(
-        text("SELECT email, name, stripe_customer_id FROM users.users WHERE id = :id"),
+        text("""
+            SELECT email, name, stripe_customer_id, stripe_subscription_id, subscription_status
+            FROM users.users WHERE id = :id
+        """),
         {"id": current_user["id"]},
     )
     user = result.fetchone()
 
-    customer_id = user.stripe_customer_id
+    base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
+
+    # ── Existing subscriber: modify in-place ──────────────────────────────────
+    sub_id = getattr(user, "stripe_subscription_id", None)
+    if sub_id and getattr(user, "subscription_status", None) in _UPGRADEABLE_STATUSES:
+        try:
+            sub = _stripe.Subscription.retrieve(sub_id)
+            if sub.status in _UPGRADEABLE_STATUSES:
+                item_id = sub["items"]["data"][0]["id"]
+                _stripe.Subscription.modify(
+                    sub_id,
+                    items=[{"id": item_id, "price": price_id}],
+                    proration_behavior="create_prorations",
+                    metadata={"user_id": str(current_user["id"]), "seats": str(body.seats)},
+                )
+                log.info(
+                    f"Subscription {sub_id} modified to price {price_id} "
+                    f"(plan={body.plan} interval={body.interval}) for user {current_user['id']}"
+                )
+                # Webhook (customer.subscription.updated) will update the DB plan automatically.
+                return {"url": f"{base_url}/account?upgrade=success"}
+        except Exception as e:
+            # Subscription gone or invalid — fall through to new checkout session
+            log.warning(f"Could not modify subscription {sub_id}: {e}. Creating new checkout session.")
+
+    # ── New subscriber (or subscription lapsed): create Checkout session ──────
+    customer_id = getattr(user, "stripe_customer_id", None)
     if not customer_id:
         customer = _stripe.Customer.create(
             email=user.email,
             name=user.name or user.email,
-            metadata={"user_id": current_user["id"]},
+            metadata={"user_id": str(current_user["id"])},
         )
         customer_id = customer.id
         await db.execute(
@@ -145,15 +180,14 @@ async def create_checkout(
         )
         await db.commit()
 
-    base_url = getattr(settings, "FRONTEND_URL", "http://localhost:3000")
     session = _stripe.checkout.Session.create(
         customer=customer_id,
         payment_method_types=["card"],
         line_items=[{"price": price_id, "quantity": 1}],
         mode="subscription",
         success_url=f"{base_url}/account?upgrade=success",
-        cancel_url=f"{base_url}/account?upgrade=cancelled",
-        metadata={"user_id": current_user["id"], "seats": str(body.seats)},
+        cancel_url=f"{base_url}/pricing?upgrade=cancelled",
+        metadata={"user_id": str(current_user["id"]), "seats": str(body.seats)},
     )
     return {"url": session.url}
 
@@ -211,19 +245,21 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
     event_type = event["type"]
     log.info(f"Stripe event: {event_type}")
 
-    async def _log_event(user_id: str, event_type: str, old_plan: str, new_plan: str, stripe_event_id: str):
+    async def _log_event(user_id: str, ev_type: str, old_plan: str, new_plan: str, stripe_event_id: str):
         """Write to subscription_events audit table if it exists."""
         try:
             await db.execute(text("""
                 INSERT INTO users.subscription_events
                     (user_id, event_type, old_plan, new_plan, stripe_event_id)
                 VALUES (:uid, :et, :op, :np, :eid)
-            """), {"uid": user_id, "et": event_type, "op": old_plan, "np": new_plan, "eid": stripe_event_id})
+            """), {"uid": user_id, "et": ev_type, "op": old_plan, "np": new_plan, "eid": stripe_event_id})
         except Exception:
             pass  # table may not exist yet
 
+    # ── Subscription created / updated ────────────────────────────────────────
     if event_type in ("customer.subscription.created", "customer.subscription.updated"):
         sub        = event["data"]["object"]
+        sub_id     = sub["id"]
         sub_status = sub["status"]
         cid        = sub["customer"]
         ends       = sub.get("current_period_end")
@@ -248,26 +284,34 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         await db.execute(
             text("""
                 UPDATE users.users
-                SET plan                 = :plan,
-                    subscription_status  = :status,
-                    subscription_ends_at = to_timestamp(:ends),
-                    billing_period       = :bp,
-                    seat_limit           = :seats,
+                SET plan                      = :plan,
+                    subscription_status       = :status,
+                    subscription_ends_at      = to_timestamp(:ends),
+                    billing_period            = :bp,
+                    seat_limit                = :seats,
+                    stripe_subscription_id    = :sub_id,
                     subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
                     data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
                 WHERE stripe_customer_id = :cid
             """),
             {"plan": plan, "status": sub_status, "ends": ends,
-             "bp": billing_period, "seats": seat_limit, "cid": cid},
+             "bp": billing_period, "seats": seat_limit, "sub_id": sub_id, "cid": cid},
         )
         await db.commit()
         if user_row:
             await _log_event(str(user_row.id), event_type, user_row.plan, plan, event["id"])
             await db.commit()
-        log.info(f"Subscription updated: plan='{plan}' status='{sub_status}' for customer {cid}")
+        log.info(
+            f"Subscription {sub_id} updated: plan='{plan}' status='{sub_status}' "
+            f"interval='{billing_period}' for customer {cid}"
+        )
 
+    # ── Subscription cancelled ────────────────────────────────────────────────
     elif event_type == "customer.subscription.deleted":
-        cid = event["data"]["object"]["customer"]
+        sub = event["data"]["object"]
+        cid = sub["customer"]
+        sub_id = sub["id"]
+
         result = await db.execute(
             text("SELECT id, plan FROM users.users WHERE stripe_customer_id = :cid"),
             {"cid": cid},
@@ -277,38 +321,38 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         await db.execute(
             text("""
                 UPDATE users.users
-                SET plan = 'free',
-                    subscription_status = 'cancelled',
-                    subscription_ends_at = NULL,
-                    seat_limit = 1,
-                    subscription_inactive_since = NOW(),
-                    data_deletion_scheduled_at  = NOW() + INTERVAL '12 months',
-                    deletion_reminder_30d_sent  = FALSE,
-                    deletion_reminder_7d_sent   = FALSE,
-                    deletion_reminder_1d_sent   = FALSE
+                SET plan                      = 'free',
+                    subscription_status       = 'cancelled',
+                    subscription_ends_at      = NULL,
+                    seat_limit                = 1,
+                    stripe_subscription_id    = NULL,
+                    subscription_inactive_since     = NOW(),
+                    data_deletion_scheduled_at      = NOW() + INTERVAL '12 months',
+                    deletion_reminder_30d_sent      = FALSE,
+                    deletion_reminder_7d_sent       = FALSE,
+                    deletion_reminder_1d_sent       = FALSE
                 WHERE stripe_customer_id = :cid
+                  AND (stripe_subscription_id = :sub_id OR stripe_subscription_id IS NULL)
             """),
-            {"cid": cid},
+            {"cid": cid, "sub_id": sub_id},
         )
         await db.commit()
         if user_row:
             await _log_event(str(user_row.id), "cancelled", user_row.plan, "free", event["id"])
             await db.commit()
-        log.info(f"Subscription cancelled for customer {cid} — downgraded to free")
+        log.info(f"Subscription {sub_id} cancelled for customer {cid} — downgraded to free")
 
+    # ── Payment failed ────────────────────────────────────────────────────────
     elif event_type == "invoice.payment_failed":
         cid = event["data"]["object"]["customer"]
         await db.execute(
-            text("""
-                UPDATE users.users
-                SET subscription_status = 'past_due'
-                WHERE stripe_customer_id = :cid
-            """),
+            text("UPDATE users.users SET subscription_status = 'past_due' WHERE stripe_customer_id = :cid"),
             {"cid": cid},
         )
         await db.commit()
         log.warning(f"Payment failed for customer {cid} — marked past_due")
 
+    # ── Payment succeeded ─────────────────────────────────────────────────────
     elif event_type == "invoice.payment_succeeded":
         cid = event["data"]["object"]["customer"]
         await db.execute(
@@ -325,15 +369,23 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         )
         await db.commit()
 
+    # ── Checkout completed: store customer ID and subscription ID ─────────────
     elif event_type == "checkout.session.completed":
-        session = event["data"]["object"]
-        user_id = session.get("metadata", {}).get("user_id")
-        cid     = session.get("customer")
+        session    = event["data"]["object"]
+        user_id    = session.get("metadata", {}).get("user_id")
+        cid        = session.get("customer")
+        sub_id     = session.get("subscription")  # present for mode=subscription
         if user_id and cid:
             await db.execute(
-                text("UPDATE users.users SET stripe_customer_id = :cid WHERE id = :uid"),
-                {"cid": cid, "uid": user_id},
+                text("""
+                    UPDATE users.users
+                    SET stripe_customer_id     = :cid,
+                        stripe_subscription_id = COALESCE(:sub_id, stripe_subscription_id)
+                    WHERE id = :uid
+                """),
+                {"cid": cid, "sub_id": sub_id, "uid": user_id},
             )
             await db.commit()
+            log.info(f"Checkout completed: customer={cid} subscription={sub_id} user={user_id}")
 
     return {"status": "ok"}

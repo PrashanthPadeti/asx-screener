@@ -96,14 +96,10 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "roa":              {"col": "u.roa",             "scale": 0.01, "type": "number",  "label": "ROA %",                "unit": "%",   "cat": "Profitability"},
     "roce":             {"col": "u.roce",            "scale": 0.01, "type": "number",  "label": "ROCE %",               "unit": "%",   "cat": "Profitability"},
     "avg_roe_3y":       {"col": "u.avg_roe_3y",      "scale": 0.01, "type": "number",  "label": "Avg ROE 3Y %",         "unit": "%",   "cat": "Profitability"},
-    "roic":             {"col": "u.roic",            "scale": 0.01, "type": "number",  "label": "ROIC %",               "unit": "%",   "cat": "Profitability"},
     "avg_roic_3y":      {"col": "u.avg_roic_3y",     "scale": 0.01, "type": "number",  "label": "Avg ROIC 3Y %",        "unit": "%",   "cat": "Profitability"},
     "avg_roic_5y":      {"col": "u.avg_roic_5y",     "scale": 0.01, "type": "number",  "label": "Avg ROIC 5Y %",        "unit": "%",   "cat": "Profitability"},
-    "asset_turnover":   {"col": "u.asset_turnover",  "scale": 1,    "type": "number",  "label": "Asset Turnover",       "unit": "x",   "cat": "Profitability"},
-    "inventory_turnover":{"col":"u.inventory_turnover","scale": 1,  "type": "number",  "label": "Inventory Turnover",   "unit": "x",   "cat": "Profitability"},
-    "eps":              {"col": "u.eps",             "scale": 1,    "type": "number",  "label": "EPS (AUD)",            "unit": "AUD", "cat": "Profitability"},
-    "net_income":       {"col": "u.net_income",      "scale": 1_000_000, "type": "number", "label": "Net Profit (AUD M)",   "unit": "AUD M","cat": "Profitability"},
     "capital_efficiency_score": {"col": "u.capital_efficiency_score", "scale": 1, "type": "number", "label": "Capital Efficiency Score", "unit": "", "cat": "Profitability"},
+    # NOTE: roic, asset_turnover, inventory_turnover, eps, net_income not in screener.universe yet
 
     # ── Growth ────────────────────────────────────────────────────────────────
     "revenue_growth_1y":       {"col": "u.revenue_growth_1y",       "scale": 0.01, "type": "number", "label": "Revenue Growth 1Y %",      "unit": "%",   "cat": "Growth"},
@@ -116,8 +112,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "revenue_growth_hoh":      {"col": "u.revenue_growth_hoh",      "scale": 0.01, "type": "number", "label": "Revenue Growth HoH % ★",  "unit": "%",   "cat": "Growth"},
     "net_income_growth_hoh":   {"col": "u.net_income_growth_hoh",   "scale": 0.01, "type": "number", "label": "Net Income Growth HoH % ★","unit": "%",  "cat": "Growth"},
     "eps_growth_hoh":          {"col": "u.eps_growth_hoh",          "scale": 0.01, "type": "number", "label": "EPS Growth HoH % ★",      "unit": "%",   "cat": "Growth"},
-    "eps_cagr_5y":             {"col": "u.eps_cagr_5y",             "scale": 0.01, "type": "number", "label": "EPS CAGR 5Y %",           "unit": "%",   "cat": "Growth"},
-    "revenue":                 {"col": "u.revenue",                 "scale": 1_000_000, "type": "number", "label": "Revenue (AUD M)",     "unit": "AUD M","cat": "Growth"},
+    # NOTE: eps_cagr_5y, revenue not in screener.universe yet
     "eps_fy0":                 {"col": "u.eps_fy0",                 "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",            "unit": "AUD", "cat": "Growth"},
     "eps_fy1":                 {"col": "u.eps_fy1",                 "scale": 1,    "type": "number", "label": "EPS FY1 Estimate (AUD)",   "unit": "AUD", "cat": "Growth"},
     "eps_growth_yoy_q":        {"col": "u.eps_growth_yoy_q",        "scale": 0.01, "type": "number", "label": "EPS Growth YoY Q %",       "unit": "%",   "cat": "Growth"},
@@ -135,11 +130,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "book_value_per_share":{"col": "u.book_value_per_share","scale": 1,    "type": "number", "label": "Book Value Per Share", "unit": "AUD", "cat": "Financial Health"},
     "fcf_fy0":             {"col": "u.fcf_fy0",             "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)","unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":             {"col": "u.cfo_fy0",             "scale": 1,    "type": "number", "label": "Operating CF (AUD M)", "unit": "AUD M","cat": "Financial Health"},
-    "quick_ratio":         {"col": "u.quick_ratio",         "scale": 1,    "type": "number", "label": "Quick Ratio",          "unit": "x",   "cat": "Financial Health"},
-    "interest_coverage":   {"col": "u.interest_coverage",   "scale": 1,    "type": "number", "label": "Interest Coverage",    "unit": "x",   "cat": "Financial Health"},
-    "debt_to_ebitda":      {"col": "u.debt_to_ebitda",      "scale": 1,    "type": "number", "label": "Debt / EBITDA",        "unit": "x",   "cat": "Financial Health"},
-    "net_debt_to_ebitda":  {"col": "u.net_debt_to_ebitda",  "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",    "unit": "x",   "cat": "Financial Health"},
-    "cash_conversion_cycle":{"col":"u.cash_conversion_cycle","scale": 1,   "type": "number", "label": "Cash Conversion Cycle","unit": "days","cat": "Financial Health"},
+    # NOTE: quick_ratio, interest_coverage, debt_to_ebitda, net_debt_to_ebitda, cash_conversion_cycle not in screener.universe yet
 
     # ── Quality Scores ────────────────────────────────────────────────────────
     "piotroski_f_score":       {"col": "u.piotroski_f_score",       "scale": 1,    "type": "number", "label": "Piotroski F-Score",        "unit": "",    "cat": "Quality"},
@@ -147,7 +138,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "percent_insiders":        {"col": "u.percent_insiders",        "scale": 1,    "type": "number", "label": "Insider Holding %",        "unit": "%",   "cat": "Quality"},
     "percent_institutions":    {"col": "u.percent_institutions",    "scale": 1,    "type": "number", "label": "Institutional Holding %",  "unit": "%",   "cat": "Quality"},
     "short_pct":               {"col": "u.short_pct",               "scale": 1,    "type": "number", "label": "Short Interest %",         "unit": "%",   "cat": "Quality"},
-    "beneish_m_score":         {"col": "u.beneish_m_score",         "scale": 1,    "type": "number", "label": "Beneish M-Score",          "unit": "",    "cat": "Quality"},
+    # NOTE: beneish_m_score not in screener.universe yet
     "short_interest_chg_1w":   {"col": "u.short_interest_chg_1w",  "scale": 1,    "type": "number", "label": "Short Change 1W pp",       "unit": "pp",  "cat": "Quality"},
     "ocf_to_net_profit":       {"col": "u.ocf_to_net_profit",       "scale": 1,    "type": "number", "label": "CFO / Net Profit",         "unit": "x",   "cat": "Quality"},
     "fcf_payout_ratio":        {"col": "u.fcf_payout_ratio",        "scale": 0.01, "type": "number", "label": "FCF Payout Ratio %",       "unit": "%",   "cat": "Quality"},
@@ -184,11 +175,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "beta_1y":       {"col": "u.beta_1y",       "scale": 1,    "type": "number",  "label": "Beta (1Y)",            "unit": "",    "cat": "Technicals"},
     "sharpe_1y":     {"col": "u.sharpe_1y",     "scale": 1,    "type": "number",  "label": "Sharpe Ratio (1Y)",    "unit": "",    "cat": "Technicals"},
     "drawdown_from_ath":      {"col": "u.drawdown_from_ath",      "scale": 0.01, "type": "number", "label": "Drawdown from ATH %",       "unit": "%", "cat": "Technicals"},
-    "sharpe_3y":              {"col": "u.sharpe_3y",              "scale": 1,    "type": "number", "label": "Sharpe Ratio (3Y)",          "unit": "",  "cat": "Technicals"},
-    "sortino_1y":             {"col": "u.sortino_1y",             "scale": 1,    "type": "number", "label": "Sortino Ratio (1Y)",         "unit": "",  "cat": "Technicals"},
-    "beta_3y":                {"col": "u.beta_3y",                "scale": 1,    "type": "number", "label": "Beta (3Y)",                  "unit": "",  "cat": "Technicals"},
-    "max_drawdown_1y":        {"col": "u.max_drawdown_1y",        "scale": 0.01, "type": "number", "label": "Max Drawdown 1Y %",          "unit": "%", "cat": "Technicals"},
-    "relative_strength_xjo":  {"col": "u.relative_strength_xjo",  "scale": 0.01, "type": "number", "label": "Relative Strength vs XJO %", "unit": "%", "cat": "Technicals"},
+    # NOTE: sharpe_3y, sortino_1y, beta_3y, max_drawdown_1y, relative_strength_xjo not in screener.universe yet
 
     # ── Price Returns ─────────────────────────────────────────────────────────
     "return_1w":  {"col": "u.return_1w",  "scale": 0.01, "type": "number", "label": "Return 1W %",  "unit": "%", "cat": "Returns"},
@@ -201,19 +188,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "return_5y":  {"col": "u.return_5y",  "scale": 0.01, "type": "number", "label": "Return 5Y %",  "unit": "%", "cat": "Returns"},
     "return_10y": {"col": "u.return_10y", "scale": 0.01, "type": "number", "label": "Return 10Y %", "unit": "%", "cat": "Returns"},
 
-    # ── Valuation (additional) ────────────────────────────────────────────────
-    "enterprise_value":  {"col": "u.enterprise_value",  "scale": 1_000_000, "type": "number", "label": "Enterprise Value (AUD M)", "unit": "AUD M","cat": "Valuation"},
-
-    # ── Dividends (additional) ────────────────────────────────────────────────
-    "dps":               {"col": "u.dps",               "scale": 1,    "type": "number", "label": "DPS (AUD cents)",          "unit": "¢",   "cat": "Dividends"},
-
-    # ── ASX-Specific ──────────────────────────────────────────────────────────
-    "nta_per_share":            {"col": "u.nta_per_share",            "scale": 1,    "type": "number", "label": "NTA Per Share (AUD)",      "unit": "AUD", "cat": "ASX-Specific"},
-    "nta_discount_premium":     {"col": "u.nta_discount_premium",     "scale": 0.01, "type": "number", "label": "NTA Discount/Premium %",   "unit": "%",   "cat": "ASX-Specific"},
-    "gearing_ratio":            {"col": "u.gearing_ratio",            "scale": 0.01, "type": "number", "label": "Gearing Ratio %",          "unit": "%",   "cat": "ASX-Specific"},
-    "wale_years":               {"col": "u.wale_years",               "scale": 1,    "type": "number", "label": "WALE (years)",             "unit": "yrs", "cat": "ASX-Specific"},
-    "management_expense_ratio": {"col": "u.management_expense_ratio", "scale": 0.01, "type": "number", "label": "MER %",                    "unit": "%",   "cat": "ASX-Specific"},
-    "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC Per Oz (USD)",        "unit": "USD", "cat": "ASX-Specific"},
+    # NOTE: enterprise_value, dps, nta_per_share, nta_discount_premium, gearing_ratio,
+    #       wale_years, management_expense_ratio, aisc_per_oz not in screener.universe yet
 }
 
 OPERATOR_MAP = {
@@ -265,31 +241,10 @@ SORTABLE_COLS: dict[str, str] = {
     "fcf_yield":          "u.fcf_yield",
     "ev_to_ebitda":       "u.ev_to_ebitda",
     "ev_to_revenue":      "u.ev_to_revenue",
-    "roic":               "u.roic",
-    "asset_turnover":     "u.asset_turnover",
-    "eps":                "u.eps",
-    "net_income":         "u.net_income",
-    "revenue":            "u.revenue",
-    "eps_cagr_5y":        "u.eps_cagr_5y",
-    "quick_ratio":        "u.quick_ratio",
-    "interest_coverage":  "u.interest_coverage",
-    "debt_to_ebitda":     "u.debt_to_ebitda",
-    "net_debt_to_ebitda": "u.net_debt_to_ebitda",
-    "beneish_m_score":    "u.beneish_m_score",
-    "sharpe_3y":          "u.sharpe_3y",
-    "sortino_1y":         "u.sortino_1y",
-    "beta_3y":            "u.beta_3y",
-    "max_drawdown_1y":    "u.max_drawdown_1y",
     "return_6m":          "u.return_6m",
     "return_3y":          "u.return_3y",
     "return_5y":          "u.return_5y",
     "return_10y":         "u.return_10y",
-    "enterprise_value":   "u.enterprise_value",
-    "dps":                "u.dps",
-    "nta_per_share":      "u.nta_per_share",
-    "gearing_ratio":      "u.gearing_ratio",
-    "wale_years":         "u.wale_years",
-    "aisc_per_oz":        "u.aisc_per_oz",
     # Phase 1 additions
     "avg_roic_3y":              "u.avg_roic_3y",
     "avg_roic_5y":              "u.avg_roic_5y",

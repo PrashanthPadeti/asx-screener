@@ -9,7 +9,9 @@ import { HelpDrawer } from '@/components/HelpDrawer'
 import { MARKET_SECTIONS } from '@/lib/helpContent'
 import {
   getMarketDashboard, getMarketMovers, getMarketSignals, getMarketAnomalies,
+  getVolumeActivity,
   MarketDashboard, DashboardStock, ActiveStock, VolumePressureStock,
+  VolumeActivityResponse,
   ExDivStock, MoverStock, SignalStock, AnomalyFlag,
 } from '@/lib/api'
 import { ANOMALY_TYPES } from '@/lib/constants'
@@ -63,24 +65,6 @@ function heatColor(v: number | null): string {
   if (pct >= -1) return 'bg-red-100 text-red-800'
   if (pct >= -3) return 'bg-red-400 text-white'
   return 'bg-red-600 text-white'
-}
-
-// market_cap is stored in raw AUD dollars (full dollars from EODHD), NOT millions
-function filterByCapTier<T extends { market_cap: number | null }>(items: T[], tier: CapTier): T[] {
-  if (tier === 'all') return items
-  return items.filter(s => {
-    const mc = s.market_cap
-    if (mc == null) return false
-    switch (tier) {
-      case 'mega':  return mc >= 50_000_000_000
-      case 'large': return mc >= 10_000_000_000 && mc < 50_000_000_000
-      case 'mid':   return mc >= 2_000_000_000  && mc < 10_000_000_000
-      case 'small': return mc >= 300_000_000    && mc < 2_000_000_000
-      case 'micro': return mc >= 50_000_000     && mc < 300_000_000
-      case 'nano':  return mc < 50_000_000
-      default:      return true
-    }
-  })
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -308,9 +292,12 @@ export default function MarketPage() {
 
   const [moverPeriod, setMoverPeriod] = useState<Period>('1w')
   const [capTier, setCapTier]         = useState<CapTier>('all')
-  const [volumeCapTier, setVolumeCapTier] = useState<CapTier>('all')
   const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
+
+  const [volumeCapTier, setVolumeCapTier]     = useState<CapTier>('all')
+  const [volumeActivity, setVolumeActivity]   = useState<VolumeActivityResponse | null>(null)
+  const [volumeLoading, setVolumeLoading]     = useState(false)
 
   const [sigPeriod, setSigPeriod] = useState<SigPeriod>('52w')
   const [signals, setSignals]   = useState<{ near_period_high: SignalStock[]; near_period_low: SignalStock[]; volume_surge: SignalStock[] } | null>(null)
@@ -336,6 +323,13 @@ export default function MarketPage() {
     finally { setMoversLoading(false) }
   }, [])
 
+  const loadVolumeActivity = useCallback(async (tier: CapTier = 'all') => {
+    setVolumeLoading(true)
+    try { setVolumeActivity(await getVolumeActivity(tier === 'all' ? undefined : tier as 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano')) }
+    catch { /* keep previous */ }
+    finally { setVolumeLoading(false) }
+  }, [])
+
   const loadSignals = useCallback(async (period: SigPeriod) => {
     setSignalsLoading(true)
     try { setSignals(await getMarketSignals(period)) }
@@ -352,11 +346,12 @@ export default function MarketPage() {
     finally { setAnomaliesLoading(false) }
   }
 
-  useEffect(() => { loadDashboard(); loadSignals('52w'); loadAnomalies() }, [loadSignals, loadMovers])
+  useEffect(() => { loadDashboard(); loadSignals('52w'); loadAnomalies(); loadVolumeActivity() }, [loadSignals, loadMovers, loadVolumeActivity])
   useEffect(() => { loadMovers(moverPeriod, capTier) }, [moverPeriod, capTier, loadMovers])
   useEffect(() => { loadSignals(sigPeriod) }, [sigPeriod, loadSignals])
+  useEffect(() => { loadVolumeActivity(volumeCapTier) }, [volumeCapTier, loadVolumeActivity])
 
-  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod, capTier); loadSignals(sigPeriod); loadAnomalies(anomalyFilter) }
+  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod, capTier); loadSignals(sigPeriod); loadAnomalies(anomalyFilter); loadVolumeActivity(volumeCapTier) }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -379,10 +374,6 @@ export default function MarketPage() {
     moverPeriod === '1d' ? 'return_1d' :
     moverPeriod === '1w' ? 'return_1w' :
     moverPeriod === '3m' ? 'return_3m' : 'return_1m'
-
-  const filteredMostActive   = filterByCapTier(data.most_active,   volumeCapTier)
-  const filteredHeavyBuying  = filterByCapTier(data.heavy_buying,  volumeCapTier)
-  const filteredHeavySelling = filterByCapTier(data.heavy_selling, volumeCapTier)
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
@@ -609,78 +600,82 @@ export default function MarketPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <TableCard title="Most Active by Volume" icon={Activity}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-xs text-slate-400 bg-slate-50">
-                  <th className="py-2 px-3 text-left w-6">#</th>
-                  <th className="py-2 px-3 text-left">Stock</th>
-                  <th className="py-2 px-3 text-right">Price</th>
-                  <th className="py-2 px-3 text-right">Volume</th>
-                  <th className="py-2 px-3 text-right">vs 20D</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMostActive.length === 0
-                  ? <tr><td colSpan={5} className="py-8 text-center text-sm text-slate-400">No stocks in this tier</td></tr>
-                  : filteredMostActive.map((s, i) => <ActiveRow key={s.asx_code} s={s} rank={i + 1} />)}
-              </tbody>
-            </table>
-          </TableCard>
-
-          <TableCard title="Heavy Buying" icon={ArrowUp}>
-            <div className="px-4 py-1.5 bg-emerald-50 border-b border-emerald-100">
-              <p className="text-xs text-emerald-700">Volume surge + price rising — potential overbought</p>
-            </div>
-            {filteredHeavyBuying.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-400">
-                No heavy buying detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
-              </div>
-            ) : (
+        {volumeLoading ? (
+          <div className="h-48 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <TableCard title="Most Active by Volume" icon={Activity}>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-xs text-slate-400 bg-slate-50">
                     <th className="py-2 px-3 text-left w-6">#</th>
                     <th className="py-2 px-3 text-left">Stock</th>
                     <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">Vol Ratio</th>
-                    <th className="py-2 px-3 text-right">1W</th>
+                    <th className="py-2 px-3 text-right">Volume</th>
+                    <th className="py-2 px-3 text-right">vs 20D</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredHeavyBuying.map((s, i) => <VolumePressureRow key={s.asx_code} s={s} rank={i + 1} type="buying" />)}
+                  {(volumeActivity?.most_active ?? []).length === 0
+                    ? <tr><td colSpan={5} className="py-8 text-center text-sm text-slate-400">No stocks in this tier</td></tr>
+                    : (volumeActivity?.most_active ?? []).map((s, i) => <ActiveRow key={s.asx_code} s={s} rank={i + 1} />)}
                 </tbody>
               </table>
-            )}
-          </TableCard>
+            </TableCard>
 
-          <TableCard title="Heavy Selling" icon={ArrowDown}>
-            <div className="px-4 py-1.5 bg-red-50 border-b border-red-100">
-              <p className="text-xs text-red-700">Volume surge + price falling — potential oversold bounce</p>
-            </div>
-            {filteredHeavySelling.length === 0 ? (
-              <div className="py-8 text-center text-sm text-slate-400">
-                No heavy selling detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
+            <TableCard title="Heavy Buying" icon={ArrowUp}>
+              <div className="px-4 py-1.5 bg-emerald-50 border-b border-emerald-100">
+                <p className="text-xs text-emerald-700">Volume surge + price rising — potential overbought</p>
               </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-400 bg-slate-50">
-                    <th className="py-2 px-3 text-left w-6">#</th>
-                    <th className="py-2 px-3 text-left">Stock</th>
-                    <th className="py-2 px-3 text-right">Price</th>
-                    <th className="py-2 px-3 text-right">Vol Ratio</th>
-                    <th className="py-2 px-3 text-right">1W</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredHeavySelling.map((s, i) => <VolumePressureRow key={s.asx_code} s={s} rank={i + 1} type="selling" />)}
-                </tbody>
-              </table>
-            )}
-          </TableCard>
-        </div>
+              {(volumeActivity?.heavy_buying ?? []).length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-400">
+                  No heavy buying detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-slate-400 bg-slate-50">
+                      <th className="py-2 px-3 text-left w-6">#</th>
+                      <th className="py-2 px-3 text-left">Stock</th>
+                      <th className="py-2 px-3 text-right">Price</th>
+                      <th className="py-2 px-3 text-right">Vol Ratio</th>
+                      <th className="py-2 px-3 text-right">1W</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(volumeActivity?.heavy_buying ?? []).map((s, i) => <VolumePressureRow key={s.asx_code} s={s} rank={i + 1} type="buying" />)}
+                  </tbody>
+                </table>
+              )}
+            </TableCard>
+
+            <TableCard title="Heavy Selling" icon={ArrowDown}>
+              <div className="px-4 py-1.5 bg-red-50 border-b border-red-100">
+                <p className="text-xs text-red-700">Volume surge + price falling — potential oversold bounce</p>
+              </div>
+              {(volumeActivity?.heavy_selling ?? []).length === 0 ? (
+                <div className="py-8 text-center text-sm text-slate-400">
+                  No heavy selling detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-xs text-slate-400 bg-slate-50">
+                      <th className="py-2 px-3 text-left w-6">#</th>
+                      <th className="py-2 px-3 text-left">Stock</th>
+                      <th className="py-2 px-3 text-right">Price</th>
+                      <th className="py-2 px-3 text-right">Vol Ratio</th>
+                      <th className="py-2 px-3 text-right">1W</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(volumeActivity?.heavy_selling ?? []).map((s, i) => <VolumePressureRow key={s.asx_code} s={s} rank={i + 1} type="selling" />)}
+                  </tbody>
+                </table>
+              )}
+            </TableCard>
+          </div>
+        )}
       </div>
 
       {/* Anomaly Feed */}

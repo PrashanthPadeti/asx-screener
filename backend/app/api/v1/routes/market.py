@@ -26,6 +26,7 @@ from app.schemas.market import (
     VolumePressureStock,
     SectorHeatmapItem,
     ExDivStock,
+    VolumeActivityResponse,
 )
 
 router = APIRouter()
@@ -233,6 +234,148 @@ def _to_mover(r, period: str) -> MoverStock:
         return_3m=pr if period == "3m" else None,
         market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
     )
+
+
+# ── helpers shared with volume-activity ──────────────────────────────────────
+
+def _to_active(r) -> ActiveStock:
+    return ActiveStock(
+        asx_code=r["asx_code"],
+        company_name=r["company_name"],
+        sector=r.get("sector"),
+        price=float(r["price"]) if r.get("price") is not None else None,
+        return_1w=float(r["return_1w"]) if r.get("return_1w") is not None else None,
+        market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
+        volume=int(r["volume"]) if r.get("volume") is not None else None,
+        avg_volume_20d=int(r["avg_volume_20d"]) if r.get("avg_volume_20d") is not None else None,
+    )
+
+
+def _to_vol_pressure(r) -> VolumePressureStock:
+    vol = int(r["volume"]) if r.get("volume") is not None else None
+    avg = int(r["avg_volume_20d"]) if r.get("avg_volume_20d") is not None else None
+    ratio = (r["volume"] / r["avg_volume_20d"]) if (r.get("volume") and r.get("avg_volume_20d")) else None
+    return VolumePressureStock(
+        asx_code=r["asx_code"],
+        company_name=r["company_name"],
+        sector=r.get("sector"),
+        price=float(r["price"]) if r.get("price") is not None else None,
+        return_1w=float(r["return_1w"]) if r.get("return_1w") is not None else None,
+        market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
+        volume=vol,
+        avg_volume_20d=avg,
+        volume_ratio=float(ratio) if ratio is not None else None,
+    )
+
+
+@router.get("/volume-activity", response_model=VolumeActivityResponse)
+async def volume_activity(
+    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
+    limit:    int        = Query(10, ge=5, le=25),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Most Active by Volume, Heavy Buying and Heavy Selling panels.
+    Without cap_tier: uses pre-computed mover_snapshots (same as dashboard).
+    With cap_tier: queries screener.universe live using boolean flag columns,
+    matching exactly how /movers works for Top Movers.
+    """
+    cap_flag_sql = {
+        "mega":  "AND is_mega  = TRUE",
+        "large": "AND is_large = TRUE",
+        "mid":   "AND is_mid   = TRUE",
+        "small": "AND is_small = TRUE",
+        "micro": "AND is_micro = TRUE",
+        "nano":  "AND is_nano  = TRUE",
+    }
+
+    _key = make_key("market", "volume_activity", cap_tier or "all")
+    cached = await cache_get(_key)
+    if cached:
+        return VolumeActivityResponse(**cached)
+
+    active_rows:  list = []
+    buying_rows:  list = []
+    selling_rows: list = []
+
+    if cap_tier:
+        flag = cap_flag_sql[cap_tier]
+        liquid = f"status = 'active' AND price > 0.05 AND market_cap > 0 {flag}"
+        try:
+            active_rows = (await db.execute(text(f"""
+                SELECT asx_code, company_name, sector,
+                       price, return_1w, market_cap, volume, avg_volume_20d
+                FROM screener.universe
+                WHERE {liquid}
+                  AND volume IS NOT NULL AND volume > 0
+                ORDER BY volume DESC NULLS LAST
+                LIMIT :lim
+            """), {"lim": limit})).mappings().all()
+
+            buying_rows = (await db.execute(text(f"""
+                SELECT asx_code, company_name, sector,
+                       price, return_1w, market_cap, volume, avg_volume_20d
+                FROM screener.universe
+                WHERE {liquid}
+                  AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
+                  AND return_1w > 0
+                  AND volume::float / avg_volume_20d >= 1.5
+                ORDER BY volume::float / avg_volume_20d DESC NULLS LAST
+                LIMIT :lim
+            """), {"lim": limit})).mappings().all()
+
+            selling_rows = (await db.execute(text(f"""
+                SELECT asx_code, company_name, sector,
+                       price, return_1w, market_cap, volume, avg_volume_20d
+                FROM screener.universe
+                WHERE {liquid}
+                  AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
+                  AND return_1w < 0
+                  AND volume::float / avg_volume_20d >= 1.5
+                ORDER BY volume::float / avg_volume_20d DESC NULLS LAST
+                LIMIT :lim
+            """), {"lim": limit})).mappings().all()
+
+        except Exception as e:
+            log.warning("volume_activity cap_tier=%s failed: %s", cap_tier, e)
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+
+    else:
+        # Use pre-computed mover_snapshots — same source as the dashboard
+        try:
+            snap_date_row = (await db.execute(text("""
+                SELECT MAX(snapshot_date) AS latest FROM market.mover_snapshots
+            """))).mappings().one()
+            snap_date = snap_date_row["latest"]
+            if snap_date:
+                rows = (await db.execute(text("""
+                    SELECT snapshot_type, rank, asx_code, company_name, sector,
+                           price, return_1w, market_cap, volume, avg_volume_20d
+                    FROM market.mover_snapshots
+                    WHERE snapshot_date = :d
+                      AND snapshot_type IN ('ACTIVE', 'BUYING', 'SELLING')
+                    ORDER BY snapshot_type, rank
+                """), {"d": snap_date})).mappings().all()
+                for r in rows:
+                    st = r["snapshot_type"]
+                    if   st == "ACTIVE":  active_rows.append(r)
+                    elif st == "BUYING":  buying_rows.append(r)
+                    elif st == "SELLING": selling_rows.append(r)
+        except Exception as e:
+            log.warning("volume_activity snapshot query failed: %s", e)
+
+    result = VolumeActivityResponse(
+        most_active  =[_to_active(r)       for r in active_rows],
+        heavy_buying =[_to_vol_pressure(r) for r in buying_rows],
+        heavy_selling=[_to_vol_pressure(r) for r in selling_rows],
+        cap_tier=cap_tier,
+    )
+    ttl = MARKET_TTL if cap_tier else MARKET_TTL
+    await cache_set(_key, result.model_dump(), ttl=ttl)
+    return result
 
 
 @router.get("/signals")

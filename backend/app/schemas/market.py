@@ -110,3 +110,10 @@ class MarketDashboard(BaseModel):
     upcoming_exdiv: list[ExDivStock]
     period: str = "1w"
     universe_built_at: Optional[datetime] = None
+
+
+class VolumeActivityResponse(BaseModel):
+    most_active:   list[ActiveStock]
+    heavy_buying:  list[VolumePressureStock]
+    heavy_selling: list[VolumePressureStock]
+    cap_tier:      Optional[str] = None   # echoed back, None = 'all'

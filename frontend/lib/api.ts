@@ -656,6 +656,22 @@ export const getMarketDashboard = async (): Promise<MarketDashboard> => {
   return data
 }
 
+export interface VolumeActivityResponse {
+  most_active:   ActiveStock[]
+  heavy_buying:  VolumePressureStock[]
+  heavy_selling: VolumePressureStock[]
+  cap_tier:      string | null
+}
+
+export const getVolumeActivity = async (
+  cap_tier?: 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano',
+): Promise<VolumeActivityResponse> => {
+  const { data } = await api.get('/api/v1/market/volume-activity', {
+    params: cap_tier ? { cap_tier } : {},
+  })
+  return data
+}
+
 export interface SignalStock {
   asx_code: string
   company_name: string | null

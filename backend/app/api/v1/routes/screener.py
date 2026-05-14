@@ -72,18 +72,16 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "peg_ratio":       {"col": "u.peg_ratio",       "scale": 1,    "type": "number",  "label": "PEG Ratio",            "unit": "x",    "cat": "Valuation"},
     "price_to_book":   {"col": "u.price_to_book",   "scale": 1,    "type": "number",  "label": "Price / Book",         "unit": "x",    "cat": "Valuation"},
     "price_to_sales":  {"col": "u.price_to_sales",  "scale": 1,    "type": "number",  "label": "Price / Sales",        "unit": "x",    "cat": "Valuation"},
-    "price_to_fcf":    {"col": "u.price_to_fcf",    "scale": 1,    "type": "number",  "label": "Price / FCF",          "unit": "x",    "cat": "Valuation"},
     "ev_to_ebitda":    {"col": "u.ev_to_ebitda",    "scale": 1,    "type": "number",  "label": "EV / EBITDA",          "unit": "x",    "cat": "Valuation"},
-    "ev_to_ebit":      {"col": "u.ev_to_ebit",      "scale": 1,    "type": "number",  "label": "EV / EBIT",            "unit": "x",    "cat": "Valuation"},
     "ev_to_revenue":   {"col": "u.ev_to_revenue",   "scale": 1,    "type": "number",  "label": "EV / Revenue",         "unit": "x",    "cat": "Valuation"},
-    "graham_number":   {"col": "u.graham_number",   "scale": 1,    "type": "number",  "label": "Graham Number",        "unit": "AUD",  "cat": "Valuation"},
     "fcf_yield":       {"col": "u.fcf_yield",       "scale": 0.01, "type": "number",  "label": "FCF Yield %",          "unit": "%",    "cat": "Valuation"},
+    # NOTE: price_to_fcf, ev_to_ebit, graham_number — column exists but no data yet
 
     # ── Dividends & Franking ──────────────────────────────────────────────────
     "dividend_yield":          {"col": "u.dividend_yield",          "scale": 0.01, "type": "number",  "label": "Dividend Yield %",         "unit": "%",   "cat": "Dividends"},
     "grossed_up_yield":        {"col": "u.grossed_up_yield",        "scale": 0.01, "type": "number",  "label": "Grossed-Up Yield %",       "unit": "%",   "cat": "Dividends"},
     "franking_pct":            {"col": "u.franking_pct",            "scale": 1,    "type": "number",  "label": "Franking %",               "unit": "%",   "cat": "Dividends"},
-    "payout_ratio":            {"col": "u.payout_ratio",            "scale": 0.01, "type": "number",  "label": "Payout Ratio %",           "unit": "%",   "cat": "Dividends"},
+    # NOTE: payout_ratio — column exists but no data yet
     "dividend_cagr_3y":        {"col": "u.dividend_cagr_3y",        "scale": 0.01, "type": "number",  "label": "Dividend CAGR 3Y %",       "unit": "%",   "cat": "Dividends"},
     "dividend_consecutive_yrs":{"col": "u.dividend_consecutive_yrs","scale": 1,    "type": "number",  "label": "Consecutive Dividend Yrs", "unit": "yrs", "cat": "Dividends"},
 
@@ -111,12 +109,9 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "revenue_growth_yoy_q":    {"col": "u.revenue_growth_yoy_q",    "scale": 0.01, "type": "number", "label": "Revenue Growth YoY Q %",   "unit": "%",   "cat": "Growth"},
     "revenue_growth_hoh":      {"col": "u.revenue_growth_hoh",      "scale": 0.01, "type": "number", "label": "Revenue Growth HoH % ★",  "unit": "%",   "cat": "Growth"},
     "net_income_growth_hoh":   {"col": "u.net_income_growth_hoh",   "scale": 0.01, "type": "number", "label": "Net Income Growth HoH % ★","unit": "%",  "cat": "Growth"},
-    "eps_growth_hoh":          {"col": "u.eps_growth_hoh",          "scale": 0.01, "type": "number", "label": "EPS Growth HoH % ★",      "unit": "%",   "cat": "Growth"},
-    # NOTE: eps_cagr_5y, revenue not in screener.universe yet
-    "eps_fy0":                 {"col": "u.eps_fy0",                 "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",            "unit": "AUD", "cat": "Growth"},
-    "eps_fy1":                 {"col": "u.eps_fy1",                 "scale": 1,    "type": "number", "label": "EPS FY1 Estimate (AUD)",   "unit": "AUD", "cat": "Growth"},
-    "eps_growth_yoy_q":        {"col": "u.eps_growth_yoy_q",        "scale": 0.01, "type": "number", "label": "EPS Growth YoY Q %",       "unit": "%",   "cat": "Growth"},
     "net_income_growth_yoy_q": {"col": "u.net_income_growth_yoy_q", "scale": 0.01, "type": "number", "label": "Net Income Growth YoY Q %","unit": "%",   "cat": "Growth"},
+    # NOTE: eps_cagr_5y, revenue not in screener.universe yet
+    # NOTE: eps_growth_hoh, eps_fy0, eps_fy1, eps_growth_yoy_q — column exists but no data yet
     "momentum_3m":             {"col": "u.momentum_3m",             "scale": 0.01, "type": "number", "label": "Price Momentum 3M %",      "unit": "%",   "cat": "Growth"},
     "momentum_6m":             {"col": "u.momentum_6m",             "scale": 0.01, "type": "number", "label": "Price Momentum 6M %",      "unit": "%",   "cat": "Growth"},
     "return_7y":               {"col": "u.return_7y",               "scale": 0.01, "type": "number", "label": "Return 7Y %",              "unit": "%",   "cat": "Returns"},
@@ -127,32 +122,26 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "current_ratio":       {"col": "u.current_ratio",       "scale": 1,    "type": "number", "label": "Current Ratio",        "unit": "x",   "cat": "Financial Health"},
     "net_debt":            {"col": "u.net_debt",            "scale": 1,    "type": "number", "label": "Net Debt (AUD M)",     "unit": "AUD M","cat": "Financial Health"},
     "total_debt":          {"col": "u.total_debt",          "scale": 1,    "type": "number", "label": "Total Debt (AUD M)",   "unit": "AUD M","cat": "Financial Health"},
-    "book_value_per_share":{"col": "u.book_value_per_share","scale": 1,    "type": "number", "label": "Book Value Per Share", "unit": "AUD", "cat": "Financial Health"},
+    # NOTE: book_value_per_share — column exists but no data yet
     "fcf_fy0":             {"col": "u.fcf_fy0",             "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)","unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":             {"col": "u.cfo_fy0",             "scale": 1,    "type": "number", "label": "Operating CF (AUD M)", "unit": "AUD M","cat": "Financial Health"},
     # NOTE: quick_ratio, interest_coverage, debt_to_ebitda, net_debt_to_ebitda, cash_conversion_cycle not in screener.universe yet
 
     # ── Quality Scores ────────────────────────────────────────────────────────
     "piotroski_f_score":       {"col": "u.piotroski_f_score",       "scale": 1,    "type": "number", "label": "Piotroski F-Score",        "unit": "",    "cat": "Quality"},
-    "altman_z_score":          {"col": "u.altman_z_score",          "scale": 1,    "type": "number", "label": "Altman Z-Score",           "unit": "",    "cat": "Quality"},
-    "percent_insiders":        {"col": "u.percent_insiders",        "scale": 1,    "type": "number", "label": "Insider Holding %",        "unit": "%",   "cat": "Quality"},
-    "percent_institutions":    {"col": "u.percent_institutions",    "scale": 1,    "type": "number", "label": "Institutional Holding %",  "unit": "%",   "cat": "Quality"},
-    "short_pct":               {"col": "u.short_pct",               "scale": 1,    "type": "number", "label": "Short Interest %",         "unit": "%",   "cat": "Quality"},
-    # NOTE: beneish_m_score not in screener.universe yet
-    "short_interest_chg_1w":   {"col": "u.short_interest_chg_1w",  "scale": 1,    "type": "number", "label": "Short Change 1W pp",       "unit": "pp",  "cat": "Quality"},
     "ocf_to_net_profit":       {"col": "u.ocf_to_net_profit",       "scale": 1,    "type": "number", "label": "CFO / Net Profit",         "unit": "x",   "cat": "Quality"},
     "fcf_payout_ratio":        {"col": "u.fcf_payout_ratio",        "scale": 0.01, "type": "number", "label": "FCF Payout Ratio %",       "unit": "%",   "cat": "Quality"},
-    "shares_dilution_3y":      {"col": "u.shares_dilution_3y",      "scale": 0.01, "type": "number", "label": "Share Dilution 3Y %",      "unit": "%",   "cat": "Quality"},
     "eps_volatility_5y":       {"col": "u.eps_volatility_5y",       "scale": 1,    "type": "number", "label": "EPS Volatility 5Y",        "unit": "",    "cat": "Quality"},
     "fcf_positive_years":      {"col": "u.fcf_positive_years",      "scale": 1,    "type": "number", "label": "FCF +ve Years (0-5)",      "unit": "",    "cat": "Quality"},
-    "analyst_count":           {"col": "u.analyst_count",           "scale": 1,    "type": "number", "label": "Analyst Coverage",         "unit": "",    "cat": "Quality"},
-    "analyst_buy_pct":         {"col": "u.analyst_buy_pct",         "scale": 1,    "type": "number", "label": "% Buy Ratings",            "unit": "%",   "cat": "Quality"},
-    "analyst_consensus_score": {"col": "u.analyst_consensus_score", "scale": 1,    "type": "number", "label": "Analyst Consensus Score",  "unit": "",    "cat": "Quality"},
     "earnings_stability_score":{"col": "u.earnings_stability_score","scale": 1,    "type": "number", "label": "Earnings Stability Score", "unit": "",    "cat": "Quality"},
+    # NOTE: beneish_m_score not in screener.universe yet
+    # NOTE: altman_z_score, percent_insiders, percent_institutions, short_pct,
+    #       short_interest_chg_1w, shares_dilution_3y, analyst_count,
+    #       analyst_buy_pct, analyst_consensus_score — column exists but no data yet
 
     # ── Price & Market (additional) ──────────────────────────────────────────
-    "dollar_volume_avg_20d": {"col": "u.dollar_volume_avg_20d", "scale": 1_000_000, "type": "number", "label": "Avg $ Volume 20D (AUD M)", "unit": "AUD M", "cat": "Price"},
     "shares_outstanding":    {"col": "u.shares_outstanding",    "scale": 1,         "type": "number", "label": "Shares Outstanding",       "unit": "",      "cat": "Price"},
+    # NOTE: dollar_volume_avg_20d — only 5 rows populated, not usable yet
     "above_vwap":            {"col": "u.above_vwap",            "scale": 1,         "type": "boolean","label": "Price Above VWAP",         "unit": "",      "cat": "Price"},
 
     # ── Technicals ────────────────────────────────────────────────────────────
@@ -172,7 +161,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "ema_20":        {"col": "u.ema_20",        "scale": 1,    "type": "number",  "label": "EMA 20",               "unit": "AUD", "cat": "Technicals"},
     "volatility_20d":{"col": "u.volatility_20d","scale": 0.01, "type": "number",  "label": "Volatility 20D %",     "unit": "%",   "cat": "Technicals"},
     "volatility_60d":{"col": "u.volatility_60d","scale": 0.01, "type": "number",  "label": "Volatility 60D %",     "unit": "%",   "cat": "Technicals"},
-    "beta_1y":       {"col": "u.beta_1y",       "scale": 1,    "type": "number",  "label": "Beta (1Y)",            "unit": "",    "cat": "Technicals"},
+    # NOTE: beta_1y — column exists but no data yet
     "sharpe_1y":     {"col": "u.sharpe_1y",     "scale": 1,    "type": "number",  "label": "Sharpe Ratio (1Y)",    "unit": "",    "cat": "Technicals"},
     "drawdown_from_ath":      {"col": "u.drawdown_from_ath",      "scale": 0.01, "type": "number", "label": "Drawdown from ATH %",       "unit": "%", "cat": "Technicals"},
     # NOTE: sharpe_3y, sortino_1y, beta_3y, max_drawdown_1y, relative_strength_xjo not in screener.universe yet
@@ -226,7 +215,6 @@ SORTABLE_COLS: dict[str, str] = {
     "revenue_cagr_5y":    "u.revenue_cagr_5y",
     "revenue_growth_hoh": "u.revenue_growth_hoh",
     "piotroski_f_score":  "u.piotroski_f_score",
-    "altman_z_score":     "u.altman_z_score",
     "debt_to_equity":     "u.debt_to_equity",
     "rsi_14":             "u.rsi_14",
     "adx_14":             "u.adx_14",
@@ -235,7 +223,6 @@ SORTABLE_COLS: dict[str, str] = {
     "return_1y":          "u.return_1y",
     "return_ytd":         "u.return_ytd",
     "volatility_20d":     "u.volatility_20d",
-    "short_pct":          "u.short_pct",
     "high_52w":           "u.high_52w",
     "low_52w":            "u.low_52w",
     "fcf_yield":          "u.fcf_yield",
@@ -249,21 +236,12 @@ SORTABLE_COLS: dict[str, str] = {
     "avg_roic_3y":              "u.avg_roic_3y",
     "avg_roic_5y":              "u.avg_roic_5y",
     "capital_efficiency_score": "u.capital_efficiency_score",
-    "short_interest_chg_1w":    "u.short_interest_chg_1w",
     "ocf_to_net_profit":        "u.ocf_to_net_profit",
     "fcf_payout_ratio":         "u.fcf_payout_ratio",
-    "shares_dilution_3y":       "u.shares_dilution_3y",
     "eps_volatility_5y":        "u.eps_volatility_5y",
     "fcf_positive_years":       "u.fcf_positive_years",
-    "analyst_count":            "u.analyst_count",
-    "analyst_buy_pct":          "u.analyst_buy_pct",
-    "analyst_consensus_score":  "u.analyst_consensus_score",
     "earnings_stability_score": "u.earnings_stability_score",
-    "dollar_volume_avg_20d":    "u.dollar_volume_avg_20d",
     "shares_outstanding":       "u.shares_outstanding",
-    "eps_fy0":                  "u.eps_fy0",
-    "eps_fy1":                  "u.eps_fy1",
-    "eps_growth_yoy_q":         "u.eps_growth_yoy_q",
     "net_income_growth_yoy_q":  "u.net_income_growth_yoy_q",
     "momentum_3m":              "u.momentum_3m",
     "momentum_6m":              "u.momentum_6m",

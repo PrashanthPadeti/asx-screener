@@ -39,13 +39,25 @@ SCRIPTS  = BASE_DIR / "scripts" / "eodhd" / "v2"
 COMPUTE  = BASE_DIR / "compute" / "engine"
 PYTHON   = sys.executable
 
+# Shared alert utility — path: backend/scripts/utils/alert.py
+sys.path.insert(0, str(BASE_DIR / "scripts"))
+from utils.alert import send_failure_alert  # noqa: E402
+
+_target_date = "unknown"  # set in main() so run() can reference it for alerts
+
 
 def run(label: str, cmd: list[str]) -> None:
-    """Run a subprocess step; exit on failure."""
+    """Run a subprocess step; send failure alert and exit on non-zero return code."""
     log.info(f"▶  {label}")
     result = subprocess.run(cmd, cwd=BASE_DIR)
     if result.returncode != 0:
         log.error(f"✗  {label} failed (exit {result.returncode})")
+        send_failure_alert(
+            pipeline="daily",
+            step=label,
+            target_date=_target_date,
+            exit_code=result.returncode,
+        )
         sys.exit(result.returncode)
     log.info(f"✓  {label} done")
 
@@ -57,7 +69,9 @@ def main():
                         help="Skip step 1 (raw download) — use existing file")
     args = parser.parse_args()
 
+    global _target_date
     target_date = args.date or date.today().isoformat()
+    _target_date = target_date
     log.info(f"Daily pipeline starting — target date: {target_date}")
 
     # ── Step 1: Download bulk EOD prices ──────────────────────────────────────

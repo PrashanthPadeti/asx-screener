@@ -49,13 +49,25 @@ ASIC     = BASE_DIR / "scripts" / "asic"
 COMPUTE  = BASE_DIR / "compute" / "engine"
 PYTHON   = sys.executable
 
+# Shared alert utility — path: backend/scripts/utils/alert.py
+sys.path.insert(0, str(BASE_DIR / "scripts"))
+from utils.alert import send_failure_alert  # noqa: E402
+
+_from_date = "unknown"  # set in main() so run() can reference it for alerts
+
 
 def run(label: str, cmd: list[str]) -> None:
-    """Run a subprocess step; exit on failure."""
+    """Run a subprocess step; send failure alert and exit on non-zero return code."""
     log.info(f"▶  {label}")
     result = subprocess.run(cmd, cwd=BASE_DIR)
     if result.returncode != 0:
         log.error(f"✗  {label} failed (exit {result.returncode})")
+        send_failure_alert(
+            pipeline="weekly",
+            step=label,
+            target_date=_from_date,
+            exit_code=result.returncode,
+        )
         sys.exit(result.returncode)
     log.info(f"✓  {label} done")
 
@@ -89,6 +101,8 @@ def main():
     last_monday = today.replace(day=today.day - days_since_monday) if days_since_monday > 0 else today
     from_date   = args.from_date or last_monday.isoformat()
 
+    global _from_date
+    _from_date = from_date
     log.info(f"Weekly pipeline starting — from_date: {from_date}")
 
     # ── Step 0: ASIC short interest — download → staging → transform ──────────

@@ -351,15 +351,20 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
                 params[f"{param_key}_{j}"] = v
 
         elif ftype == "boolean":
-            # Embed literal TRUE/FALSE to avoid asyncpg type inference issues with boolean params
+            # Cast to int before comparing so this works for BOTH:
+            #   - smallint columns (is_reit, is_asx50, above_vwap, etc.) stored as 0/1
+            #   - boolean expression fields (above_sma50, golden_cross, etc.)
+            # PostgreSQL: true::int=1, false::int=0, 1::smallint::int=1
             if isinstance(f.value, bool):
                 bool_val = f.value
             elif isinstance(f.value, str):
                 bool_val = f.value.lower() in ("true", "1", "yes")
             else:
                 bool_val = bool(f.value)
-            literal = "TRUE" if bool_val else "FALSE"
-            where_clauses.append(f"({sql_col}) = {literal}")
+            if bool_val:
+                where_clauses.append(f"({sql_col})::int != 0")
+            else:
+                where_clauses.append(f"({sql_col})::int = 0")
 
         else:
             # number or text

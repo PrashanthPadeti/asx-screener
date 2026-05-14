@@ -10,7 +10,7 @@ Endpoints:
   GET  /api/v1/screener/presets   — Pre-built screen templates
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -20,11 +20,14 @@ import io
 import json
 import math
 from datetime import date as date_type
-from typing import Any
+from typing import Any, Optional
 
 from app.db.session import get_db
 from app.schemas.screener import ScreenerRequest, ScreenerResponse, ScreenerRow
 from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
+from app.core.deps import get_optional_user, get_current_user
+
+FREE_STOCK_LIMIT = 500   # max rows visible to free / unauthenticated users
 
 router = APIRouter()
 
@@ -473,9 +476,13 @@ async def batch_screener(
 async def run_screener(
     req: ScreenerRequest,
     db: AsyncSession = Depends(get_db),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
     """
     Run a stock screen with dynamic filters against screener.universe.
+
+    Free / unauthenticated users see at most 500 rows total.
+    Pro and above see all results.
 
     All percentage fields accept human-readable % values:
     - ROE >= 15    → means ROE ≥ 15%
@@ -490,22 +497,44 @@ async def run_screener(
     except HTTPException:
         raise
 
+    # Determine if this user is on a free tier
+    is_free = user is None or user.get("plan", "free") == "free"
+
     # ── Cache check (skip for page > 1 to keep key space small) ─────────────
     cache_key: str | None = None
     if req.page == 1:
         req_hash  = hashlib.md5(req.model_dump_json().encode()).hexdigest()
-        cache_key = make_key("screener", req_hash)
+        tier_tag  = "free" if is_free else "paid"
+        cache_key = make_key("screener", tier_tag, req_hash)
         cached    = await cache_get(cache_key)
         if cached:
             return ScreenerResponse(**cached)
 
     result = await db.execute(text(count_sql), params)
-    total = result.scalar() or 0
+    total_raw = result.scalar() or 0
 
-    params["_limit"]  = req.page_size
-    params["_offset"] = (req.page - 1) * req.page_size
-    result = await db.execute(text(data_sql), params)
-    rows = result.mappings().all()
+    # ── Apply free-tier cap ───────────────────────────────────────────────────
+    if is_free:
+        total     = min(total_raw, FREE_STOCK_LIMIT)
+        is_capped = total_raw > FREE_STOCK_LIMIT
+        # Cap offset so free users can never paginate past row 500
+        offset        = (req.page - 1) * req.page_size
+        capped_offset = min(offset, max(0, FREE_STOCK_LIMIT - req.page_size))
+        capped_limit  = min(req.page_size, max(0, FREE_STOCK_LIMIT - capped_offset))
+    else:
+        total     = total_raw
+        is_capped = False
+        capped_offset = (req.page - 1) * req.page_size
+        capped_limit  = req.page_size
+
+    params["_limit"]  = capped_limit
+    params["_offset"] = capped_offset
+
+    if capped_limit > 0:
+        result = await db.execute(text(data_sql), params)
+        rows = result.mappings().all()
+    else:
+        rows = []
 
     response = ScreenerResponse(
         data=[ScreenerRow(**dict(r)) for r in rows],
@@ -514,6 +543,8 @@ async def run_screener(
         page_size=req.page_size,
         total_pages=math.ceil(total / req.page_size) if total else 0,
         filters_applied=len(req.filters),
+        is_capped=is_capped,
+        free_limit=FREE_STOCK_LIMIT if is_free else None,
     )
 
     if cache_key:
@@ -688,9 +719,11 @@ def _fmt_val(col: str, val: Any) -> str:
 async def export_screener(
     req: ScreenerRequest,
     db: AsyncSession = Depends(get_db),
+    user: dict = Depends(get_current_user),
 ):
     """
     Stream screener results as a CSV file download (max 5,000 rows).
+    Requires Pro plan or higher — free users receive HTTP 403.
 
     Takes the same request body as POST /screener (filters + sort),
     ignores page/page_size, and returns all matching rows up to the cap.
@@ -700,6 +733,12 @@ async def export_screener(
 
     Response: Content-Disposition: attachment; filename="asx_screener_YYYY-MM-DD.csv"
     """
+    if user.get("plan", "free") == "free":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSV export is available on Pro and Premium plans. Upgrade to download data.",
+        )
+
     try:
         _, data_sql, params = build_screener_sql(req)
     except HTTPException:

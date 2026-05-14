@@ -180,3 +180,5 @@ class ScreenerResponse(BaseModel):
     page_size:       int
     total_pages:     int
     filters_applied: int
+    is_capped:       bool          = False   # True when free-tier 500-row limit applied
+    free_limit:      Optional[int] = None    # 500 for free users, None otherwise

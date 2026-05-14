@@ -200,6 +200,8 @@ export interface ScreenerResponse {
   page_size: number
   total_pages: number
   filters_applied: number
+  is_capped?: boolean   // true when free-tier 500-row limit is applied
+  free_limit?: number   // 500 for free users
 }
 
 export interface ScreenerFieldMeta {

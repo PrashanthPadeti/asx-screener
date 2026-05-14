@@ -407,6 +407,8 @@ export default function ScreenerPage() {
   const [loading, setLoading]       = useState(false)
   const [ran, setRan]               = useState(false)
   const [exporting, setExporting]   = useState(false)
+  const [isCapped, setIsCapped]     = useState(false)
+  const [totalRaw, setTotalRaw]     = useState(0)   // actual unfiltered count (for capped banner)
   const [sortBy, setSortBy]         = useState('market_cap')
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
 
@@ -643,6 +645,8 @@ export default function ScreenerPage() {
       setTotal(res.total)
       setPage(res.page)
       setTotalPages(res.total_pages)
+      setIsCapped(res.is_capped ?? false)
+      if (res.is_capped) setTotalRaw(res.free_limit ?? 500)
     } catch (e) {
       console.error(e)
     } finally {
@@ -1251,6 +1255,22 @@ export default function ScreenerPage() {
       {/* Results table — manual mode */}
       {screenerMode === 'manual' && results.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+
+          {/* Free-tier cap banner */}
+          {isCapped && (
+            <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 border-b border-amber-200">
+              <span className="text-sm text-amber-800">
+                <span className="font-semibold">Free plan:</span> showing first 500 stocks.
+                Upgrade to <span className="font-semibold">Pro</span> to see all results and export to CSV.
+              </span>
+              <Link href="/pricing"
+                className="flex-shrink-0 ml-4 px-3 py-1 text-xs font-semibold rounded-lg
+                           bg-amber-500 text-white hover:bg-amber-600 transition-colors">
+                Upgrade →
+              </Link>
+            </div>
+          )}
+
           {/* Table header bar */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
             <span className="text-sm font-semibold text-gray-700">

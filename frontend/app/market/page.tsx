@@ -65,19 +65,19 @@ function heatColor(v: number | null): string {
   return 'bg-red-600 text-white'
 }
 
-// market_cap is stored in AUD millions in the DB
+// market_cap is stored in raw AUD dollars (full dollars from EODHD), NOT millions
 function filterByCapTier<T extends { market_cap: number | null }>(items: T[], tier: CapTier): T[] {
   if (tier === 'all') return items
   return items.filter(s => {
     const mc = s.market_cap
     if (mc == null) return false
     switch (tier) {
-      case 'mega':  return mc >= 50_000
-      case 'large': return mc >= 10_000 && mc < 50_000
-      case 'mid':   return mc >= 2_000  && mc < 10_000
-      case 'small': return mc >= 300    && mc < 2_000
-      case 'micro': return mc >= 50     && mc < 300
-      case 'nano':  return mc < 50
+      case 'mega':  return mc >= 50_000_000_000
+      case 'large': return mc >= 10_000_000_000 && mc < 50_000_000_000
+      case 'mid':   return mc >= 2_000_000_000  && mc < 10_000_000_000
+      case 'small': return mc >= 300_000_000    && mc < 2_000_000_000
+      case 'micro': return mc >= 50_000_000     && mc < 300_000_000
+      case 'nano':  return mc < 50_000_000
       default:      return true
     }
   })

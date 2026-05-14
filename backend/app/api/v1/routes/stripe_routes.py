@@ -43,7 +43,7 @@ def _price_ids() -> dict[str, str]:
 # Map Stripe price_id → (plan_code, seat_limit, billing_period)
 def _build_price_plan_map() -> dict[str, tuple[str, int, str]]:
     ids = _price_ids()
-    return {v: k for k, v in {
+    return {k: v for k, v in {
         ids["STRIPE_PRO_MONTHLY"]:         ("pro",               1,  "monthly"),
         ids["STRIPE_PRO_YEARLY"]:          ("pro",               1,  "yearly"),
         ids["STRIPE_PREMIUM_MONTHLY"]:     ("premium",           1,  "monthly"),

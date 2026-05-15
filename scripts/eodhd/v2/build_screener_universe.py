@@ -224,10 +224,10 @@ SELECT
     dp.price_date     AS price_date,
     dp.open           AS open,
     dp.volume         AS volume,
-    dp.avg_volume_20d AS avg_volume_20d,
+    dp20.avg_volume_20d,
     vs.market_cap,
-    dp.high_52w,
-    dp.low_52w,
+    dp52.high_52w,
+    dp52.low_52w,
 
     -- ── Valuation ratios ─────────────────────────────────────────────────────
     vs.pe_ratio,
@@ -440,24 +440,36 @@ SELECT
 
 FROM market.companies_current c
 
--- ── Latest close price + open/volume + 52w high/low + 20d avg volume ────────
+-- ── Latest close price + open/volume ────────────────────────────────────────
+-- Separated from range aggregates to avoid slow window-function scan.
 LEFT JOIN LATERAL (
-    SELECT
-        close,
-        open,
-        volume,
-        DATE(time AT TIME ZONE 'Australia/Sydney') AS price_date,
-        MAX(high)   OVER (PARTITION BY asx_code ORDER BY time
-            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS high_52w,
-        MIN(low)    OVER (PARTITION BY asx_code ORDER BY time
-            ROWS BETWEEN 251 PRECEDING AND CURRENT ROW) AS low_52w,
-        AVG(volume) OVER (PARTITION BY asx_code ORDER BY time
-            ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)  AS avg_volume_20d
+    SELECT close, open, volume,
+           DATE(time AT TIME ZONE 'Australia/Sydney') AS price_date
     FROM market.daily_prices
     WHERE asx_code = c.asx_code
     ORDER BY time DESC
     LIMIT 1
 ) dp ON TRUE
+
+-- ── 52-week high/low (simple MAX/MIN aggregate — much faster than window fn) ─
+LEFT JOIN LATERAL (
+    SELECT MAX(high) AS high_52w, MIN(low) AS low_52w
+    FROM market.daily_prices
+    WHERE asx_code = c.asx_code
+      AND time >= NOW() - INTERVAL '365 days'
+) dp52 ON TRUE
+
+-- ── 20-day avg volume (LIMIT 20 aggregate — scans only 20 rows per stock) ────
+LEFT JOIN LATERAL (
+    SELECT AVG(volume) AS avg_volume_20d
+    FROM (
+        SELECT volume
+        FROM market.daily_prices
+        WHERE asx_code = c.asx_code
+        ORDER BY time DESC
+        LIMIT 20
+    ) v20
+) dp20 ON TRUE
 
 -- ── Valuation snapshot (EODHD weekly refresh) ─────────────────────────────────
 LEFT JOIN market.valuation_snapshot vs ON vs.asx_code = c.asx_code

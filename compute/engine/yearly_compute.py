@@ -562,7 +562,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         payout    = _clamp(_div(dps, eps) if (eps and eps > 0) else None)
         graham    = None
         if eps and bvps and eps > 0 and bvps > 0:
-            graham = round(np.sqrt(22.5 * eps * bvps), 4)
+            graham = round(float(np.sqrt(22.5 * eps * bvps)), 4)
 
         fr_yld = None
         if div_yld is not None and fpc is not None:

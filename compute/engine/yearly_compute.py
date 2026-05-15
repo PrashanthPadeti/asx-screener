@@ -494,6 +494,13 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         if eps is not None:
             yearly[i]["eps"] = eps
 
+        # ── Derive BVPS from total_equity / shares ────────────────────────
+        # EODHD omits book_value_per_share from the ASX balance sheet feed
+        # (transform_financials.py stores None for that column).
+        # Derive here the same way as EPS: te in AUD millions, shares count.
+        if bvps is None and te is not None and shares is not None and shares > 0:
+            bvps = round(te / (shares / 1_000_000), 4)
+
         # Stored margins (preferred) or compute from P&L
         gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)
         ebitda_margin = _f(row.get("ebitda_margin")) or _div(ebitda, rev)
@@ -544,6 +551,8 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         pe        = _clamp(_div(px,  eps))
         pb        = _clamp(_div(px,  bvps))
         ps        = _clamp(_div(mc,  rev))
+        # P/FCF: market_cap / FCF (both AUD millions); only when FCF > 0
+        p_fcf     = _clamp(_div(mc,  fcf)) if (fcf is not None and fcf > 0) else None
         ev_eb     = _clamp(_div(ev,  ebitda))
         ev_ebit   = _clamp(_div(ev,  ebit))
         ev_rev    = _clamp(_div(ev,  rev))
@@ -723,7 +732,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             px, mc,
             int(shares) if shares and np.isfinite(shares) else None,
             # Valuation
-            pe, pb, ps, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield, graham,
+            pe, pb, ps, p_fcf, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield, graham,
             # Per share
             eps, _f(row.get("eps_diluted")), bvps, dps, fpc,
             # Dividend
@@ -792,7 +801,7 @@ INSERT_SQL = """
     INSERT INTO market.yearly_metrics (
         asx_code, fiscal_year, period_end_date, price_at_compute,
         market_cap, shares_outstanding,
-        pe_ratio, pb_ratio, ps_ratio,
+        pe_ratio, pb_ratio, ps_ratio, p_fcf_ratio,
         enterprise_value, ev_ebitda, ev_ebit, ev_revenue,
         earnings_yield, fcf_yield, graham_number,
         eps, eps_diluted, bvps, dps, franking_pct,
@@ -842,6 +851,7 @@ INSERT_SQL = """
         pe_ratio                = EXCLUDED.pe_ratio,
         pb_ratio                = EXCLUDED.pb_ratio,
         ps_ratio                = EXCLUDED.ps_ratio,
+        p_fcf_ratio             = EXCLUDED.p_fcf_ratio,
         enterprise_value        = EXCLUDED.enterprise_value,
         ev_ebitda               = EXCLUDED.ev_ebitda,
         ev_ebit                 = EXCLUDED.ev_ebit,

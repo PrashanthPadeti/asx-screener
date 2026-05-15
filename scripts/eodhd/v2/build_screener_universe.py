@@ -241,7 +241,9 @@ SELECT
     -- ev_to_ebit: from yearly_metrics (computed by yearly_compute)
     ym.ev_ebit              AS ev_to_ebit,
     -- price_to_fcf: market_cap / FCF (both in AUD millions)
+    -- Guard: only compute when |ratio| < 10^7 to avoid NUMERIC(12,4) overflow
     CASE WHEN vs.market_cap IS NOT NULL AND cf0.fcf IS NOT NULL AND cf0.fcf != 0
+              AND ABS(vs.market_cap / cf0.fcf) < 10000000
          THEN ROUND((vs.market_cap / cf0.fcf)::NUMERIC, 4) END AS price_to_fcf,
     -- graham_number: from yearly_metrics (sqrt(22.5 * eps * bvps))
     ym.graham_number        AS graham_number,
@@ -252,9 +254,12 @@ SELECT
     div_latest.ex_date,
     div_latest.franking_pct,
     -- payout_ratio: prefer direct eps; fall back to yearly_metrics derived eps
+    -- Guard: only compute when |ratio| < 10^7 to avoid NUMERIC(12,4) overflow
+    -- (tiny eps near zero would produce an astronomically large ratio)
     CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL
               AND COALESCE(pnl0.eps, ym.eps) > 0
               AND vs.dividend_per_share IS NOT NULL
+              AND ABS(vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 10000000
          THEN ROUND((vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4)
     END AS payout_ratio,
 

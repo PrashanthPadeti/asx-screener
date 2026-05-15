@@ -240,12 +240,9 @@ SELECT
     vs.ev_to_revenue,
     -- ev_to_ebit: from yearly_metrics (computed by yearly_compute)
     ym.ev_ebit              AS ev_to_ebit,
-    -- price_to_fcf: market_cap / FCF (both in AUD, raw)
-    -- Guard: FCF must be > 0 (negative FCF → null, not meaningful),
-    --        and ratio capped at 9999 (extreme but still displayable)
-    CASE WHEN vs.market_cap IS NOT NULL AND cf0.fcf IS NOT NULL AND cf0.fcf > 0
-              AND (vs.market_cap / cf0.fcf) <= 9999
-         THEN ROUND((vs.market_cap / cf0.fcf)::NUMERIC, 4) END AS price_to_fcf,
+    -- price_to_fcf: use yearly_compute's pre-computed p_fcf_ratio (reliable,
+    -- already guards against negative/zero FCF and extreme values)
+    ym.p_fcf_ratio          AS price_to_fcf,
     -- graham_number: from yearly_metrics (sqrt(22.5 * eps * bvps))
     ym.graham_number        AS graham_number,
 
@@ -583,7 +580,7 @@ LEFT JOIN LATERAL (
            -- Quality proxy scores
            brand_proxy_score, capital_efficiency_score, earnings_stability_score,
            -- Per-share & valuation derived (used for COALESCE + payout_ratio)
-           eps, bvps, graham_number, ev_ebit
+           eps, bvps, graham_number, ev_ebit, p_fcf_ratio
     FROM market.yearly_metrics
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC

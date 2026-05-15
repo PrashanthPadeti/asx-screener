@@ -240,10 +240,11 @@ SELECT
     vs.ev_to_revenue,
     -- ev_to_ebit: from yearly_metrics (computed by yearly_compute)
     ym.ev_ebit              AS ev_to_ebit,
-    -- price_to_fcf: market_cap / FCF (both in AUD millions)
-    -- Guard: only compute when |ratio| < 10^7 to avoid NUMERIC(12,4) overflow
-    CASE WHEN vs.market_cap IS NOT NULL AND cf0.fcf IS NOT NULL AND cf0.fcf != 0
-              AND ABS(vs.market_cap / cf0.fcf) < 10000000
+    -- price_to_fcf: market_cap / FCF (both in AUD, raw)
+    -- Guard: FCF must be > 0 (negative FCF → null, not meaningful),
+    --        and ratio capped at 9999 (extreme but still displayable)
+    CASE WHEN vs.market_cap IS NOT NULL AND cf0.fcf IS NOT NULL AND cf0.fcf > 0
+              AND (vs.market_cap / cf0.fcf) <= 9999
          THEN ROUND((vs.market_cap / cf0.fcf)::NUMERIC, 4) END AS price_to_fcf,
     -- graham_number: from yearly_metrics (sqrt(22.5 * eps * bvps))
     ym.graham_number        AS graham_number,

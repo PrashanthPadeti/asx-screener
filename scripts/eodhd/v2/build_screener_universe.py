@@ -87,9 +87,10 @@ INSERT INTO screener.universe (
     price, price_date, open, volume, avg_volume_20d, market_cap,
     high_52w, low_52w,
 
-    -- ── Valuation ratios (from valuation_snapshot) ───────────────────────────
+    -- ── Valuation ratios (from valuation_snapshot + yearly_metrics) ──────────
     pe_ratio, forward_pe, peg_ratio, price_to_book, price_to_sales,
     ev, ev_to_ebitda, ev_to_revenue,
+    ev_to_ebit, price_to_fcf, graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
     dividend_yield, dps_ttm, ex_div_date, franking_pct, payout_ratio,
@@ -110,7 +111,8 @@ INSERT INTO screener.universe (
 
     -- ── Balance Sheet (latest FY) ─────────────────────────────────────────────
     total_assets, total_equity, total_debt, net_debt, cash,
-    book_value_per_share, debt_to_equity, current_ratio,
+    book_value_per_share,          -- COALESCE(bs0, ym.bvps)
+    debt_to_equity, current_ratio,
 
     -- ── Cash Flow (latest FY) ────────────────────────────────────────────────
     cfo_fy0, capex_fy0, fcf_fy0,
@@ -154,8 +156,9 @@ INSERT INTO screener.universe (
     -- ── Short interest (ASIC) ────────────────────────────────────────────────
     short_pct, short_position_shares, short_interest_chg_1w,
 
-    -- ── Shares ───────────────────────────────────────────────────────────────
+    -- ── Shares & Ownership ───────────────────────────────────────────────────
     shares_outstanding,
+    percent_insiders, percent_institutions,
 
     -- ── Quick-win metrics ────────────────────────────────────────────────────
     ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
@@ -194,12 +197,14 @@ SELECT
     c.is_asx200, c.is_asx300, c.is_all_ords,
 
     -- ── Market cap tier flags (derived from vs.market_cap, raw AUD) ───────────
-    (vs.market_cap >= 50000000000)                                           AS is_mega,
-    (vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000)          AS is_large,
-    (vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000)          AS is_mid,
-    (vs.market_cap >= 300000000   AND vs.market_cap < 2000000000)           AS is_small,
-    (vs.market_cap >= 50000000    AND vs.market_cap < 300000000)            AS is_micro,
-    (vs.market_cap > 0            AND vs.market_cap < 50000000)             AS is_nano,
+    -- COALESCE(..., FALSE) prevents NOT NULL violation when market_cap is NULL
+    -- (e.g. delisted stocks or stocks not yet in valuation_snapshot)
+    COALESCE(vs.market_cap >= 50000000000, FALSE)                                           AS is_mega,
+    COALESCE(vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000, FALSE)          AS is_large,
+    COALESCE(vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000, FALSE)          AS is_mid,
+    COALESCE(vs.market_cap >= 300000000   AND vs.market_cap < 2000000000, FALSE)           AS is_small,
+    COALESCE(vs.market_cap >= 50000000    AND vs.market_cap < 300000000, FALSE)            AS is_micro,
+    COALESCE(vs.market_cap > 0            AND vs.market_cap < 50000000, FALSE)             AS is_nano,
     CASE
         WHEN vs.market_cap >= 50000000000                              THEN 'mega'
         WHEN vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000 THEN 'large'
@@ -233,14 +238,25 @@ SELECT
     vs.enterprise_value     AS ev,
     vs.ev_to_ebitda,
     vs.ev_to_revenue,
+    -- ev_to_ebit: from yearly_metrics (computed by yearly_compute)
+    ym.ev_ebit              AS ev_to_ebit,
+    -- price_to_fcf: market_cap / FCF (both in AUD millions)
+    CASE WHEN vs.market_cap IS NOT NULL AND cf0.fcf IS NOT NULL AND cf0.fcf != 0
+         THEN ROUND((vs.market_cap / cf0.fcf)::NUMERIC, 4) END AS price_to_fcf,
+    -- graham_number: from yearly_metrics (sqrt(22.5 * eps * bvps))
+    ym.graham_number        AS graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
     vs.dividend_yield,
     vs.dividend_per_share   AS dps_ttm,
     div_latest.ex_date,
     div_latest.franking_pct,
-    CASE WHEN pnl0.eps IS NOT NULL AND pnl0.eps > 0 AND vs.dividend_per_share IS NOT NULL
-         THEN ROUND((vs.dividend_per_share / pnl0.eps)::numeric, 4) END AS payout_ratio,
+    -- payout_ratio: prefer direct eps; fall back to yearly_metrics derived eps
+    CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL
+              AND COALESCE(pnl0.eps, ym.eps) > 0
+              AND vs.dividend_per_share IS NOT NULL
+         THEN ROUND((vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4)
+    END AS payout_ratio,
 
     -- ── Profitability TTM ─────────────────────────────────────────────────────
     -- Priority: computed_metrics (daily) → valuation_snapshot (weekly)
@@ -258,8 +274,11 @@ SELECT
     COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield,
 
     -- ── EPS ──────────────────────────────────────────────────────────────────
-    pnl0.eps        AS eps_fy0,
-    pnl1.eps        AS eps_fy1,
+    -- COALESCE: pnl0.eps is usually NULL (EODHD doesn't supply per-share data
+    -- for ASX income statements); yearly_compute derives EPS from net_profit /
+    -- shares and stores in market.yearly_metrics.eps — use that as fallback.
+    COALESCE(pnl0.eps, ym.eps)  AS eps_fy0,
+    pnl1.eps                    AS eps_fy1,
 
     -- ── Income Statement FY0 / FY1 ───────────────────────────────────────────
     pnl0.revenue    AS revenue_fy0,
@@ -275,7 +294,9 @@ SELECT
     bs0.total_debt,
     bs0.net_debt,
     bs0.cash_equivalents    AS cash,
-    bs0.book_value_per_share,
+    -- COALESCE: transform_financials passes None for bvps (EODHD omits it);
+    -- yearly_compute derives it from total_equity / shares → use as fallback.
+    COALESCE(bs0.book_value_per_share, ym.bvps) AS book_value_per_share,
     CASE WHEN bs0.total_equity <> 0 AND bs0.total_equity IS NOT NULL
          THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END AS debt_to_equity,
     CASE WHEN bs0.total_current_liab <> 0 AND bs0.total_current_liab IS NOT NULL
@@ -361,8 +382,10 @@ SELECT
     si.short_shares            AS short_position_shares,
     si.short_pct_chg_1w        AS short_interest_chg_1w,
 
-    -- ── Shares ───────────────────────────────────────────────────────────────
+    -- ── Shares & Ownership ───────────────────────────────────────────────────
     ss.shares_outstanding,
+    ss.percent_insiders,
+    ss.percent_institutions,
 
     -- ── Quick-win metrics (from yearly_metrics + daily_metrics) ──────────────
     ym.ocf_to_net_profit,
@@ -552,7 +575,9 @@ LEFT JOIN LATERAL (
            -- Partial metrics
            avg_roic_3y, avg_roic_5y, asset_light_score,
            -- Quality proxy scores
-           brand_proxy_score, capital_efficiency_score, earnings_stability_score
+           brand_proxy_score, capital_efficiency_score, earnings_stability_score,
+           -- Per-share & valuation derived (used for COALESCE + payout_ratio)
+           eps, bvps, graham_number, ev_ebit
     FROM market.yearly_metrics
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -580,9 +605,12 @@ LEFT JOIN LATERAL (
 -- ── Analyst ratings ───────────────────────────────────────────────────────────
 LEFT JOIN market.analyst_ratings ar ON ar.asx_code = c.asx_code
 
--- ── Shares outstanding (staging — most recently loaded) ───────────────────────
+-- ── Shares outstanding + ownership (staging — most recently loaded) ──────────
 LEFT JOIN LATERAL (
-    SELECT shares_outstanding::BIGINT
+    SELECT
+        shares_outstanding::BIGINT,
+        percent_insiders,
+        percent_institutions
     FROM staging.shares_stats
     WHERE asx_code = c.asx_code
     LIMIT 1
@@ -658,6 +686,9 @@ ON CONFLICT (asx_code) DO UPDATE SET
     ev                      = EXCLUDED.ev,
     ev_to_ebitda            = EXCLUDED.ev_to_ebitda,
     ev_to_revenue           = EXCLUDED.ev_to_revenue,
+    ev_to_ebit              = EXCLUDED.ev_to_ebit,
+    price_to_fcf            = EXCLUDED.price_to_fcf,
+    graham_number           = EXCLUDED.graham_number,
     -- Dividends
     dividend_yield          = EXCLUDED.dividend_yield,
     dps_ttm                 = EXCLUDED.dps_ttm,
@@ -767,8 +798,10 @@ ON CONFLICT (asx_code) DO UPDATE SET
     short_pct               = EXCLUDED.short_pct,
     short_position_shares   = EXCLUDED.short_position_shares,
     short_interest_chg_1w   = EXCLUDED.short_interest_chg_1w,
-    -- Shares
+    -- Shares & Ownership
     shares_outstanding      = EXCLUDED.shares_outstanding,
+    percent_insiders        = EXCLUDED.percent_insiders,
+    percent_institutions    = EXCLUDED.percent_institutions,
     -- Quick-win metrics
     ocf_to_net_profit       = EXCLUDED.ocf_to_net_profit,
     fcf_payout_ratio        = EXCLUDED.fcf_payout_ratio,

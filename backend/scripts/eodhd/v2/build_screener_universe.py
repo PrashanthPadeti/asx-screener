@@ -41,6 +41,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _flush_screener_cache() -> None:
+    """Flush all asx:screener:* keys from Redis after universe rebuild.
+    Fault-tolerant — silently skips if Redis is unavailable."""
+    try:
+        import redis as sync_redis
+        r = sync_redis.from_url(
+            os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            socket_connect_timeout=2,
+            socket_timeout=2,
+            decode_responses=True,
+        )
+        deleted = 0
+        for key in r.scan_iter("asx:screener:*"):
+            r.delete(key)
+            deleted += 1
+        if deleted:
+            log.info(f"Cache invalidated: {deleted} asx:screener:* keys flushed")
+        else:
+            log.info("Cache invalidated: no asx:screener:* keys found (cache was cold)")
+    except Exception as e:
+        log.warning(f"Redis cache flush skipped (Redis unavailable): {e}")
+
 DB_URL = os.getenv("DATABASE_URL_SYNC",
            "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener")
 
@@ -56,6 +79,8 @@ INSERT INTO screener.universe (
     stock_type, status, fiscal_year_end_month,
     is_reit, is_miner,
     is_asx20, is_asx50, is_asx100, is_asx200, is_asx300, is_all_ords,
+    is_mega, is_large, is_mid, is_small, is_micro, is_nano,
+    market_cap_tier,
     isin, website, description,
 
     -- ── Price ────────────────────────────────────────────────────────────────
@@ -167,6 +192,16 @@ INSERT INTO screener.universe (
     -- ── Admin tags (from market.companies) ───────────────────────────────────
     business_model_tag, commodity_exposure,
 
+    -- ── Tier 2: daily signals (from daily_metrics) ────────────────────────────
+    dma50_ratio, dma200_ratio,
+    above_sma50, above_sma200,
+    golden_cross, death_cross,
+    new_52w_high, new_52w_low,
+    relative_volume,
+    bb_pct, rsi_21, stoch_k, stoch_d,
+    rsi_overbought, rsi_oversold,
+    macd_bullish_cross, macd_bearish_cross,
+
     universe_built_at
 )
 SELECT
@@ -184,6 +219,26 @@ SELECT
     c.is_miner,
     c.is_asx20,  c.is_asx50,  c.is_asx100,
     c.is_asx200, c.is_asx300, c.is_all_ords,
+
+    -- ── Market cap tier flags (derived from vs.market_cap, raw AUD) ───────────
+    -- COALESCE(..., FALSE) prevents NOT NULL violation when market_cap is NULL
+    -- (e.g. delisted stocks or stocks not yet in valuation_snapshot)
+    COALESCE(vs.market_cap >= 50000000000, FALSE)                                           AS is_mega,
+    COALESCE(vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000, FALSE)          AS is_large,
+    COALESCE(vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000, FALSE)          AS is_mid,
+    COALESCE(vs.market_cap >= 300000000   AND vs.market_cap < 2000000000, FALSE)           AS is_small,
+    COALESCE(vs.market_cap >= 50000000    AND vs.market_cap < 300000000, FALSE)            AS is_micro,
+    COALESCE(vs.market_cap > 0            AND vs.market_cap < 50000000, FALSE)             AS is_nano,
+    CASE
+        WHEN vs.market_cap >= 50000000000                              THEN 'mega'
+        WHEN vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000 THEN 'large'
+        WHEN vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000 THEN 'mid'
+        WHEN vs.market_cap >= 300000000   AND vs.market_cap < 2000000000  THEN 'small'
+        WHEN vs.market_cap >= 50000000    AND vs.market_cap < 300000000   THEN 'micro'
+        WHEN vs.market_cap > 0                                            THEN 'nano'
+        ELSE NULL
+    END                                                                      AS market_cap_tier,
+
     c.isin,
     c.website,
     c.description,
@@ -222,6 +277,7 @@ SELECT
     div_latest.franking_pct,
     -- payout_ratio: prefer direct eps; fall back to yearly_metrics derived eps
     -- Guard: only compute when |ratio| < 10^7 to avoid NUMERIC(12,4) overflow
+    -- (tiny eps near zero would produce an astronomically large ratio)
     CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL
               AND COALESCE(pnl0.eps, ym.eps) > 0
               AND vs.dividend_per_share IS NOT NULL
@@ -391,7 +447,7 @@ SELECT
     si.short_shares            AS short_position_shares,
     si.short_pct_chg_1w        AS short_interest_chg_1w,
 
-    -- ── Shares ───────────────────────────────────────────────────────────────
+    -- ── Shares & Ownership ───────────────────────────────────────────────────
     ss.shares_outstanding,
     ss.percent_insiders,
     ss.percent_institutions,
@@ -442,11 +498,33 @@ SELECT
     mc.business_model_tag,
     mc.commodity_exposure,
 
+    -- ── Tier 2: daily signals (from daily_metrics) ────────────────────────────
+    dm.dma50_ratio,
+    dm.dma200_ratio,
+    dm.above_sma50,
+    dm.above_sma200,
+    dm.golden_cross,
+    dm.death_cross,
+    CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL
+         AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high,
+    CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL
+         AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low,
+    dm.relative_volume,
+    dm.bb_pct,
+    dm.rsi_21,
+    dm.stoch_k,
+    dm.stoch_d,
+    dm.rsi_overbought,
+    dm.rsi_oversold,
+    dm.macd_bullish_cross,
+    dm.macd_bearish_cross,
+
     NOW()
 
 FROM market.companies_current c
 
 -- ── Latest close price + open/volume ────────────────────────────────────────
+-- Separated from range aggregates to avoid slow window-function scan.
 LEFT JOIN LATERAL (
     SELECT close, open, volume,
            DATE(time AT TIME ZONE 'Australia/Sydney') AS price_date
@@ -456,7 +534,7 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) dp ON TRUE
 
--- ── 52-week high/low (simple MAX/MIN aggregate) ───────────────────────────────
+-- ── 52-week high/low (simple MAX/MIN aggregate — much faster than window fn) ─
 LEFT JOIN LATERAL (
     SELECT MAX(high) AS high_52w, MIN(low) AS low_52w
     FROM market.daily_prices
@@ -464,7 +542,7 @@ LEFT JOIN LATERAL (
       AND time >= NOW() - INTERVAL '365 days'
 ) dp52 ON TRUE
 
--- ── 20-day avg volume (LIMIT 20 aggregate) ────────────────────────────────────
+-- ── 20-day avg volume (LIMIT 20 aggregate — scans only 20 rows per stock) ────
 LEFT JOIN LATERAL (
     SELECT AVG(volume) AS avg_volume_20d
     FROM (
@@ -569,7 +647,15 @@ LEFT JOIN LATERAL (
            bb_upper, bb_lower, atr_14, adx_14, obv,
            hv_20d, hv_60d, pct_from_ath,
            return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y,
-           above_vwap, dollar_volume_avg_20d
+           above_vwap, dollar_volume_avg_20d,
+           -- Tier 2 signals
+           dma50_ratio, dma200_ratio,
+           above_sma50, above_sma200,
+           golden_cross, death_cross,
+           relative_volume,
+           bb_pct, rsi_21, stoch_k, stoch_d,
+           rsi_overbought, rsi_oversold,
+           macd_bullish_cross, macd_bearish_cross
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
     ORDER BY date DESC
@@ -691,6 +777,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     fiscal_year_end_month   = EXCLUDED.fiscal_year_end_month,
     is_reit                 = EXCLUDED.is_reit,
     is_miner                = EXCLUDED.is_miner,
+    is_mega                 = EXCLUDED.is_mega,
+    is_large                = EXCLUDED.is_large,
+    is_mid                  = EXCLUDED.is_mid,
+    is_small                = EXCLUDED.is_small,
+    is_micro                = EXCLUDED.is_micro,
+    is_nano                 = EXCLUDED.is_nano,
+    market_cap_tier         = EXCLUDED.market_cap_tier,
     is_asx20                = EXCLUDED.is_asx20,
     is_asx50                = EXCLUDED.is_asx50,
     is_asx100               = EXCLUDED.is_asx100,
@@ -895,6 +988,24 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- Admin tags
     business_model_tag      = EXCLUDED.business_model_tag,
     commodity_exposure      = EXCLUDED.commodity_exposure,
+    -- Tier 2 daily signals
+    dma50_ratio             = EXCLUDED.dma50_ratio,
+    dma200_ratio            = EXCLUDED.dma200_ratio,
+    above_sma50             = EXCLUDED.above_sma50,
+    above_sma200            = EXCLUDED.above_sma200,
+    golden_cross            = EXCLUDED.golden_cross,
+    death_cross             = EXCLUDED.death_cross,
+    new_52w_high            = EXCLUDED.new_52w_high,
+    new_52w_low             = EXCLUDED.new_52w_low,
+    relative_volume         = EXCLUDED.relative_volume,
+    bb_pct                  = EXCLUDED.bb_pct,
+    rsi_21                  = EXCLUDED.rsi_21,
+    stoch_k                 = EXCLUDED.stoch_k,
+    stoch_d                 = EXCLUDED.stoch_d,
+    rsi_overbought          = EXCLUDED.rsi_overbought,
+    rsi_oversold            = EXCLUDED.rsi_oversold,
+    macd_bullish_cross      = EXCLUDED.macd_bullish_cross,
+    macd_bearish_cross      = EXCLUDED.macd_bearish_cross,
     universe_built_at       = NOW()
 """
 
@@ -925,6 +1036,9 @@ def main():
     cur.close()
     conn.close()
     log.info(f"DONE — {n:,} rows upserted into screener.universe")
+
+    # Flush Redis screener cache so next request gets fresh data
+    _flush_screener_cache()
 
 
 if __name__ == "__main__":

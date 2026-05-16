@@ -192,6 +192,16 @@ INSERT INTO screener.universe (
     -- ── Admin tags (from market.companies) ───────────────────────────────────
     business_model_tag, commodity_exposure,
 
+    -- ── Tier 2: daily signals (from daily_metrics) ────────────────────────────
+    dma50_ratio, dma200_ratio,
+    above_sma50, above_sma200,
+    golden_cross, death_cross,
+    new_52w_high, new_52w_low,
+    relative_volume,
+    bb_pct, rsi_21, stoch_k, stoch_d,
+    rsi_overbought, rsi_oversold,
+    macd_bullish_cross, macd_bearish_cross,
+
     universe_built_at
 )
 SELECT
@@ -488,6 +498,27 @@ SELECT
     mc.business_model_tag,
     mc.commodity_exposure,
 
+    -- ── Tier 2: daily signals (from daily_metrics) ────────────────────────────
+    dm.dma50_ratio,
+    dm.dma200_ratio,
+    dm.above_sma50,
+    dm.above_sma200,
+    dm.golden_cross,
+    dm.death_cross,
+    CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL
+         AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high,
+    CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL
+         AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low,
+    dm.relative_volume,
+    dm.bb_pct,
+    dm.rsi_21,
+    dm.stoch_k,
+    dm.stoch_d,
+    dm.rsi_overbought,
+    dm.rsi_oversold,
+    dm.macd_bullish_cross,
+    dm.macd_bearish_cross,
+
     NOW()
 
 FROM market.companies_current c
@@ -616,7 +647,15 @@ LEFT JOIN LATERAL (
            bb_upper, bb_lower, atr_14, adx_14, obv,
            hv_20d, hv_60d, pct_from_ath,
            return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y,
-           above_vwap, dollar_volume_avg_20d
+           above_vwap, dollar_volume_avg_20d,
+           -- Tier 2 signals
+           dma50_ratio, dma200_ratio,
+           above_sma50, above_sma200,
+           golden_cross, death_cross,
+           relative_volume,
+           bb_pct, rsi_21, stoch_k, stoch_d,
+           rsi_overbought, rsi_oversold,
+           macd_bullish_cross, macd_bearish_cross
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
     ORDER BY date DESC
@@ -949,6 +988,24 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- Admin tags
     business_model_tag      = EXCLUDED.business_model_tag,
     commodity_exposure      = EXCLUDED.commodity_exposure,
+    -- Tier 2 daily signals
+    dma50_ratio             = EXCLUDED.dma50_ratio,
+    dma200_ratio            = EXCLUDED.dma200_ratio,
+    above_sma50             = EXCLUDED.above_sma50,
+    above_sma200            = EXCLUDED.above_sma200,
+    golden_cross            = EXCLUDED.golden_cross,
+    death_cross             = EXCLUDED.death_cross,
+    new_52w_high            = EXCLUDED.new_52w_high,
+    new_52w_low             = EXCLUDED.new_52w_low,
+    relative_volume         = EXCLUDED.relative_volume,
+    bb_pct                  = EXCLUDED.bb_pct,
+    rsi_21                  = EXCLUDED.rsi_21,
+    stoch_k                 = EXCLUDED.stoch_k,
+    stoch_d                 = EXCLUDED.stoch_d,
+    rsi_overbought          = EXCLUDED.rsi_overbought,
+    rsi_oversold            = EXCLUDED.rsi_oversold,
+    macd_bullish_cross      = EXCLUDED.macd_bullish_cross,
+    macd_bearish_cross      = EXCLUDED.macd_bearish_cross,
     universe_built_at       = NOW()
 """
 

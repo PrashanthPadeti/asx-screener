@@ -238,6 +238,25 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "return_10y":  {"col": "u.return_10y",  "scale": 0.01, "type": "number", "label": "Return 10Y %",  "unit": "%", "cat": "Returns"},
     "return_15y":  {"col": "u.return_15y",  "scale": 0.01, "type": "number", "label": "Return 15Y %",  "unit": "%", "cat": "Returns"},
 
+    # ── Tier 2: Technical signals & ratios ───────────────────────────────────
+    "dma50_ratio":       {"col": "u.dma50_ratio",       "scale": 1,    "type": "number", "label": "Price / SMA50",          "unit": "x",   "cat": "Technicals"},
+    "dma200_ratio":      {"col": "u.dma200_ratio",      "scale": 1,    "type": "number", "label": "Price / SMA200",         "unit": "x",   "cat": "Technicals"},
+    "relative_volume":   {"col": "u.relative_volume",   "scale": 1,    "type": "number", "label": "Relative Volume",        "unit": "x",   "cat": "Technicals"},
+    "bb_pct":            {"col": "u.bb_pct",            "scale": 1,    "type": "number", "label": "Bollinger %B",           "unit": "",    "cat": "Technicals"},
+    "rsi_21":            {"col": "u.rsi_21",            "scale": 1,    "type": "number", "label": "RSI 21",                 "unit": "",    "cat": "Technicals"},
+    "stoch_k":           {"col": "u.stoch_k",           "scale": 1,    "type": "number", "label": "Stochastic %K",         "unit": "",    "cat": "Technicals"},
+    "stoch_d":           {"col": "u.stoch_d",           "scale": 1,    "type": "number", "label": "Stochastic %D",         "unit": "",    "cat": "Technicals"},
+    "above_sma50":       {"col": "u.above_sma50",       "scale": 1,    "type": "boolean","label": "Above SMA50",           "unit": "",    "cat": "Technicals"},
+    "above_sma200":      {"col": "u.above_sma200",      "scale": 1,    "type": "boolean","label": "Above SMA200",          "unit": "",    "cat": "Technicals"},
+    "golden_cross":      {"col": "u.golden_cross",      "scale": 1,    "type": "boolean","label": "Golden Cross",          "unit": "",    "cat": "Technicals"},
+    "death_cross":       {"col": "u.death_cross",       "scale": 1,    "type": "boolean","label": "Death Cross",           "unit": "",    "cat": "Technicals"},
+    "new_52w_high":      {"col": "u.new_52w_high",      "scale": 1,    "type": "boolean","label": "New 52W High",          "unit": "",    "cat": "Technicals"},
+    "new_52w_low":       {"col": "u.new_52w_low",       "scale": 1,    "type": "boolean","label": "New 52W Low",           "unit": "",    "cat": "Technicals"},
+    "rsi_overbought":    {"col": "u.rsi_overbought",    "scale": 1,    "type": "boolean","label": "RSI Overbought (≥70)",  "unit": "",    "cat": "Technicals"},
+    "rsi_oversold":      {"col": "u.rsi_oversold",      "scale": 1,    "type": "boolean","label": "RSI Oversold (≤30)",   "unit": "",    "cat": "Technicals"},
+    "macd_bullish_cross":{"col": "u.macd_bullish_cross","scale": 1,    "type": "boolean","label": "MACD Bullish Cross",   "unit": "",    "cat": "Technicals"},
+    "macd_bearish_cross":{"col": "u.macd_bearish_cross","scale": 1,    "type": "boolean","label": "MACD Bearish Cross",   "unit": "",    "cat": "Technicals"},
+
     # ── ASX REIT-Specific ★ ───────────────────────────────────────────────────
     # (★ = ASX-unique field not common on US screeners)
     "nta_per_share":            {"col": "u.nta_per_share",            "scale": 1,    "type": "number", "label": "NTA per Share (AUD) ★",       "unit": "AUD",  "cat": "REIT"},   # TODO: add to screener.universe schema
@@ -391,11 +410,18 @@ SORTABLE_COLS: dict[str, str] = {
     "avg_eps_growth_5y":       "u.avg_eps_growth_5y",
     # Technicals
     "rsi_14":             "u.rsi_14",
+    "rsi_21":             "u.rsi_21",
     "adx_14":             "u.adx_14",
     "sma_20":             "u.sma_20",
     "sma_50":             "u.sma_50",
     "sma_200":            "u.sma_200",
     "ema_20":             "u.ema_20",
+    "bb_pct":             "u.bb_pct",
+    "stoch_k":            "u.stoch_k",
+    "stoch_d":            "u.stoch_d",
+    "dma50_ratio":        "u.dma50_ratio",
+    "dma200_ratio":       "u.dma200_ratio",
+    "relative_volume":    "u.relative_volume",
     "volatility_20d":     "u.volatility_20d",
     "volatility_60d":     "u.volatility_60d",
     "beta_1y":            "u.beta_1y",

@@ -179,6 +179,7 @@ class ScreenerRow(BaseModel):
 
     # ── Technicals ───────────────────────────────────────────────────────────
     rsi_14:       Optional[float] = None   # 0–100
+    rsi_21:       Optional[float] = None   # 0–100
     adx_14:       Optional[float] = None   # 0–100
     macd:         Optional[float] = None
     macd_signal:  Optional[float] = None
@@ -188,12 +189,30 @@ class ScreenerRow(BaseModel):
     ema_20:       Optional[float] = None
     bb_upper:     Optional[float] = None
     bb_lower:     Optional[float] = None
+    bb_pct:       Optional[float] = None   # Bollinger %B (0=at lower, 1=at upper)
     atr_14:       Optional[float] = None
     obv:          Optional[float] = None
+    stoch_k:      Optional[float] = None   # Stochastic %K
+    stoch_d:      Optional[float] = None   # Stochastic %D
+    dma50_ratio:  Optional[float] = None   # price / SMA50
+    dma200_ratio: Optional[float] = None   # price / SMA200
+    relative_volume: Optional[float] = None  # volume / avg_volume_20d
     volatility_20d: Optional[float] = None   # decimal ratio
     volatility_60d: Optional[float] = None   # decimal ratio
     beta_1y:      Optional[float] = None
     sharpe_1y:    Optional[float] = None
+
+    # ── Technical signals (boolean) ───────────────────────────────────────────
+    above_sma50:        Optional[bool] = None
+    above_sma200:       Optional[bool] = None
+    golden_cross:       Optional[bool] = None   # SMA50 crossed above SMA200
+    death_cross:        Optional[bool] = None   # SMA50 crossed below SMA200
+    new_52w_high:       Optional[bool] = None
+    new_52w_low:        Optional[bool] = None
+    rsi_overbought:     Optional[bool] = None   # RSI14 >= 70
+    rsi_oversold:       Optional[bool] = None   # RSI14 <= 30
+    macd_bullish_cross: Optional[bool] = None
+    macd_bearish_cross: Optional[bool] = None
 
     # ── Returns ──────────────────────────────────────────────────────────────
     return_1w:         Optional[float] = None   # decimal ratio

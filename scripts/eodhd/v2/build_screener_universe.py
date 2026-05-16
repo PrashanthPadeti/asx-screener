@@ -1045,7 +1045,15 @@ def main():
     parser.add_argument("--codes", nargs="+")
     args = parser.parse_args()
 
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(
+        DB_URL,
+        # TCP keepalives prevent SSL "connection closed unexpectedly" on long queries
+        keepalives=1,
+        keepalives_idle=30,      # send keepalive after 30s idle
+        keepalives_interval=10,  # retry every 10s
+        keepalives_count=5,      # drop after 5 failures
+        options="-c statement_timeout=0",   # no query timeout for this bulk upsert
+    )
     cur  = conn.cursor()
 
     if args.codes:

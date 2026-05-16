@@ -525,10 +525,10 @@ SELECT
     dm.macd_bearish_cross,
 
     -- ── Tier 3: inline calculations from existing laterals ────────────────────
-    -- price_to_52w_high: 1.0 = at 52w high; 0.9 = 10% below; >1 = new high
+    -- price_to_52w_high: 1.0 = at 52w high; 0.9 = 10 pct below; >1 = new high
     CASE WHEN dp52.high_52w > 0 AND dp.close IS NOT NULL
          THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END              AS price_to_52w_high,
-    -- price_to_52w_low: 1.0 = at 52w low; 1.5 = 50% above; >1 = above low
+    -- price_to_52w_low: 1.0 = at 52w low; 1.5 = 50 pct above; >1 = above low
     CASE WHEN dp52.low_52w > 0 AND dp.close IS NOT NULL
          THEN ROUND((dp.close / dp52.low_52w)::numeric, 4)  END              AS price_to_52w_low,
     -- per-share values: fcf/cfo/revenue in AUD millions → AUD per share

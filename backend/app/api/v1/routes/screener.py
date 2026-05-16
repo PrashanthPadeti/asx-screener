@@ -257,6 +257,14 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "macd_bullish_cross":{"col": "u.macd_bullish_cross","scale": 1,    "type": "boolean","label": "MACD Bullish Cross",   "unit": "",    "cat": "Technicals"},
     "macd_bearish_cross":{"col": "u.macd_bearish_cross","scale": 1,    "type": "boolean","label": "MACD Bearish Cross",   "unit": "",    "cat": "Technicals"},
 
+    # ── Tier 3: Inline calculations ───────────────────────────────────────────
+    "price_to_52w_high":  {"col": "u.price_to_52w_high",  "scale": 1, "type": "number", "label": "Price / 52W High",       "unit": "x",    "cat": "Price"},
+    "price_to_52w_low":   {"col": "u.price_to_52w_low",   "scale": 1, "type": "number", "label": "Price / 52W Low",        "unit": "x",    "cat": "Price"},
+    "fcf_per_share":      {"col": "u.fcf_per_share",      "scale": 1, "type": "number", "label": "FCF per Share (AUD)",    "unit": "AUD",  "cat": "Financials"},
+    "ocf_per_share":      {"col": "u.ocf_per_share",      "scale": 1, "type": "number", "label": "OCF per Share (AUD)",    "unit": "AUD",  "cat": "Financials"},
+    "revenue_per_share":  {"col": "u.revenue_per_share",  "scale": 1, "type": "number", "label": "Revenue per Share (AUD)","unit": "AUD",  "cat": "Financials"},
+    "working_capital":    {"col": "u.working_capital",    "scale": 1, "type": "number", "label": "Working Capital (AUD M)","unit": "AUD M","cat": "Financials"},
+
     # ── ASX REIT-Specific ★ ───────────────────────────────────────────────────
     # (★ = ASX-unique field not common on US screeners)
     "nta_per_share":            {"col": "u.nta_per_share",            "scale": 1,    "type": "number", "label": "NTA per Share (AUD) ★",       "unit": "AUD",  "cat": "REIT"},   # TODO: add to screener.universe schema
@@ -376,6 +384,13 @@ SORTABLE_COLS: dict[str, str] = {
     "total_debt":         "u.total_debt",
     "fcf_fy0":            "u.fcf_fy0",
     "cfo_fy0":            "u.cfo_fy0",
+    # Tier 3 inline calculations
+    "price_to_52w_high":  "u.price_to_52w_high",
+    "price_to_52w_low":   "u.price_to_52w_low",
+    "fcf_per_share":      "u.fcf_per_share",
+    "ocf_per_share":      "u.ocf_per_share",
+    "revenue_per_share":  "u.revenue_per_share",
+    "working_capital":    "u.working_capital",
     # Quality
     "piotroski_f_score":  "u.piotroski_f_score",
     "altman_z_score":     "u.altman_z_score",

@@ -202,6 +202,11 @@ INSERT INTO screener.universe (
     rsi_overbought, rsi_oversold,
     macd_bullish_cross, macd_bearish_cross,
 
+    -- ── Tier 3: inline calculations from existing laterals ────────────────────
+    price_to_52w_high, price_to_52w_low,
+    fcf_per_share, ocf_per_share, revenue_per_share,
+    working_capital,
+
     universe_built_at
 )
 SELECT
@@ -518,6 +523,24 @@ SELECT
     dm.rsi_oversold,
     dm.macd_bullish_cross,
     dm.macd_bearish_cross,
+
+    -- ── Tier 3: inline calculations from existing laterals ────────────────────
+    -- price_to_52w_high: 1.0 = at 52w high; 0.9 = 10% below; >1 = new high
+    CASE WHEN dp52.high_52w > 0 AND dp.close IS NOT NULL
+         THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END              AS price_to_52w_high,
+    -- price_to_52w_low: 1.0 = at 52w low; 1.5 = 50% above; >1 = above low
+    CASE WHEN dp52.low_52w > 0 AND dp.close IS NOT NULL
+         THEN ROUND((dp.close / dp52.low_52w)::numeric, 4)  END              AS price_to_52w_low,
+    -- per-share values: fcf/cfo/revenue in AUD millions → AUD per share
+    CASE WHEN ss.shares_outstanding > 0 AND cf0.fcf IS NOT NULL
+         THEN ROUND((cf0.fcf * 1000000.0 / ss.shares_outstanding)::numeric, 4)     END AS fcf_per_share,
+    CASE WHEN ss.shares_outstanding > 0 AND cf0.cfo IS NOT NULL
+         THEN ROUND((cf0.cfo * 1000000.0 / ss.shares_outstanding)::numeric, 4)     END AS ocf_per_share,
+    CASE WHEN ss.shares_outstanding > 0 AND pnl0.revenue IS NOT NULL
+         THEN ROUND((pnl0.revenue * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS revenue_per_share,
+    -- working capital in AUD millions (same unit as total_assets etc.)
+    CASE WHEN bs0.total_current_assets IS NOT NULL AND bs0.total_current_liab IS NOT NULL
+         THEN ROUND((bs0.total_current_assets - bs0.total_current_liab)::numeric, 2) END AS working_capital,
 
     NOW()
 
@@ -1006,6 +1029,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     rsi_oversold            = EXCLUDED.rsi_oversold,
     macd_bullish_cross      = EXCLUDED.macd_bullish_cross,
     macd_bearish_cross      = EXCLUDED.macd_bearish_cross,
+    -- Tier 3 inline calculations
+    price_to_52w_high       = EXCLUDED.price_to_52w_high,
+    price_to_52w_low        = EXCLUDED.price_to_52w_low,
+    fcf_per_share           = EXCLUDED.fcf_per_share,
+    ocf_per_share           = EXCLUDED.ocf_per_share,
+    revenue_per_share       = EXCLUDED.revenue_per_share,
+    working_capital         = EXCLUDED.working_capital,
     universe_built_at       = NOW()
 """
 

@@ -155,6 +155,14 @@ class ScreenerRow(BaseModel):
     avg_eps_growth_3y:       Optional[float] = None   # decimal ratio
     avg_eps_growth_5y:       Optional[float] = None   # decimal ratio
 
+    # ── Tier 3: Inline calculations ──────────────────────────────────────────
+    price_to_52w_high:   Optional[float] = None   # price / 52w high (1.0 = at high)
+    price_to_52w_low:    Optional[float] = None   # price / 52w low  (1.0 = at low)
+    fcf_per_share:       Optional[float] = None   # AUD per share
+    ocf_per_share:       Optional[float] = None   # AUD per share
+    revenue_per_share:   Optional[float] = None   # AUD per share
+    working_capital:     Optional[float] = None   # AUD millions
+
     # ── Balance Sheet ────────────────────────────────────────────────────────
     debt_to_equity:      Optional[float] = None
     current_ratio:       Optional[float] = None

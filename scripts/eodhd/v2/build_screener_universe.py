@@ -98,7 +98,9 @@ INSERT INTO screener.universe (
     -- ── Profitability (computed_metrics → yearly_metrics → valuation_snapshot)
     revenue_ttm, gross_profit_ttm, ebitda_ttm,
     gross_margin, ebitda_margin, net_margin, operating_margin,
-    roe, roa, roce,
+    roe, roa, roce, roic,
+    asset_turnover,
+    ocf_margin, fcf_margin, capex_intensity,
     grossed_up_yield, fcf_yield,
 
     -- ── EPS ──────────────────────────────────────────────────────────────────
@@ -113,6 +115,8 @@ INSERT INTO screener.universe (
     total_assets, total_equity, total_debt, net_debt, cash,
     book_value_per_share,          -- COALESCE(bs0, ym.bvps)
     debt_to_equity, current_ratio,
+    net_debt_to_ebitda, interest_coverage,
+    debt_to_assets, lt_debt_to_capital,
 
     -- ── Cash Flow (latest FY) ────────────────────────────────────────────────
     cfo_fy0, capex_fy0, fcf_fy0,
@@ -120,6 +124,7 @@ INSERT INTO screener.universe (
     -- ── Growth rates (computed_metrics → yearly_metrics) ─────────────────────
     revenue_growth_1y, revenue_growth_3y_cagr,
     earnings_growth_1y, earnings_growth_3y_cagr,
+    ebitda_growth_1y, fcf_growth_1y, eps_growth_1y,
 
     -- ── Returns (weekly + monthly) ───────────────────────────────────────────
     return_1w,
@@ -139,8 +144,17 @@ INSERT INTO screener.universe (
     -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
     piotroski_f_score, altman_z_score,
     revenue_cagr_5y, eps_growth_3y_cagr,
+    revenue_cagr_7y, revenue_cagr_10y, net_income_cagr_5y, eps_cagr_5y,
+    ebitda_cagr_3y, ebitda_cagr_5y, fcf_cagr_3y, fcf_cagr_5y,
     avg_roe_3y,
+    avg_roe_5y, avg_roa_3y, avg_roa_5y, avg_roce_3y, avg_roce_5y,
+    avg_gross_margin_3y, avg_gross_margin_5y,
+    avg_ebitda_margin_3y, avg_ebitda_margin_5y,
+    avg_operating_margin_3y, avg_operating_margin_5y,
+    avg_net_margin_3y, avg_net_margin_5y,
+    avg_eps_growth_3y, avg_eps_growth_5y,
     dividend_cagr_3y, dividend_consecutive_yrs,
+    dividend_cagr_5y, bvps_cagr_3y, bvps_cagr_5y,
     return_3y, return_5y, return_7y, return_10y, return_15y,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
@@ -273,6 +287,11 @@ SELECT
     COALESCE(cm.roe,  ym.roe,  vs.roe_ttm)                  AS roe,
     COALESCE(cm.roa,  ym.roa,  vs.roa_ttm)                  AS roa,
     COALESCE(cm.roce, ym.roce)                               AS roce,
+    ym.roic                                                  AS roic,
+    ym.asset_turnover                                        AS asset_turnover,
+    ym.ocf_margin                                            AS ocf_margin,
+    ym.fcf_margin                                            AS fcf_margin,
+    ym.capex_intensity                                       AS capex_intensity,
     COALESCE(cm.grossed_up_yield, ym.franked_yield)          AS grossed_up_yield,
     COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield,
 
@@ -304,6 +323,10 @@ SELECT
          THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END AS debt_to_equity,
     CASE WHEN bs0.total_current_liab <> 0 AND bs0.total_current_liab IS NOT NULL
          THEN ROUND(bs0.total_current_assets / bs0.total_current_liab, 4) END AS current_ratio,
+    ym.net_debt_to_ebitda                                    AS net_debt_to_ebitda,
+    ym.interest_coverage                                     AS interest_coverage,
+    ym.debt_to_assets                                        AS debt_to_assets,
+    ym.lt_debt_to_capital                                    AS lt_debt_to_capital,
 
     -- ── Cash Flow ────────────────────────────────────────────────────────────
     cf0.cfo         AS cfo_fy0,
@@ -317,6 +340,9 @@ SELECT
     COALESCE(cm.revenue_growth_3y,  ym.revenue_cagr_3y)          AS revenue_growth_3y_cagr,
     COALESCE(cm.profit_growth_1y,   ym.net_income_growth_1y)     AS earnings_growth_1y,
     COALESCE(cm.profit_growth_3y,   ym.net_income_cagr_3y)       AS earnings_growth_3y_cagr,
+    ym.ebitda_growth_1y                                          AS ebitda_growth_1y,
+    ym.fcf_growth_1y                                             AS fcf_growth_1y,
+    ym.eps_growth_1y                                             AS eps_growth_1y,
 
     -- ── Returns (daily → weekly/monthly fallback) ─────────────────────────────
     COALESCE(dm.return_1w,  wm.weekly_return)  AS return_1w,
@@ -356,9 +382,35 @@ SELECT
     ym.altman_z_score,
     ym.revenue_cagr_5y,
     ym.eps_cagr_3y          AS eps_growth_3y_cagr,
+    ym.revenue_cagr_7y,
+    ym.revenue_cagr_10y,
+    ym.net_income_cagr_5y,
+    ym.eps_cagr_5y,
+    ym.ebitda_cagr_3y,
+    ym.ebitda_cagr_5y,
+    ym.fcf_cagr_3y,
+    ym.fcf_cagr_5y,
     ym.avg_roe_3y,
+    ym.avg_roe_5y,
+    ym.avg_roa_3y,
+    ym.avg_roa_5y,
+    ym.avg_roce_3y,
+    ym.avg_roce_5y,
+    ym.avg_gross_margin_3y,
+    ym.avg_gross_margin_5y,
+    ym.avg_ebitda_margin_3y,
+    ym.avg_ebitda_margin_5y,
+    ym.avg_operating_margin_3y,
+    ym.avg_operating_margin_5y,
+    ym.avg_net_margin_3y,
+    ym.avg_net_margin_5y,
+    ym.avg_eps_growth_3y,
+    ym.avg_eps_growth_5y,
     ym.dividend_cagr_3y,
     ym.dividend_consecutive_yrs,
+    ym.dividend_cagr_5y,
+    ym.bvps_cagr_3y,
+    ym.bvps_cagr_5y,
     ym.return_3y,
     ym.return_5y,
     ym.return_7y,
@@ -592,7 +644,26 @@ LEFT JOIN LATERAL (
            -- Quality proxy scores
            brand_proxy_score, capital_efficiency_score, earnings_stability_score,
            -- Per-share & valuation derived (used for COALESCE + payout_ratio)
-           eps, bvps, graham_number, ev_ebit, p_fcf_ratio
+           eps, bvps, graham_number, ev_ebit, p_fcf_ratio,
+           -- Efficiency & leverage (Group 3 columns)
+           roic, asset_turnover, interest_coverage, net_debt_to_ebitda,
+           -- Margins / efficiency (new columns)
+           ocf_margin, fcf_margin, capex_intensity, receivables_days,
+           -- Leverage (new columns)
+           debt_to_assets, lt_debt_to_capital,
+           -- 1-year growth (new columns)
+           ebitda_growth_1y, fcf_growth_1y, eps_growth_1y,
+           -- Multi-year CAGRs (new columns)
+           revenue_cagr_7y, revenue_cagr_10y, net_income_cagr_5y, eps_cagr_5y,
+           ebitda_cagr_3y, ebitda_cagr_5y, fcf_cagr_3y, fcf_cagr_5y,
+           dividend_cagr_5y, bvps_cagr_3y, bvps_cagr_5y,
+           -- Rolling averages (new columns)
+           avg_roe_5y, avg_roa_3y, avg_roa_5y, avg_roce_3y, avg_roce_5y,
+           avg_gross_margin_3y, avg_gross_margin_5y,
+           avg_ebitda_margin_3y, avg_ebitda_margin_5y,
+           avg_operating_margin_3y, avg_operating_margin_5y,
+           avg_net_margin_3y, avg_net_margin_5y,
+           avg_eps_growth_3y, avg_eps_growth_5y
     FROM market.yearly_metrics
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -721,6 +792,11 @@ ON CONFLICT (asx_code) DO UPDATE SET
     roe                     = EXCLUDED.roe,
     roa                     = EXCLUDED.roa,
     roce                    = EXCLUDED.roce,
+    roic                    = EXCLUDED.roic,
+    asset_turnover          = EXCLUDED.asset_turnover,
+    ocf_margin              = EXCLUDED.ocf_margin,
+    fcf_margin              = EXCLUDED.fcf_margin,
+    capex_intensity         = EXCLUDED.capex_intensity,
     grossed_up_yield        = EXCLUDED.grossed_up_yield,
     fcf_yield               = EXCLUDED.fcf_yield,
     -- EPS
@@ -742,6 +818,10 @@ ON CONFLICT (asx_code) DO UPDATE SET
     book_value_per_share    = EXCLUDED.book_value_per_share,
     debt_to_equity          = EXCLUDED.debt_to_equity,
     current_ratio           = EXCLUDED.current_ratio,
+    net_debt_to_ebitda      = EXCLUDED.net_debt_to_ebitda,
+    interest_coverage       = EXCLUDED.interest_coverage,
+    debt_to_assets          = EXCLUDED.debt_to_assets,
+    lt_debt_to_capital      = EXCLUDED.lt_debt_to_capital,
     -- Cash Flow
     cfo_fy0                 = EXCLUDED.cfo_fy0,
     capex_fy0               = EXCLUDED.capex_fy0,
@@ -751,6 +831,9 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_growth_3y_cagr  = EXCLUDED.revenue_growth_3y_cagr,
     earnings_growth_1y      = EXCLUDED.earnings_growth_1y,
     earnings_growth_3y_cagr = EXCLUDED.earnings_growth_3y_cagr,
+    ebitda_growth_1y        = EXCLUDED.ebitda_growth_1y,
+    fcf_growth_1y           = EXCLUDED.fcf_growth_1y,
+    eps_growth_1y           = EXCLUDED.eps_growth_1y,
     -- Returns & momentum
     return_1w               = EXCLUDED.return_1w,
     return_1m               = EXCLUDED.return_1m,
@@ -785,9 +868,35 @@ ON CONFLICT (asx_code) DO UPDATE SET
     altman_z_score          = EXCLUDED.altman_z_score,
     revenue_cagr_5y         = EXCLUDED.revenue_cagr_5y,
     eps_growth_3y_cagr      = EXCLUDED.eps_growth_3y_cagr,
+    revenue_cagr_7y         = EXCLUDED.revenue_cagr_7y,
+    revenue_cagr_10y        = EXCLUDED.revenue_cagr_10y,
+    net_income_cagr_5y      = EXCLUDED.net_income_cagr_5y,
+    eps_cagr_5y             = EXCLUDED.eps_cagr_5y,
+    ebitda_cagr_3y          = EXCLUDED.ebitda_cagr_3y,
+    ebitda_cagr_5y          = EXCLUDED.ebitda_cagr_5y,
+    fcf_cagr_3y             = EXCLUDED.fcf_cagr_3y,
+    fcf_cagr_5y             = EXCLUDED.fcf_cagr_5y,
     avg_roe_3y              = EXCLUDED.avg_roe_3y,
+    avg_roe_5y              = EXCLUDED.avg_roe_5y,
+    avg_roa_3y              = EXCLUDED.avg_roa_3y,
+    avg_roa_5y              = EXCLUDED.avg_roa_5y,
+    avg_roce_3y             = EXCLUDED.avg_roce_3y,
+    avg_roce_5y             = EXCLUDED.avg_roce_5y,
+    avg_gross_margin_3y     = EXCLUDED.avg_gross_margin_3y,
+    avg_gross_margin_5y     = EXCLUDED.avg_gross_margin_5y,
+    avg_ebitda_margin_3y    = EXCLUDED.avg_ebitda_margin_3y,
+    avg_ebitda_margin_5y    = EXCLUDED.avg_ebitda_margin_5y,
+    avg_operating_margin_3y = EXCLUDED.avg_operating_margin_3y,
+    avg_operating_margin_5y = EXCLUDED.avg_operating_margin_5y,
+    avg_net_margin_3y       = EXCLUDED.avg_net_margin_3y,
+    avg_net_margin_5y       = EXCLUDED.avg_net_margin_5y,
+    avg_eps_growth_3y       = EXCLUDED.avg_eps_growth_3y,
+    avg_eps_growth_5y       = EXCLUDED.avg_eps_growth_5y,
     dividend_cagr_3y        = EXCLUDED.dividend_cagr_3y,
     dividend_consecutive_yrs = EXCLUDED.dividend_consecutive_yrs,
+    dividend_cagr_5y        = EXCLUDED.dividend_cagr_5y,
+    bvps_cagr_3y            = EXCLUDED.bvps_cagr_3y,
+    bvps_cagr_5y            = EXCLUDED.bvps_cagr_5y,
     return_3y               = EXCLUDED.return_3y,
     return_5y               = EXCLUDED.return_5y,
     return_7y               = EXCLUDED.return_7y,

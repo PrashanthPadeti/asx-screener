@@ -105,7 +105,12 @@ class ScreenerRow(BaseModel):
     roe:              Optional[float] = None   # decimal ratio
     roa:              Optional[float] = None   # decimal ratio
     roce:             Optional[float] = None   # decimal ratio
+    roic:             Optional[float] = None   # decimal ratio
     avg_roe_3y:       Optional[float] = None   # decimal ratio
+    asset_turnover:   Optional[float] = None   # ratio
+    ocf_margin:       Optional[float] = None   # decimal ratio
+    fcf_margin:       Optional[float] = None   # decimal ratio
+    capex_intensity:  Optional[float] = None   # decimal ratio
 
     # ── Growth ───────────────────────────────────────────────────────────────
     revenue_growth_1y:       Optional[float] = None   # decimal ratio
@@ -118,10 +123,45 @@ class ScreenerRow(BaseModel):
     revenue_growth_hoh:      Optional[float] = None   # decimal ratio ★ ASX unique
     net_income_growth_hoh:   Optional[float] = None   # decimal ratio ★ ASX unique
     eps_growth_hoh:          Optional[float] = None   # decimal ratio ★ ASX unique
+    ebitda_growth_1y:        Optional[float] = None   # decimal ratio
+    fcf_growth_1y:           Optional[float] = None   # decimal ratio
+    eps_growth_1y:           Optional[float] = None   # decimal ratio
+    revenue_cagr_7y:         Optional[float] = None   # decimal ratio
+    revenue_cagr_10y:        Optional[float] = None   # decimal ratio
+    net_income_cagr_5y:      Optional[float] = None   # decimal ratio
+    eps_cagr_5y:             Optional[float] = None   # decimal ratio
+    ebitda_cagr_3y:          Optional[float] = None   # decimal ratio
+    ebitda_cagr_5y:          Optional[float] = None   # decimal ratio
+    fcf_cagr_3y:             Optional[float] = None   # decimal ratio
+    fcf_cagr_5y:             Optional[float] = None   # decimal ratio
+    dividend_cagr_5y:        Optional[float] = None   # decimal ratio
+    bvps_cagr_3y:            Optional[float] = None   # decimal ratio
+    bvps_cagr_5y:            Optional[float] = None   # decimal ratio
+
+    # ── Rolling Averages ─────────────────────────────────────────────────────
+    avg_roe_5y:              Optional[float] = None   # decimal ratio
+    avg_roa_3y:              Optional[float] = None   # decimal ratio
+    avg_roa_5y:              Optional[float] = None   # decimal ratio
+    avg_roce_3y:             Optional[float] = None   # decimal ratio
+    avg_roce_5y:             Optional[float] = None   # decimal ratio
+    avg_gross_margin_3y:     Optional[float] = None   # decimal ratio
+    avg_gross_margin_5y:     Optional[float] = None   # decimal ratio
+    avg_ebitda_margin_3y:    Optional[float] = None   # decimal ratio
+    avg_ebitda_margin_5y:    Optional[float] = None   # decimal ratio
+    avg_operating_margin_3y: Optional[float] = None   # decimal ratio
+    avg_operating_margin_5y: Optional[float] = None   # decimal ratio
+    avg_net_margin_3y:       Optional[float] = None   # decimal ratio
+    avg_net_margin_5y:       Optional[float] = None   # decimal ratio
+    avg_eps_growth_3y:       Optional[float] = None   # decimal ratio
+    avg_eps_growth_5y:       Optional[float] = None   # decimal ratio
 
     # ── Balance Sheet ────────────────────────────────────────────────────────
     debt_to_equity:      Optional[float] = None
     current_ratio:       Optional[float] = None
+    debt_to_assets:      Optional[float] = None
+    lt_debt_to_capital:  Optional[float] = None
+    net_debt_to_ebitda:  Optional[float] = None   # ratio (x)
+    interest_coverage:   Optional[float] = None   # ratio (x)
     net_debt:            Optional[float] = None   # AUD millions
     total_debt:          Optional[float] = None   # AUD millions
     book_value_per_share:Optional[float] = None   # AUD

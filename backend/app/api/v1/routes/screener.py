@@ -90,6 +90,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "payout_ratio":             {"col": "u.payout_ratio",             "scale": 0.01, "type": "number", "label": "Payout Ratio %",            "unit": "%",   "cat": "Dividends"},  # TODO: fix eps in annual_pnl
     "dps":                      {"col": "u.dps_ttm",                  "scale": 1,    "type": "number", "label": "DPS TTM (AUD)",             "unit": "AUD", "cat": "Dividends"},   # col=u.dps_ttm
     "dividend_cagr_3y":         {"col": "u.dividend_cagr_3y",         "scale": 0.01, "type": "number", "label": "Dividend CAGR 3Y %",        "unit": "%",   "cat": "Dividends"},
+    "dividend_cagr_5y":         {"col": "u.dividend_cagr_5y",         "scale": 0.01, "type": "number", "label": "Dividend CAGR 5Y %",        "unit": "%",   "cat": "Dividends"},
     "dividend_consecutive_yrs": {"col": "u.dividend_consecutive_yrs", "scale": 1,    "type": "number", "label": "Consecutive Dividend Yrs",  "unit": "yrs", "cat": "Dividends"},
 
     # ── Profitability ─────────────────────────────────────────────────────────
@@ -104,8 +105,11 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "avg_roic_3y":              {"col": "u.avg_roic_3y",              "scale": 0.01, "type": "number", "label": "Avg ROIC 3Y %",             "unit": "%",   "cat": "Profitability"},
     "avg_roic_5y":              {"col": "u.avg_roic_5y",              "scale": 0.01, "type": "number", "label": "Avg ROIC 5Y %",             "unit": "%",   "cat": "Profitability"},
     "capital_efficiency_score": {"col": "u.capital_efficiency_score", "scale": 1,    "type": "number", "label": "Capital Efficiency Score",  "unit": "",    "cat": "Profitability"},
-    "roic":                     {"col": "u.roic",                     "scale": 0.01, "type": "number", "label": "ROIC %",                    "unit": "%",   "cat": "Profitability"},  # TODO: add to screener.universe schema
-    "asset_turnover":           {"col": "u.asset_turnover",           "scale": 1,    "type": "number", "label": "Asset Turnover",            "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
+    "roic":                     {"col": "u.roic",                     "scale": 0.01, "type": "number", "label": "ROIC %",                    "unit": "%",   "cat": "Profitability"},
+    "asset_turnover":           {"col": "u.asset_turnover",           "scale": 1,    "type": "number", "label": "Asset Turnover",            "unit": "x",   "cat": "Profitability"},
+    "ocf_margin":               {"col": "u.ocf_margin",               "scale": 0.01, "type": "number", "label": "OCF Margin %",              "unit": "%",   "cat": "Profitability"},
+    "fcf_margin":               {"col": "u.fcf_margin",               "scale": 0.01, "type": "number", "label": "FCF Margin %",              "unit": "%",   "cat": "Profitability"},
+    "capex_intensity":          {"col": "u.capex_intensity",          "scale": 0.01, "type": "number", "label": "Capex Intensity %",         "unit": "%",   "cat": "Profitability"},
     "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number", "label": "Inventory Turnover",        "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
 
     # ── Per-Share ─────────────────────────────────────────────────────────────
@@ -123,13 +127,25 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "earnings_growth_1y":       {"col": "u.earnings_growth_1y",       "scale": 0.01, "type": "number", "label": "Earnings Growth 1Y %",     "unit": "%",   "cat": "Growth"},
     "earnings_growth_3y_cagr":  {"col": "u.earnings_growth_3y_cagr",  "scale": 0.01, "type": "number", "label": "Earnings CAGR 3Y %",       "unit": "%",   "cat": "Growth"},
     "eps_growth_3y_cagr":       {"col": "u.eps_growth_3y_cagr",       "scale": 0.01, "type": "number", "label": "EPS CAGR 3Y %",            "unit": "%",   "cat": "Growth"},
-    "eps_cagr_5y":              {"col": "u.eps_cagr_5y",              "scale": 0.01, "type": "number", "label": "EPS CAGR 5Y %",            "unit": "%",   "cat": "Growth"},  # TODO: add to screener.universe schema
+    "eps_cagr_5y":              {"col": "u.eps_cagr_5y",              "scale": 0.01, "type": "number", "label": "EPS CAGR 5Y %",            "unit": "%",   "cat": "Growth"},
     "revenue_growth_yoy_q":     {"col": "u.revenue_growth_yoy_q",     "scale": 0.01, "type": "number", "label": "Revenue Growth YoY Q %",   "unit": "%",   "cat": "Growth"},
     "eps_growth_yoy_q":         {"col": "u.eps_growth_yoy_q",         "scale": 0.01, "type": "number", "label": "EPS Growth YoY Q %",       "unit": "%",   "cat": "Growth"},
     "revenue_growth_hoh":       {"col": "u.revenue_growth_hoh",       "scale": 0.01, "type": "number", "label": "Revenue Growth HoH % ★",  "unit": "%",   "cat": "Growth"},
     "net_income_growth_hoh":    {"col": "u.net_income_growth_hoh",    "scale": 0.01, "type": "number", "label": "Net Income Growth HoH % ★","unit": "%",   "cat": "Growth"},
     "eps_growth_hoh":           {"col": "u.eps_growth_hoh",           "scale": 0.01, "type": "number", "label": "EPS Growth HoH % ★",      "unit": "%",   "cat": "Growth"},
     "net_income_growth_yoy_q":  {"col": "u.net_income_growth_yoy_q",  "scale": 0.01, "type": "number", "label": "Net Income Growth YoY Q %","unit": "%",   "cat": "Growth"},
+    "ebitda_growth_1y":         {"col": "u.ebitda_growth_1y",         "scale": 0.01, "type": "number", "label": "EBITDA Growth 1Y %",        "unit": "%",   "cat": "Growth"},
+    "fcf_growth_1y":            {"col": "u.fcf_growth_1y",            "scale": 0.01, "type": "number", "label": "FCF Growth 1Y %",           "unit": "%",   "cat": "Growth"},
+    "eps_growth_1y":            {"col": "u.eps_growth_1y",            "scale": 0.01, "type": "number", "label": "EPS Growth 1Y %",           "unit": "%",   "cat": "Growth"},
+    "revenue_cagr_7y":          {"col": "u.revenue_cagr_7y",          "scale": 0.01, "type": "number", "label": "Revenue CAGR 7Y %",         "unit": "%",   "cat": "Growth"},
+    "revenue_cagr_10y":         {"col": "u.revenue_cagr_10y",         "scale": 0.01, "type": "number", "label": "Revenue CAGR 10Y %",        "unit": "%",   "cat": "Growth"},
+    "net_income_cagr_5y":       {"col": "u.net_income_cagr_5y",       "scale": 0.01, "type": "number", "label": "Net Income CAGR 5Y %",      "unit": "%",   "cat": "Growth"},
+    "ebitda_cagr_3y":           {"col": "u.ebitda_cagr_3y",           "scale": 0.01, "type": "number", "label": "EBITDA CAGR 3Y %",          "unit": "%",   "cat": "Growth"},
+    "ebitda_cagr_5y":           {"col": "u.ebitda_cagr_5y",           "scale": 0.01, "type": "number", "label": "EBITDA CAGR 5Y %",          "unit": "%",   "cat": "Growth"},
+    "fcf_cagr_3y":              {"col": "u.fcf_cagr_3y",              "scale": 0.01, "type": "number", "label": "FCF CAGR 3Y %",             "unit": "%",   "cat": "Growth"},
+    "fcf_cagr_5y":              {"col": "u.fcf_cagr_5y",              "scale": 0.01, "type": "number", "label": "FCF CAGR 5Y %",             "unit": "%",   "cat": "Growth"},
+    "bvps_cagr_3y":             {"col": "u.bvps_cagr_3y",             "scale": 0.01, "type": "number", "label": "BVPS CAGR 3Y %",            "unit": "%",   "cat": "Growth"},
+    "bvps_cagr_5y":             {"col": "u.bvps_cagr_5y",             "scale": 0.01, "type": "number", "label": "BVPS CAGR 5Y %",            "unit": "%",   "cat": "Growth"},
     "momentum_3m":              {"col": "u.momentum_3m",              "scale": 0.01, "type": "number", "label": "Price Momentum 3M %",      "unit": "%",   "cat": "Growth"},
     "momentum_6m":              {"col": "u.momentum_6m",              "scale": 0.01, "type": "number", "label": "Price Momentum 6M %",      "unit": "%",   "cat": "Growth"},
 
@@ -137,11 +153,13 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "debt_to_equity":        {"col": "u.debt_to_equity",       "scale": 1,    "type": "number", "label": "Debt / Equity",               "unit": "x",    "cat": "Financial Health"},
     "current_ratio":         {"col": "u.current_ratio",        "scale": 1,    "type": "number", "label": "Current Ratio",               "unit": "x",    "cat": "Financial Health"},
     "quick_ratio":           {"col": "u.quick_ratio",          "scale": 1,    "type": "number", "label": "Quick Ratio",                 "unit": "x",    "cat": "Financial Health"},  # TODO: add to screener.universe schema
-    "interest_coverage":     {"col": "u.interest_coverage",    "scale": 1,    "type": "number", "label": "Interest Coverage",           "unit": "x",    "cat": "Financial Health"},  # TODO: add to screener.universe schema
+    "interest_coverage":     {"col": "u.interest_coverage",    "scale": 1,    "type": "number", "label": "Interest Coverage",           "unit": "x",    "cat": "Financial Health"},
+    "debt_to_assets":        {"col": "u.debt_to_assets",       "scale": 1,    "type": "number", "label": "Debt / Assets",               "unit": "x",    "cat": "Financial Health"},
+    "lt_debt_to_capital":    {"col": "u.lt_debt_to_capital",   "scale": 1,    "type": "number", "label": "LT Debt / Capital",           "unit": "x",    "cat": "Financial Health"},
     "net_debt":              {"col": "u.net_debt",             "scale": 1,    "type": "number", "label": "Net Debt (AUD M)",            "unit": "AUD M","cat": "Financial Health"},
     "total_debt":            {"col": "u.total_debt",           "scale": 1,    "type": "number", "label": "Total Debt (AUD M)",          "unit": "AUD M","cat": "Financial Health"},
     "debt_to_ebitda":        {"col": "u.debt_to_ebitda",       "scale": 1,    "type": "number", "label": "Debt / EBITDA",               "unit": "x",    "cat": "Financial Health"},  # TODO: add to screener.universe schema
-    "net_debt_to_ebitda":    {"col": "u.net_debt_to_ebitda",   "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",           "unit": "x",    "cat": "Financial Health"},  # TODO: add to screener.universe schema
+    "net_debt_to_ebitda":    {"col": "u.net_debt_to_ebitda",   "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",           "unit": "x",    "cat": "Financial Health"},
     "cash_conversion_cycle": {"col": "u.cash_conversion_cycle","scale": 1,    "type": "number", "label": "Cash Conversion Cycle (days)","unit": "days", "cat": "Financial Health"},  # TODO: add to screener.universe schema
     "fcf_fy0":               {"col": "u.fcf_fy0",              "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)",      "unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":               {"col": "u.cfo_fy0",              "scale": 1,    "type": "number", "label": "Operating CF (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
@@ -163,6 +181,23 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "analyst_count":           {"col": "u.analyst_count",            "scale": 1,    "type": "number", "label": "Analyst Count",              "unit": "",    "cat": "Quality"},   # TODO: populate analyst_ratings
     "analyst_buy_pct":         {"col": "u.analyst_buy_pct",          "scale": 1,    "type": "number", "label": "Analyst Buy %",              "unit": "%",   "cat": "Quality"},   # TODO: populate analyst_ratings
     "analyst_consensus_score": {"col": "u.analyst_consensus_score",  "scale": 1,    "type": "number", "label": "Analyst Consensus Score",    "unit": "",    "cat": "Quality"},   # TODO: populate analyst_ratings
+
+    # ── Quality / Rolling Averages ────────────────────────────────────────────
+    "avg_roe_5y":              {"col": "u.avg_roe_5y",              "scale": 0.01, "type": "number", "label": "Avg ROE 5Y %",              "unit": "%",   "cat": "Quality"},
+    "avg_roa_3y":              {"col": "u.avg_roa_3y",              "scale": 0.01, "type": "number", "label": "Avg ROA 3Y %",              "unit": "%",   "cat": "Quality"},
+    "avg_roa_5y":              {"col": "u.avg_roa_5y",              "scale": 0.01, "type": "number", "label": "Avg ROA 5Y %",              "unit": "%",   "cat": "Quality"},
+    "avg_roce_3y":             {"col": "u.avg_roce_3y",             "scale": 0.01, "type": "number", "label": "Avg ROCE 3Y %",             "unit": "%",   "cat": "Quality"},
+    "avg_roce_5y":             {"col": "u.avg_roce_5y",             "scale": 0.01, "type": "number", "label": "Avg ROCE 5Y %",             "unit": "%",   "cat": "Quality"},
+    "avg_gross_margin_3y":     {"col": "u.avg_gross_margin_3y",     "scale": 0.01, "type": "number", "label": "Avg Gross Margin 3Y %",     "unit": "%",   "cat": "Quality"},
+    "avg_gross_margin_5y":     {"col": "u.avg_gross_margin_5y",     "scale": 0.01, "type": "number", "label": "Avg Gross Margin 5Y %",     "unit": "%",   "cat": "Quality"},
+    "avg_ebitda_margin_3y":    {"col": "u.avg_ebitda_margin_3y",    "scale": 0.01, "type": "number", "label": "Avg EBITDA Margin 3Y %",    "unit": "%",   "cat": "Quality"},
+    "avg_ebitda_margin_5y":    {"col": "u.avg_ebitda_margin_5y",    "scale": 0.01, "type": "number", "label": "Avg EBITDA Margin 5Y %",    "unit": "%",   "cat": "Quality"},
+    "avg_operating_margin_3y": {"col": "u.avg_operating_margin_3y", "scale": 0.01, "type": "number", "label": "Avg Op Margin 3Y %",        "unit": "%",   "cat": "Quality"},
+    "avg_operating_margin_5y": {"col": "u.avg_operating_margin_5y", "scale": 0.01, "type": "number", "label": "Avg Op Margin 5Y %",        "unit": "%",   "cat": "Quality"},
+    "avg_net_margin_3y":       {"col": "u.avg_net_margin_3y",       "scale": 0.01, "type": "number", "label": "Avg Net Margin 3Y %",       "unit": "%",   "cat": "Quality"},
+    "avg_net_margin_5y":       {"col": "u.avg_net_margin_5y",       "scale": 0.01, "type": "number", "label": "Avg Net Margin 5Y %",       "unit": "%",   "cat": "Quality"},
+    "avg_eps_growth_3y":       {"col": "u.avg_eps_growth_3y",       "scale": 0.01, "type": "number", "label": "Avg EPS Growth 3Y %",       "unit": "%",   "cat": "Quality"},
+    "avg_eps_growth_5y":       {"col": "u.avg_eps_growth_5y",       "scale": 0.01, "type": "number", "label": "Avg EPS Growth 5Y %",       "unit": "%",   "cat": "Quality"},
 
     # ── Technicals ────────────────────────────────────────────────────────────
     "rsi_14":              {"col": "u.rsi_14",        "scale": 1,    "type": "number",  "label": "RSI (14)",                "unit": "",    "cat": "Technicals"},
@@ -274,6 +309,9 @@ SORTABLE_COLS: dict[str, str] = {
     "avg_roic_3y":        "u.avg_roic_3y",
     "avg_roic_5y":        "u.avg_roic_5y",
     "capital_efficiency_score": "u.capital_efficiency_score",
+    "ocf_margin":         "u.ocf_margin",
+    "fcf_margin":         "u.fcf_margin",
+    "capex_intensity":    "u.capex_intensity",
     # Per-Share
     "eps":                "u.eps_fy0",
     "eps_fy0":            "u.eps_fy0",
@@ -288,17 +326,33 @@ SORTABLE_COLS: dict[str, str] = {
     "earnings_growth_1y": "u.earnings_growth_1y",
     "earnings_growth_3y_cagr": "u.earnings_growth_3y_cagr",
     "eps_growth_3y_cagr": "u.eps_growth_3y_cagr",
+    "eps_cagr_5y":        "u.eps_cagr_5y",
     "revenue_growth_yoy_q": "u.revenue_growth_yoy_q",
     "eps_growth_yoy_q":   "u.eps_growth_yoy_q",
     "revenue_growth_hoh": "u.revenue_growth_hoh",
     "net_income_growth_hoh": "u.net_income_growth_hoh",
     "eps_growth_hoh":     "u.eps_growth_hoh",
     "net_income_growth_yoy_q": "u.net_income_growth_yoy_q",
+    "ebitda_growth_1y":   "u.ebitda_growth_1y",
+    "fcf_growth_1y":      "u.fcf_growth_1y",
+    "eps_growth_1y":      "u.eps_growth_1y",
+    "revenue_cagr_7y":    "u.revenue_cagr_7y",
+    "revenue_cagr_10y":   "u.revenue_cagr_10y",
+    "net_income_cagr_5y": "u.net_income_cagr_5y",
+    "ebitda_cagr_3y":     "u.ebitda_cagr_3y",
+    "ebitda_cagr_5y":     "u.ebitda_cagr_5y",
+    "fcf_cagr_3y":        "u.fcf_cagr_3y",
+    "fcf_cagr_5y":        "u.fcf_cagr_5y",
+    "dividend_cagr_5y":   "u.dividend_cagr_5y",
+    "bvps_cagr_3y":       "u.bvps_cagr_3y",
+    "bvps_cagr_5y":       "u.bvps_cagr_5y",
     "momentum_3m":        "u.momentum_3m",
     "momentum_6m":        "u.momentum_6m",
     # Financial Health
     "debt_to_equity":     "u.debt_to_equity",
     "current_ratio":      "u.current_ratio",
+    "debt_to_assets":     "u.debt_to_assets",
+    "lt_debt_to_capital": "u.lt_debt_to_capital",
     "net_debt":           "u.net_debt",
     "total_debt":         "u.total_debt",
     "fcf_fy0":            "u.fcf_fy0",
@@ -319,6 +373,22 @@ SORTABLE_COLS: dict[str, str] = {
     "analyst_count":      "u.analyst_count",
     "analyst_buy_pct":    "u.analyst_buy_pct",
     "analyst_consensus_score": "u.analyst_consensus_score",
+    # Quality / Rolling Averages
+    "avg_roe_5y":              "u.avg_roe_5y",
+    "avg_roa_3y":              "u.avg_roa_3y",
+    "avg_roa_5y":              "u.avg_roa_5y",
+    "avg_roce_3y":             "u.avg_roce_3y",
+    "avg_roce_5y":             "u.avg_roce_5y",
+    "avg_gross_margin_3y":     "u.avg_gross_margin_3y",
+    "avg_gross_margin_5y":     "u.avg_gross_margin_5y",
+    "avg_ebitda_margin_3y":    "u.avg_ebitda_margin_3y",
+    "avg_ebitda_margin_5y":    "u.avg_ebitda_margin_5y",
+    "avg_operating_margin_3y": "u.avg_operating_margin_3y",
+    "avg_operating_margin_5y": "u.avg_operating_margin_5y",
+    "avg_net_margin_3y":       "u.avg_net_margin_3y",
+    "avg_net_margin_5y":       "u.avg_net_margin_5y",
+    "avg_eps_growth_3y":       "u.avg_eps_growth_3y",
+    "avg_eps_growth_5y":       "u.avg_eps_growth_5y",
     # Technicals
     "rsi_14":             "u.rsi_14",
     "adx_14":             "u.adx_14",

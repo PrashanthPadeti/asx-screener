@@ -500,6 +500,9 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # Derive here the same way as EPS: te in AUD millions, shares count.
         if bvps is None and te is not None and shares is not None and shares > 0:
             bvps = round(te / (shares / 1_000_000), 4)
+        # Write back so cn("book_value_per_share", n) can find it in prior years
+        if bvps is not None:
+            yearly[i]["book_value_per_share"] = bvps
 
         # Stored margins (preferred) or compute from P&L
         gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)

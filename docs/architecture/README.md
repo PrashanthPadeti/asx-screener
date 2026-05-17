@@ -1,55 +1,22 @@
-# Data Platform Architecture — Document Index
+# Data Platform Architecture
 
-This directory contains the authoritative architecture standards for all projects built
-on the shared data platform. Every project (ASX Screener, India Nifty Screener,
-US Screener, Charting, and any future projects) must follow these standards.
+The authoritative architecture documentation has moved to the shared platform docs repository:
 
-## Documents
+## 👉 https://github.com/PrashanthPadeti/data-platform-docs
 
-| # | Document | Purpose |
-|---|---|---|
-| 01 | [Platform Overview](01_platform_overview.md) | Full architecture, all 4 projects, layer definitions |
-| 02 | [Bronze Layer — Raw Zone Guide](02_bronze_layer_guide.md) | How to read/write the shared data lake |
-| 03 | [Naming Conventions](03_naming_conventions.md) | Schema, table, column, file, and code naming rules |
-| 04 | [Starting a New Project](04_new_project_checklist.md) | Step-by-step checklist for bootstrapping a new project |
-| 05 | [Pipeline Development Standards](05_pipeline_standards.md) | How to write ingestion, transform, and compute jobs |
+---
 
-## Quick Reference
+All architecture standards, naming conventions, new project checklists, and pipeline
+standards are maintained there — not in this repo.
 
-### The One Rule
-> **All projects share the Bronze Raw Zone. After the Raw Zone, every project is fully independent.**
-> Changes in one project must never affect another.
+| Document | Link |
+|---|---|
+| Platform Overview | [01_platform_overview.md](https://github.com/PrashanthPadeti/data-platform-docs/blob/main/docs/01_platform_overview.md) |
+| Bronze Layer Guide | [02_bronze_layer_guide.md](https://github.com/PrashanthPadeti/data-platform-docs/blob/main/docs/02_bronze_layer_guide.md) |
+| Naming Conventions | [03_naming_conventions.md](https://github.com/PrashanthPadeti/data-platform-docs/blob/main/docs/03_naming_conventions.md) |
+| New Project Checklist | [04_new_project_checklist.md](https://github.com/PrashanthPadeti/data-platform-docs/blob/main/docs/04_new_project_checklist.md) |
+| Pipeline Standards | [05_pipeline_standards.md](https://github.com/PrashanthPadeti/data-platform-docs/blob/main/docs/05_pipeline_standards.md) |
 
-### Project → Schema Mapping
-
-| Project | Staging | Market Transform | Financials | Application |
-|---|---|---|---|---|
-| ASX Screener | `stg_au.*` | `mkt_au.*` | `fin_au.*` | `screener_au.*` |
-| India Nifty Screener | `stg_in.*` | `mkt_in.*` | `fin_in.*` | `screener_in.*` |
-| US Screener | `stg_us.*` | `mkt_us.*` | `fin_us.*` | `screener_us.*` |
-| Charting | `stg_charts.*` | `charts_mkt.*` | — | `charts.*` |
-| Shared Infra | — | — | — | `users.*` `notifications.*` `ai.*` |
-
-### Raw Zone Path
-
-```
-/opt/data-lake/raw/eodhd/exchange=AU/       ← ASX
-/opt/data-lake/raw/eodhd/exchange=NSE/      ← India NSE
-/opt/data-lake/raw/eodhd/exchange=BSE/      ← India BSE
-/opt/data-lake/raw/eodhd/exchange=NYSE/     ← US NYSE
-/opt/data-lake/raw/eodhd/exchange=NASDAQ/   ← US NASDAQ
-/opt/data-lake/raw/asic/                    ← ASX short positions
-/opt/data-lake/raw/nse-india/               ← India NSE direct feeds
-/opt/data-lake/raw/sec/                     ← US SEC EDGAR
-/opt/data-lake/raw/finra/                   ← US FINRA short interest
-```
-
-## Ownership
-
-- **Bronze Layer / Data Lake**: Platform team (shared)
-- **ASX Screener**: ASX Screener team
-- **India Nifty Screener**: India Screener team
-- **US Screener**: US Screener team
-- **Charting**: Charting team
-
-Questions about the platform architecture → update these docs and notify all teams.
+To propose a change to the platform architecture, open a PR in
+[data-platform-docs](https://github.com/PrashanthPadeti/data-platform-docs) —
+not in this repo.

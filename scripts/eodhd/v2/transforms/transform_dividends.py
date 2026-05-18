@@ -1,8 +1,8 @@
 """
-Transform: staging.dividends → market.dividends
+Transform: staging_au.dividends → market.dividends
 ================================================
 Upserts all dividend records from staging into market.dividends.
-staging.dividends now captures: value, unadjustedValue, currency,
+staging_au.dividends now captures: value, unadjustedValue, currency,
 period (Final/Interim/Special), declarationDate, recordDate,
 paymentDate, franking_pct — all mapped to market.dividends columns.
 
@@ -52,7 +52,7 @@ def main():
         cur.execute(f"""
             SELECT asx_code, date, dividend, currency,
                    period, declaration_date, record_date, payment_date, franking_pct
-            FROM staging.dividends
+            FROM staging_au.dividends
             WHERE asx_code IN ({placeholders})
             ORDER BY asx_code, date
         """, [c.upper() for c in args.codes])
@@ -60,7 +60,7 @@ def main():
         cur.execute("""
             SELECT asx_code, date, dividend, currency,
                    period, declaration_date, record_date, payment_date, franking_pct
-            FROM staging.dividends
+            FROM staging_au.dividends
             ORDER BY asx_code, date
         """)
 

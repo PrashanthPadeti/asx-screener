@@ -17,7 +17,7 @@ One denormalised row per stock, covering:
   - Multi-year metrics         (market.yearly_metrics  — latest FY)
   - Latest-quarter growth      (market.quarterly_metrics — latest quarter)
   - Analyst ratings            (market.analyst_ratings)
-  - Shares / ownership         (staging.shares_stats)
+  - Shares / ownership         (staging_au.shares_stats)
 
 COALESCE priority for overlapping fields:
   market.computed_metrics  (daily, freshest)
@@ -759,7 +759,7 @@ LEFT JOIN LATERAL (
         shares_outstanding::BIGINT,
         percent_insiders,
         percent_institutions
-    FROM staging.shares_stats
+    FROM staging_au.shares_stats
     WHERE asx_code = c.asx_code
     LIMIT 1
 ) ss ON TRUE

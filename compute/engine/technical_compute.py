@@ -156,7 +156,7 @@ def fetch_ohlcv(cur, asx_code: str) -> pd.DataFrame:
 
 def fetch_shares(cur, asx_code: str) -> Optional[float]:
     cur.execute("""
-        SELECT shares_outstanding FROM staging.shares_stats
+        SELECT shares_outstanding FROM staging_au.shares_stats
         WHERE asx_code = %s LIMIT 1
     """, [asx_code])
     row = cur.fetchone()

@@ -1,5 +1,5 @@
 """
-Transform: staging.eod_prices → market.daily_prices
+Transform: staging_au.eod_prices → market.daily_prices
 =====================================================
 Converts staging DATE rows to TIMESTAMPTZ (ASX market close = 16:00 AEST = 06:00 UTC)
 and upserts into the TimescaleDB hypertable.
@@ -64,7 +64,7 @@ def transform_prices_for_code(cur, code: str, from_date: str | None, to_date: st
     where = "WHERE " + " AND ".join(filters)
     cur.execute(f"""
         SELECT asx_code, date, open, high, low, close, adjusted_close, volume
-        FROM staging.eod_prices
+        FROM staging_au.eod_prices
         {where}
         ORDER BY date
     """, params)
@@ -113,11 +113,11 @@ def main():
     if args.codes:
         all_codes = [c.upper() for c in args.codes]
     else:
-        cur.execute("SELECT asx_code FROM staging.company_profile ORDER BY asx_code")
+        cur.execute("SELECT asx_code FROM staging_au.company_profile ORDER BY asx_code")
         all_codes = [r[0] for r in cur.fetchall()]
 
     total_codes = len(all_codes)
-    log.info(f"Transforming {total_codes:,} codes from staging.eod_prices → market.daily_prices …")
+    log.info(f"Transforming {total_codes:,} codes from staging_au.eod_prices → market.daily_prices …")
 
     total_rows = done = failed = 0
     for i, code in enumerate(all_codes, 1):

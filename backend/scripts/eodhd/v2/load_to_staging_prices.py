@@ -1,7 +1,7 @@
 """
 Staging Load — EOD Prices
 ==========================
-Reads raw EOD price files from the Raw Zone and loads them into staging.eod_prices.
+Reads raw EOD price files from the Raw Zone and loads them into staging_au.eod_prices.
 
 Handles two layouts:
   Historical (per-stock): {EXCHANGE_DIR}/eod_prices/historical/{CODE}.AU_{DATE}.json.gz
@@ -101,7 +101,7 @@ def upsert_prices(cur, rows: list[tuple]) -> int:
     if not rows:
         return 0
     execute_values(cur, """
-        INSERT INTO staging.eod_prices
+        INSERT INTO staging_au.eod_prices
             (asx_code, date, open, high, low, close, adjusted_close,
              volume, source_file)
         VALUES %s
@@ -177,7 +177,7 @@ def main():
                 continue
             try:
                 # Delete-by-date for incremental (idempotent re-run)
-                cur.execute("DELETE FROM staging.eod_prices WHERE date = %s",
+                cur.execute("DELETE FROM staging_au.eod_prices WHERE date = %s",
                             (target_date,))
                 n = load_bulk_file(cur, path)
                 conn.commit()
@@ -210,9 +210,9 @@ def main():
         log.info(f"Loading {total} historical price files from {HIST_DIR}")
 
         if is_full_run:
-            cur.execute("TRUNCATE TABLE staging.eod_prices RESTART IDENTITY")
+            cur.execute("TRUNCATE TABLE staging_au.eod_prices RESTART IDENTITY")
             conn.commit()
-            log.info("staging.eod_prices truncated.")
+            log.info("staging_au.eod_prices truncated.")
 
         for i, path in enumerate(files, 1):
             try:

@@ -1,5 +1,5 @@
 """
-Transform: staging.earnings → financials.earnings_quarterly
+Transform: staging_au.earnings → financials.earnings_quarterly
 ============================================================
 Transforms EPS actuals/estimates from staging into financials.earnings_quarterly.
 Derives beat_miss:
@@ -66,7 +66,7 @@ def main():
         placeholders = ",".join(["%s"] * len(args.codes))
         cur.execute(f"""
             SELECT asx_code, date, eps_actual, eps_estimate, eps_difference, surprise_percent
-            FROM staging.earnings
+            FROM staging_au.earnings
             WHERE period_type = 'actual'
               AND asx_code IN ({placeholders})
             ORDER BY asx_code, date
@@ -74,7 +74,7 @@ def main():
     else:
         cur.execute("""
             SELECT asx_code, date, eps_actual, eps_estimate, eps_difference, surprise_percent
-            FROM staging.earnings
+            FROM staging_au.earnings
             WHERE period_type = 'actual'
             ORDER BY asx_code, date
         """)

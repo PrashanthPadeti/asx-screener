@@ -2,7 +2,7 @@
 Sync Companies Universe from Exchange Symbol List
 ==================================================
 Ensures market.companies has a row for every ASX stock in
-staging.exchange_symbols (EODHD /exchange-symbol-list/AU).
+staging_au.exchange_symbols (EODHD /exchange-symbol-list/AU).
 
 Why:
   market.companies is normally populated by transform_companies.py, which
@@ -12,7 +12,7 @@ Why:
   universe is complete.
 
 What it does:
-  1. Reads all stocks from staging.exchange_symbols (type = 'Common Stock').
+  1. Reads all stocks from staging_au.exchange_symbols (type = 'Common Stock').
   2. Finds codes NOT already in market.companies (is_current = TRUE).
   3. Inserts a minimal market.companies row for each gap stock so the
      download and compute pipelines can pick it up.
@@ -23,7 +23,7 @@ Safe to re-run at any time — INSERT is guarded by the partial unique index
 
 Pre-requisite:
   Run download_exchange_symbols.py + load_to_staging_exchange_symbols.py first
-  to ensure staging.exchange_symbols is up to date.
+  to ensure staging_au.exchange_symbols is up to date.
 
 Usage:
     python scripts/eodhd/v2/sync_companies_from_exchange.py
@@ -73,18 +73,18 @@ def main():
     cur  = conn.cursor()
 
     # ── Step 1: check staging has data ────────────────────────────────────────
-    cur.execute("SELECT COUNT(*) FROM staging.exchange_symbols")
+    cur.execute("SELECT COUNT(*) FROM staging_au.exchange_symbols")
     staging_count = cur.fetchone()[0]
     if staging_count == 0:
         log.error(
-            "staging.exchange_symbols is empty. "
+            "staging_au.exchange_symbols is empty. "
             "Run download_exchange_symbols.py + load_to_staging_exchange_symbols.py first."
         )
         cur.close()
         conn.close()
         return
 
-    log.info(f"staging.exchange_symbols has {staging_count:,} rows")
+    log.info(f"staging_au.exchange_symbols has {staging_count:,} rows")
 
     # ── Step 2: find codes not yet in market.companies ─────────────────────────
     type_filter = "" if args.include_etfs else "AND UPPER(es.type) LIKE '%COMMON%'"
@@ -96,7 +96,7 @@ def main():
             es.type            AS stock_type,
             es.isin,
             es.currency
-        FROM staging.exchange_symbols es
+        FROM staging_au.exchange_symbols es
         WHERE es.exchange = 'AU'
           {type_filter}
           AND es.code IS NOT NULL

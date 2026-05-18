@@ -3,8 +3,8 @@ Pipeline Runner — Full EODHD Pipeline
 ======================================
 Orchestrates the end-to-end pipeline:
 
-  Stage 1: Load staging (staging.* tables from Raw Zone files)
-  Stage 2: Transform (staging.* → market.* / financials.*)
+  Stage 1: Load staging (staging_au.* tables from Raw Zone files)
+  Stage 2: Transform (staging_au.* → market.* / financials.*)
   Stage 3: Build Golden Record (screener.universe)
 
 Each stage can be run independently via --stage. Default: run all three.

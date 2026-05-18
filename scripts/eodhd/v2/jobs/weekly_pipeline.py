@@ -98,7 +98,7 @@ def main():
     run("Step 0a: ASIC download short positions", [
         PYTHON, str(ASIC / "download_short_positions.py"),
     ])
-    run("Step 0b: ASIC load → staging.short_positions", [
+    run("Step 0b: ASIC load → staging_au.short_positions", [
         PYTHON, str(ASIC / "load_to_staging_short.py"),
     ])
     run("Step 0c: ASIC transform → market.short_positions (+ back-fill short_interest)", [

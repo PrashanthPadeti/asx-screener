@@ -1,5 +1,5 @@
 """
-Transform: staging.analyst_ratings → market.analyst_ratings
+Transform: staging_au.analyst_ratings → market.analyst_ratings
 ============================================================
 Upserts analyst consensus per stock into market.analyst_ratings.
 One row per stock (snapshot table — overwritten each refresh).
@@ -50,14 +50,14 @@ def main():
         cur.execute(f"""
             SELECT asx_code, rating, target_price,
                    strong_buy, buy, hold, sell, strong_sell
-            FROM staging.analyst_ratings
+            FROM staging_au.analyst_ratings
             WHERE asx_code IN ({placeholders})
         """, [c.upper() for c in args.codes])
     else:
         cur.execute("""
             SELECT asx_code, rating, target_price,
                    strong_buy, buy, hold, sell, strong_sell
-            FROM staging.analyst_ratings
+            FROM staging_au.analyst_ratings
         """)
 
     rows = cur.fetchall()

@@ -2,9 +2,9 @@
 ASIC Short Positions — Staging Loader
 ========================================
 Reads the most recently downloaded ASIC CSV from the raw zone and
-upserts into staging.short_positions.
+upserts into staging_au.short_positions.
 
-staging.short_positions schema:
+staging_au.short_positions schema:
     report_date   DATE           (the trading date the report covers)
     asx_code      VARCHAR(10)
     short_shares  BIGINT         (gross short position in shares)
@@ -49,7 +49,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 UPSERT_SQL = """
-INSERT INTO staging.short_positions
+INSERT INTO staging_au.short_positions
     (loaded_at, source_file, report_date, asx_code,
      short_shares, total_issued, short_pct)
 VALUES %s
@@ -72,8 +72,8 @@ def parse_asic_date(s: str) -> date:
 
 
 def load_file(filepath: Path, conn) -> int:
-    """Parse the ASIC CSV and upsert into staging.short_positions. Returns row count."""
-    log.info(f"Loading {filepath.name} → staging.short_positions …")
+    """Parse the ASIC CSV and upsert into staging_au.short_positions. Returns row count."""
+    log.info(f"Loading {filepath.name} → staging_au.short_positions …")
 
     with gzip.open(filepath, "rt", encoding="utf-8-sig") as f:
         content = f.read()
@@ -122,7 +122,7 @@ def load_file(filepath: Path, conn) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Load ASIC short positions into staging.short_positions"
+        description="Load ASIC short positions into staging_au.short_positions"
     )
     parser.add_argument("--date", help="Load file for YYYY-MM-DD (default: most recent)")
     parser.add_argument("--file", help="Load a specific file path (overrides --date)")

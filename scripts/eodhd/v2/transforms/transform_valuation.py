@@ -1,9 +1,9 @@
 """
-Transform: staging.highlights + staging.valuation → market.valuation_snapshot
+Transform: staging_au.highlights + staging_au.valuation → market.valuation_snapshot
 ==============================================================================
 Merges the two staging snapshot tables into a single valuation record per stock.
-staging.highlights  → market/valuation ratios, EPS, revenue, margins
-staging.valuation   → trailing/forward PE, EV, EV/Revenue, EV/EBITDA
+staging_au.highlights  → market/valuation ratios, EPS, revenue, margins
+staging_au.valuation   → trailing/forward PE, EV, EV/Revenue, EV/EBITDA
 
 Full run: truncates market.valuation_snapshot first.
 Partial run (--codes): upsert only.
@@ -88,8 +88,8 @@ def main():
             v.enterprise_value_revenue,
             v.enterprise_value_ebitda,
             h.snapshot_date
-        FROM staging.highlights h
-        LEFT JOIN staging.valuation v ON v.asx_code = h.asx_code
+        FROM staging_au.highlights h
+        LEFT JOIN staging_au.valuation v ON v.asx_code = h.asx_code
         {code_filter}
         ORDER BY h.asx_code
     """, params)

@@ -170,7 +170,7 @@ async def run(target_date: date | None = None, dry_run: bool = False) -> None:
         # 1. Stage
         for r in rows:
             await session.execute(text("""
-                INSERT INTO staging.short_positions
+                INSERT INTO staging_au.short_positions
                     (report_date, asx_code, short_shares, total_issued, short_pct, source_file)
                 VALUES (:d, :code, :ss, :ti, :pct, :src)
                 ON CONFLICT (report_date, asx_code) DO UPDATE SET
@@ -188,7 +188,7 @@ async def run(target_date: date | None = None, dry_run: bool = False) -> None:
                 (report_date, asx_code, short_pct, short_shares, short_pct_chg_1w)
             SELECT s.report_date, s.asx_code, s.short_pct, s.short_shares,
                    s.short_pct - prev.short_pct
-            FROM staging.short_positions s
+            FROM staging_au.short_positions s
             LEFT JOIN LATERAL (
                 SELECT short_pct FROM market.short_positions p
                 WHERE p.asx_code=s.asx_code AND p.report_date < s.report_date

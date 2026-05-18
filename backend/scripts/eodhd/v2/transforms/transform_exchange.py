@@ -1,5 +1,5 @@
 """
-Transform: staging.exchange_symbols → market.exchange_list
+Transform: staging_au.exchange_symbols → market.exchange_list
 ==========================================================
 Upserts ASX exchange symbol list into market.exchange_list.
 
@@ -48,13 +48,13 @@ def main():
         placeholders = ",".join(["%s"] * len(args.codes))
         cur.execute(f"""
             SELECT code, name, country, exchange, currency, type, isin, snapshot_date
-            FROM staging.exchange_symbols
+            FROM staging_au.exchange_symbols
             WHERE code IN ({placeholders})
         """, [c.upper() for c in args.codes])
     else:
         cur.execute("""
             SELECT code, name, country, exchange, currency, type, isin, snapshot_date
-            FROM staging.exchange_symbols
+            FROM staging_au.exchange_symbols
             ORDER BY code
         """)
 

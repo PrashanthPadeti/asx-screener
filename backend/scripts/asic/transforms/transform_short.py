@@ -1,13 +1,13 @@
 """
 ASIC Short Positions — Transform
 ====================================
-staging.short_positions → market.short_positions
+staging_au.short_positions → market.short_positions
 
 Computes the week-over-week (WoW) change in short interest % for each stock
 and writes the result to market.short_positions.
 
 Logic:
-  1. Find the most recent report_date in staging.short_positions.
+  1. Find the most recent report_date in staging_au.short_positions.
   2. For each (asx_code, report_date) in that snapshot, find the prior
      snapshot (the most recent date BEFORE the current one, ≤ 14 days prior).
   3. Compute: short_pct_chg_1w = current.short_pct - prior.short_pct
@@ -81,12 +81,12 @@ ON CONFLICT (time, asx_code) DO UPDATE SET
 
 
 def get_report_date(conn, explicit_date: str | None) -> date | None:
-    """Return the report_date to process: explicit or most recent in staging."""
+    """Return the report_date to process: explicit or most recent in staging_au."""
     cur = conn.cursor()
     if explicit_date:
         target = date.fromisoformat(explicit_date)
         cur.execute(
-            "SELECT COUNT(*) FROM staging.short_positions WHERE report_date = %s",
+            "SELECT COUNT(*) FROM staging_au.short_positions WHERE report_date = %s",
             (target,)
         )
         cnt = cur.fetchone()[0]
@@ -96,7 +96,7 @@ def get_report_date(conn, explicit_date: str | None) -> date | None:
             return None
         return target
 
-    cur.execute("SELECT MAX(report_date) FROM staging.short_positions")
+    cur.execute("SELECT MAX(report_date) FROM staging_au.short_positions")
     row = cur.fetchone()
     cur.close()
     return row[0] if row else None
@@ -112,7 +112,7 @@ def transform(conn, report_date: date) -> int:
     # ── Load current snapshot ──────────────────────────────────────────────────
     cur.execute("""
         SELECT asx_code, short_pct, short_shares
-        FROM   staging.short_positions
+        FROM   staging_au.short_positions
         WHERE  report_date = %s
     """, (report_date,))
     current = {r[0]: (r[1], r[2]) for r in cur.fetchall()}
@@ -127,7 +127,7 @@ def transform(conn, report_date: date) -> int:
     # ── Find prior report date (most recent before this one, ≤ 14 days back) ──
     cur.execute("""
         SELECT DISTINCT report_date
-        FROM   staging.short_positions
+        FROM   staging_au.short_positions
         WHERE  report_date < %s
           AND  report_date >= %s - INTERVAL '14 days'
         ORDER  BY report_date DESC
@@ -140,7 +140,7 @@ def transform(conn, report_date: date) -> int:
     if prior_date:
         cur.execute("""
             SELECT asx_code, short_pct
-            FROM   staging.short_positions
+            FROM   staging_au.short_positions
             WHERE  report_date = %s
         """, (prior_date,))
         prior = {r[0]: r[1] for r in cur.fetchall()}
@@ -194,7 +194,7 @@ def transform(conn, report_date: date) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Transform staging.short_positions → market.short_positions"
+        description="Transform staging_au.short_positions → market.short_positions"
     )
     parser.add_argument(
         "--date",

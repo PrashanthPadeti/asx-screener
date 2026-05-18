@@ -2,7 +2,7 @@
 Staging Load — Exchange Symbols
 ================================
 Reads the latest exchange_symbols/{DATE}.json.gz from the Raw Zone
-and loads into staging.exchange_symbols (TRUNCATE + reload).
+and loads into staging_au.exchange_symbols (TRUNCATE + reload).
 
 Usage:
     python scripts/eodhd/v2/load_to_staging_exchange_symbols.py
@@ -94,11 +94,11 @@ def main():
     cur  = conn.cursor()
 
     # Truncate and reload
-    cur.execute("TRUNCATE TABLE staging.exchange_symbols RESTART IDENTITY")
-    log.info("staging.exchange_symbols truncated")
+    cur.execute("TRUNCATE TABLE staging_au.exchange_symbols RESTART IDENTITY")
+    log.info("staging_au.exchange_symbols truncated")
 
     execute_values(cur, """
-        INSERT INTO staging.exchange_symbols
+        INSERT INTO staging_au.exchange_symbols
             (code, name, country, exchange, currency, type, isin,
              snapshot_date, source_file)
         VALUES %s
@@ -118,7 +118,7 @@ def main():
     cur.close()
     conn.close()
 
-    log.info(f"DONE — {len(rows):,} symbols loaded into staging.exchange_symbols")
+    log.info(f"DONE — {len(rows):,} symbols loaded into staging_au.exchange_symbols")
 
 
 if __name__ == "__main__":

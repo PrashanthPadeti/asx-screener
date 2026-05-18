@@ -2,16 +2,16 @@
 Staging Load — Fundamentals
 ============================
 Reads raw fundamentals files from the Raw Zone and loads them into:
-  staging.fundamentals       (full JSON blob + key fields)
-  staging.company_profile    (General section)
-  staging.highlights         (Highlights section)
-  staging.valuation          (Valuation section)
-  staging.income_statement   (Financials.Income_Statement yearly + quarterly)
-  staging.balance_sheet      (Financials.Balance_Sheet yearly + quarterly)
-  staging.cash_flow          (Financials.Cash_Flow yearly + quarterly)
-  staging.earnings           (Earnings.History)
-  staging.analyst_ratings    (AnalystRatings)
-  staging.shares_stats       (SharesStats)
+  staging_au.fundamentals       (full JSON blob + key fields)
+  staging_au.company_profile    (General section)
+  staging_au.highlights         (Highlights section)
+  staging_au.valuation          (Valuation section)
+  staging_au.income_statement   (Financials.Income_Statement yearly + quarterly)
+  staging_au.balance_sheet      (Financials.Balance_Sheet yearly + quarterly)
+  staging_au.cash_flow          (Financials.Cash_Flow yearly + quarterly)
+  staging_au.earnings           (Earnings.History)
+  staging_au.analyst_ratings    (AnalystRatings)
+  staging_au.shares_stats       (SharesStats)
 
 Design: TRUNCATE AND RELOAD
   A full run truncates all fundamentals-derived staging tables before loading.
@@ -92,13 +92,13 @@ def st(v) -> Optional[str]:
     return str(v)[:2048]
 
 
-# ─── Insert: staging.fundamentals ─────────────────────────────────────────────
+# ─── Insert: staging_au.fundamentals ─────────────────────────────────────────────
 
 def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
                          source_file: str, checksum: str) -> int:
     general = raw_json.get("General", {})
     cur.execute("""
-        INSERT INTO staging.fundamentals
+        INSERT INTO staging_au.fundamentals
             (asx_code, snapshot_date, raw_json, general_code, general_name,
              general_sector, general_industry, updated_at_eodhd,
              source_file, checksum)
@@ -126,12 +126,12 @@ def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
     return row[0] if row else None
 
 
-# ─── Insert: staging.company_profile ──────────────────────────────────────────
+# ─── Insert: staging_au.company_profile ──────────────────────────────────────────
 
 def upsert_company_profile(cur, asx_code: str, snapshot_date: date,
                             general: dict, fund_id: int) -> None:
     cur.execute("""
-        INSERT INTO staging.company_profile
+        INSERT INTO staging_au.company_profile
             (asx_code, snapshot_date, code, type, name, exchange, currency_code,
              country_name, isin, cusip, cik, employer_id_number, fiscal_year_end,
              ipo_date, sector, industry, gic_sector, gic_group, gic_industry,
@@ -161,12 +161,12 @@ def upsert_company_profile(cur, asx_code: str, snapshot_date: date,
     ))
 
 
-# ─── Insert: staging.highlights ───────────────────────────────────────────────
+# ─── Insert: staging_au.highlights ───────────────────────────────────────────────
 
 def upsert_highlights(cur, asx_code: str, snapshot_date: date,
                        h: dict, fund_id: int) -> None:
     cur.execute("""
-        INSERT INTO staging.highlights
+        INSERT INTO staging_au.highlights
             (asx_code, snapshot_date,
              market_capitalization, ebitda, pe_ratio, peg_ratio,
              wall_street_target_price, book_value, dividend_share, dividend_yield,
@@ -199,12 +199,12 @@ def upsert_highlights(cur, asx_code: str, snapshot_date: date,
     ))
 
 
-# ─── Insert: staging.valuation ────────────────────────────────────────────────
+# ─── Insert: staging_au.valuation ────────────────────────────────────────────────
 
 def upsert_valuation(cur, asx_code: str, snapshot_date: date,
                       v: dict, fund_id: int) -> None:
     cur.execute("""
-        INSERT INTO staging.valuation
+        INSERT INTO staging_au.valuation
             (asx_code, snapshot_date, trailing_pe, forward_pe, price_sales_ttm,
              price_book_mrq, enterprise_value, enterprise_value_revenue,
              enterprise_value_ebitda, source_file)
@@ -223,12 +223,12 @@ def upsert_valuation(cur, asx_code: str, snapshot_date: date,
     ))
 
 
-# ─── Insert: staging.analyst_ratings ─────────────────────────────────────────
+# ─── Insert: staging_au.analyst_ratings ─────────────────────────────────────────
 
 def upsert_analyst_ratings(cur, asx_code: str, snapshot_date: date,
                              ar: dict, fund_id: int) -> None:
     cur.execute("""
-        INSERT INTO staging.analyst_ratings
+        INSERT INTO staging_au.analyst_ratings
             (asx_code, snapshot_date, rating, target_price,
              strong_buy, buy, hold, sell, strong_sell, source_file)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
@@ -251,12 +251,12 @@ def upsert_analyst_ratings(cur, asx_code: str, snapshot_date: date,
     ))
 
 
-# ─── Insert: staging.shares_stats ─────────────────────────────────────────────
+# ─── Insert: staging_au.shares_stats ─────────────────────────────────────────────
 
 def upsert_shares_stats(cur, asx_code: str, snapshot_date: date,
                          ss: dict, fund_id: int) -> None:
     cur.execute("""
-        INSERT INTO staging.shares_stats
+        INSERT INTO staging_au.shares_stats
             (asx_code, snapshot_date, shares_outstanding, shares_float,
              percent_insiders, percent_institutions, shares_short,
              short_ratio, short_percent_outstanding, short_percent_float,
@@ -276,7 +276,7 @@ def upsert_shares_stats(cur, asx_code: str, snapshot_date: date,
     ))
 
 
-# ─── Insert: staging.income_statement ─────────────────────────────────────────
+# ─── Insert: staging_au.income_statement ─────────────────────────────────────────
 
 def upsert_income_statement(cur, asx_code: str, periods: dict,
                              period_type: str, fund_id: int) -> int:
@@ -300,7 +300,7 @@ def upsert_income_statement(cur, asx_code: str, periods: dict,
     if not rows:
         return 0
     execute_values(cur, """
-        INSERT INTO staging.income_statement
+        INSERT INTO staging_au.income_statement
             (asx_code, date, period_type,
              total_revenue, cost_of_revenue, gross_profit,
              total_operating_expenses, operating_income, ebitda,
@@ -314,7 +314,7 @@ def upsert_income_statement(cur, asx_code: str, periods: dict,
     return len(rows)
 
 
-# ─── Insert: staging.balance_sheet ────────────────────────────────────────────
+# ─── Insert: staging_au.balance_sheet ────────────────────────────────────────────
 
 def upsert_balance_sheet(cur, asx_code: str, periods: dict,
                           period_type: str, fund_id: int) -> int:
@@ -340,7 +340,7 @@ def upsert_balance_sheet(cur, asx_code: str, periods: dict,
     if not rows:
         return 0
     execute_values(cur, """
-        INSERT INTO staging.balance_sheet
+        INSERT INTO staging_au.balance_sheet
             (asx_code, date, period_type,
              total_assets, total_current_assets,
              cash_and_short_term_investments, net_receivables, inventory,
@@ -357,7 +357,7 @@ def upsert_balance_sheet(cur, asx_code: str, periods: dict,
     return len(rows)
 
 
-# ─── Insert: staging.cash_flow ────────────────────────────────────────────────
+# ─── Insert: staging_au.cash_flow ────────────────────────────────────────────────
 
 def upsert_cash_flow(cur, asx_code: str, periods: dict,
                       period_type: str, fund_id: int) -> int:
@@ -381,7 +381,7 @@ def upsert_cash_flow(cur, asx_code: str, periods: dict,
     if not rows:
         return 0
     execute_values(cur, """
-        INSERT INTO staging.cash_flow
+        INSERT INTO staging_au.cash_flow
             (asx_code, date, period_type,
              total_cash_from_operating_activities, capital_expenditures,
              total_cash_from_investing_activities,
@@ -396,7 +396,7 @@ def upsert_cash_flow(cur, asx_code: str, periods: dict,
     return len(rows)
 
 
-# ─── Insert: staging.earnings ─────────────────────────────────────────────────
+# ─── Insert: staging_au.earnings ─────────────────────────────────────────────────
 
 def upsert_earnings(cur, asx_code: str, history: dict, fund_id: int) -> int:
     rows = []
@@ -414,7 +414,7 @@ def upsert_earnings(cur, asx_code: str, history: dict, fund_id: int) -> int:
     if not rows:
         return 0
     execute_values(cur, """
-        INSERT INTO staging.earnings
+        INSERT INTO staging_au.earnings
             (asx_code, date, period_type,
              eps_actual, eps_estimate, eps_difference, surprise_percent)
         VALUES %s
@@ -557,16 +557,16 @@ def main():
     if is_full_run:
         cur.execute("""
             TRUNCATE TABLE
-                staging.income_statement,
-                staging.balance_sheet,
-                staging.cash_flow,
-                staging.earnings,
-                staging.company_profile,
-                staging.highlights,
-                staging.valuation,
-                staging.analyst_ratings,
-                staging.shares_stats,
-                staging.fundamentals
+                staging_au.income_statement,
+                staging_au.balance_sheet,
+                staging_au.cash_flow,
+                staging_au.earnings,
+                staging_au.company_profile,
+                staging_au.highlights,
+                staging_au.valuation,
+                staging_au.analyst_ratings,
+                staging_au.shares_stats,
+                staging_au.fundamentals
             RESTART IDENTITY
         """)
         conn.commit()

@@ -5,7 +5,7 @@ Runs after ASX market close each weekday (~18:30 AEST).
 
 Steps:
   1. Download today's bulk EOD prices       → Raw Zone (.json.gz)
-  2. Load prices to staging.eod_prices      → DELETE today + INSERT
+  2. Load prices to staging_au.eod_prices      → DELETE today + INSERT
   3. Transform to market.daily_prices       → upsert --from-date TODAY
   4. Run daily compute engine               → market.computed_metrics
   4b. Run technical compute engine          → market.daily_metrics (latest date)

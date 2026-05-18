@@ -1,7 +1,7 @@
 """
 Staging Load — Splits
 ======================
-Reads per-stock split files from the Raw Zone and loads into staging.splits.
+Reads per-stock split files from the Raw Zone and loads into staging_au.splits.
 TRUNCATE + reload on full run; upsert on --codes / --from-code partial run.
 
 Usage:
@@ -44,7 +44,7 @@ def latest_file_for(code: str) -> Path | None:
 
 
 def load_splits_file(cur, path: Path) -> int:
-    """Parse one splits file and upsert into staging.splits. Returns row count."""
+    """Parse one splits file and upsert into staging_au.splits. Returns row count."""
     stem  = path.name[:-len(".json.gz")]
     code  = stem.split("_")[0].replace(".AU", "")
 
@@ -73,7 +73,7 @@ def load_splits_file(cur, path: Path) -> int:
         return 0
 
     execute_values(cur, """
-        INSERT INTO staging.splits (asx_code, date, split, source_file)
+        INSERT INTO staging_au.splits (asx_code, date, split, source_file)
         VALUES %s
         ON CONFLICT (asx_code, date) DO UPDATE SET
             split       = EXCLUDED.split,
@@ -124,9 +124,9 @@ def main():
     cur  = conn.cursor()
 
     if is_full_run:
-        cur.execute("TRUNCATE TABLE staging.splits RESTART IDENTITY")
+        cur.execute("TRUNCATE TABLE staging_au.splits RESTART IDENTITY")
         conn.commit()
-        log.info("staging.splits truncated")
+        log.info("staging_au.splits truncated")
 
     total_rows = done = failed = 0
 

@@ -1,7 +1,7 @@
 """
 Transform: staging IS/BS/CF → financials.annual_pnl / balance_sheet / cashflow
 ===============================================================================
-Processes only period_type = 'yearly' rows from staging.
+Processes only period_type = 'yearly' rows from staging_au.
 Monetary values: EODHD returns full AUD dollars → stored as AUD millions (÷ 1,000,000).
 fiscal_year: year extracted from the period end date.
 
@@ -62,7 +62,7 @@ def transform_pnl(cur, codes, fiscal_year) -> int:
             total_operating_expenses, operating_income, ebitda,
             interest_expense, income_before_tax, income_tax_expense,
             net_income, eps, eps_diluted, depreciation_amortization
-        FROM staging.income_statement
+        FROM staging_au.income_statement
         WHERE period_type = 'yearly' {filters}
         ORDER BY asx_code, date
     """, params)
@@ -167,7 +167,7 @@ def transform_balance_sheet(cur, codes, fiscal_year) -> int:
             total_liabilities, total_current_liabilities,
             short_long_term_debt_total, long_term_debt,
             total_stockholder_equity, retained_earnings, common_stock
-        FROM staging.balance_sheet
+        FROM staging_au.balance_sheet
         WHERE period_type = 'yearly' {filters}
         ORDER BY asx_code, date
     """, params)
@@ -295,7 +295,7 @@ def transform_cashflow(cur, codes, fiscal_year) -> int:
             dividends_paid,
             change_to_cash,
             free_cash_flow
-        FROM staging.cash_flow
+        FROM staging_au.cash_flow
         WHERE period_type = 'yearly' {filters}
         ORDER BY asx_code, date
     """, params)

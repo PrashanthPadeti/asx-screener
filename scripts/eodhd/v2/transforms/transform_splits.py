@@ -1,5 +1,5 @@
 """
-Transform: staging.splits → market.splits
+Transform: staging_au.splits → market.splits
 ==========================================
 Parses EODHD split ratio strings ('2:1', '1:10', etc.) into decimal ratios:
   '2:1'  → 2.0  (2-for-1 forward split)
@@ -77,14 +77,14 @@ def main():
         placeholders = ",".join(["%s"] * len(args.codes))
         cur.execute(f"""
             SELECT asx_code, date, split
-            FROM staging.splits
+            FROM staging_au.splits
             WHERE asx_code IN ({placeholders})
             ORDER BY asx_code, date
         """, [c.upper() for c in args.codes])
     else:
         cur.execute("""
             SELECT asx_code, date, split
-            FROM staging.splits
+            FROM staging_au.splits
             ORDER BY asx_code, date
         """)
 

@@ -1,7 +1,7 @@
 """
 Staging Load — Dividends
 =========================
-Reads raw dividend files from the Raw Zone and loads them into staging.dividends.
+Reads raw dividend files from the Raw Zone and loads them into staging_au.dividends.
 
 Source: {RAW_BASE}/eodhd/exchange=AU/dividends/historical/{CODE}.AU_{DATE}.json.gz
 
@@ -106,7 +106,7 @@ def load_file(cur, path: Path) -> int:
         return 0
 
     execute_values(cur, """
-        INSERT INTO staging.dividends
+        INSERT INTO staging_au.dividends
             (asx_code, date, dividend, unadjusted_value, currency,
              period, declaration_date, record_date, payment_date, franking_pct,
              source_file)
@@ -151,15 +151,15 @@ def main():
 
     total = len(files)
     is_full_run = not args.codes and not args.from_code
-    log.info(f"Loading {total} dividend files → staging.dividends")
+    log.info(f"Loading {total} dividend files → staging_au.dividends")
 
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
 
     if is_full_run:
-        cur.execute("TRUNCATE TABLE staging.dividends RESTART IDENTITY")
+        cur.execute("TRUNCATE TABLE staging_au.dividends RESTART IDENTITY")
         conn.commit()
-        log.info("staging.dividends truncated.")
+        log.info("staging_au.dividends truncated.")
 
     done = failed = total_rows = stocks_with_divs = 0
 

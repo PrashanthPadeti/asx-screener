@@ -1,7 +1,7 @@
 """
-Transform: staging.company_profile → market.companies  (SCD Type 2)
+Transform: staging_au.company_profile → market.companies  (SCD Type 2)
 =====================================================================
-Reads the latest snapshot from staging.company_profile and applies
+Reads the latest snapshot from staging_au.company_profile and applies
 SCD Type 2 logic to market.companies:
 
   - New stock (no current row)  → INSERT with valid_from=today, is_current=TRUE
@@ -208,7 +208,7 @@ def main():
                    fiscal_year_end, ipo_date, sector, industry,
                    gic_sector, gic_group, gic_industry, gic_sub_industry,
                    description, address, phone, web_url, full_time_employees, updated_at
-            FROM staging.company_profile
+            FROM staging_au.company_profile
             WHERE asx_code IN ({placeholders})
         """, [c.upper() for c in args.codes])
     else:
@@ -218,14 +218,14 @@ def main():
                    fiscal_year_end, ipo_date, sector, industry,
                    gic_sector, gic_group, gic_industry, gic_sub_industry,
                    description, address, phone, web_url, full_time_employees, updated_at
-            FROM staging.company_profile
+            FROM staging_au.company_profile
             ORDER BY asx_code
         """)
 
     cols = [d[0] for d in cur.description]
     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
     total = len(rows)
-    log.info(f"Processing {total} companies from staging.company_profile")
+    log.info(f"Processing {total} companies from staging_au.company_profile")
 
     counts = {"new": 0, "versioned": 0, "unchanged": 0, "error": 0}
 

@@ -243,13 +243,13 @@ def fetch_annual_financials(cur, asx_code: str) -> pd.DataFrame:
 
 def fetch_current_shares(cur, asx_code: str) -> Optional[float]:
     """
-    Fetch current shares outstanding from staging.shares_stats.
+    Fetch current shares outstanding from staging_au.shares_stats.
     Used as a proxy for historical per-share calculations when
     EODHD does not provide per-share data in the income statement.
     """
     cur.execute("""
         SELECT shares_outstanding
-        FROM staging.shares_stats
+        FROM staging_au.shares_stats
         WHERE asx_code = %s
         LIMIT 1
     """, [asx_code])
@@ -418,7 +418,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
     """
     For each fiscal_year row, compute all metrics.
     prices:         full daily close history fetched once by caller.
-    current_shares: fallback shares count (from staging.shares_stats) used
+    current_shares: fallback shares count (from staging_au.shares_stats) used
                     when annual_balance_sheet.shares_outstanding is NULL —
                     EODHD does not provide per-share data for ASX income
                     statements, so we approximate EPS from net_profit / shares.

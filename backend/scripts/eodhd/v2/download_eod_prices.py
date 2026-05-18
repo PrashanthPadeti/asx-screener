@@ -110,7 +110,7 @@ def _fetch_with_retry(url: str, params: dict, handler: ErrorHandler,
 
 # ─── Historical mode ──────────────────────────────────────────────────────────
 
-def run_historical(codes: list[str], force: bool) -> None:
+def run_historical(codes: list[str], force: bool, from_date: str = DEFAULT_FROM) -> None:
     HIST_DIR.mkdir(parents=True, exist_ok=True)
     known_checksums = load_known_checksums(AUDIT_DIR)
     handler = ErrorHandler(EXCHANGE_DIR, RUN_DATE)
@@ -119,7 +119,7 @@ def run_historical(codes: list[str], force: bool) -> None:
     total = len(codes)
     done = errors = quarantined = retried = skipped = 0
 
-    log.info(f"Historical prices: {total} stocks → {HIST_DIR}")
+    log.info(f"Historical prices: {total} stocks | from: {from_date} → {HIST_DIR}")
 
     for i, code in enumerate(codes, 1):
         existing = list(HIST_DIR.glob(f"{code}.AU_{RUN_DATE}.json.gz"))
@@ -129,7 +129,7 @@ def run_historical(codes: list[str], force: bool) -> None:
             continue
 
         url    = f"{EODHD_BASE}/eod/{code}.AU"
-        params = {"api_token": EODHD_KEY, "fmt": "json", "from": DEFAULT_FROM}
+        params = {"api_token": EODHD_KEY, "fmt": "json", "from": from_date}
 
         try:
             raw = _fetch_with_retry(url, params, handler, code)
@@ -244,6 +244,8 @@ def main():
                         required=True)
     parser.add_argument("--codes",         nargs="+")
     parser.add_argument("--from-code",     help="Historical: resume from this code")
+    parser.add_argument("--from-date",     default=DEFAULT_FROM,
+                        help="Historical: fetch data from this date YYYY-MM-DD (default: 2000-01-01)")
     parser.add_argument("--limit",         type=int)
     parser.add_argument("--date",          help="Incremental: specific date YYYY-MM-DD")
     parser.add_argument("--backfill-days", type=int, default=1,
@@ -272,7 +274,7 @@ def main():
         if args.limit:
             codes = codes[:args.limit]
 
-        run_historical(codes, force=args.force_recheck)
+        run_historical(codes, force=args.force_recheck, from_date=args.from_date)
 
     else:  # incremental
         if args.date:

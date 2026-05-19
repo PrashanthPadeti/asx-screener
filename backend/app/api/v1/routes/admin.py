@@ -169,8 +169,7 @@ async def pipeline_status(
         "schedule": "Daily 5:50pm AEST",
         "type": "apscheduler",
         "job_id": "asx_index_flags",
-        "last_run": await _scalar(db, "SELECT MAX(computed_at) FROM market.asx_index_constituents") or
-                    await _scalar(db, "SELECT MAX(universe_built_at) FROM screener.universe WHERE is_asx200 = TRUE"),
+        "last_run": await _scalar(db, "SELECT last_run_at FROM meta.job_heartbeat WHERE job_id = 'asx_index_flags'"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE is_asx200 = TRUE"),
         "table": "screener.universe (is_asx200/300)",
         "description": "Mark ASX 200/300 constituent flags by market cap",

@@ -92,12 +92,17 @@ async def _update_via_eodhd(session: AsyncSession, dry_run: bool) -> bool:
                 log.info("[DRY RUN] Would set %s=TRUE for %d stocks", flag, len(codes))
             return True
 
-        # Reset all flags first
+        # Reset all flags in both tables first
         await session.execute(text("""
             UPDATE screener.universe
             SET is_asx20=FALSE, is_asx50=FALSE, is_asx100=FALSE,
                 is_asx200=FALSE, is_asx300=FALSE
             WHERE status = 'active'
+        """))
+        await session.execute(text("""
+            UPDATE market.companies
+            SET is_asx20=FALSE, is_asx50=FALSE, is_asx100=FALSE,
+                is_asx200=FALSE, is_asx300=FALSE
         """))
 
         for flag, codes in flag_to_codes.items():
@@ -105,6 +110,10 @@ async def _update_via_eodhd(session: AsyncSession, dry_run: bool) -> bool:
                 continue
             await session.execute(
                 text(f"UPDATE screener.universe SET {flag}=TRUE WHERE asx_code = ANY(:codes)"),
+                {"codes": list(codes)},
+            )
+            await session.execute(
+                text(f"UPDATE market.companies SET {flag}=TRUE WHERE asx_code = ANY(:codes)"),
                 {"codes": list(codes)},
             )
             log.info("Set %s=TRUE for %d stocks", flag, len(codes))
@@ -125,7 +134,7 @@ async def _update_via_market_cap(session: AsyncSession, dry_run: bool) -> None:
             log.info("[DRY RUN] Would mark top %d stocks by market_cap as %s", n, flag)
         return
 
-    # Single pass: compute rank once, set all flags
+    # Single pass: compute rank once, set all flags in screener.universe
     await session.execute(text("""
         WITH ranked AS (
             SELECT asx_code,
@@ -144,6 +153,20 @@ async def _update_via_market_cap(session: AsyncSession, dry_run: bool) -> None:
             is_asx300 = (r.rn <= 300)
         FROM ranked r
         WHERE u.asx_code = r.asx_code
+    """))
+
+    # Mirror flags to market.companies so universe rebuilds preserve them
+    await session.execute(text("""
+        UPDATE market.companies c
+        SET
+            is_asx20  = u.is_asx20,
+            is_asx50  = u.is_asx50,
+            is_asx100 = u.is_asx100,
+            is_asx200 = u.is_asx200,
+            is_asx300 = u.is_asx300
+        FROM screener.universe u
+        WHERE c.asx_code = u.asx_code
+          AND u.status = 'active'
     """))
 
     counts = (await session.execute(text("""

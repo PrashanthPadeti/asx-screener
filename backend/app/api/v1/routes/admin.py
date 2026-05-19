@@ -229,8 +229,7 @@ async def pipeline_status(
         "type": "interval",
         "job_id": "price_alerts",
         "last_run": await _scalar(db, """
-            SELECT MAX(sent_at) FROM users.notification_history
-            WHERE notification_type = 'price_alert'
+            SELECT last_run_at FROM app.job_heartbeat WHERE job_id = 'price_alerts'
         """),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM users.alerts WHERE is_active = TRUE"),
         "table": "users.alerts",

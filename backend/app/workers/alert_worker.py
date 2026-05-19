@@ -24,6 +24,19 @@ async def check_alerts() -> None:
             await _run_checks(db)
         except Exception as e:
             log.error(f"Alert worker error: {e}", exc_info=True)
+        finally:
+            # Always record execution time so Pipeline Monitor shows true last-run
+            try:
+                await db.execute(text("""
+                    INSERT INTO app.job_heartbeat (job_id, last_run_at, run_count)
+                    VALUES ('price_alerts', NOW(), 1)
+                    ON CONFLICT (job_id) DO UPDATE SET
+                        last_run_at = NOW(),
+                        run_count   = app.job_heartbeat.run_count + 1
+                """))
+                await db.commit()
+            except Exception as hb_err:
+                log.debug(f"Heartbeat write failed: {hb_err}")
 
 
 async def _run_checks(db: AsyncSession) -> None:

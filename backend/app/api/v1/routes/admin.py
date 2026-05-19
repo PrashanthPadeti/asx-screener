@@ -217,7 +217,7 @@ async def pipeline_status(
         "schedule": "Every 10 minutes",
         "type": "interval",
         "job_id": "asx_announcements",
-        "last_run": await _scalar(db, "SELECT MAX(released_at) FROM market.asx_announcements"),
+        "last_run": await _scalar(db, "SELECT last_run_at FROM meta.job_heartbeat WHERE job_id = 'asx_announcements'"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM market.asx_announcements"),
         "table": "market.asx_announcements",
         "description": "ASX company announcements from EODHD",

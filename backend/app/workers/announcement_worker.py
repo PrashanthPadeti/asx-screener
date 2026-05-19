@@ -30,6 +30,19 @@ async def fetch_announcements() -> None:
             await _run(db)
         except Exception as e:
             log.error(f"Announcement worker error: {e}", exc_info=True)
+        finally:
+            # Always record execution time so Pipeline Monitor shows true last-run
+            try:
+                await db.execute(text("""
+                    INSERT INTO meta.job_heartbeat (job_id, last_run_at, run_count)
+                    VALUES ('asx_announcements', NOW(), 1)
+                    ON CONFLICT (job_id) DO UPDATE SET
+                        last_run_at = NOW(),
+                        run_count   = meta.job_heartbeat.run_count + 1
+                """))
+                await db.commit()
+            except Exception as hb_err:
+                log.debug(f"Heartbeat write failed: {hb_err}")
 
 
 async def _run(db) -> None:

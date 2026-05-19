@@ -181,7 +181,7 @@ async def pipeline_status(
         "schedule": "Daily 6:30pm AEST",
         "type": "apscheduler",
         "job_id": "short_positions",
-        "last_run": await _scalar(db, "SELECT MAX(report_date) FROM market.short_positions"),
+        "last_run": await _scalar(db, "SELECT last_run_at FROM meta.job_heartbeat WHERE job_id = 'short_positions'"),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE short_pct > 0"),
         "table": "market.short_positions",
         "description": "ASIC daily short interest data (JS-rendered — currently 0 rows)",

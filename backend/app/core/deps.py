@@ -95,7 +95,10 @@ async def require_admin(
 def require_plan(minimum: str):
     """
     Dependency factory: raise HTTP 403 if the authenticated user's plan
-    is below *minimum*.
+    is below *minimum*, or HTTP 402 if their paid subscription is past_due.
+
+    Free plan always passes (no subscription required).
+    Paid plans (pro+) require subscription_status in ('active', 'trialing').
 
     Usage::
 
@@ -106,10 +109,26 @@ def require_plan(minimum: str):
     async def _check(user: dict = Depends(get_current_user)) -> dict:
         user_rank = _PLAN_RANK.get(user["plan"], 0)
         min_rank  = _PLAN_RANK.get(minimum, 0)
+
         if user_rank < min_rank:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This feature requires the '{minimum}' plan or higher.",
             )
+
+        # For paid plans, block access if subscription payment has failed
+        if min_rank > 0:
+            sub_status = user.get("subscription_status", "inactive")
+            if sub_status == "past_due":
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Your subscription payment is overdue. Please update your payment method to continue.",
+                )
+            if sub_status not in ("active", "trialing"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your subscription is inactive. Please renew to access this feature.",
+                )
+
         return user
     return _check

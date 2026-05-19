@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI):
     from app.workers.asx_companies_worker import sync_asx_companies
     from app.workers.anomaly_alert_worker import send_anomaly_alerts
     from app.workers.capital_raise_worker import scan_capital_raises
+    from app.workers.cleanup_worker import purge_expired_sessions, run_data_deletion
     from app.workers.mining_reit_worker import sync_mining_reit_metrics
 
     scheduler = AsyncIOScheduler()
@@ -140,6 +141,17 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_top5_strategy,
                       CronTrigger(day=2, hour=20, minute=0, timezone="Australia/Sydney"),
                       id="top5_strategy", replace_existing=True)
+
+    # Nightly cleanup — 2:00am AEST (low traffic window)
+    scheduler.add_job(purge_expired_sessions,
+                      CronTrigger(hour=2, minute=0, timezone="Australia/Sydney"),
+                      id="session_cleanup", replace_existing=True)
+
+    # Premium data deletion — 2:15am AEST (after session cleanup)
+    # Removes portfolios/alerts for cancelled users whose 12-month window has passed
+    scheduler.add_job(run_data_deletion,
+                      CronTrigger(hour=2, minute=15, timezone="Australia/Sydney"),
+                      id="data_deletion", replace_existing=True)
 
     # ASX companies list sync — daily at 6:00am AEST (before universe build)
     scheduler.add_job(sync_asx_companies,

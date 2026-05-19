@@ -19,6 +19,9 @@ Usage:
     # Load last N incremental days
     python scripts/eodhd/v2/load_to_staging_prices.py --mode incremental --last-days 5
 
+    # Load only files downloaded today (daily pipeline — no truncate)
+    python scripts/eodhd/v2/load_to_staging_prices.py --mode historical --run-date 2026-05-19
+
     # Load specific stocks
     python scripts/eodhd/v2/load_to_staging_prices.py --mode historical --codes BHP CBA
 """
@@ -150,6 +153,7 @@ def main():
     parser.add_argument("--codes",     nargs="+")
     parser.add_argument("--from-code")
     parser.add_argument("--limit",     type=int)
+    parser.add_argument("--run-date",  help="Historical: only load files downloaded on this date YYYY-MM-DD (no truncate)")
     parser.add_argument("--date",      help="Incremental: specific date YYYY-MM-DD")
     parser.add_argument("--last-days", type=int, help="Incremental: load last N days")
     args = parser.parse_args()
@@ -193,7 +197,9 @@ def main():
         if not HIST_DIR.exists():
             print(f"ERROR: {HIST_DIR} not found."); sys.exit(1)
 
-        if args.codes:
+        if args.run_date:
+            files = sorted(HIST_DIR.glob(f"*.AU_{args.run_date}.json.gz"))
+        elif args.codes:
             files = []
             for c in args.codes:
                 files.extend(sorted(HIST_DIR.glob(f"{c.upper()}.AU_*.json.gz")))
@@ -206,7 +212,7 @@ def main():
             files = files[:args.limit]
 
         total = len(files)
-        is_full_run = not args.codes and not args.from_code
+        is_full_run = not args.codes and not args.from_code and not args.run_date
         log.info(f"Loading {total} historical price files from {HIST_DIR}")
 
         if is_full_run:

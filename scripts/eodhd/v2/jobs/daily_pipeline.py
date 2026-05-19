@@ -1,30 +1,35 @@
 """
 Daily Pipeline — ASX Screener
 ==============================
-Runs after ASX market close each weekday (~18:30 AEST).
+Runs after ASX market close each weekday (08:30 UTC = 18:30 AEST).
 
 Steps:
-  1. Download today's bulk EOD prices       → Raw Zone (.json.gz)
-  2. Load prices to staging_au.eod_prices      → DELETE today + INSERT
-  3. Transform to market.daily_prices       → upsert --from-date TODAY
-  4. Run daily compute engine               → market.computed_metrics
-  4b. Run technical compute engine          → market.daily_metrics (latest date)
-  4c. Run half-yearly compute engine        → market.halfyearly_metrics
-  4d. Run period metrics compute engine     → market.period_metrics (H/L/AvgVol all periods)
-  5. Build screener.universe                → Golden Record
+  1.  Download today's EOD prices (per-stock, from yesterday) → Raw Zone
+  2.  Download ASIC short positions                           → Raw Zone
+  3.  Load prices → staging_au.eod_prices                    (today's files, UPSERT)
+  4.  Load short positions → staging_au.short_positions
+  5.  Transform prices → market.daily_prices                  (from yesterday)
+  6.  Transform short positions → market.short_positions
+  7.  Daily compute engine → market.computed_metrics
+  8.  Technical compute engine → market.daily_metrics
+  9.  Half-yearly compute engine → market.halfyearly_metrics
+  10. Period metrics compute engine → market.period_metrics
+  11. Build screener.universe → Golden Record
 
 Usage:
     python scripts/eodhd/v2/jobs/daily_pipeline.py
-    python scripts/eodhd/v2/jobs/daily_pipeline.py --date 2026-04-29
     python scripts/eodhd/v2/jobs/daily_pipeline.py --skip-download
+
+Crontab (08:30 UTC Mon-Fri — ~2.5 hours after ASX close):
+    30 8 * * 1-5 cd /opt/asx-screener && /opt/asx-screener/asx-venv/bin/python scripts/eodhd/v2/jobs/daily_pipeline.py >> /opt/asx-screener/logs/daily_pipeline.log 2>&1
 """
 
 import argparse
 import logging
-import os
 import subprocess
 import sys
-from datetime import date
+import time
+from datetime import date, timedelta
 from pathlib import Path
 
 logging.basicConfig(
@@ -34,88 +39,111 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parents[4]   # /opt/asx-screener
-SCRIPTS  = BASE_DIR / "scripts" / "eodhd" / "v2"
-COMPUTE  = BASE_DIR / "compute" / "engine"
-PYTHON   = sys.executable
+BASE_DIR  = Path(__file__).resolve().parents[4]   # /opt/asx-screener
+SCRIPTS   = BASE_DIR / "scripts" / "eodhd" / "v2"
+ASIC      = BASE_DIR / "scripts" / "asic"
+COMPUTE   = BASE_DIR / "compute" / "engine"
+PYTHON    = sys.executable
+TODAY     = date.today().isoformat()
+YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
 
 
 def run(label: str, cmd: list[str]) -> None:
-    """Run a subprocess step; exit on failure."""
     log.info(f"▶  {label}")
+    t0 = time.time()
     result = subprocess.run(cmd, cwd=BASE_DIR)
+    elapsed = time.time() - t0
     if result.returncode != 0:
-        log.error(f"✗  {label} failed (exit {result.returncode})")
+        log.error(f"✗  {label} failed (exit {result.returncode}) after {elapsed:.1f}s")
         sys.exit(result.returncode)
-    log.info(f"✓  {label} done")
+    log.info(f"✓  {label} done in {elapsed:.1f}s")
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--date",          help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--skip-download", action="store_true",
-                        help="Skip step 1 (raw download) — use existing file")
+                        help="Skip steps 1-2 (raw downloads) — use existing files")
     args = parser.parse_args()
 
-    target_date = args.date or date.today().isoformat()
-    log.info(f"Daily pipeline starting — target date: {target_date}")
+    DIVIDER = "─" * 60
+    log.info(DIVIDER)
+    log.info(f"ASX Screener — Daily Pipeline — {TODAY}")
+    log.info(DIVIDER)
+    t_start = time.time()
 
-    # ── Step 1: Download bulk EOD prices ──────────────────────────────────────
+    # ── Step 1: Download EOD prices (per-stock from yesterday) ───────────────
+    # Uses historical per-stock endpoint — bulk endpoint not available on this tier.
+    # --from-date yesterday covers Mon (gets Fri+Mon) and all weekdays correctly.
     if not args.skip_download:
-        run("Step 1: Download bulk EOD prices", [
+        run("Step 1: Download EOD prices", [
             PYTHON, str(SCRIPTS / "download_eod_prices.py"),
-            "--mode", "incremental",
-            "--date", target_date,
+            "--mode", "historical",
+            "--from-date", YESTERDAY,
         ])
     else:
         log.info("Step 1: Skipped (--skip-download)")
 
-    # ── Step 2: Load staging prices ───────────────────────────────────────────
-    run("Step 2: Load staging prices", [
+    # ── Step 2: Download ASIC short positions ─────────────────────────────────
+    # ASIC publishes with ~2-3 business day lag; idempotent if already cached.
+    if not args.skip_download:
+        run("Step 2: Download ASIC short positions", [
+            PYTHON, str(ASIC / "download_short_positions.py"),
+        ])
+    else:
+        log.info("Step 2: Skipped (--skip-download)")
+
+    # ── Step 3: Load today's price files → staging_au (UPSERT, no truncate) ──
+    run("Step 3: Load prices → staging_au", [
         PYTHON, str(SCRIPTS / "load_to_staging_prices.py"),
-        "--mode", "incremental",
-        "--date", target_date,
+        "--mode", "historical",
+        "--run-date", TODAY,
     ])
 
-    # ── Step 3: Transform to market.daily_prices ──────────────────────────────
-    run("Step 3: Transform market.daily_prices", [
+    # ── Step 4: Load short positions → staging_au ────────────────────────────
+    run("Step 4: Load short positions → staging_au", [
+        PYTHON, str(ASIC / "load_to_staging_short.py"),
+    ])
+
+    # ── Step 5: Transform prices → market.daily_prices ───────────────────────
+    run("Step 5: Transform prices → market.daily_prices", [
         PYTHON, str(SCRIPTS / "transforms" / "transform_prices.py"),
-        "--from-date", target_date,
+        "--from-date", YESTERDAY,
     ])
 
-    # ── Step 4: Daily compute engine ──────────────────────────────────────────
-    run("Step 4: Daily compute engine → market.computed_metrics", [
+    # ── Step 6: Transform short positions → market.short_positions ───────────
+    run("Step 6: Transform short positions → market.short_positions", [
+        PYTHON, str(ASIC / "transforms" / "transform_short.py"),
+    ])
+
+    # ── Step 7: Daily compute engine ──────────────────────────────────────────
+    run("Step 7: Daily compute → market.computed_metrics", [
         PYTHON, str(COMPUTE / "daily_compute.py"),
     ])
 
-    # ── Step 4b: Technical compute engine ─────────────────────────────────────
-    # Writes latest-date indicators to market.daily_metrics for all stocks.
-    # Fetches full OHLCV history per stock for warm-up accuracy; writes only
-    # the latest row (~2-3 min for all stocks).
-    run("Step 4b: Technical compute engine → market.daily_metrics", [
+    # ── Step 8: Technical compute engine ──────────────────────────────────────
+    run("Step 8: Technical compute → market.daily_metrics", [
         PYTHON, str(COMPUTE / "technical_compute.py"),
     ])
 
-    # ── Step 4c: Half-yearly compute engine ───────────────────────────────────
-    # Aggregates quarterly → half-yearly, computes margins + HoH/YoY growth.
-    # Fast (~30s) — runs weekly on Sunday but also daily to catch new quarters.
-    run("Step 4c: Half-yearly compute engine → market.halfyearly_metrics", [
+    # ── Step 9: Half-yearly compute ───────────────────────────────────────────
+    run("Step 9: Half-yearly compute → market.halfyearly_metrics", [
         PYTHON, str(COMPUTE / "halfyearly_compute.py"),
     ])
 
-    # ── Step 4d: Period metrics compute engine ────────────────────────────────
-    # Upserts H/L/AvgVol for 1D/1W/1M/3M/6M/1Y/52W into market.period_metrics.
-    # Used by the Market Signals API for accurate period-aware highs/lows.
-    run("Step 4d: Period metrics compute engine → market.period_metrics", [
+    # ── Step 10: Period metrics ────────────────────────────────────────────────
+    run("Step 10: Period metrics → market.period_metrics", [
         PYTHON, str(COMPUTE / "period_metrics_compute.py"),
     ])
 
-    # ── Step 5: Build screener.universe ───────────────────────────────────────
-    run("Step 5: Build screener.universe", [
+    # ── Step 11: Build screener.universe ──────────────────────────────────────
+    run("Step 11: Build screener.universe", [
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
     ])
 
-    log.info(f"Daily pipeline complete for {target_date}")
+    elapsed = time.time() - t_start
+    log.info(DIVIDER)
+    log.info(f"Daily pipeline complete in {elapsed / 60:.1f} min")
+    log.info(DIVIDER)
 
 
 if __name__ == "__main__":

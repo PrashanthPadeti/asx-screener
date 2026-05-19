@@ -112,7 +112,7 @@ async def pipeline_status(
         "type": "cron",
         "job_id": "weekly_fundamentals",
         "last_run": await _scalar(db, """
-            SELECT MAX(updated_at) FROM screener.universe
+            SELECT MAX(universe_built_at) FROM screener.universe
             WHERE pe_ratio IS NOT NULL OR revenue_ttm IS NOT NULL
         """),
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE pe_ratio IS NOT NULL"),

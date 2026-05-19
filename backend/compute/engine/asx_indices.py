@@ -22,11 +22,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy import text
 
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+# Load .env from backend/ directory so DATABASE_URL is available when run standalone
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 DATABASE_URL  = os.environ.get("DATABASE_URL", "")
 EODHD_API_KEY = os.environ.get("EODHD_API_KEY", "")

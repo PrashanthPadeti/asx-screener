@@ -72,10 +72,10 @@ async def pipeline_status(
         "schedule": "Weekdays 6:30pm AEST",
         "type": "cron",
         "job_id": "eod_price_download",
-        "last_run": await _scalar(db, "SELECT MAX(price_date) FROM market.daily_prices"),
+        "last_run": await _scalar(db, "SELECT MAX(time)::date FROM market.daily_prices"),
         "row_count": await _scalar(db, """
             SELECT COUNT(*) FROM market.daily_prices
-            WHERE price_date = (SELECT MAX(price_date) FROM market.daily_prices)
+            WHERE time::date = (SELECT MAX(time)::date FROM market.daily_prices)
         """),
         "table": "market.daily_prices",
         "description": "Download bulk EOD prices from EODHD → staging → market.daily_prices",

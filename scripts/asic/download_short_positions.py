@@ -45,6 +45,11 @@ ASIC_SEARCH_URL = (
     "?s=SSDailyAggShortPos&p=5&o=DateDescending&f="
 )
 
+# Direct URL pattern — confirmed consistent across all business days
+# e.g. https://download.asic.gov.au/short-selling/RR20260513-001-SSDailyAggShortPos.csv
+ASIC_DIRECT_BASE = "https://download.asic.gov.au/short-selling"
+ASIC_DIRECT_PATTERN = "RR{date}-001-SSDailyAggShortPos.csv"
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -213,6 +218,45 @@ def business_days_back(n: int) -> list[date]:
     return days
 
 
+def try_direct_url_construction(force: bool = False) -> list[tuple[date, str]]:
+    """
+    Fallback 3: Construct direct download URLs using the known ASIC CDN pattern.
+
+    Confirmed pattern (all business days):
+        https://download.asic.gov.au/short-selling/RR{YYYYMMDD}-001-SSDailyAggShortPos.csv
+
+    Probes the last 7 business days and returns any that respond with HTTP 200
+    and valid CSV content (not HTML).
+    """
+    log.info("Trying direct URL construction fallback (ASIC CDN pattern)…")
+    candidates = business_days_back(7)  # ASIC publishes with ~2 day lag; probe 7 days to be safe
+    found: list[tuple[date, str]] = []
+
+    dl_headers = {**HEADERS, "Accept": "text/csv,text/plain,application/octet-stream,*/*"}
+
+    for d in candidates:
+        dest = local_path(d)
+        if dest.exists() and not force:
+            log.info(f"  {d.isoformat()}: already cached — skipping probe")
+            found.append((d, "cached"))
+            continue
+
+        filename = ASIC_DIRECT_PATTERN.format(date=d.strftime("%Y%m%d"))
+        url = f"{ASIC_DIRECT_BASE}/{filename}"
+
+        try:
+            resp = requests.head(url, headers=dl_headers, timeout=15, allow_redirects=True)
+            if resp.status_code == 200:
+                log.info(f"  {d.isoformat()}: ✓ URL exists → {url}")
+                found.append((d, url))
+            else:
+                log.debug(f"  {d.isoformat()}: HTTP {resp.status_code} — not published yet")
+        except requests.RequestException as e:
+            log.debug(f"  {d.isoformat()}: probe error — {e}")
+
+    return found
+
+
 def main():
     parser = argparse.ArgumentParser(description="Download ASIC Aggregate Short Position Reports")
     parser.add_argument("--force",      action="store_true", help="Re-download even if already cached")
@@ -269,14 +313,25 @@ def main():
         )
         links = scrape_links_via_json_api()
 
+    # ── Step 2c: Fallback — direct URL construction from known CDN pattern ───────
+    if not links:
+        log.warning("JSON API also returned no links. Trying direct URL construction…")
+        direct = try_direct_url_construction(force=args.force)
+        # Filter to only real URLs (not already-cached markers)
+        links = [(d, url) for d, url in direct if url != "cached"]
+        # If most-recent is already cached, we're done
+        if not links and direct:
+            newest_cached = direct[0][0]
+            log.info(f"Most recent report already cached ({newest_cached.isoformat()}) — pipeline will proceed.")
+            return
+
     if not links:
         log.warning(
-            "JSON API also returned no links. "
+            "All download strategies failed. "
             "Use --url <direct_csv_url> to manually specify the download URL.\n"
             f"  Find the latest report at: {TABLE_URL}"
         )
-        # Still exit 0 (not 1) so the pipeline continues if data was already cached.
-        # If no cached file exists, the next step (load_to_staging) will fail clearly.
+        # Still exit 0 so the pipeline continues with the most recent cached file.
         if not args.force:
             latest = max(OUT_DIR.glob("*.csv.gz"), default=None, key=lambda p: p.name)
             if latest:

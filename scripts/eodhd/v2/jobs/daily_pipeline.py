@@ -62,6 +62,18 @@ def run(label: str, cmd: list[str]) -> None:
     log.info(f"✓  {label} done in {elapsed:.1f}s")
 
 
+def run_optional(label: str, cmd: list[str]) -> None:
+    """Run a step that is allowed to fail without stopping the pipeline."""
+    log.info(f"▶  {label}")
+    t0 = time.time()
+    result = subprocess.run(cmd, cwd=BASE_DIR)
+    elapsed = time.time() - t0
+    if result.returncode != 0:
+        log.warning(f"⚠  {label} failed (exit {result.returncode}) after {elapsed:.1f}s — continuing")
+    else:
+        log.info(f"✓  {label} done in {elapsed:.1f}s")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-download", action="store_true",
@@ -86,10 +98,11 @@ def main():
     else:
         log.info("Step 1: Skipped (--skip-download)")
 
-    # ── Step 2: Download ASIC short positions ─────────────────────────────────
+    # ── Step 2: Download ASIC short positions (non-fatal — page is JS-rendered) ─
     # ASIC publishes with ~2-3 business day lag; idempotent if already cached.
+    # Step is optional: a scraping failure must not block prices/compute/universe.
     if not args.skip_download:
-        run("Step 2: Download ASIC short positions", [
+        run_optional("Step 2: Download ASIC short positions", [
             PYTHON, str(ASIC / "download_short_positions.py"),
         ])
     else:
@@ -102,8 +115,8 @@ def main():
         "--run-date", TODAY,
     ])
 
-    # ── Step 4: Load short positions → staging_au ────────────────────────────
-    run("Step 4: Load short positions → staging_au", [
+    # ── Step 4: Load + transform short positions (non-fatal) ─────────────────
+    run_optional("Step 4: Load short positions → staging_au", [
         PYTHON, str(ASIC / "load_to_staging_short.py"),
     ])
 
@@ -113,8 +126,8 @@ def main():
         "--from-date", YESTERDAY,
     ])
 
-    # ── Step 6: Transform short positions → market.short_positions ───────────
-    run("Step 6: Transform short positions → market.short_positions", [
+    # ── Step 6: Transform short positions (non-fatal) ────────────────────────
+    run_optional("Step 6: Transform short positions → market.short_positions", [
         PYTHON, str(ASIC / "transforms" / "transform_short.py"),
     ])
 

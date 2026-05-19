@@ -14,7 +14,10 @@ Steps:
   8.  Technical compute engine → market.daily_metrics
   9.  Half-yearly compute engine → market.halfyearly_metrics
   10. Period metrics compute engine → market.period_metrics
-  11. Build screener.universe → Golden Record
+  11. ASX index prices → market.index_prices                  (Yahoo Finance)
+  12. ETF & fund prices → market.fund_prices                  (Yahoo Finance)
+  13. Build screener.universe → Golden Record
+  14. Market snapshots → index/sector/mover/exdiv snapshots
 
 Usage:
     python scripts/eodhd/v2/jobs/daily_pipeline.py
@@ -135,9 +138,26 @@ def main():
         PYTHON, str(COMPUTE / "period_metrics_compute.py"),
     ])
 
-    # ── Step 11: Build screener.universe ──────────────────────────────────────
-    run("Step 11: Build screener.universe", [
+    # ── Step 11: ASX index prices (Yahoo Finance) ─────────────────────────────
+    run("Step 11: ASX index prices → market.index_prices", [
+        PYTHON, str(COMPUTE / "index_prices.py"),
+        "--days", "2",
+    ])
+
+    # ── Step 12: ETF & fund prices (Yahoo Finance) ────────────────────────────
+    run("Step 12: ETF & fund prices → market.fund_prices", [
+        PYTHON, str(COMPUTE / "fund_prices.py"),
+        "--days", "2",
+    ])
+
+    # ── Step 13: Build screener.universe ──────────────────────────────────────
+    run("Step 13: Build screener.universe", [
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
+    ])
+
+    # ── Step 14: Market snapshots (runs after universe rebuild) ───────────────
+    run("Step 14: Market snapshots → index/sector/mover/exdiv", [
+        PYTHON, str(COMPUTE / "market_snapshot.py"),
     ])
 
     elapsed = time.time() - t_start

@@ -1,12 +1,26 @@
 import Link from 'next/link'
 import { BarChart2, Search, TrendingUp, Star, Zap, Shield, ArrowUpRight, ArrowDownRight, Building2 } from 'lucide-react'
-import { getMarketSummary, getMarketMovers, getMarketSectors } from '@/lib/api'
+import { getMarketMovers, getMarketSectors } from '@/lib/api'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
 
-// Revalidate the homepage every 5 minutes so market data stays fresh
-// (end-of-day data changes once per night when the pipeline runs)
-export const revalidate = 300
+// Force dynamic rendering so every request fetches live data.
+// Avoids ISR cache serving stale/empty results baked in at build time.
+export const dynamic = 'force-dynamic'
+
+// Internal API URL for server-side fetches (avoids firewall on public port 8000)
+const INTERNAL_API = process.env.API_INTERNAL_URL || 'http://localhost:8000'
+
+async function fetchMarketSummary(): Promise<MarketSummary> {
+  try {
+    const res = await fetch(`${INTERNAL_API}/api/v1/market/summary`, { cache: 'no-store' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.json()
+  } catch {
+    return { total_stocks: 0, asx200_stocks: 0, stocks_with_dividends: 0,
+             avg_dividend_yield: null, median_pe: null, total_market_cap_bn: null, universe_built_at: null }
+  }
+}
 
 // ── Static content ────────────────────────────────────────────
 
@@ -170,10 +184,7 @@ function FreshnessBadge({ builtAt }: { builtAt: string | null }) {
 export default async function HomePage() {
   // Fetch all three endpoints in parallel; fall back gracefully if API is down
   const [summary, movers, sectors] = await Promise.all([
-    getMarketSummary().catch((): MarketSummary => ({
-      total_stocks: 0, asx200_stocks: 0, stocks_with_dividends: 0,
-      avg_dividend_yield: null, median_pe: null, total_market_cap_bn: null, universe_built_at: null,
-    })),
+    fetchMarketSummary(),
     getMarketMovers('1w').catch((): MoversResponse => ({ gainers: [], losers: [], period: '1w' })),
     getMarketSectors().catch((): SectorsResponse => ({ sectors: [] })),
   ])

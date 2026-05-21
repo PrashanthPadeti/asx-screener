@@ -350,7 +350,7 @@ function TabPills<T extends string>({ value, onChange, options }: {
 // ── Types ─────────────────────────────────────────────────────────────────────
 type Period    = '1d' | '1w' | '1m' | '3m'
 type SigPeriod = '1d' | '1w' | '1m' | '3m' | '52w'
-type CapTier   = 'asx300' | 'all' | 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
+type CapTier   = 'all' | 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
 
 const PERIOD_OPTIONS: { value: Period; label: string }[] = [
   { value: '1d', label: '1D' }, { value: '1w', label: '1W' },
@@ -361,7 +361,6 @@ const SIG_PERIOD_OPTIONS: { value: SigPeriod; label: string }[] = [
   { value: '3m', label: '3M' }, { value: '52w', label: '52W' },
 ]
 const CAP_TIER_OPTIONS: { value: CapTier; label: string }[] = [
-  { value: 'asx300', label: 'ASX 300+' },
   { value: 'all',    label: 'All Sizes' },
   { value: 'mega',   label: 'Mega ≥$50B' },
   { value: 'large',  label: 'Large $10B–$50B' },
@@ -371,10 +370,10 @@ const CAP_TIER_OPTIONS: { value: CapTier; label: string }[] = [
   { value: 'nano',   label: 'Nano <$50M' },
 ]
 
-// API cap_tier value — 'asx300' and 'all' both send no cap_tier to API ('all' = default)
-function apiCapTier(t: CapTier): 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano' | 'asx300' | undefined {
+// API cap_tier value — 'all' sends no cap_tier to API (uses pre-computed snapshots)
+function apiCapTier(t: CapTier): 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano' | undefined {
   if (t === 'all') return undefined
-  return t as 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano' | 'asx300'
+  return t as 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -390,11 +389,11 @@ export default function MarketPage() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   const [moverPeriod, setMoverPeriod] = useState<Period>('1w')
-  const [capTier, setCapTier]         = useState<CapTier>('asx300')   // default: ≥$300M
+  const [capTier, setCapTier]         = useState<CapTier>('all')
   const [movers, setMovers]           = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
 
-  const [volumeCapTier, setVolumeCapTier]   = useState<CapTier>('asx300')
+  const [volumeCapTier, setVolumeCapTier]   = useState<CapTier>('all')
   const [volumeActivity, setVolumeActivity] = useState<VolumeActivityResponse | null>(null)
   const [volumeLoading, setVolumeLoading]   = useState(false)
 
@@ -445,7 +444,7 @@ export default function MarketPage() {
   }, [])
 
   useEffect(() => {
-    loadDashboard(); loadSignals('52w'); loadAnomalies(); loadVolumeActivity('asx300')
+    loadDashboard(); loadSignals('52w'); loadAnomalies(); loadVolumeActivity('all')
   }, [loadSignals, loadAnomalies, loadVolumeActivity])
   useEffect(() => { loadMovers(moverPeriod, capTier) }, [moverPeriod, capTier, loadMovers])
   useEffect(() => { loadSignals(sigPeriod) }, [sigPeriod, loadSignals])
@@ -798,7 +797,7 @@ export default function MarketPage() {
               </div>
               {(volumeActivity?.heavy_buying ?? []).length === 0 ? (
                 <div className="py-8 text-center text-sm text-slate-400">
-                  No heavy buying detected{volumeCapTier !== 'all' && volumeCapTier !== 'asx300' ? ' in this tier' : ' today'}
+                  No heavy buying detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
                 </div>
               ) : (
                 <table className="w-full text-sm">
@@ -828,7 +827,7 @@ export default function MarketPage() {
               </div>
               {(volumeActivity?.heavy_selling ?? []).length === 0 ? (
                 <div className="py-8 text-center text-sm text-slate-400">
-                  No heavy selling detected{volumeCapTier !== 'all' && volumeCapTier !== 'asx300' ? ' in this tier' : ' today'}
+                  No heavy selling detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
                 </div>
               ) : (
                 <table className="w-full text-sm">

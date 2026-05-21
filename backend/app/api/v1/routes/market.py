@@ -87,6 +87,21 @@ async def market_movers(
     col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
     ret_col = col_map[period]
 
+    # Period high/low column names in market.period_metrics
+    ph_col = {"1d": "high_1d", "1w": "high_1w", "1m": "high_1m", "3m": "high_3m"}[period]
+    pl_col = {"1d": "low_1d",  "1w": "low_1w",  "1m": "low_1m",  "3m": "low_3m"}[period]
+
+    # LEFT JOIN to period_metrics using MAX(computed_date) — never CURRENT_DATE.
+    # Using CURRENT_DATE races against the nightly compute job: if period_metrics
+    # hasn't been written yet today the JOIN returns nothing and H/L show as dashes.
+    # MAX(computed_date) always finds the most-recently-available data regardless of
+    # when in the day the request arrives.
+    pm_date_subq = "(SELECT MAX(computed_date) FROM market.period_metrics)"
+    pm_join   = f"""LEFT JOIN market.period_metrics pm
+                       ON pm.asx_code = u.asx_code
+                      AND pm.computed_date = {pm_date_subq}"""
+    pm_select = f"pm.{ph_col} AS period_high, pm.{pl_col} AS period_low"
+
     # Cap tier filter — uses pre-computed boolean flags (is_mega, is_large, etc.)
     # populated by build_screener_universe.py from raw AUD market_cap thresholds.
     # asx300 = direct market_cap >= 300M filter (all tiers ≥$300M).
@@ -110,25 +125,29 @@ async def market_movers(
         for col in [ret_col, "return_1w"]:
             try:
                 g_rows = (await db.execute(text(f"""
-                    SELECT asx_code, company_name, sector,
-                           price, {col} AS period_return, market_cap
-                    FROM screener.universe
-                    WHERE {col} IS NOT NULL
-                      AND price > 0.05
-                      AND market_cap > 0
+                    SELECT u.asx_code, u.company_name, u.sector,
+                           u.price, u.{col} AS period_return, u.market_cap,
+                           {pm_select}
+                    FROM screener.universe u
+                    {pm_join}
+                    WHERE u.{col} IS NOT NULL
+                      AND u.price > 0.05
+                      AND u.market_cap > 0
                       {mcap_filter}
-                    ORDER BY {col} DESC NULLS LAST
+                    ORDER BY u.{col} DESC NULLS LAST
                     LIMIT :lim
                 """), {"lim": limit})).mappings().all()
                 l_rows = (await db.execute(text(f"""
-                    SELECT asx_code, company_name, sector,
-                           price, {col} AS period_return, market_cap
-                    FROM screener.universe
-                    WHERE {col} IS NOT NULL
-                      AND price > 0.05
-                      AND market_cap > 0
+                    SELECT u.asx_code, u.company_name, u.sector,
+                           u.price, u.{col} AS period_return, u.market_cap,
+                           {pm_select}
+                    FROM screener.universe u
+                    {pm_join}
+                    WHERE u.{col} IS NOT NULL
+                      AND u.price > 0.05
+                      AND u.market_cap > 0
                       {mcap_filter}
-                    ORDER BY {col} ASC NULLS LAST
+                    ORDER BY u.{col} ASC NULLS LAST
                     LIMIT :lim
                 """), {"lim": limit})).mappings().all()
                 gainers_rows = list(g_rows)
@@ -165,7 +184,8 @@ async def market_movers(
         if snap_date:
             snap_rows = (await db.execute(text("""
                 SELECT snapshot_type, asx_code, company_name, sector,
-                       price, return_1w AS period_return, market_cap
+                       price, return_1w AS period_return, market_cap,
+                       period_high, period_low
                 FROM market.mover_snapshots
                 WHERE snapshot_date = :d
                   AND snapshot_type IN (:gt, :lt, :fg, :fl)
@@ -182,24 +202,31 @@ async def market_movers(
     except Exception as e:
         log.warning("mover_snapshots query failed: %s", e)
 
+    # Snapshot rows now carry period_high / period_low directly (written by
+    # market_snapshot.py since migration 052). No runtime enrichment needed.
+
     # Fallback: live universe query if snapshots empty
     if not gainers_rows and not losers_rows:
         # Try the requested period col; if missing (e.g. return_1d), try return_1w
         for col in [ret_col, "return_1w"]:
             try:
                 g_rows = (await db.execute(text(f"""
-                    SELECT asx_code, company_name, sector,
-                           price, {col} AS period_return, market_cap
-                    FROM screener.universe
-                    WHERE {col} IS NOT NULL AND price > 0.05 AND market_cap > 20
-                    ORDER BY {col} DESC NULLS LAST LIMIT :lim
+                    SELECT u.asx_code, u.company_name, u.sector,
+                           u.price, u.{col} AS period_return, u.market_cap,
+                           {pm_select}
+                    FROM screener.universe u
+                    {pm_join}
+                    WHERE u.{col} IS NOT NULL AND u.price > 0.05 AND u.market_cap > 20
+                    ORDER BY u.{col} DESC NULLS LAST LIMIT :lim
                 """), {"lim": limit})).mappings().all()
                 l_rows = (await db.execute(text(f"""
-                    SELECT asx_code, company_name, sector,
-                           price, {col} AS period_return, market_cap
-                    FROM screener.universe
-                    WHERE {col} IS NOT NULL AND price > 0.05 AND market_cap > 20
-                    ORDER BY {col} ASC NULLS LAST LIMIT :lim
+                    SELECT u.asx_code, u.company_name, u.sector,
+                           u.price, u.{col} AS period_return, u.market_cap,
+                           {pm_select}
+                    FROM screener.universe u
+                    {pm_join}
+                    WHERE u.{col} IS NOT NULL AND u.price > 0.05 AND u.market_cap > 20
+                    ORDER BY u.{col} ASC NULLS LAST LIMIT :lim
                 """), {"lim": limit})).mappings().all()
                 gainers_rows = list(g_rows)
                 losers_rows  = list(l_rows)
@@ -223,7 +250,14 @@ async def market_movers(
 
 
 def _to_mover(r, period: str) -> MoverStock:
-    """Map a DB row (with period_return alias) to MoverStock schema."""
+    """Map a DB row (with period_return alias) to MoverStock schema.
+
+    period_high / period_low are always present in the row:
+    - Snapshot path:        stored in market.mover_snapshots since migration 052
+    - Cap-tier path:        LEFT JOIN to market.period_metrics in the SELECT
+    - Live-fallback path:   LEFT JOIN to market.period_metrics in the SELECT
+    All three paths use MAX(computed_date) so there is no CURRENT_DATE race condition.
+    """
     pr = float(r["period_return"]) if r.get("period_return") is not None else None
     return MoverStock(
         asx_code=r["asx_code"],
@@ -235,6 +269,8 @@ def _to_mover(r, period: str) -> MoverStock:
         return_1m=pr if period == "1m" else None,
         return_3m=pr if period == "3m" else None,
         market_cap=float(r["market_cap"]) if r.get("market_cap") is not None else None,
+        period_high=float(r["period_high"]) if r.get("period_high") is not None else None,
+        period_low =float(r["period_low"])  if r.get("period_low")  is not None else None,
     )
 
 

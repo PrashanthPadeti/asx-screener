@@ -143,22 +143,41 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
             AND market_cap > 20
         """
 
+        # Period H/L column names in market.period_metrics
+        period_hl_cols = {
+            "1D": ("high_1d", "low_1d"),
+            "1W": ("high_1w", "low_1w"),
+            "1M": ("high_1m", "low_1m"),
+            "3M": ("high_3m", "low_3m"),
+        }
+
+        # Use the most-recently-computed period_metrics date (avoids CURRENT_DATE race
+        # when the nightly jobs run in different orders or near midnight).
+        pm_date_subq = "(SELECT MAX(computed_date) FROM market.period_metrics)"
+
         movers: dict[str, list] = {}
 
-        # Compute gainers/losers for each period separately
-        # Wrap each in try/except — some return columns may not exist in older universe schemas
+        # Compute gainers/losers for each period separately.
+        # LEFT JOIN period_metrics so period_high/period_low are included in the snapshot row.
+        # Wrap each in try/except — some return columns may not exist in older universe schemas.
         for snap_suffix, ret_col in [("1D", "return_1d"), ("1W", "return_1w"),
                                       ("1M", "return_1m"), ("3M", "return_3m")]:
+            ph_col, pl_col = period_hl_cols[snap_suffix]
             for snap_kind, order in [("GAINER", "DESC"), ("LOSER", "ASC")]:
                 snap_type = f"{snap_kind}_{snap_suffix}"
                 try:
                     rows = (await session.execute(text(f"""
-                        SELECT asx_code, company_name, sector,
-                               price, {ret_col} AS period_return, market_cap,
-                               volume, avg_volume_20d, short_pct
-                        FROM screener.universe
-                        WHERE {liquid_filter} AND {ret_col} IS NOT NULL
-                        ORDER BY {ret_col} {order} NULLS LAST
+                        SELECT u.asx_code, u.company_name, u.sector,
+                               u.price, u.{ret_col} AS period_return, u.market_cap,
+                               u.volume, u.avg_volume_20d, u.short_pct,
+                               pm.{ph_col} AS period_high,
+                               pm.{pl_col} AS period_low
+                        FROM screener.universe u
+                        LEFT JOIN market.period_metrics pm
+                               ON pm.asx_code = u.asx_code
+                              AND pm.computed_date = {pm_date_subq}
+                        WHERE {liquid_filter} AND u.{ret_col} IS NOT NULL
+                        ORDER BY u.{ret_col} {order} NULLS LAST
                         LIMIT {TOP_N}
                     """))).mappings().all()
                     movers[snap_type] = rows
@@ -171,41 +190,50 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
         movers["GAINER"] = movers.get("GAINER_1W", [])
         movers["LOSER"]  = movers.get("LOSER_1W",  [])
 
-        vol_base = """
-            asx_code, company_name, sector,
-            price, return_1w AS period_return, market_cap,
-            volume, avg_volume_20d, short_pct
+        # Volume panels: use 1W H/L (consistent with return_1w displayed in those rows)
+        ph_col_1w, pl_col_1w = period_hl_cols["1W"]
+        vol_base = f"""
+            u.asx_code, u.company_name, u.sector,
+            u.price, u.return_1w AS period_return, u.market_cap,
+            u.volume, u.avg_volume_20d, u.short_pct,
+            pm.{ph_col_1w} AS period_high,
+            pm.{pl_col_1w} AS period_low
+        """
+        vol_join = f"""
+            LEFT JOIN market.period_metrics pm
+                   ON pm.asx_code = u.asx_code
+                  AND pm.computed_date = {pm_date_subq}
         """
 
         movers["ACTIVE"] = (await session.execute(text(f"""
             SELECT {vol_base}
-            FROM screener.universe
-            WHERE {liquid_filter} AND volume IS NOT NULL AND volume > 0
-            ORDER BY volume DESC NULLS LAST
+            FROM screener.universe u {vol_join}
+            WHERE {liquid_filter} AND u.volume IS NOT NULL AND u.volume > 0
+            ORDER BY u.volume DESC NULLS LAST
             LIMIT {TOP_N}
         """))).mappings().all()
 
         # Heavy buying: volume surge + price rising
         movers["BUYING"] = (await session.execute(text(f"""
             SELECT {vol_base}
-            FROM screener.universe
+            FROM screener.universe u {vol_join}
             WHERE {liquid_filter}
-              AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
-              AND return_1w > 0
-              AND volume::float / avg_volume_20d >= 1.5
-            ORDER BY volume::float / avg_volume_20d DESC NULLS LAST
+              AND u.volume IS NOT NULL AND u.avg_volume_20d IS NOT NULL AND u.avg_volume_20d > 0
+              AND u.return_1w > 0
+              AND u.volume::float / u.avg_volume_20d >= 1.5
+            ORDER BY u.volume::float / u.avg_volume_20d DESC NULLS LAST
             LIMIT {TOP_N}
         """))).mappings().all()
 
         # Heavy selling: volume surge + price falling
         movers["SELLING"] = (await session.execute(text(f"""
             SELECT {vol_base}
-            FROM screener.universe
+            FROM screener.universe u {vol_join}
             WHERE {liquid_filter}
-              AND volume IS NOT NULL AND avg_volume_20d IS NOT NULL AND avg_volume_20d > 0
-              AND return_1w < 0
-              AND volume::float / avg_volume_20d >= 1.5
-            ORDER BY volume::float / avg_volume_20d DESC NULLS LAST
+              AND u.volume IS NOT NULL AND u.avg_volume_20d IS NOT NULL AND u.avg_volume_20d > 0
+              AND u.return_1w < 0
+              AND u.volume::float / u.avg_volume_20d >= 1.5
+            ORDER BY u.volume::float / u.avg_volume_20d DESC NULLS LAST
             LIMIT {TOP_N}
         """))).mappings().all()
 
@@ -221,10 +249,10 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                         INSERT INTO market.mover_snapshots
                             (snapshot_date, snapshot_type, rank, asx_code, company_name,
                              sector, price, return_1w, volume, avg_volume_20d,
-                             short_pct, market_cap)
+                             short_pct, market_cap, period_high, period_low)
                         VALUES
                             (:d, :st, :rk, :code, :name, :sec, :px, :r1w,
-                             :vol, :avg_vol, :shrt, :mcap)
+                             :vol, :avg_vol, :shrt, :mcap, :ph, :pl)
                         ON CONFLICT (snapshot_date, snapshot_type, rank) DO UPDATE SET
                             asx_code       = EXCLUDED.asx_code,
                             company_name   = EXCLUDED.company_name,
@@ -235,6 +263,8 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                             avg_volume_20d = EXCLUDED.avg_volume_20d,
                             short_pct      = EXCLUDED.short_pct,
                             market_cap     = EXCLUDED.market_cap,
+                            period_high    = EXCLUDED.period_high,
+                            period_low     = EXCLUDED.period_low,
                             created_at     = NOW()
                     """), {
                         "d":       snapshot_date,
@@ -249,6 +279,8 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                         "avg_vol": r["avg_volume_20d"],
                         "shrt":    r["short_pct"],
                         "mcap":    r["market_cap"],
+                        "ph":      r.get("period_high"),
+                        "pl":      r.get("period_low"),
                     })
 
         # ── 4. Ex-dividend snapshots ──────────────────────────────────────────

@@ -408,7 +408,8 @@ const NL_EXAMPLES = [
 export default function ScreenerPage() {
   const { user } = useAuth()
   const userPlan = user?.plan ?? 'free'
-  const isPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+  const isPro     = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+  const isPremium = ['premium', 'enterprise_premium'].includes(userPlan)   // AI Query: Premium only
   const searchParams = useSearchParams()
 
   const [showUpgradeModal, setShowUpgradeModal] = useState(false)
@@ -806,8 +807,8 @@ export default function ScreenerPage() {
           >
             <Sparkles className="w-3.5 h-3.5 text-blue-500" />
             AI Query
-            {isPro
-              ? <span className="text-[10px] bg-blue-600 text-white rounded px-1.5 py-0.5 font-bold">PRO</span>
+            {isPremium
+              ? <span className="text-[10px] bg-purple-600 text-white rounded px-1.5 py-0.5 font-bold">PREMIUM</span>
               : <span className="text-[10px] bg-amber-500 text-white rounded px-1.5 py-0.5 font-bold">UPGRADE</span>
             }
           </button>
@@ -818,7 +819,7 @@ export default function ScreenerPage() {
       {/* ── AI Query Mode ────────────────────────────────────────── */}
       {screenerMode === 'ai' && (
         <>
-          {isPro ? (
+          {isPremium ? (
             <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl border border-white/10 overflow-hidden">
               {/* Search area */}
               <div className="p-6">
@@ -968,9 +969,9 @@ export default function ScreenerPage() {
               )}
             </div>
           ) : (
-            /* Upgrade CTA for non-pro users */
+            /* Upgrade CTA for non-premium users */
             <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl p-8 border border-white/10 text-center">
-              <Sparkles className="w-10 h-10 text-blue-400 mx-auto mb-3" />
+              <Sparkles className="w-10 h-10 text-purple-400 mx-auto mb-3" />
               <h2 className="text-lg font-bold text-white mb-2">AI Natural Language Query</h2>
               <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
                 Ask questions in plain English — <span className="text-white">&quot;show me profitable miners under $1B&quot;</span> — and AI instantly queries the ASX database for you.
@@ -980,12 +981,16 @@ export default function ScreenerPage() {
                   <span key={q} className="text-xs px-3 py-1.5 rounded-full bg-white/10 text-slate-400 border border-white/10">{q}</span>
                 ))}
               </div>
+              <span className="inline-block mb-3 text-xs font-semibold px-3 py-1 rounded-full bg-purple-700/40 text-purple-300 border border-purple-500/30">
+                Premium Plan Feature
+              </span>
+              <br />
               <Link
                 href="/pricing"
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500
-                           text-white text-sm font-semibold rounded-xl transition-colors"
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-purple-600 hover:bg-purple-500
+                           text-white text-sm font-semibold rounded-xl transition-colors mt-2"
               >
-                <Zap className="w-4 h-4" /> Upgrade to Pro
+                <Zap className="w-4 h-4" /> Upgrade to Premium
               </Link>
             </div>
           )}

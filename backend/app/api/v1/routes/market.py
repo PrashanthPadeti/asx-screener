@@ -74,13 +74,14 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
 @router.get("/movers", response_model=MoversResponse)
 async def market_movers(
     period:   str           = Query("1w", pattern="^(1d|1w|1m|3m)$"),
-    cap_tier: str | None    = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
+    cap_tier: str | None    = Query(None, pattern="^(mega|large|mid|small|micro|nano|asx300)$"),
     limit:    int           = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Top gainers and losers for a given period (1d / 1w / 1m / 3m).
     Optional cap_tier filter: large | mid | small | micro (uses market_cap ranges).
+    asx300 = market_cap >= 300 (AUD millions), i.e. ASX 300+ universe.
     Without cap_tier, uses pre-computed mover_snapshots.
     """
     col_map = {"1d": "return_1d", "1w": "return_1w", "1m": "return_1m", "3m": "return_3m"}
@@ -88,14 +89,15 @@ async def market_movers(
 
     # Cap tier filter — uses pre-computed boolean flags (is_mega, is_large, etc.)
     # populated by build_screener_universe.py from raw AUD market_cap thresholds.
-    # Falls back to market_cap_tier TEXT column if flag columns unavailable.
+    # asx300 = direct market_cap >= 300M filter (all tiers ≥$300M).
     cap_flag_sql = {
-        "mega":  "AND is_mega  = TRUE",
-        "large": "AND is_large = TRUE",
-        "mid":   "AND is_mid   = TRUE",
-        "small": "AND is_small = TRUE",
-        "micro": "AND is_micro = TRUE",
-        "nano":  "AND is_nano  = TRUE",
+        "mega":   "AND is_mega  = TRUE",
+        "large":  "AND is_large = TRUE",
+        "mid":    "AND is_mid   = TRUE",
+        "small":  "AND is_small = TRUE",
+        "micro":  "AND is_micro = TRUE",
+        "nano":   "AND is_nano  = TRUE",
+        "asx300": "AND market_cap >= 300",   # ≥$300M — excludes micro/nano noise
     }
 
     gainers_rows: list = []
@@ -270,23 +272,24 @@ def _to_vol_pressure(r) -> VolumePressureStock:
 
 @router.get("/volume-activity", response_model=VolumeActivityResponse)
 async def volume_activity(
-    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
+    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano|asx300)$"),
     limit:    int        = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Most Active by Volume, Heavy Buying and Heavy Selling panels.
     Without cap_tier: uses pre-computed mover_snapshots (same as dashboard).
-    With cap_tier: queries screener.universe live using boolean flag columns,
-    matching exactly how /movers works for Top Movers.
+    With cap_tier: queries screener.universe live using boolean flag columns.
+    asx300 = market_cap >= 300 (AUD millions).
     """
     cap_flag_sql = {
-        "mega":  "AND is_mega  = TRUE",
-        "large": "AND is_large = TRUE",
-        "mid":   "AND is_mid   = TRUE",
-        "small": "AND is_small = TRUE",
-        "micro": "AND is_micro = TRUE",
-        "nano":  "AND is_nano  = TRUE",
+        "mega":   "AND is_mega  = TRUE",
+        "large":  "AND is_large = TRUE",
+        "mid":    "AND is_mid   = TRUE",
+        "small":  "AND is_small = TRUE",
+        "micro":  "AND is_micro = TRUE",
+        "nano":   "AND is_nano  = TRUE",
+        "asx300": "AND market_cap >= 300",
     }
 
     _key = make_key("market", "volume_activity", cap_tier or "all")

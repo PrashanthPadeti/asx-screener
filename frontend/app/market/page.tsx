@@ -4,6 +4,7 @@ import Link from 'next/link'
 import {
   TrendingUp, TrendingDown, Activity, BarChart2,
   Calendar, RefreshCw, ArrowUp, ArrowDown, Zap, AlertTriangle,
+  ExternalLink, Lock,
 } from 'lucide-react'
 import { HelpDrawer } from '@/components/HelpDrawer'
 import { MARKET_SECTIONS } from '@/lib/helpContent'
@@ -15,17 +16,43 @@ import {
   ExDivStock, MoverStock, SignalStock, AnomalyFlag,
 } from '@/lib/api'
 import { ANOMALY_TYPES } from '@/lib/constants'
+import { useAuth } from '@/lib/auth'
+
+// ── Anomaly tooltips ──────────────────────────────────────────────────────────
+const ANOMALY_TOOLTIPS: Record<string, string> = {
+  'PRICE_EARNINGS_DIVERGENCE': 'Price is diverging from what earnings justify — potential mispricing opportunity',
+  'HIGH_SHORT_INTEREST':       'High proportion of float is sold short — squeeze risk or confirmed bearish signal',
+  'OVERSOLD_QUALITY':          'High-quality stock that is technically oversold — potential snap-back candidate',
+  'OVERBOUGHT_WEAK':           'Weak fundamentals but technically overbought — elevated reversal risk',
+  'DIVIDEND_YIELD_SPIKE':      'Yield has spiked — may signal a price drop, special dividend, or elevated payout risk',
+  'VALUE_GROWTH':              'Stock is cheap (low P/E) but growing earnings — a rare and valuable combination',
+  'SHORT_SQUEEZE_RISK':        'Short interest jumped sharply in one week — elevated squeeze or distribution risk',
+}
+
+// Anomaly type → closest screener preset
+const ANOMALY_SCREENER: Record<string, string> = {
+  'VALUE_GROWTH':              'value_franked',
+  'OVERSOLD_QUALITY':          'rsi_oversold',
+  'OVERBOUGHT_WEAK':           'rsi_overbought',
+  'PRICE_EARNINGS_DIVERGENCE': 'quality_undervalued',
+  'DIVIDEND_YIELD_SPIKE':      'franking_optimiser',
+  'HIGH_SHORT_INTEREST':       'short_interest_risk',
+  'SHORT_SQUEEZE_RISK':        'short_interest_risk',
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtPct(v: number | null, decimals = 1): string {
   if (v == null) return '—'
   const pct = v * 100
+  // Extreme outliers (>100% or <-50%) get no extra decimals
+  if (Math.abs(pct) >= 100) return (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%'
   return (pct >= 0 ? '+' : '') + pct.toFixed(decimals) + '%'
 }
 
 function fmtPctRaw(v: number | null, decimals = 1): string {
   if (v == null) return '—'
+  if (Math.abs(v) >= 100) return (v >= 0 ? '+' : '') + v.toFixed(0) + '%'
   return (v >= 0 ? '+' : '') + v.toFixed(decimals) + '%'
 }
 
@@ -40,7 +67,7 @@ function fmtCap(v: number | null): string {
 function fmtVol(v: number | null): string {
   if (v == null) return '—'
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + 'M'
-  if (v >= 1_000) return (v / 1_000).toFixed(0) + 'K'
+  if (v >= 1_000)     return (v / 1_000).toFixed(0) + 'K'
   return v.toString()
 }
 
@@ -51,8 +78,8 @@ function fmtPrice(v: number | null): string {
 
 function retColor(v: number | null): string {
   if (v == null) return 'text-slate-500'
-  if (v > 0) return 'text-emerald-600'
-  if (v < 0) return 'text-red-500'
+  if (v > 0)  return 'text-emerald-600'
+  if (v < 0)  return 'text-red-500'
   return 'text-slate-500'
 }
 
@@ -65,6 +92,39 @@ function heatColor(v: number | null): string {
   if (pct >= -1) return 'bg-red-100 text-red-800'
   if (pct >= -3) return 'bg-red-400 text-white'
   return 'bg-red-600 text-white'
+}
+
+// ── "Open in Screener" button ─────────────────────────────────────────────────
+function ScreenerLink({ href, label = 'Open in Screener' }: { href: string; label?: string }) {
+  return (
+    <Link href={href}
+      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 hover:underline font-medium whitespace-nowrap">
+      <ExternalLink className="w-3 h-3" />
+      {label}
+    </Link>
+  )
+}
+
+// ── Pro gate overlay ──────────────────────────────────────────────────────────
+function ProGate({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative">
+      <div className="blur-sm pointer-events-none select-none" style={{ maxHeight: 220, overflow: 'hidden' }}>
+        {children}
+      </div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/85 rounded-b-xl gap-3">
+        <Lock className="w-6 h-6 text-blue-500" />
+        <div className="text-center">
+          <p className="text-sm font-semibold text-slate-800">Pro Feature</p>
+          <p className="text-xs text-slate-500 mt-0.5">Upgrade to access full volume activity, market signals, and anomalies.</p>
+        </div>
+        <Link href="/pricing"
+          className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
+          Upgrade to Pro →
+        </Link>
+      </div>
+    </div>
+  )
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -106,9 +166,8 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
 }
 
 type MoverRetKey = 'return_1d' | 'return_1w' | 'return_1m' | 'return_3m'
-function MoverRow({ s, rank, retKey, period }: { s: MoverStock; rank: number; retKey: MoverRetKey; period: Period }) {
+function MoverRow({ s, rank, retKey }: { s: MoverStock; rank: number; retKey: MoverRetKey }) {
   const ret = s[retKey]
-  const periodLabel = period.toUpperCase()
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
       <td className="py-2 px-3 text-xs text-slate-400 w-6">{rank}</td>
@@ -254,78 +313,117 @@ function VolSurgeRow({ s, period }: { s: SignalStock; period: SigPeriod }) {
   )
 }
 
-function TableCard({ title, icon: Icon, children, className }: {
-  title: string; icon: React.ElementType; children: React.ReactNode; className?: string
+function TableCard({ title, icon: Icon, action, children, className }: {
+  title: string; icon: React.ElementType; action?: React.ReactNode; children: React.ReactNode; className?: string
 }) {
   return (
     <div className={`bg-white rounded-xl border border-slate-200 overflow-hidden ${className ?? ''}`}>
-      <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-        <Icon className="w-4 h-4 text-slate-500" />
-        <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+      <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Icon className="w-4 h-4 text-slate-500" />
+          <h2 className="text-sm font-semibold text-slate-700">{title}</h2>
+        </div>
+        {action}
       </div>
       <div className="overflow-x-auto">{children}</div>
     </div>
   )
 }
 
-type Period   = '1d' | '1w' | '1m' | '3m'
+// ── Pill tab ──────────────────────────────────────────────────────────────────
+function TabPills<T extends string>({ value, onChange, options }: {
+  value: T; onChange: (v: T) => void
+  options: { value: T; label: string }[]
+}) {
+  return (
+    <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+      {options.map(o => (
+        <button key={o.value} onClick={() => onChange(o.value)}
+          className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${value === o.value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+type Period    = '1d' | '1w' | '1m' | '3m'
 type SigPeriod = '1d' | '1w' | '1m' | '3m' | '52w'
-type CapTier  = 'all' | 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
-const PERIOD_LABELS: Record<Period, string>    = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M' }
-const SIG_PERIOD_LABELS: Record<SigPeriod, string> = { '1d': '1D', '1w': '1W', '1m': '1M', '3m': '3M', '52w': '52W' }
-const CAP_TIER_LABELS: Record<CapTier, string> = {
-  all:   'All',
-  mega:  'Mega ≥$50B',
-  large: 'Large $10B–$50B',
-  mid:   'Mid $2B–$10B',
-  small: 'Small $300M–$2B',
-  micro: 'Micro $50M–$300M',
-  nano:  'Nano <$50M',
+type CapTier   = 'asx300' | 'all' | 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
+
+const PERIOD_OPTIONS: { value: Period; label: string }[] = [
+  { value: '1d', label: '1D' }, { value: '1w', label: '1W' },
+  { value: '1m', label: '1M' }, { value: '3m', label: '3M' },
+]
+const SIG_PERIOD_OPTIONS: { value: SigPeriod; label: string }[] = [
+  { value: '1d', label: '1D' }, { value: '1w', label: '1W' }, { value: '1m', label: '1M' },
+  { value: '3m', label: '3M' }, { value: '52w', label: '52W' },
+]
+const CAP_TIER_OPTIONS: { value: CapTier; label: string }[] = [
+  { value: 'asx300', label: 'ASX 300+' },
+  { value: 'all',    label: 'All Sizes' },
+  { value: 'mega',   label: 'Mega ≥$50B' },
+  { value: 'large',  label: 'Large $10B–$50B' },
+  { value: 'mid',    label: 'Mid $2B–$10B' },
+  { value: 'small',  label: 'Small $300M–$2B' },
+  { value: 'micro',  label: 'Micro $50M–$300M' },
+  { value: 'nano',   label: 'Nano <$50M' },
+]
+
+// API cap_tier value — 'asx300' and 'all' both send no cap_tier to API ('all' = default)
+function apiCapTier(t: CapTier): 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano' | 'asx300' | undefined {
+  if (t === 'all') return undefined
+  return t as 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano' | 'asx300'
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function MarketPage() {
-  const [data, setData]         = useState<MarketDashboard | null>(null)
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState<string | null>(null)
+  const { user } = useAuth()
+  const userPlan  = user?.plan ?? 'free'
+  const isPro     = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+
+  const [data, setData]       = useState<MarketDashboard | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError]     = useState<string | null>(null)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   const [moverPeriod, setMoverPeriod] = useState<Period>('1w')
-  const [capTier, setCapTier]         = useState<CapTier>('all')
-  const [movers, setMovers]     = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
+  const [capTier, setCapTier]         = useState<CapTier>('asx300')   // default: ≥$300M
+  const [movers, setMovers]           = useState<{ gainers: MoverStock[]; losers: MoverStock[] } | null>(null)
   const [moversLoading, setMoversLoading] = useState(false)
 
-  const [volumeCapTier, setVolumeCapTier]     = useState<CapTier>('all')
-  const [volumeActivity, setVolumeActivity]   = useState<VolumeActivityResponse | null>(null)
-  const [volumeLoading, setVolumeLoading]     = useState(false)
+  const [volumeCapTier, setVolumeCapTier]   = useState<CapTier>('asx300')
+  const [volumeActivity, setVolumeActivity] = useState<VolumeActivityResponse | null>(null)
+  const [volumeLoading, setVolumeLoading]   = useState(false)
 
   const [sigPeriod, setSigPeriod] = useState<SigPeriod>('52w')
-  const [signals, setSignals]   = useState<{ near_period_high: SignalStock[]; near_period_low: SignalStock[]; volume_surge: SignalStock[] } | null>(null)
+  const [signals, setSignals]     = useState<{ near_period_high: SignalStock[]; near_period_low: SignalStock[]; volume_surge: SignalStock[] } | null>(null)
   const [signalsLoading, setSignalsLoading] = useState(false)
+  const [sigTab, setSigTab]       = useState<'high' | 'low' | 'volume'>('high')
 
-  const [sigTab, setSigTab]     = useState<'high' | 'low' | 'volume'>('high')
-
-  const [anomalies, setAnomalies]         = useState<AnomalyFlag[]>([])
+  const [anomalies, setAnomalies]             = useState<AnomalyFlag[]>([])
   const [anomaliesLoading, setAnomaliesLoading] = useState(false)
-  const [anomalyFilter, setAnomalyFilter] = useState('all')
+  const [anomalyFilter, setAnomalyFilter]     = useState('all')
 
   const loadDashboard = async () => {
     setLoading(true); setError(null)
-    try { setData(await getMarketDashboard()) }
+    try { setData(await getMarketDashboard()); setLastRefresh(new Date()) }
     catch { setError('Failed to load market data.') }
     finally { setLoading(false) }
   }
 
-  const loadMovers = useCallback(async (period: Period, tier: CapTier = 'all') => {
+  const loadMovers = useCallback(async (period: Period, tier: CapTier) => {
     setMoversLoading(true)
-    try { setMovers(await getMarketMovers(period, 10, tier === 'all' ? undefined : tier)) }
+    try { setMovers(await getMarketMovers(period, 10, apiCapTier(tier))) }
     catch { /* keep previous */ }
     finally { setMoversLoading(false) }
   }, [])
 
-  const loadVolumeActivity = useCallback(async (tier: CapTier = 'all') => {
+  const loadVolumeActivity = useCallback(async (tier: CapTier) => {
     setVolumeLoading(true)
-    try { setVolumeActivity(await getVolumeActivity(tier === 'all' ? undefined : tier as 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano')) }
+    try { setVolumeActivity(await getVolumeActivity(apiCapTier(tier))) }
     catch { /* keep previous */ }
     finally { setVolumeLoading(false) }
   }, [])
@@ -337,21 +435,30 @@ export default function MarketPage() {
     finally { setSignalsLoading(false) }
   }, [])
 
-  const loadAnomalies = async (flagType?: string) => {
+  const loadAnomalies = useCallback(async (flagType?: string) => {
     setAnomaliesLoading(true)
     try {
       const res = await getMarketAnomalies(100, flagType === 'all' ? undefined : flagType)
       setAnomalies(res.flags)
     } catch { /* keep previous */ }
     finally { setAnomaliesLoading(false) }
-  }
+  }, [])
 
-  useEffect(() => { loadDashboard(); loadSignals('52w'); loadAnomalies(); loadVolumeActivity() }, [loadSignals, loadMovers, loadVolumeActivity])
+  useEffect(() => {
+    loadDashboard(); loadSignals('52w'); loadAnomalies(); loadVolumeActivity('asx300')
+  }, [loadSignals, loadAnomalies, loadVolumeActivity])
   useEffect(() => { loadMovers(moverPeriod, capTier) }, [moverPeriod, capTier, loadMovers])
   useEffect(() => { loadSignals(sigPeriod) }, [sigPeriod, loadSignals])
   useEffect(() => { loadVolumeActivity(volumeCapTier) }, [volumeCapTier, loadVolumeActivity])
 
-  const refreshAll = () => { loadDashboard(); loadMovers(moverPeriod, capTier); loadSignals(sigPeriod); loadAnomalies(anomalyFilter); loadVolumeActivity(volumeCapTier) }
+  const refreshAll = () => {
+    loadDashboard()
+    loadMovers(moverPeriod, capTier)
+    loadSignals(sigPeriod)
+    loadAnomalies(anomalyFilter)
+    loadVolumeActivity(volumeCapTier)
+    setLastRefresh(new Date())
+  }
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center">
@@ -370,19 +477,37 @@ export default function MarketPage() {
     ? new Date(data.universe_built_at).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })
     : null
 
+  const refreshedAt = lastRefresh
+    ? lastRefresh.toLocaleTimeString('en-AU', { timeStyle: 'short' })
+    : null
+
   const retKey: MoverRetKey =
     moverPeriod === '1d' ? 'return_1d' :
     moverPeriod === '1w' ? 'return_1w' :
     moverPeriod === '3m' ? 'return_3m' : 'return_1m'
 
+  // Screener URL for current mover period
+  const moverScreenerUrl = moverPeriod === '1d' || moverPeriod === '1w'
+    ? '/screener?preset=momentum' : '/screener?preset=high_growth'
+
+  // Signal tab → screener preset
+  const sigScreenerPreset = sigTab === 'high' ? 'new_52w_highs' : sigTab === 'low' ? 'new_52w_lows' : 'volume_breakout'
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Market Overview</h1>
-          {builtAt && <p className="text-xs text-slate-400 mt-0.5">Data as at {builtAt} AEST</p>}
+          <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+            {builtAt && (
+              <p className="text-xs text-slate-400">Data as at {builtAt} AEST</p>
+            )}
+            {refreshedAt && (
+              <p className="text-xs text-slate-400">· Last refreshed {refreshedAt}</p>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <HelpDrawer sections={MARKET_SECTIONS} />
@@ -393,30 +518,38 @@ export default function MarketPage() {
         </div>
       </div>
 
-      {/* Index Snapshots */}
+      {/* ── Index Snapshots ─────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <IndexCard label="ASX 200" snap={data.asx200} />
         <IndexCard label="ASX 300" snap={data.asx300} />
       </div>
 
-      {/* Sector Heatmap */}
+      {/* ── Sector Heatmap ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-100 flex items-center gap-2">
-          <BarChart2 className="w-4 h-4 text-slate-500" />
-          <h2 className="text-sm font-semibold text-slate-700">Sector Heatmap — 1W Performance</h2>
+        <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <BarChart2 className="w-4 h-4 text-slate-500" />
+            <h2 className="text-sm font-semibold text-slate-700">Sector Heatmap — 1W Performance</h2>
+          </div>
+          <span className="text-xs text-slate-400">Click a sector to screen it</span>
         </div>
         <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
           {data.sector_heatmap.map(s => (
-            <div key={s.sector} className={`rounded-lg p-3 text-center ${heatColor(s.avg_return_1w)}`}>
+            <Link
+              key={s.sector}
+              href={`/screener?sector=${encodeURIComponent(s.sector)}`}
+              title={`Screen ${s.sector} stocks in Screener`}
+              className={`rounded-lg p-3 text-center transition-opacity hover:opacity-90 hover:ring-2 hover:ring-white/50 cursor-pointer ${heatColor(s.avg_return_1w)}`}
+            >
               <div className="text-xs font-semibold leading-tight mb-1">{s.sector}</div>
               <div className="text-sm font-bold">{fmtPct(s.avg_return_1w)}</div>
               <div className="text-xs opacity-75 mt-0.5">{s.stock_count} stocks</div>
-            </div>
+            </Link>
           ))}
         </div>
       </div>
 
-      {/* Top Movers — period tabs */}
+      {/* ── Top Movers ─────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
@@ -424,24 +557,8 @@ export default function MarketPage() {
             <h2 className="text-sm font-semibold text-slate-700">Top Movers</h2>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Cap tier filter */}
-            <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
-              {(['all', 'mega', 'large', 'mid', 'small', 'micro', 'nano'] as CapTier[]).map(t => (
-                <button key={t} onClick={() => setCapTier(t)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${capTier === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                  {CAP_TIER_LABELS[t]}
-                </button>
-              ))}
-            </div>
-            {/* Period filter */}
-            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-              {(['1d', '1w', '1m', '3m'] as Period[]).map(p => (
-                <button key={p} onClick={() => setMoverPeriod(p)}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${moverPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                  {p.toUpperCase()}
-                </button>
-              ))}
-            </div>
+            <TabPills value={capTier} onChange={setCapTier} options={CAP_TIER_OPTIONS} />
+            <TabPills value={moverPeriod} onChange={setMoverPeriod} options={PERIOD_OPTIONS} />
           </div>
         </div>
         {moversLoading ? (
@@ -454,27 +571,33 @@ export default function MarketPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
             {/* Gainers */}
             <div>
-              <div className="px-4 py-2 bg-emerald-50 flex items-center gap-1.5">
-                <ArrowUp className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="text-xs font-semibold text-emerald-700">Top Gainers — {PERIOD_LABELS[moverPeriod]}</span>
+              <div className="px-4 py-2 bg-emerald-50 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <ArrowUp className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="text-xs font-semibold text-emerald-700">Top Gainers — {moverPeriod.toUpperCase()}</span>
+                </div>
+                <ScreenerLink href={moverScreenerUrl} label="Screen Gainers" />
               </div>
               <table className="w-full text-sm">
                 <thead><MoverTableHeader period={moverPeriod} retKey={retKey} /></thead>
                 <tbody>
-                  {movers.gainers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} period={moverPeriod} />)}
+                  {movers.gainers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} />)}
                 </tbody>
               </table>
             </div>
             {/* Losers */}
             <div>
-              <div className="px-4 py-2 bg-red-50 flex items-center gap-1.5">
-                <ArrowDown className="w-3.5 h-3.5 text-red-600" />
-                <span className="text-xs font-semibold text-red-700">Top Losers — {PERIOD_LABELS[moverPeriod]}</span>
+              <div className="px-4 py-2 bg-red-50 flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <ArrowDown className="w-3.5 h-3.5 text-red-600" />
+                  <span className="text-xs font-semibold text-red-700">Top Losers — {moverPeriod.toUpperCase()}</span>
+                </div>
+                <ScreenerLink href="/screener?preset=turnaround" label="Screen Losers" />
               </div>
               <table className="w-full text-sm">
                 <thead><MoverTableHeader period={moverPeriod} retKey={retKey} /></thead>
                 <tbody>
-                  {movers.losers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} period={moverPeriod} />)}
+                  {movers.losers.map((s, i) => <MoverRow key={s.asx_code} s={s} rank={i + 1} retKey={retKey} />)}
                 </tbody>
               </table>
             </div>
@@ -482,38 +605,66 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* Period Highs/Lows + Volume Surge */}
+      {/* ── Market Signals ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-semibold text-slate-700">Market Signals</h2>
+            {!isPro && (
+              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Pro</span>
+            )}
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Signal type tabs */}
-            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-              {([['high', '↑ Highs'], ['low', '↓ Lows'], ['volume', '⚡ Volume']] as const).map(([k, label]) => (
-                <button key={k} onClick={() => setSigTab(k)}
-                  className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${sigTab === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            {/* Period selector — independent from movers, includes 52W */}
-            <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-              {(Object.keys(SIG_PERIOD_LABELS) as SigPeriod[]).map(p => (
-                <button key={p} onClick={() => setSigPeriod(p)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${sigPeriod === p ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                  {SIG_PERIOD_LABELS[p]}
-                </button>
-              ))}
-            </div>
+            {/* Signal type tabs — renamed "Near Highs" / "Near Lows" */}
+            <TabPills
+              value={sigTab}
+              onChange={setSigTab}
+              options={[
+                { value: 'high',   label: '↑ Near Highs' },
+                { value: 'low',    label: '↓ Near Lows'  },
+                { value: 'volume', label: '⚡ Volume'     },
+              ]}
+            />
+            <TabPills value={sigPeriod} onChange={setSigPeriod} options={SIG_PERIOD_OPTIONS} />
           </div>
         </div>
-        {signalsLoading ? (
+
+        {!isPro ? (
+          <ProGate>
+            {/* Fake blurred rows */}
+            <table className="w-full text-sm">
+              <thead><tr className="text-xs text-slate-400 bg-slate-50">
+                <th className="py-2 px-3 text-left">Stock</th>
+                <th className="py-2 px-3 text-right">Price</th>
+                <th className="py-2 px-3 text-right">Period High</th>
+                <th className="py-2 px-3 text-right">From High</th>
+                <th className="py-2 px-3 text-right">1W</th>
+              </tr></thead>
+              <tbody>
+                {[['BHP', 'BHP Group', '43.20', '+2.1%', '+4.5%'],
+                  ['CBA', 'Commonwealth Bank', '141.00', '-0.5%', '+1.8%'],
+                  ['CSL', 'CSL Limited', '285.50', '+0.8%', '+3.2%'],
+                ].map(([code, name, price, from, ret]) => (
+                  <tr key={code} className="border-t border-slate-100">
+                    <td className="py-2 px-3"><span className="font-semibold text-blue-600">{code}</span><div className="text-xs text-slate-400">{name}</div></td>
+                    <td className="py-2 px-3 text-right">${price}</td>
+                    <td className="py-2 px-3 text-right text-slate-400">—</td>
+                    <td className="py-2 px-3 text-right text-emerald-600">{from}</td>
+                    <td className="py-2 px-3 text-right text-emerald-600">{ret}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ProGate>
+        ) : signalsLoading ? (
           <div className="h-48 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
         ) : signals ? (
           <>
+            {/* Action bar */}
+            <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex justify-end">
+              <ScreenerLink href={`/screener?preset=${sigScreenerPreset}`} />
+            </div>
             {(() => {
               const retLabel = (sigPeriod === '1m' || sigPeriod === '3m' || sigPeriod === '52w') ? '1M' : '1W'
               return (
@@ -524,7 +675,7 @@ export default function MarketPage() {
                         <tr className="text-xs text-slate-400 bg-slate-50">
                           <th className="py-2 px-3 text-left">Stock</th>
                           <th className="py-2 px-3 text-right">Price</th>
-                          <th className="py-2 px-3 text-right">{SIG_PERIOD_LABELS[sigPeriod]} High</th>
+                          <th className="py-2 px-3 text-right">{SIG_PERIOD_OPTIONS.find(o => o.value === sigPeriod)?.label} High</th>
                           <th className="py-2 px-3 text-right">From High</th>
                           <th className="py-2 px-3 text-right">{retLabel}</th>
                         </tr>
@@ -542,7 +693,7 @@ export default function MarketPage() {
                         <tr className="text-xs text-slate-400 bg-slate-50">
                           <th className="py-2 px-3 text-left">Stock</th>
                           <th className="py-2 px-3 text-right">Price</th>
-                          <th className="py-2 px-3 text-right">{SIG_PERIOD_LABELS[sigPeriod]} Low</th>
+                          <th className="py-2 px-3 text-right">{SIG_PERIOD_OPTIONS.find(o => o.value === sigPeriod)?.label} Low</th>
                           <th className="py-2 px-3 text-right">From Low</th>
                           <th className="py-2 px-3 text-right">{retLabel}</th>
                         </tr>
@@ -582,25 +733,39 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* Most Active + Heavy Buying + Heavy Selling */}
+      {/* ── Volume Activity ─────────────────────────────────────────────────── */}
       <div className="space-y-3">
-        {/* Section header with shared cap tier filter */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Activity className="w-4 h-4 text-slate-400" />
             <span className="text-sm font-semibold text-slate-700">Volume Activity</span>
+            {!isPro && (
+              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Pro</span>
+            )}
           </div>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
-            {(['all', 'mega', 'large', 'mid', 'small', 'micro', 'nano'] as CapTier[]).map(t => (
-              <button key={t} onClick={() => setVolumeCapTier(t)}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${volumeCapTier === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-                {CAP_TIER_LABELS[t]}
-              </button>
-            ))}
-          </div>
+          <TabPills value={volumeCapTier} onChange={setVolumeCapTier} options={CAP_TIER_OPTIONS} />
         </div>
 
-        {volumeLoading ? (
+        {!isPro ? (
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <ProGate>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-slate-100">
+                {['Most Active by Volume', 'Heavy Buying', 'Heavy Selling'].map(t => (
+                  <div key={t} className="p-4">
+                    <div className="font-semibold text-sm text-slate-700 mb-2">{t}</div>
+                    {[1,2,3].map(i => (
+                      <div key={i} className="flex justify-between py-1.5 border-t border-slate-50">
+                        <span className="text-blue-600 font-semibold text-sm">XXX</span>
+                        <span className="text-slate-400 text-sm">$0.00</span>
+                        <span className="text-emerald-600 text-sm">+0.0%</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </ProGate>
+          </div>
+        ) : volumeLoading ? (
           <div className="h-48 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -623,13 +788,17 @@ export default function MarketPage() {
               </table>
             </TableCard>
 
-            <TableCard title="Heavy Buying" icon={ArrowUp}>
+            <TableCard
+              title="Heavy Buying"
+              icon={ArrowUp}
+              action={<ScreenerLink href="/screener?preset=volume_breakout" />}
+            >
               <div className="px-4 py-1.5 bg-emerald-50 border-b border-emerald-100">
-                <p className="text-xs text-emerald-700">Volume surge + price rising — potential overbought</p>
+                <p className="text-xs text-emerald-700">Volume surge + price rising — accumulation signal</p>
               </div>
               {(volumeActivity?.heavy_buying ?? []).length === 0 ? (
                 <div className="py-8 text-center text-sm text-slate-400">
-                  No heavy buying detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
+                  No heavy buying detected{volumeCapTier !== 'all' && volumeCapTier !== 'asx300' ? ' in this tier' : ' today'}
                 </div>
               ) : (
                 <table className="w-full text-sm">
@@ -649,13 +818,17 @@ export default function MarketPage() {
               )}
             </TableCard>
 
-            <TableCard title="Heavy Selling" icon={ArrowDown}>
+            <TableCard
+              title="Heavy Selling"
+              icon={ArrowDown}
+              action={<ScreenerLink href="/screener?preset=rsi_oversold" />}
+            >
               <div className="px-4 py-1.5 bg-red-50 border-b border-red-100">
                 <p className="text-xs text-red-700">Volume surge + price falling — potential oversold bounce</p>
               </div>
               {(volumeActivity?.heavy_selling ?? []).length === 0 ? (
                 <div className="py-8 text-center text-sm text-slate-400">
-                  No heavy selling detected{volumeCapTier !== 'all' ? ' in this tier' : ' today'}
+                  No heavy selling detected{volumeCapTier !== 'all' && volumeCapTier !== 'asx300' ? ' in this tier' : ' today'}
                 </div>
               ) : (
                 <table className="w-full text-sm">
@@ -678,28 +851,63 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* Anomaly Feed */}
+      {/* ── Anomaly Feed ───────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500" />
             <h2 className="text-sm font-semibold text-slate-700">Market Anomalies</h2>
-            {anomalies.length > 0 && (
+            {anomalies.length > 0 && isPro && (
               <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700">
                 {anomalies.length} active
               </span>
             )}
+            {!isPro && (
+              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Pro</span>
+            )}
           </div>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
             {ANOMALY_TYPES.map(({ value, label }) => (
-              <button key={value} onClick={() => { setAnomalyFilter(value); loadAnomalies(value) }}
+              <button key={value}
+                onClick={() => { setAnomalyFilter(value); loadAnomalies(value) }}
+                title={ANOMALY_TOOLTIPS[value] ?? ''}
                 className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-colors ${anomalyFilter === value ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
                 {label}
               </button>
             ))}
           </div>
         </div>
-        {anomaliesLoading ? (
+
+        {!isPro ? (
+          <ProGate>
+            <table className="w-full text-sm">
+              <thead><tr className="text-xs text-slate-400 bg-slate-50">
+                <th className="py-2 px-3 text-left">Stock</th>
+                <th className="py-2 px-3 text-left hidden sm:table-cell">Type</th>
+                <th className="py-2 px-3 text-left">Description</th>
+                <th className="py-2 px-3 text-right">Price</th>
+                <th className="py-2 px-3 text-right">1W</th>
+                <th className="py-2 px-3 text-right hidden md:table-cell">Severity</th>
+              </tr></thead>
+              <tbody>
+                {[
+                  ['BHP',  'BHP Group',           'VALUE_GROWTH',              'Trading at 8.2x PE with 14% earnings growth — strong value signal', '43.20', '+4.2%', 'high'],
+                  ['WBC',  'Westpac Banking',      'OVERSOLD_QUALITY',          'RSI 26 — technically oversold quality bank stock', '26.80', '-3.1%', 'medium'],
+                  ['RIO',  'Rio Tinto',            'PRICE_EARNINGS_DIVERGENCE', 'Price fell 8% while EPS guidance raised — PE now 9.1x vs sector 14x', '118.50', '-2.4%', 'high'],
+                ].map(([code, name, type, desc, price, ret, sev]) => (
+                  <tr key={code} className="border-t border-slate-100">
+                    <td className="py-2 px-3"><span className="font-semibold text-blue-600">{code}</span><div className="text-xs text-slate-400">{name}</div></td>
+                    <td className="py-2 px-3 hidden sm:table-cell"><span className="text-xs text-slate-500">{(type as string).replace(/_/g, ' ')}</span></td>
+                    <td className="py-2 px-3 text-xs text-slate-600 max-w-[200px]">{desc}</td>
+                    <td className="py-2 px-3 text-right text-sm">${price}</td>
+                    <td className="py-2 px-3 text-right text-sm font-medium text-emerald-600">{ret}</td>
+                    <td className="py-2 px-3 text-right hidden md:table-cell"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sev === 'high' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>{sev}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ProGate>
+        ) : anomaliesLoading ? (
           <div className="h-40 flex items-center justify-center text-slate-400 text-sm">Loading…</div>
         ) : anomalies.length === 0 ? (
           <div className="py-8 text-center text-sm text-slate-400">No active anomalies detected</div>
@@ -713,6 +921,7 @@ export default function MarketPage() {
                 <th className="py-2 px-3 text-right">Price</th>
                 <th className="py-2 px-3 text-right">1W</th>
                 <th className="py-2 px-3 text-right hidden md:table-cell">Severity</th>
+                <th className="py-2 px-3 text-right hidden lg:table-cell">Screen</th>
               </tr>
             </thead>
             <tbody>
@@ -721,6 +930,8 @@ export default function MarketPage() {
                   a.severity === 'high'   ? 'bg-red-100 text-red-700' :
                   a.severity === 'medium' ? 'bg-amber-100 text-amber-700' :
                                             'bg-slate-100 text-slate-600'
+                const screenerPreset = ANOMALY_SCREENER[a.flag_type]
+                const tooltip = ANOMALY_TOOLTIPS[a.flag_type]
                 return (
                   <tr key={i} className="border-t border-slate-100 hover:bg-slate-50 transition-colors">
                     <td className="py-2 px-3">
@@ -728,17 +939,27 @@ export default function MarketPage() {
                       <div className="text-xs text-slate-500 truncate max-w-[90px]">{a.company_name}</div>
                     </td>
                     <td className="py-2 px-3 hidden sm:table-cell">
-                      <span className="text-xs text-slate-500">{a.flag_type.replace(/_/g, ' ')}</span>
+                      <span
+                        className="text-xs text-slate-500 cursor-help border-b border-dotted border-slate-300"
+                        title={tooltip ?? a.flag_type.replace(/_/g, ' ')}
+                      >
+                        {a.flag_type.replace(/_/g, ' ')}
+                      </span>
                     </td>
                     <td className="py-2 px-3 text-xs text-slate-600 max-w-[200px]">{a.description}</td>
-                    <td className="py-2 px-3 text-right text-sm">{a.price != null ? `$${a.price.toFixed(3)}` : '—'}</td>
+                    <td className="py-2 px-3 text-right text-sm">{a.price != null ? `$${a.price.toFixed(2)}` : '—'}</td>
                     <td className={`py-2 px-3 text-right text-sm font-medium ${a.return_1w != null ? (a.return_1w >= 0 ? 'text-emerald-600' : 'text-red-500') : 'text-slate-400'}`}>
-                      {a.return_1w != null ? `${a.return_1w >= 0 ? '+' : ''}${(a.return_1w * 100).toFixed(2)}%` : '—'}
+                      {a.return_1w != null ? fmtPct(a.return_1w) : '—'}
                     </td>
                     <td className="py-2 px-3 text-right hidden md:table-cell">
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${sevColor}`}>
                         {a.severity}
                       </span>
+                    </td>
+                    <td className="py-2 px-3 text-right hidden lg:table-cell">
+                      {screenerPreset && (
+                        <ScreenerLink href={`/screener?preset=${screenerPreset}`} label="Screen" />
+                      )}
                     </td>
                   </tr>
                 )
@@ -748,7 +969,7 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* Upcoming Ex-Div Dates */}
+      {/* ── Upcoming Ex-Dividend Dates ───────────────────────────────────── */}
       <TableCard title="Upcoming Ex-Dividend Dates — Next 14 Days" icon={Calendar}>
         {data.upcoming_exdiv.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-slate-400">

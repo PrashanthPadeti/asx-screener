@@ -524,6 +524,12 @@ export default function ScreenerPage() {
       }
     }).catch(console.error)
 
+    // Auto-apply sector filter from Market page heatmap (?sector=Energy)
+    const sectorParam = searchParams.get('sector')
+    if (sectorParam) {
+      setFilters([{ id: nextId++, field: 'sector', operator: 'eq', value: sectorParam }])
+    }
+
     // Auto-load community screen from URL ?screen=id
     const screenId = searchParams.get('screen')
     if (screenId) {

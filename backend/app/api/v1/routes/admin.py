@@ -191,7 +191,7 @@ async def pipeline_status(
         "schedule": "Daily 6:45pm AEST",
         "type": "apscheduler",
         "job_id": "market_snapshot",
-        "last_run": await _scalar(db, "SELECT MAX(snapshot_date) FROM market.index_snapshots"),
+        "last_run": await _scalar(db, "SELECT last_run_at FROM meta.job_heartbeat WHERE job_id = 'market_snapshot'"),
         "row_count": await _scalar(db, """
             SELECT COUNT(*) FROM market.mover_snapshots
             WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM market.mover_snapshots)

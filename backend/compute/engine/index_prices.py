@@ -152,7 +152,7 @@ def fetch_index_data(
         except Exception as exc:
             msg = str(exc)
             if "Too Many Requests" in msg or "rate limit" in msg.lower():
-                wait = 30 * (attempt + 1)
+                wait = 5 * (attempt + 1)   # short wait — long sleeps block the event loop for many tickers
                 log.warning(f"{ticker}: rate limited — waiting {wait}s (attempt {attempt+1}/{retries})")
                 time.sleep(wait)
             else:

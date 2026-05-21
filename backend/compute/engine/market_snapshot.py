@@ -24,11 +24,20 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-# Load .env before reading DATABASE_URL so the script works when run directly
-# (not through the FastAPI app which sets env vars separately).
+# Load .env before reading DATABASE_URL so the script works when run directly.
+# Search in the project root AND backend/ — the file lives in one or the other
+# depending on how the server was deployed.
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    _here = Path(__file__).resolve()
+    for _candidate in [
+        _here.parents[2] / ".env",           # /opt/asx-screener/.env  (root)
+        _here.parents[2] / "backend" / ".env", # /opt/asx-screener/backend/.env
+        _here.parents[3] / ".env",            # one level higher, just in case
+    ]:
+        if _candidate.exists():
+            load_dotenv(_candidate)
+            break
 except ImportError:
     pass  # dotenv not installed — rely on env vars already being set
 

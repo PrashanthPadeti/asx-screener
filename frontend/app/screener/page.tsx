@@ -442,7 +442,8 @@ export default function ScreenerPage() {
   const [totalPages, setTotalPages] = useState(0)
   const [loading, setLoading]       = useState(false)
   const [ran, setRan]               = useState(false)
-  const [exporting, setExporting]   = useState(false)
+  const [exporting, setExporting]       = useState(false)
+  const [nlExporting, setNlExporting]   = useState(false)
   const [isCapped, setIsCapped]     = useState(false)
   const [totalRaw, setTotalRaw]     = useState(0)   // actual unfiltered count (for capped banner)
   const [sortBy, setSortBy]         = useState('market_cap')
@@ -757,6 +758,19 @@ export default function ScreenerPage() {
     }
   }, [buildApiFilters, sortBy, sortDir])
 
+  // Export AI query results as CSV — reuses the same filters Claude generated
+  const handleNlExport = useCallback(async () => {
+    if (!nlResult) return
+    setNlExporting(true)
+    try {
+      await exportScreener(nlResult.filters, { sort_by: nlResult.sort_by })
+    } catch (e) {
+      console.error('NL export failed', e)
+    } finally {
+      setNlExporting(false)
+    }
+  }, [nlResult])
+
   // Resolve visible columns in order
   const visibleCols = ALL_COLUMNS.filter(c => c.always || visibleKeys.has(c.key as string))
 
@@ -918,7 +932,19 @@ export default function ScreenerPage() {
                     <span className="text-sm font-semibold text-white">
                       {nlTotal.toLocaleString()} results
                     </span>
-                    <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleNlExport}
+                        disabled={nlExporting}
+                        title="Download AI query results as CSV"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border
+                                   border-white/20 text-slate-300 hover:bg-white/10 hover:text-white
+                                   disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium">
+                        <Download className="w-3.5 h-3.5" />
+                        {nlExporting ? 'Exporting…' : 'Export CSV'}
+                      </button>
+                      <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto">

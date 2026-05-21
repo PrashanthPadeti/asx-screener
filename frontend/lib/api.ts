@@ -1,7 +1,12 @@
 import axios from 'axios'
 import { getStoredAccessToken } from './auth'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+// Server-side (build / SSR): use internal localhost so firewall on port 8000
+// doesn't block the fetch. Client-side (browser): use the public API URL.
+const isServer = typeof window === 'undefined'
+const API_BASE = isServer
+  ? (process.env.API_INTERNAL_URL || 'http://localhost:8000')
+  : (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
 
 export const api = axios.create({
   baseURL: API_BASE,

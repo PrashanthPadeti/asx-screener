@@ -38,7 +38,14 @@ from sqlalchemy import text
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+# Resolve async DATABASE_URL.
+# Prefer the explicit async form; fall back to deriving it from DATABASE_URL_SYNC
+# (which period_metrics_compute.py also uses) by swapping the driver prefix.
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
+if not DATABASE_URL:
+    _sync = os.environ.get("DATABASE_URL_SYNC", "")
+    if _sync:
+        DATABASE_URL = _sync.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 TOP_N = 10
 EXDIV_DAYS = 14

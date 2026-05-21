@@ -252,16 +252,16 @@ async def _run_job(job_id: str) -> None:
     from datetime import date
     try:
         if job_id == "index_prices":
-            from compute.engine.index_prices import run
-            await run(target_date=date.today(), backfill_days=3)
+            from app.workers.index_prices_worker import compute_index_prices
+            await compute_index_prices()
 
         elif job_id == "fund_prices":
             from compute.engine.fund_prices import run
             await run(target_date=date.today(), backfill_days=3)
 
         elif job_id == "global_markets":
-            from compute.engine.global_markets import run
-            await run(target_date=date.today(), backfill_days=3)
+            from app.workers.global_markets_worker import compute_global_markets
+            await compute_global_markets()
 
         elif job_id == "commodities":
             from app.workers.commodities_worker import compute_commodities

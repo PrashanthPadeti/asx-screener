@@ -463,7 +463,10 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
     Queries screener.universe directly — no JOINs.
     Returns (count_sql, data_sql, params).
     """
-    where_clauses: list[str] = ["u.price IS NOT NULL"]   # exclude no-price stocks
+    where_clauses: list[str] = [
+        "u.price IS NOT NULL",      # exclude no-price stocks
+        "u.status = 'active'",      # match sector heatmap — active stocks only
+    ]
     params: dict[str, Any] = {}
 
     for i, f in enumerate(req.filters):

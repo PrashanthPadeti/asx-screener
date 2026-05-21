@@ -55,7 +55,7 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
             SUM(market_cap) / 1000.0                                                   AS total_market_cap_bn,
             MAX(universe_built_at)                                                     AS universe_built_at
         FROM screener.universe
-        WHERE status = 'Active'
+        WHERE status = 'active'
     """)
     row = (await db.execute(sql)).mappings().one()
     result = MarketSummary(
@@ -536,7 +536,7 @@ async def market_sectors(db: AsyncSession = Depends(get_db)):
             AVG(return_1y) FILTER (WHERE return_1y IS NOT NULL)                  AS avg_return_1y,
             SUM(market_cap) / 1000.0                                             AS total_market_cap_bn
         FROM screener.universe
-        WHERE status = 'Active'
+        WHERE status = 'active'
           AND sector IS NOT NULL
         GROUP BY sector
         ORDER BY total_market_cap_bn DESC NULLS LAST

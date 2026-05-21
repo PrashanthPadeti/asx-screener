@@ -235,7 +235,7 @@ export default function Navbar() {
           </div>
 
           {/* Search bar */}
-          <div className="flex-1 max-w-md ml-auto">
+          <div className="flex-1 min-w-[200px] max-w-xs ml-auto">
             <SearchBar />
           </div>
 

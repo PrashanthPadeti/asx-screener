@@ -475,18 +475,66 @@ export default async function HomePage() {
           </div>
 
           {/* Table footer */}
-          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-4">
             <p className="text-xs text-gray-400">
-              Showing 8 of {summary.total_stocks > 0 ? summary.total_stocks.toLocaleString() : '2,100+'} stocks · Sample data for illustration
+              Sample preview only — open the full screener for latest available data.
             </p>
             <Link
               href="/screener"
-              className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
+              className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 shrink-0"
             >
               Screen all {summary.total_stocks > 0 ? summary.total_stocks.toLocaleString() : '2,100+'} stocks <ArrowUpRight className="w-3 h-3" />
             </Link>
           </div>
         </div>
+      </section>
+
+      {/* ── SEO Section ───────────────────────────────────────── */}
+      <section className="bg-blue-50 border border-blue-100 rounded-xl p-6 md:p-8">
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-3">
+          Why use an ASX-specific stock screener?
+        </h2>
+        <p className="text-gray-600 mb-5 leading-relaxed max-w-3xl">
+          Most stock screeners are built for US markets and adapted for the ASX as an afterthought.
+          Australian investors have unique needs that generic tools simply don&apos;t cover.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {[
+            {
+              title: 'Franking Credits',
+              desc: 'Australian dividend imputation means a 4% dividend with full franking is worth up to 5.7% gross. Only an ASX-specific screener shows you the true grossed-up yield.',
+            },
+            {
+              title: 'Mining & Resources Depth',
+              desc: 'The ASX is dominated by miners. Key metrics like AISC (all-in sustaining cost), reserve life, and production guidance are critical for evaluating BHP, RIO, FMG, and hundreds of junior miners.',
+            },
+            {
+              title: 'A-REIT Metrics',
+              desc: 'Australian Real Estate Investment Trusts (A-REITs) require NTA per unit, WALE (weighted average lease expiry), and occupancy rates — metrics that US screeners don\'t include.',
+            },
+            {
+              title: 'ASIC Short Position Data',
+              desc: 'ASIC publishes daily short-selling data for ASX-listed stocks. Tracking short interest helps identify stocks under pressure — data unique to the Australian regulatory environment.',
+            },
+            {
+              title: 'ASX Index Membership',
+              desc: 'Whether a stock is in the ASX 200, ASX 300, or a GICS sector index affects liquidity, index fund ownership, and institutional coverage. Filter directly by index membership.',
+            },
+            {
+              title: 'End-of-Day ASX Pricing',
+              desc: 'Prices sourced directly from ASX end-of-day feeds — updated nightly after market close. No stale data, no US market hours confusion, no currency conversion required.',
+            },
+          ].map(item => (
+            <div key={item.title} className="bg-white rounded-lg p-4 border border-blue-100">
+              <h3 className="font-semibold text-gray-900 mb-1.5 text-sm">{item.title}</h3>
+              <p className="text-xs text-gray-600 leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-gray-400 mt-5">
+          ASX Screener is built from the ground up for the Australian Securities Exchange.
+          Not financial advice — always do your own research before making investment decisions.
+        </p>
       </section>
 
     </div>

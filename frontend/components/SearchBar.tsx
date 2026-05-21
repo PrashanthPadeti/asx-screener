@@ -97,7 +97,7 @@ export default function SearchBar() {
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Search stocks… (BHP, Commonwealth Bank)"
+          placeholder="Search ASX code or company…"
           autoComplete="off"
           role="combobox"
           aria-expanded={open}

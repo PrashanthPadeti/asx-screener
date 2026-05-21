@@ -1,11 +1,10 @@
 import Link from 'next/link'
-import { BarChart2, Search, TrendingUp, Star, Zap, Shield, ArrowUpRight, ArrowDownRight, Building2 } from 'lucide-react'
+import { BarChart2, Search, TrendingUp, Star, Zap, Shield, ArrowUpRight, ArrowDownRight, Database, Calculator, Building2, Brain } from 'lucide-react'
 import { getMarketMovers, getMarketSectors } from '@/lib/api'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
 
 // Force dynamic rendering so every request fetches live data.
-// Avoids ISR cache serving stale/empty results baked in at build time.
 export const dynamic = 'force-dynamic'
 
 // Internal API URL for server-side fetches (avoids firewall on public port 8000)
@@ -66,6 +65,18 @@ const QUICK_SCREENS = [
   { label: 'A-REITs',                href: '/screener?preset=reits',            color: 'bg-pink-50 text-pink-700 border-pink-200' },
 ]
 
+// ── Sample preview table rows (real-looking ASX data) ─────────
+const PREVIEW_STOCKS = [
+  { code: 'BHP',  name: 'BHP Group',               sector: 'Materials',    price: 43.82, pe: 11.4, yield: 5.2, roe: 28.1, rsi: 54.2, yieldColor: 'text-green-600' },
+  { code: 'CBA',  name: 'Commonwealth Bank',        sector: 'Financials',   price: 138.50, pe: 22.1, yield: 3.4, roe: 13.8, rsi: 61.7, yieldColor: 'text-green-600' },
+  { code: 'CSL',  name: 'CSL Limited',              sector: 'Health Care',  price: 292.10, pe: 38.6, yield: 1.1, roe: 22.4, rsi: 48.3, yieldColor: 'text-gray-600' },
+  { code: 'WES',  name: 'Wesfarmers',               sector: 'Cons. Disc.',  price: 74.40, pe: 29.3, yield: 3.1, roe: 41.2, rsi: 57.9, yieldColor: 'text-green-600' },
+  { code: 'NAB',  name: 'National Australia Bank',  sector: 'Financials',   price: 38.95, pe: 14.8, yield: 5.8, roe: 12.1, rsi: 52.4, yieldColor: 'text-green-600' },
+  { code: 'RIO',  name: 'Rio Tinto',                sector: 'Materials',    price: 118.20, pe: 9.7, yield: 6.4, roe: 24.7, rsi: 46.8, yieldColor: 'text-green-600' },
+  { code: 'WBC',  name: 'Westpac Banking',          sector: 'Financials',   price: 32.10, pe: 13.2, yield: 6.1, roe: 10.9, rsi: 44.5, yieldColor: 'text-green-600' },
+  { code: 'GMG',  name: 'Goodman Group',            sector: 'Real Estate',  price: 36.80, pe: 31.5, yield: 1.2, roe: 18.3, rsi: 63.1, yieldColor: 'text-gray-600' },
+]
+
 // ── Formatting helpers ────────────────────────────────────────
 
 function fmtPct(v: number | null, decimals = 1) {
@@ -88,10 +99,14 @@ function fmtBn(v: number | null) {
 
 function StatCard({ val, label, sub }: { val: string; label: string; sub?: string }) {
   return (
-    <div className="text-center">
-      <div className="text-2xl font-bold text-blue-600">{val}</div>
-      <div className="text-sm text-gray-600 font-medium mt-0.5">{label}</div>
-      {sub && <div className="text-xs text-gray-400 mt-0.5">{sub}</div>}
+    <div className="text-center px-2">
+      <div className="text-3xl md:text-4xl font-extrabold text-blue-600 tracking-tight leading-none">
+        {val}
+      </div>
+      <div className="text-xs md:text-sm text-gray-500 font-medium mt-2 uppercase tracking-wide">
+        {label}
+      </div>
+      {sub && <div className="text-xs text-gray-400 mt-1">{sub}</div>}
     </div>
   )
 }
@@ -166,8 +181,6 @@ function SectorCard({ s }: { s: { sector: string; stock_count: number; avg_pe: n
   )
 }
 
-// ── Data freshness badge ──────────────────────────────────────
-
 function FreshnessBadge({ builtAt }: { builtAt: string | null }) {
   if (!builtAt) return null
   const d = new Date(builtAt)
@@ -182,7 +195,6 @@ function FreshnessBadge({ builtAt }: { builtAt: string | null }) {
 // ── Page ──────────────────────────────────────────────────────
 
 export default async function HomePage() {
-  // Fetch all three endpoints in parallel; fall back gracefully if API is down
   const [summary, movers, sectors] = await Promise.all([
     fetchMarketSummary(),
     getMarketMovers('1w').catch((): MoversResponse => ({ gainers: [], losers: [], period: '1w' })),
@@ -197,13 +209,16 @@ export default async function HomePage() {
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <section className="text-center py-10 px-4">
+
+        {/* Live badge */}
         <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full mb-4">
           <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
           {summary.total_stocks > 0
             ? `${summary.total_stocks.toLocaleString()} active stocks · ASX end-of-day data`
-            : '1,800+ active stocks · ASX end-of-day data'
+            : '2,100+ active stocks · ASX end-of-day data'
           }
         </div>
+
         <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
           ASX Stock Screener
         </h1>
@@ -211,13 +226,22 @@ export default async function HomePage() {
           The most comprehensive ASX screener — franking credits, mining metrics,
           A-REIT depth, and AI insights. Built for Australian investors.
         </p>
-        <div className="flex flex-wrap gap-3 justify-center">
+
+        {/* CTA buttons — 3 buttons */}
+        <div className="flex flex-wrap gap-3 justify-center mb-8">
           <Link
             href="/screener"
             className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg
                        hover:bg-blue-700 transition-colors shadow-sm"
           >
             Open Screener
+          </Link>
+          <Link
+            href="/screener?preset=asx200"
+            className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg
+                       border-2 border-blue-200 hover:bg-blue-50 transition-colors"
+          >
+            Explore ASX 200
           </Link>
           <Link
             href="/company/BHP"
@@ -227,15 +251,38 @@ export default async function HomePage() {
             View BHP Example →
           </Link>
         </div>
+
+        {/* Trust row */}
+        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-gray-500">
+          <span className="flex items-center gap-1.5">
+            <Database className="w-3.5 h-3.5 text-blue-400" />
+            ASX end-of-day data
+          </span>
+          <span className="hidden sm:block text-gray-200">|</span>
+          <span className="flex items-center gap-1.5">
+            <Calculator className="w-3.5 h-3.5 text-blue-400" />
+            Franking credit calculations
+          </span>
+          <span className="hidden sm:block text-gray-200">|</span>
+          <span className="flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-blue-400" />
+            Mining &amp; A-REIT metrics
+          </span>
+          <span className="hidden sm:block text-gray-200">|</span>
+          <span className="flex items-center gap-1.5">
+            <Brain className="w-3.5 h-3.5 text-blue-400" />
+            AI stock insights
+          </span>
+        </div>
       </section>
 
-      {/* ── Live stats bar ────────────────────────────────────── */}
+      {/* ── Market Snapshot ───────────────────────────────────── */}
       <section className="bg-white border border-gray-200 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex items-center justify-between mb-6">
           <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide">Market Snapshot</h2>
           <FreshnessBadge builtAt={summary.universe_built_at} />
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 divide-x-0 md:divide-x divide-gray-100">
           <StatCard
             val={summary.total_stocks > 0 ? summary.total_stocks.toLocaleString() : '—'}
             label="ASX Active Stocks"
@@ -267,8 +314,6 @@ export default async function HomePage() {
             <span className="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">Past week · price &gt; $0.10 · mkt cap &gt; $50M</span>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-            {/* Gainers */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-green-50">
                 <ArrowUpRight className="w-4 h-4 text-green-600" />
@@ -284,8 +329,6 @@ export default async function HomePage() {
                 )}
               </div>
             </div>
-
-            {/* Losers */}
             <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-red-50">
                 <ArrowDownRight className="w-4 h-4 text-red-500" />
@@ -301,7 +344,6 @@ export default async function HomePage() {
                 )}
               </div>
             </div>
-
           </div>
         </section>
       )}
@@ -311,10 +353,7 @@ export default async function HomePage() {
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-lg font-semibold text-gray-800">Sector Snapshot</h2>
-            <Link
-              href="/screener"
-              className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
-            >
+            <Link href="/screener" className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1">
               Filter by sector <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>
@@ -334,8 +373,7 @@ export default async function HomePage() {
             <Link
               key={s.label}
               href={s.href}
-              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all
-                          hover:shadow-sm ${s.color}`}
+              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all hover:shadow-sm ${s.color}`}
             >
               {s.label}
             </Link>
@@ -345,7 +383,10 @@ export default async function HomePage() {
 
       {/* ── Features ──────────────────────────────────────────── */}
       <section>
-        <h2 className="text-lg font-semibold text-gray-800 mb-4">Everything you need</h2>
+        <h2 className="text-xl md:text-2xl font-bold text-gray-900 mb-1">
+          Everything Australian investors need to screen ASX stocks
+        </h2>
+        <p className="text-sm text-gray-500 mb-5">Built from the ground up for the ASX — not adapted from a US tool.</p>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {FEATURES.map(f => (
             <div key={f.title} className="bg-white border border-gray-200 rounded-xl p-5 hover:shadow-md transition-shadow">
@@ -358,6 +399,93 @@ export default async function HomePage() {
               <p className="text-sm text-gray-600 leading-relaxed">{f.desc}</p>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* ── Preview Table ─────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">See it in action</h2>
+            <p className="text-sm text-gray-500 mt-0.5">A snapshot of ASX stocks available in the screener</p>
+          </div>
+          <Link
+            href="/screener"
+            className="hidden sm:flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            Open Full Screener <ArrowUpRight className="w-4 h-4" />
+          </Link>
+        </div>
+
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          {/* Table — scrollable on mobile */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-200">
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide w-20">Code</th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Company</th>
+                  <th className="text-left px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide hidden md:table-cell">Sector</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Price</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide hidden sm:table-cell">P/E</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide">Div Yield</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide hidden lg:table-cell">ROE</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide hidden lg:table-cell">RSI</th>
+                  <th className="text-right px-4 py-3 font-semibold text-gray-600 text-xs uppercase tracking-wide"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {PREVIEW_STOCKS.map((s) => (
+                  <tr key={s.code} className="hover:bg-blue-50/40 transition-colors group">
+                    <td className="px-4 py-3">
+                      <span className="font-mono font-bold text-blue-600">{s.code}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="font-medium text-gray-800 truncate max-w-[160px] block">{s.name}</span>
+                    </td>
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{s.sector}</span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-800">${s.price.toFixed(2)}</td>
+                    <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell">{s.pe.toFixed(1)}x</td>
+                    <td className={`px-4 py-3 text-right font-semibold ${s.yieldColor}`}>{s.yield.toFixed(1)}%</td>
+                    <td className="px-4 py-3 text-right text-gray-600 hidden lg:table-cell">{s.roe.toFixed(1)}%</td>
+                    <td className="px-4 py-3 text-right hidden lg:table-cell">
+                      <span className={cn(
+                        'text-xs font-semibold px-2 py-0.5 rounded-full',
+                        s.rsi >= 70 ? 'bg-red-50 text-red-600' :
+                        s.rsi <= 30 ? 'bg-green-50 text-green-600' :
+                        'bg-gray-100 text-gray-600'
+                      )}>
+                        {s.rsi.toFixed(1)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Link
+                        href={`/company/${s.code}`}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        View →
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Table footer */}
+          <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
+            <p className="text-xs text-gray-400">
+              Showing 8 of {summary.total_stocks > 0 ? summary.total_stocks.toLocaleString() : '2,100+'} stocks · Sample data for illustration
+            </p>
+            <Link
+              href="/screener"
+              className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1"
+            >
+              Screen all {summary.total_stocks > 0 ? summary.total_stocks.toLocaleString() : '2,100+'} stocks <ArrowUpRight className="w-3 h-3" />
+            </Link>
+          </div>
         </div>
       </section>
 

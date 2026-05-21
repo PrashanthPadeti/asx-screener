@@ -272,19 +272,21 @@ export default function Navbar() {
                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm
                              text-gray-700 hover:bg-gray-100 transition-colors"
                 >
-                  <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold">
+                  <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold shrink-0">
                     {(user.name || user.email)[0].toUpperCase()}
                   </div>
-                  <span className="max-w-[120px] truncate">
-                    {user.name || user.email}
-                  </span>
-                  <span className={cn(
-                    'text-xs px-1.5 py-0.5 rounded font-medium capitalize',
-                    PLAN_BADGE[user.plan] ?? PLAN_BADGE.free
-                  )}>
-                    {user.plan}
-                  </span>
-                  <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', userDropOpen && 'rotate-180')} />
+                  <div className="flex flex-col items-start leading-tight">
+                    <span className="max-w-[100px] truncate text-sm font-medium text-gray-700">
+                      {user.name || user.email}
+                    </span>
+                    <span className={cn(
+                      'text-[10px] px-1.5 py-0 rounded font-semibold capitalize',
+                      PLAN_BADGE[user.plan] ?? PLAN_BADGE.free
+                    )}>
+                      {user.plan}
+                    </span>
+                  </div>
+                  <ChevronDown className={cn('w-3.5 h-3.5 transition-transform shrink-0', userDropOpen && 'rotate-180')} />
                 </button>
 
                 {userDropOpen && (

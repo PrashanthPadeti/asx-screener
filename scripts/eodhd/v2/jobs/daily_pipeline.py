@@ -45,7 +45,11 @@ log = logging.getLogger(__name__)
 BASE_DIR  = Path(__file__).resolve().parents[4]   # /opt/asx-screener
 SCRIPTS   = BASE_DIR / "scripts" / "eodhd" / "v2"
 ASIC      = BASE_DIR / "scripts" / "asic"
-COMPUTE   = BASE_DIR / "compute" / "engine"
+# Prefer backend/compute/engine (canonical source); fall back to root-level compute/engine
+# if the server uses a symlink or flat deployment without the backend/ prefix.
+_compute_canonical = BASE_DIR / "backend" / "compute" / "engine"
+_compute_fallback  = BASE_DIR / "compute" / "engine"
+COMPUTE   = _compute_canonical if _compute_canonical.exists() else _compute_fallback
 PYTHON    = sys.executable
 TODAY     = date.today().isoformat()
 YESTERDAY = (date.today() - timedelta(days=1)).isoformat()

@@ -126,7 +126,7 @@ export default function Navbar() {
                 )}
               >
                 <Building2 className="w-3.5 h-3.5" />
-                Data
+                Premium Data Tools
                 <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', marketDropOpen && 'rotate-180')} />
               </button>
 

@@ -9,8 +9,8 @@ import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
   { href: '/',          label: 'Home',      icon: TrendingUp },
-  { href: '/market',    label: 'Market',    icon: Globe },
   { href: '/screener',  label: 'Screener',  icon: BarChart2 },
+  { href: '/market',    label: 'Market',    icon: Globe },
   { href: '/scans',     label: 'Scans',     icon: ScanLine },
   { href: '/news',      label: 'News',      icon: Newspaper },
   { href: '/watchlist', label: 'Watchlist', icon: Star },

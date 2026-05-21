@@ -99,20 +99,40 @@ export default function Navbar() {
 
           {/* Desktop nav links */}
           <div className="hidden md:flex items-center gap-1 ml-4">
-            {NAV_LINKS.map(({ href, label }) => (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
-                  pathname === href
-                    ? 'bg-blue-50 text-blue-700'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                )}
-              >
-                {label}
-              </Link>
-            ))}
+            {NAV_LINKS.map(({ href, label }) => {
+              // Screener always shows as a solid blue pill — primary CTA in the nav
+              if (href === '/screener') {
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    className={cn(
+                      'px-3.5 py-1.5 rounded-full text-sm font-semibold transition-colors',
+                      pathname === href
+                        ? 'bg-blue-700 text-white shadow-md'        // on /screener: darker blue
+                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm' // everywhere else: solid blue
+                    )}
+                  >
+                    {label}
+                  </Link>
+                )
+              }
+              // All other links — normal active/inactive states
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
+                    pathname === href
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+                  )}
+                >
+                  {label}
+                </Link>
+              )
+            })}
 
             {/* Market Data dropdown */}
             <div className="relative" ref={marketDropRef}>

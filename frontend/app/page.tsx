@@ -4,9 +4,9 @@ import { getMarketSummary, getMarketMovers, getMarketSectors } from '@/lib/api'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
 
-// Revalidate the homepage every hour so live market data stays fresh
+// Revalidate the homepage every 5 minutes so market data stays fresh
 // (end-of-day data changes once per night when the pipeline runs)
-export const revalidate = 3600
+export const revalidate = 300
 
 // ── Static content ────────────────────────────────────────────
 

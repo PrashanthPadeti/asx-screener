@@ -392,6 +392,13 @@ function ColumnPicker({
   )
 }
 
+// ── Preset tier helper ────────────────────────────────────────────────────────
+function presetTier(p: ScreenerPreset): 'free' | 'pro' | 'premium' {
+  if (p.min_plan === 'premium') return 'premium'
+  if (p.premium)                return 'pro'
+  return 'free'
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const NL_EXAMPLES = [
@@ -407,12 +414,14 @@ const NL_EXAMPLES = [
 
 export default function ScreenerPage() {
   const { user } = useAuth()
-  const userPlan = user?.plan ?? 'free'
+  const userPlan  = user?.plan ?? 'free'
+  const isFree    = !['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
   const isPro     = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
-  const isPremium = ['premium', 'enterprise_premium'].includes(userPlan)   // AI Query: Premium only
+  const isPremium = ['premium', 'enterprise_premium'].includes(userPlan)
   const searchParams = useSearchParams()
 
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false)
+  // null = closed; 'pro' or 'premium' = show relevant upgrade modal
+  const [upgradeForTier, setUpgradeForTier] = useState<'pro' | 'premium' | null>(null)
 
   // Filter state
   const [filters, setFilters] = useState<FilterRow[]>([])
@@ -574,10 +583,9 @@ export default function ScreenerPage() {
   }
 
   const applyPreset = (preset: ScreenerPreset) => {
-    if (preset.premium && !isPro) {
-      setShowUpgradeModal(true)
-      return
-    }
+    const tier = presetTier(preset)
+    if (tier === 'premium' && !isPremium) { setUpgradeForTier('premium'); return }
+    if (tier === 'pro'     && !isPro)     { setUpgradeForTier('pro');     return }
     applyPresetDirect(preset)
   }
 
@@ -999,80 +1007,138 @@ export default function ScreenerPage() {
 
       {/* ── Manual Filter Mode ───────────────────────────────────── */}
       {screenerMode === 'manual' && presets.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Zap className="w-4 h-4 text-yellow-500" />
-            <span className="text-sm font-semibold text-gray-700">Quick Screens</span>
-            {!isPro && (
-              <span className="ml-auto text-xs text-slate-400">
-                <Lock className="w-3 h-3 inline mr-1" />Pro screens below
-              </span>
-            )}
-          </div>
-          {/* Free presets */}
-          <div className="flex flex-wrap gap-2 mb-3">
-            {presets.filter(p => !p.premium).map(p => (
-              <button key={p.id} onClick={() => applyPreset(p)}
-                className={cn(
-                  'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors',
-                  activePreset === p.id
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-600'
-                )}>
-                {p.name}
-              </button>
-            ))}
-          </div>
-          {/* Premium presets */}
-          <div className="border-t border-slate-100 pt-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              <span className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Pro Screens</span>
-              {!isPro && <Lock className="w-3 h-3 text-amber-500" />}
+        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
+
+          {/* ── Free Screens ── */}
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <Zap className="w-4 h-4 text-yellow-500" />
+              <span className="text-sm font-semibold text-gray-700">Quick Screens</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {presets.filter(p => p.premium).map(p => (
-                <button key={p.id} onClick={() => applyPreset(p)}
-                  title={p.description}
+              {presets.filter(p => presetTier(p) === 'free').map(p => (
+                <button key={p.id} onClick={() => applyPreset(p)} title={p.description}
+                  className={cn(
+                    'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors',
+                    activePreset === p.id
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-600'
+                  )}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Pro Screens ── */}
+          <div className="border-t border-slate-100 pt-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Pro Screens</span>
+              {!isPro && <Lock className="w-3 h-3 text-blue-500" />}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {presets.filter(p => presetTier(p) === 'pro').map(p => (
+                <button key={p.id} onClick={() => applyPreset(p)} title={p.description}
                   className={cn(
                     'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors flex items-center gap-1.5',
                     activePreset === p.id
-                      ? 'bg-amber-500 text-white border-amber-500'
+                      ? 'bg-blue-600 text-white border-blue-600'
                       : isPro
-                        ? 'bg-white text-gray-700 border-amber-200 hover:border-amber-400 hover:text-amber-700'
-                        : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 cursor-pointer'
+                        ? 'bg-white text-gray-700 border-blue-200 hover:border-blue-400 hover:text-blue-700'
+                        : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 cursor-pointer'
                   )}>
                   {!isPro && <Lock className="w-3 h-3 flex-shrink-0" />}
                   {p.name}
-                  {!isPro && (
-                    <span className="text-[10px] bg-amber-500 text-white rounded px-1 py-0.5 font-bold leading-none">PRO</span>
-                  )}
+                  <span className={cn(
+                    'text-[10px] rounded px-1 py-0.5 font-bold leading-none',
+                    activePreset === p.id
+                      ? 'bg-white/30 text-white'
+                      : 'bg-blue-600 text-white'
+                  )}>PRO</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* ── Premium Screens ── */}
+          <div className="border-t border-slate-100 pt-3">
+            <div className="flex items-center gap-1.5 mb-2">
+              <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Premium Screens</span>
+              {!isPremium && <Lock className="w-3 h-3 text-purple-500" />}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {presets.filter(p => presetTier(p) === 'premium').map(p => (
+                <button key={p.id} onClick={() => applyPreset(p)} title={p.description}
+                  className={cn(
+                    'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors flex items-center gap-1.5',
+                    activePreset === p.id
+                      ? 'bg-purple-600 text-white border-purple-600'
+                      : isPremium
+                        ? 'bg-white text-gray-700 border-purple-200 hover:border-purple-400 hover:text-purple-700'
+                        : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 cursor-pointer'
+                  )}>
+                  {!isPremium && <Lock className="w-3 h-3 flex-shrink-0" />}
+                  {p.name}
+                  <span className={cn(
+                    'text-[10px] rounded px-1 py-0.5 font-bold leading-none',
+                    activePreset === p.id
+                      ? 'bg-white/30 text-white'
+                      : 'bg-purple-600 text-white'
+                  )}>PREMIUM</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Upgrade modal — Pro */}
+      {upgradeForTier === 'pro' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-6 h-6 text-blue-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Pro Screen</h2>
+            <p className="text-sm text-slate-500 mb-5">
+              This is a <span className="font-semibold text-blue-600">Pro screen</span>.
+              Upgrade to Pro or Premium to unlock it, plus CSV export and more advanced screens.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                Maybe later
+              </button>
+              <Link href="/pricing" onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold">
+                Upgrade to Pro
+              </Link>
             </div>
           </div>
         </div>
       )}
 
-      {/* Upgrade modal */}
-      {showUpgradeModal && (
+      {/* Upgrade modal — Premium */}
+      {upgradeForTier === 'premium' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
-            <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-6 h-6 text-amber-600" />
+            <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-6 h-6 text-purple-600" />
             </div>
-            <h2 className="text-lg font-bold text-slate-900 mb-2">Pro Screen</h2>
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Premium Screen</h2>
             <p className="text-sm text-slate-500 mb-5">
-              This screen is available on the <span className="font-semibold text-amber-600">Pro plan</span> and above.
-              Upgrade to unlock all 7 premium screens, NL Screener, CSV export, and more.
+              This is a <span className="font-semibold text-purple-600">Premium screen</span>.
+              Upgrade to Premium to unlock advanced ASX insights — AI Ranked screens, Mining Value, A-REIT Income, Franking Optimiser and more.
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setShowUpgradeModal(false)}
+              <button onClick={() => setUpgradeForTier(null)}
                 className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
                 Maybe later
               </button>
-              <Link href="/pricing" onClick={() => setShowUpgradeModal(false)}
-                className="flex-1 px-4 py-2 text-sm bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold">
-                Upgrade to Pro
+              <Link href="/pricing" onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold">
+                Upgrade to Premium
               </Link>
             </div>
           </div>
@@ -1343,7 +1409,7 @@ export default function ScreenerPage() {
             <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 border-b border-amber-200">
               <span className="text-sm text-amber-800">
                 <span className="font-semibold">Free plan:</span> showing first 500 stocks.
-                Upgrade to <span className="font-semibold">Pro</span> to see all results and export to CSV.
+                Upgrade to <span className="font-semibold">Pro or Premium</span> to see all results and export to CSV.
               </span>
               <Link href="/pricing"
                 className="flex-shrink-0 ml-4 px-3 py-1 text-xs font-semibold rounded-lg
@@ -1375,13 +1441,13 @@ export default function ScreenerPage() {
                 </button>
               ) : (
                 <button
-                  title="Export CSV — Pro plan required"
-                  onClick={() => window.location.href = '/pricing'}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-amber-300
-                             text-amber-600 hover:border-amber-400 hover:bg-amber-50
-                             transition-colors font-medium bg-white">
+                  disabled
+                  title="Export CSV — Pro or Premium plan required"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-200
+                             text-gray-400 cursor-not-allowed opacity-60 font-medium bg-gray-50">
                   <Download className="w-3.5 h-3.5" />
-                  Export CSV 🔒
+                  Export CSV
+                  <Lock className="w-3 h-3" />
                 </button>
               )}
               <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />

@@ -1,7 +1,7 @@
-# ASX Screener — V3.1.0 Restore Guide
+# ASX Screener — V4.0.0 Restore Guide
 **Baseline Date:** 2026-05-21  
-**Git Tag:** `v3.1.0`  
-**Commit:** `9f4206b`  
+**Git Tag:** `v4.0.0`  
+**Commit:** `73cc25a`  
 **GitHub:** https://github.com/PrashanthPadeti/asx-screener
 
 ---
@@ -10,9 +10,9 @@
 
 | Backup | Location | Size | Contains |
 |--------|----------|------|----------|
-| **Full folder backup** | `C:\Users\Dell\My Claude\Code\ASX_Screener_v3.1.0_Backup_2026-05-21.zip` | ~448 MB | Everything including node_modules, venv cache |
-| **Clean git archive** | `C:\Users\Dell\My Claude\Code\ASX_Screener_v3.1.0_git_2026-05-21.zip` | ~1.3 MB | Source code only (no dependencies) |
-| **GitHub tag** | https://github.com/PrashanthPadeti/asx-screener/releases/tag/v3.1.0 | — | Full git history + tag |
+| **Full folder backup** | `C:\Users\Dell\My Claude\Code\ASX_Screener_v4.0.0_Backup_2026-05-21.zip` | ~448 MB | Everything including node_modules, venv cache |
+| **Clean git archive** | `C:\Users\Dell\My Claude\Code\ASX_Screener_v4.0.0_git_2026-05-21.zip` | ~1.3 MB | Source code only (no dependencies) |
+| **GitHub tag** | https://github.com/PrashanthPadeti/asx-screener/releases/tag/v4.0.0 | — | Full git history + tag |
 | **GitHub main branch** | https://github.com/PrashanthPadeti/asx-screener | — | Always latest |
 
 ---
@@ -149,7 +149,8 @@ All 14 jobs should show **Healthy** after the daily scheduler runs.
 | `v1.0-base` | 2026-05-04 | Base: portfolio, AI insights, 5-tier plans, screener |
 | `v2.0.0` | 2026-05-09 | Screener, market overview, AI query, anomalies, all pipelines |
 | `v3.0.0` | 2026-05-13 | Redis caching, period return fixes, pipeline monitor, DB indexes |
-| `v3.1.0` | 2026-05-21 | **← CURRENT** Pipeline heartbeat system, ASIC fix, subscription enforcement |
+| `v3.1.0` | 2026-05-21 | Pipeline heartbeat system, ASIC fix, subscription enforcement |
+| `v4.0.0` | 2026-05-21 | **← CURRENT** Production-verified stable — all fixes, 14 jobs healthy |
 
 ### Jump between versions (local)
 ```bash
@@ -159,7 +160,7 @@ git tag -l
 # Switch to any version
 git checkout v2.0.0    # go back to V2
 git checkout v3.0.0    # go back to V3.0
-git checkout v3.1.0    # this baseline
+git checkout v4.0.0    # this baseline
 git checkout main      # latest
 ```
 

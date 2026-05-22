@@ -205,7 +205,7 @@ function PlanUsageBar({
       <span>
         <span className={stPct >= 100 ? 'text-red-600 font-semibold' : ''}>
           {stockCount}
-        </span> of {limits.stocks} stocks in this list
+        </span> of {limits.stocks} stocks used
       </span>
 
       {!isPremium && (
@@ -558,9 +558,11 @@ function ServerWatchlists() {
   }
 
   const handleCreate = async () => {
-    if (!newName.trim()) return
+    // Use user-typed name exactly; fall back to "Main Watchlist" only when
+    // submitting blank (system-default for first list).
+    const name = newName.trim() || 'Main Watchlist'
     try {
-      const wl = await createWatchlist(newName.trim())
+      const wl = await createWatchlist(name)
       setWatchlists(prev => [...prev, wl])
       setActiveId(wl.id)
       setCreating(false)
@@ -762,16 +764,21 @@ function ServerWatchlists() {
                   <FolderOpen className="w-3.5 h-3.5 shrink-0" />
                   <span className="flex-1 truncate">{wl.name}</span>
                   <span className="text-xs text-gray-400">{wl.item_count}</span>
-                  <div className="hidden group-hover:flex items-center gap-0.5 ml-0.5">
+                  <div className={cn(
+                    'flex items-center gap-0.5 ml-0.5',
+                    activeId === wl.id ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+                  )}>
                     <button
                       onClick={e => { e.stopPropagation(); setEditingId(wl.id); setEditName(wl.name) }}
-                      className="p-0.5 text-gray-400 hover:text-gray-600"
+                      className="p-0.5 text-gray-400 hover:text-blue-600 transition-colors"
+                      title="Rename watchlist"
                     >
                       <Pencil className="w-2.5 h-2.5" />
                     </button>
                     <button
                       onClick={e => { e.stopPropagation(); handleDelete(wl.id) }}
-                      className="p-0.5 text-gray-400 hover:text-red-500"
+                      className="p-0.5 text-gray-400 hover:text-red-500 transition-colors"
+                      title="Delete watchlist"
                     >
                       <Trash2 className="w-2.5 h-2.5" />
                     </button>
@@ -792,7 +799,7 @@ function ServerWatchlists() {
                   if (e.key === 'Enter')  handleCreate()
                   if (e.key === 'Escape') setCreating(false)
                 }}
-                placeholder="List name…"
+                placeholder="e.g. My First Wish List"
                 className="flex-1 text-xs border border-blue-300 rounded px-2 py-1 outline-none"
               />
               <button onClick={handleCreate} className="text-green-600"><Check className="w-3.5 h-3.5" /></button>

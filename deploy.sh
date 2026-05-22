@@ -106,9 +106,11 @@ restart_frontend() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 case "${1:-}" in
     --backend)
+        pull_code
         restart_backend
         ;;
     --frontend)
+        pull_code
         build_frontend
         restart_frontend
         ;;

@@ -18,7 +18,6 @@ import {
   searchCompanies, type SearchResult,
 } from '@/lib/api'
 import { useWatchlist } from '@/lib/watchlist'
-import WatchlistButton from '@/components/WatchlistButton'
 import { useAuth } from '@/lib/auth'
 import {
   formatPrice, formatMarketCap,
@@ -78,11 +77,11 @@ const COL_CONFIG: Record<ColKey, ColDef> = {
 const COL_KEYS        = Object.keys(COL_CONFIG) as ColKey[]
 const DEFAULT_COL_SET = new Set(COL_KEYS.filter(k => COL_CONFIG[k].defaultVisible))
 
-// Sticky column pixel widths
-const SW = { star: 40, code: 80, company: 172 } as const
-const CODE_LEFT    = SW.star
-const COMPANY_LEFT = SW.star + SW.code
-const STICKY_END   = SW.star + SW.code + SW.company   // 292
+// Sticky column pixel widths (no star column — redundant on watchlist page)
+const SW = { code: 80, company: 172 } as const
+const CODE_LEFT    = 0
+const COMPANY_LEFT = SW.code
+const STICKY_END   = SW.code + SW.company   // 252
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -375,15 +374,9 @@ function StockTable({ stocks, codes, onRemove, visibleCols }: {
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500 uppercase tracking-wide">
 
-              {/* Star — sticky */}
-              <th
-                className="py-2.5 bg-gray-50"
-                style={{ ...thSticky(0), width: SW.star, minWidth: SW.star }}
-              />
-
               {/* Code — sticky */}
               <th
-                className="px-3 py-2.5 text-left bg-gray-50"
+                className="pl-4 px-3 py-2.5 text-left bg-gray-50"
                 style={{ ...thSticky(CODE_LEFT), width: SW.code, minWidth: SW.code }}
               >
                 Code
@@ -423,18 +416,10 @@ function StockTable({ stocks, codes, onRemove, visibleCols }: {
               return (
                 <tr key={s.asx_code} className="group transition-colors hover:bg-blue-50/30">
 
-                  {/* Star — sticky */}
-                  <td
-                    style={{ ...tdSticky(0), width: SW.star }}
-                    className="pl-3 pr-1 py-3 bg-white group-hover:bg-blue-50 transition-colors"
-                  >
-                    <WatchlistButton code={s.asx_code} size="sm" />
-                  </td>
-
                   {/* Code — sticky */}
                   <td
                     style={{ ...tdSticky(CODE_LEFT), width: SW.code }}
-                    className="px-3 py-3 bg-white group-hover:bg-blue-50 transition-colors"
+                    className="pl-4 px-3 py-3 bg-white group-hover:bg-blue-50 transition-colors"
                   >
                     <Link
                       href={`/company/${s.asx_code}`}
@@ -575,10 +560,7 @@ function StockTable({ stocks, codes, onRemove, visibleCols }: {
             {/* Codes not in screener universe */}
             {codes.filter(c => !stocks.find(s => s.asx_code === c)).map(code => (
               <tr key={code} className="group opacity-60">
-                <td style={{ ...tdSticky(0), width: SW.star }} className="pl-3 pr-1 py-3 bg-white">
-                  <WatchlistButton code={code} size="sm" />
-                </td>
-                <td style={{ ...tdSticky(CODE_LEFT), width: SW.code }} className="px-3 py-3 bg-white">
+                <td style={{ ...tdSticky(CODE_LEFT), width: SW.code }} className="pl-4 px-3 py-3 bg-white">
                   <Link href={`/company/${code}`} className="font-mono font-bold text-gray-400 hover:underline">
                     {code}
                   </Link>

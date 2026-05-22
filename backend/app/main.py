@@ -106,25 +106,35 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=17, minute=50, timezone="Australia/Sydney"),
                       id="asx_indices", replace_existing=True)
 
-    # ASIC short positions — daily at 6:30pm AEST (ASIC publishes ~6pm)
+    # ASIC short positions — daily at 8:05pm AEST
+    # Moved from 6:30pm: the daily_pipeline (cron 6:30pm) processes short positions in
+    # steps 2/4/6; running APScheduler at the same time caused simultaneous writes to
+    # staging_au.short_positions / market.short_positions.  8:05pm is well after the
+    # pipeline finishes (~7:30-7:40pm) and still covers ASIC's ~6pm publication lag.
     scheduler.add_job(run_short_positions,
-                      CronTrigger(hour=18, minute=30, timezone="Australia/Sydney"),
+                      CronTrigger(hour=20, minute=5, timezone="Australia/Sydney"),
                       id="short_positions", replace_existing=True)
 
-    # Market snapshot (ASX200/300, movers, shorted) — daily at 6:45pm AEST
-    # Runs after index flags + short data are updated
+    # Market snapshot (ASX200/300, movers, shorted) — daily at 7:50pm AEST
+    # Moved from 6:45pm: at 6:45pm the pipeline's compute engines (steps 7-10) and
+    # universe build (step 13) had not yet finished, so the snapshot read stale
+    # period_metrics and an incomplete screener.universe.  7:50pm gives a 10-15 min
+    # buffer after the pipeline's own step 14 snapshot (~7:30-7:40pm) and acts as a
+    # safety-net rerun with fully-settled data.
     scheduler.add_job(run_market_snapshot,
-                      CronTrigger(hour=18, minute=45, timezone="Australia/Sydney"),
+                      CronTrigger(hour=19, minute=50, timezone="Australia/Sydney"),
                       id="market_snapshot", replace_existing=True)
 
-    # Anomaly detection — daily at 7:00pm AEST (after snapshot)
+    # Anomaly detection — daily at 8:20pm AEST (after snapshot safety-net at 7:50pm)
+    # Moved from 7:00pm: anomaly detection reads mover_snapshots; running at 7:00pm
+    # meant the pipeline step 14 snapshot (~7:30pm) had not yet written fresh data.
     scheduler.add_job(run_anomaly_detect,
-                      CronTrigger(hour=19, minute=0, timezone="Australia/Sydney"),
+                      CronTrigger(hour=20, minute=20, timezone="Australia/Sydney"),
                       id="anomaly_detect", replace_existing=True)
 
-    # Anomaly alert emails — daily at 7:15pm AEST (15 min after anomaly detection)
+    # Anomaly alert emails — daily at 8:35pm AEST (15 min after anomaly detection)
     scheduler.add_job(send_anomaly_alerts,
-                      CronTrigger(hour=19, minute=15, timezone="Australia/Sydney"),
+                      CronTrigger(hour=20, minute=35, timezone="Australia/Sydney"),
                       id="anomaly_alerts", replace_existing=True)
 
     # Capital raise scanner — daily at 7:30am AEST (after announcement fetch settles)
@@ -159,7 +169,7 @@ async def lifespan(app: FastAPI):
                       id="asx_companies", replace_existing=True)
 
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), short-positions(6:30pm), market-snapshot(6:45pm), anomaly-detect(7:00pm), anomaly-alerts(7:15pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
+    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
 
     yield
 

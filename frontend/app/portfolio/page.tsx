@@ -39,7 +39,12 @@ import { PORTFOLIO_SECTIONS } from '@/lib/helpContent'
 const fmt = (n: number | null | undefined, decimals = 2, prefix = '') =>
   n == null ? '—' : `${prefix}${n.toLocaleString('en-AU', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 
-const fmtMoney = (n: number | null | undefined) => fmt(n, 2, '$')
+// Negative-safe: "-$6,671.59" not "$-6,671.59"
+const fmtMoney = (n: number | null | undefined): string => {
+  if (n == null) return '—'
+  const abs = Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return n < 0 ? `-$${abs}` : `$${abs}`
+}
 const fmtPct   = (n: number | null | undefined) => n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`
 
 const glColor = (n: number | null | undefined) =>
@@ -59,8 +64,8 @@ const PORTFOLIO_LIMITS: Record<string, number> = {
 }
 
 const PLAN_LABEL: Record<string, string> = {
-  free: 'Free Plan', pro: 'Pro', premium: 'Premium',
-  enterprise_pro: 'Enterprise Pro', enterprise_premium: 'Enterprise Premium',
+  free: 'Free Plan', pro: 'Pro Plan', premium: 'Premium Plan',
+  enterprise_pro: 'Enterprise Pro Plan', enterprise_premium: 'Enterprise Premium Plan',
 }
 
 type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends' | 'tax' | 'insights'
@@ -940,6 +945,165 @@ function AiInsightsView({
   )
 }
 
+// ── Portfolio Settings Modal ──────────────────────────────────
+
+function PortfolioSettingsModal({
+  portfolio,
+  onSave,
+  onClose,
+}: {
+  portfolio: PortfolioOut
+  onSave: (updated: PortfolioOut) => void
+  onClose: () => void
+}) {
+  const [description, setDescription] = useState(portfolio.description ?? '')
+  const [isSmsf, setIsSmsf]           = useState(portfolio.is_smsf)
+  const [saving, setSaving]           = useState(false)
+  const [error, setError]             = useState<string | null>(null)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true); setError(null)
+    try {
+      const updated = await updatePortfolio(portfolio.id, portfolio.name, description || undefined, isSmsf)
+      onSave(updated)
+    } catch (err: any) {
+      setError(err?.response?.data?.detail ?? 'Failed to save settings')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Portfolio Settings</h2>
+        <p className="text-xs text-slate-400 mb-4">{portfolio.name}</p>
+        <form onSubmit={submit} className="space-y-4">
+          <div>
+            <label className="text-xs font-medium text-slate-600 block mb-1">Description</label>
+            <textarea
+              rows={3}
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Optional notes about this portfolio…"
+              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+            />
+          </div>
+          <label className="flex items-center gap-3 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={isSmsf}
+              onChange={e => setIsSmsf(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div>
+              <p className="text-sm font-medium text-slate-700">SMSF Portfolio</p>
+              <p className="text-xs text-slate-400">Mark this as a Self Managed Super Fund portfolio</p>
+            </div>
+          </label>
+          {error && <p className="text-xs text-red-600 bg-red-50 rounded px-3 py-2">{error}</p>}
+          <div className="flex justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+            <button type="submit" disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save Settings'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Edit Holding Modal ────────────────────────────────────────
+
+function HoldingEditModal({
+  asxCode,
+  companyName,
+  transactions,
+  onDeleteTxn,
+  onAddTxn,
+  onClose,
+}: {
+  asxCode: string
+  companyName: string | null
+  transactions: TransactionOut[]
+  onDeleteTxn: (id: number) => Promise<void>
+  onAddTxn: () => void
+  onClose: () => void
+}) {
+  const holdingTxns = transactions.filter(t => t.asx_code === asxCode)
+    .sort((a, b) => b.transaction_date.localeCompare(a.transaction_date))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">{asxCode}</h2>
+            {companyName && <p className="text-xs text-slate-400 mt-0.5">{companyName}</p>}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onAddTxn}
+              className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              + Add Transaction
+            </button>
+            <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 text-lg leading-none">✕</button>
+          </div>
+        </div>
+
+        {holdingTxns.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-400">No transactions found for {asxCode}.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                  <th className="px-3 py-2.5 text-left">Date</th>
+                  <th className="px-3 py-2.5 text-left">Type</th>
+                  <th className="px-3 py-2.5 text-right">Qty</th>
+                  <th className="px-3 py-2.5 text-right">Price</th>
+                  <th className="px-3 py-2.5 text-right">Brokerage</th>
+                  <th className="px-3 py-2.5 text-right">Total</th>
+                  <th className="px-3 py-2.5 text-left">Notes</th>
+                  <th className="px-3 py-2.5 w-8" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {holdingTxns.map(t => (
+                  <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-3 py-2.5 text-slate-500">{t.transaction_date}</td>
+                    <td className="px-3 py-2.5">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium
+                        ${t.transaction_type === 'buy' || t.transaction_type === 'drp' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                        {t.transaction_type.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{fmt(t.shares, 2)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{fmtMoney(t.price_per_share)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-400">{t.brokerage > 0 ? fmtMoney(t.brokerage) : '—'}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-medium">{fmtMoney(t.total_cost)}</td>
+                    <td className="px-3 py-2.5 text-slate-400 text-xs">{t.notes ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right">
+                      <button
+                        onClick={() => onDeleteTxn(t.id)}
+                        className="text-slate-300 hover:text-red-500 transition-colors text-xs"
+                        title="Delete transaction">
+                        ✕
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Upgrade gate banner ───────────────────────────────────────
 
 function UpgradeBanner({ tab, plan }: { tab: ViewTab; plan?: string | null }) {
@@ -1003,8 +1167,10 @@ export default function PortfolioPage() {
   const rowMenuRef = useRef<HTMLDivElement>(null)
 
   // ── Modals ────────────────────────────────────────────────
-  const [showAddTxn, setShowAddTxn] = useState(false)
-  const [showImport, setShowImport] = useState(false)
+  const [showAddTxn, setShowAddTxn]             = useState(false)
+  const [showImport, setShowImport]             = useState(false)
+  const [showPortfolioSettings, setShowPortfolioSettings] = useState(false)
+  const [editHoldingCode, setEditHoldingCode]   = useState<string | null>(null)
 
   // ── Plan limits ───────────────────────────────────────────
   const plan            = user?.plan ?? 'free'
@@ -1091,6 +1257,11 @@ export default function PortfolioPage() {
     setRenameError(null)
     setShowRename(true)
     setShowSettings(false)
+  }
+
+  const openPortfolioSettings = () => {
+    setShowSettings(false)
+    setShowPortfolioSettings(true)
   }
 
   const handleRename = async (e: React.FormEvent) => {
@@ -1210,10 +1381,14 @@ export default function PortfolioPage() {
                     ⋯
                   </button>
                   {showSettings && (
-                    <div ref={settingsRef} className="absolute left-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-40">
+                    <div ref={settingsRef} className="absolute left-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-48">
                       <button onClick={openRename}
                         className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                        <span className="text-base">✏️</span> Rename
+                        <span className="text-base">✏️</span> Rename portfolio
+                      </button>
+                      <button onClick={openPortfolioSettings}
+                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                        <span className="text-base">⚙️</span> Portfolio settings
                       </button>
                       <div className="border-t border-slate-100 my-1" />
                       <button onClick={() => handleDeletePortfolio(p.id)}
@@ -1415,19 +1590,25 @@ export default function PortfolioPage() {
                                         href={`/company/${h.asx_code}`}
                                         onClick={() => setRowMenu(null)}
                                         className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                                        <span>📈</span> View Stock
+                                        <span>📈</span> View stock
                                       </Link>
                                       <button
                                         onClick={() => { setRowMenu(null); setTxnCode(h.asx_code); setShowAddTxn(true) }}
                                         className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                                        <span>+</span> Add Transaction
+                                        <span>+</span> Add transaction
                                       </button>
                                       <Link
                                         href={`/alerts?code=${h.asx_code}`}
                                         onClick={() => setRowMenu(null)}
                                         className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                                        <span>🔔</span> Set Alert
+                                        <span>🔔</span> Set alert
                                       </Link>
+                                      <div className="border-t border-slate-100 my-1" />
+                                      <button
+                                        onClick={() => { setRowMenu(null); setEditHoldingCode(h.asx_code) }}
+                                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                                        <span>✏️</span> Edit holding
+                                      </button>
                                     </div>
                                   )}
                                 </div>
@@ -1556,6 +1737,38 @@ export default function PortfolioPage() {
           portfolioId={activeId}
           onClose={() => setShowImport(false)}
           onImported={refresh}
+        />
+      )}
+
+      {/* ── Portfolio settings modal ────────────────────────── */}
+      {showPortfolioSettings && activePortfolio && (
+        <PortfolioSettingsModal
+          portfolio={activePortfolio}
+          onSave={updated => {
+            setPortfolios(prev => prev.map(p => p.id === updated.id ? updated : p))
+            setShowPortfolioSettings(false)
+          }}
+          onClose={() => setShowPortfolioSettings(false)}
+        />
+      )}
+
+      {/* ── Edit holding modal ──────────────────────────────── */}
+      {editHoldingCode && activeId && perf && (
+        <HoldingEditModal
+          asxCode={editHoldingCode}
+          companyName={perf.holdings.find(h => h.asx_code === editHoldingCode)?.company_name ?? null}
+          transactions={txns}
+          onDeleteTxn={async (id) => {
+            if (!confirm('Delete this transaction?')) return
+            await deleteTransaction(activeId, id)
+            refresh()
+          }}
+          onAddTxn={() => {
+            setTxnCode(editHoldingCode)
+            setEditHoldingCode(null)
+            setShowAddTxn(true)
+          }}
+          onClose={() => setEditHoldingCode(null)}
         />
       )}
     </div>

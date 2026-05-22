@@ -162,14 +162,19 @@ async def update_portfolio(
     name = body.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="Portfolio name cannot be empty")
+    params: dict = {"name": name, "desc": body.description, "pid": portfolio_id}
+    smsf_clause = ""
+    if body.is_smsf is not None:
+        smsf_clause = ", is_smsf = :smsf"
+        params["smsf"] = body.is_smsf
     row = (await db.execute(
-        text("""
+        text(f"""
             UPDATE users.portfolios
-            SET name = :name, description = :desc
+            SET name = :name, description = :desc{smsf_clause}
             WHERE id = :pid
             RETURNING id, name, description, is_smsf, created_at
         """),
-        {"name": name, "desc": body.description, "pid": portfolio_id},
+        params,
     )).mappings().one()
     await db.commit()
     return PortfolioOut(

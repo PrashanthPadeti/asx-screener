@@ -19,6 +19,7 @@ class PortfolioCreate(BaseModel):
 class PortfolioUpdate(BaseModel):
     name: str
     description: Optional[str] = None
+    is_smsf: Optional[bool] = None
 
 
 class PortfolioOut(BaseModel):

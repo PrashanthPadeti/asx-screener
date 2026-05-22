@@ -1058,8 +1058,8 @@ export const createPortfolio = async (name: string, description?: string, is_sms
   return data
 }
 
-export const updatePortfolio = async (id: string, name: string, description?: string): Promise<PortfolioOut> => {
-  const { data } = await api.patch(`/api/v1/portfolio/${id}`, { name, description })
+export const updatePortfolio = async (id: string, name: string, description?: string, is_smsf?: boolean): Promise<PortfolioOut> => {
+  const { data } = await api.patch(`/api/v1/portfolio/${id}`, { name, description, is_smsf })
   return data
 }
 

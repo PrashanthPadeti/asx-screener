@@ -5,8 +5,11 @@ Admin-only endpoints for platform management.
 All endpoints require require_admin dependency (email in ADMIN_EMAILS list).
 
 Endpoints:
-  GET  /pipeline-status          – job health for all daily pipelines
+  GET  /pipeline-status          – job health for all daily pipelines (heartbeat-based)
   POST /run-job/{job_id}         – trigger a pipeline job in the background
+  GET  /pipeline/runs            – pipeline run history (last 30 days)
+  GET  /pipeline/runs/{run_date} – step-level detail for a specific pipeline run
+  GET  /pipeline/scheduler       – APScheduler job run history
   GET  /stats                    – platform-level summary stats
   GET  /users                    – paginated user list (search / filter)
   GET  /users/{user_id}          – full user profile + activity
@@ -332,6 +335,221 @@ async def trigger_job(
     background_tasks.add_task(_run_job, job_id)
     log.info(f"Admin triggered job: '{job_id}' (by {admin.get('email', 'unknown')})")
     return {"status": "started", "job_id": job_id, "message": f"Job '{job_id}' is running in the background. Refresh pipeline status in ~30 seconds."}
+
+
+# ── Pipeline Run History ──────────────────────────────────────────────────────
+
+@router.get("/pipeline/runs")
+async def pipeline_run_history(
+    days: int = Query(30, ge=1, le=90),
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Returns the last N days of daily pipeline run history.
+    Each row includes overall status, step counts, duration, and failure info.
+    """
+    result = await db.execute(text("""
+        SELECT
+            id, run_date, pipeline_name,
+            started_at, completed_at, status,
+            total_steps, steps_completed,
+            failed_step, failed_step_name, error_message,
+            duration_seconds
+        FROM market.pipeline_runs
+        WHERE run_date >= CURRENT_DATE - :days * INTERVAL '1 day'
+        ORDER BY run_date DESC, started_at DESC
+    """), {"days": days})
+
+    rows = result.fetchall()
+    runs = []
+    for r in rows:
+        runs.append({
+            "id":               r.id,
+            "run_date":         r.run_date.isoformat() if r.run_date else None,
+            "pipeline_name":    r.pipeline_name,
+            "started_at":       _iso(r.started_at),
+            "completed_at":     _iso(r.completed_at),
+            "status":           r.status,
+            "total_steps":      r.total_steps,
+            "steps_completed":  r.steps_completed,
+            "failed_step":      r.failed_step,
+            "failed_step_name": r.failed_step_name,
+            "error_message":    r.error_message,
+            "duration_seconds": r.duration_seconds,
+            "duration_fmt":     _fmt_duration(r.duration_seconds),
+        })
+
+    return {"runs": runs, "total": len(runs)}
+
+
+@router.get("/pipeline/runs/{run_date}")
+async def pipeline_run_detail(
+    run_date: str,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Returns the full step-by-step detail for a specific pipeline run date.
+    Includes the overall run record plus all 14 step rows.
+    """
+    # Overall run
+    run_result = await db.execute(text("""
+        SELECT
+            id, run_date, pipeline_name,
+            started_at, completed_at, status,
+            total_steps, steps_completed,
+            failed_step, failed_step_name, error_message,
+            duration_seconds
+        FROM market.pipeline_runs
+        WHERE run_date = :run_date
+          AND pipeline_name = 'daily'
+        ORDER BY started_at DESC
+        LIMIT 1
+    """), {"run_date": run_date})
+
+    run_row = run_result.fetchone()
+    if not run_row:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"No pipeline run found for {run_date}")
+
+    # Steps
+    steps_result = await db.execute(text("""
+        SELECT
+            step_number, step_name,
+            started_at, completed_at, status,
+            duration_seconds, error_message
+        FROM market.pipeline_step_runs
+        WHERE run_id = :run_id
+        ORDER BY step_number
+    """), {"run_id": run_row.id})
+
+    steps = []
+    for s in steps_result.fetchall():
+        steps.append({
+            "step_number":      s.step_number,
+            "step_name":        s.step_name,
+            "started_at":       _iso(s.started_at),
+            "completed_at":     _iso(s.completed_at),
+            "status":           s.status,
+            "duration_seconds": float(s.duration_seconds) if s.duration_seconds else None,
+            "duration_fmt":     _fmt_duration(s.duration_seconds),
+            "error_message":    s.error_message,
+        })
+
+    return {
+        "run": {
+            "id":               run_row.id,
+            "run_date":         run_row.run_date.isoformat(),
+            "pipeline_name":    run_row.pipeline_name,
+            "started_at":       _iso(run_row.started_at),
+            "completed_at":     _iso(run_row.completed_at),
+            "status":           run_row.status,
+            "total_steps":      run_row.total_steps,
+            "steps_completed":  run_row.steps_completed,
+            "failed_step":      run_row.failed_step,
+            "failed_step_name": run_row.failed_step_name,
+            "error_message":    run_row.error_message,
+            "duration_seconds": run_row.duration_seconds,
+            "duration_fmt":     _fmt_duration(run_row.duration_seconds),
+        },
+        "steps": steps,
+    }
+
+
+@router.get("/pipeline/scheduler")
+async def scheduler_job_history(
+    days: int = Query(14, ge=1, le=60),
+    job_id: str = Query("", description="Filter by job_id"),
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Returns APScheduler job run history for the last N days.
+    Optionally filter by job_id.
+    """
+    where_parts = ["run_date >= CURRENT_DATE - :days * INTERVAL '1 day'"]
+    params: dict = {"days": days}
+
+    if job_id:
+        where_parts.append("job_id = :job_id")
+        params["job_id"] = job_id
+
+    where_sql = " AND ".join(where_parts)
+
+    result = await db.execute(text(f"""
+        SELECT
+            id, run_date, job_id, job_name,
+            started_at, completed_at, status,
+            duration_seconds, skip_reason, error_message
+        FROM market.scheduler_job_runs
+        WHERE {where_sql}
+        ORDER BY started_at DESC
+        LIMIT 500
+    """), params)
+
+    rows = result.fetchall()
+    jobs_out = []
+    for r in rows:
+        jobs_out.append({
+            "id":               r.id,
+            "run_date":         r.run_date.isoformat() if r.run_date else None,
+            "job_id":           r.job_id,
+            "job_name":         r.job_name,
+            "started_at":       _iso(r.started_at),
+            "completed_at":     _iso(r.completed_at),
+            "status":           r.status,
+            "duration_seconds": float(r.duration_seconds) if r.duration_seconds else None,
+            "duration_fmt":     _fmt_duration(r.duration_seconds),
+            "skip_reason":      r.skip_reason,
+            "error_message":    r.error_message,
+        })
+
+    # Summary counts by job
+    summary_result = await db.execute(text(f"""
+        SELECT job_id, job_name,
+               COUNT(*) FILTER (WHERE status = 'success') AS success_count,
+               COUNT(*) FILTER (WHERE status = 'failed')  AS failed_count,
+               COUNT(*) FILTER (WHERE status = 'skipped') AS skipped_count,
+               MAX(started_at) FILTER (WHERE status = 'success') AS last_success,
+               ROUND(AVG(duration_seconds) FILTER (WHERE status = 'success'), 1) AS avg_duration
+        FROM market.scheduler_job_runs
+        WHERE {where_sql}
+        GROUP BY job_id, job_name
+        ORDER BY job_name
+    """), params)
+
+    summary = []
+    for r in summary_result.fetchall():
+        summary.append({
+            "job_id":        r.job_id,
+            "job_name":      r.job_name,
+            "success_count": int(r.success_count or 0),
+            "failed_count":  int(r.failed_count or 0),
+            "skipped_count": int(r.skipped_count or 0),
+            "last_success":  _iso(r.last_success),
+            "avg_duration":  float(r.avg_duration) if r.avg_duration else None,
+        })
+
+    return {
+        "runs":    jobs_out,
+        "summary": summary,
+        "total":   len(jobs_out),
+    }
+
+
+def _fmt_duration(seconds) -> str | None:
+    """Format duration in seconds to human-readable string."""
+    if seconds is None:
+        return None
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds}s"
+    m, s = divmod(seconds, 60)
+    if m < 60:
+        return f"{m}m {s}s"
+    h, m = divmod(m, 60)
+    return f"{h}h {m}m"
 
 
 # ── Platform Stats ────────────────────────────────────────────────────────────

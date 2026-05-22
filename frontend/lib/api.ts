@@ -1569,6 +1569,10 @@ export const getAnnouncements = async (params?: {
   document_type?: string
   sensitive_only?: boolean
   search?: string
+  tab?: string
+  date_from?: string
+  date_to?: string
+  watchlist_only?: boolean
   limit?: number
   offset?: number
 }): Promise<AnnouncementFeed> => {

@@ -97,15 +97,29 @@ function getSource(url: string | null): string {
   }
 }
 
+// ── Source badge config ───────────────────────────────────────────────────────
+
+const SOURCE_CONFIG = {
+  asx_filing:     { color: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-500' },
+  company_filing: { color: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  market_news:    { color: 'bg-gray-100 text-gray-600',   dot: 'bg-gray-400' },
+} as const
+
 // ── Announcement card ─────────────────────────────────────────────────────────
 
 function AnnouncementCard({ ann }: { ann: AnnouncementFeedItem }) {
-  const source = getSource(ann.url)
+  const srcType   = (ann.source_type ?? 'market_news') as keyof typeof SOURCE_CONFIG
+  const srcCfg    = SOURCE_CONFIG[srcType] ?? SOURCE_CONFIG.market_news
+  const srcLabel  = ann.source_label ?? 'Finance News'
+  const isOfficial = srcType === 'asx_filing'
+  const btnLabel  = isOfficial ? 'Open Announcement' : 'Open Article'
 
   return (
     <div className={cn(
-      'bg-white border rounded-xl p-4 hover:border-blue-200 hover:shadow-sm transition-all',
-      ann.market_sensitive ? 'border-l-4 border-l-amber-400 border-gray-200' : 'border-gray-200',
+      'bg-white border rounded-xl p-4 hover:shadow-sm transition-all group',
+      ann.market_sensitive
+        ? 'border-l-[3px] border-l-amber-500 border-t border-r border-b border-gray-200'
+        : 'border-gray-200 hover:border-blue-200',
     )}>
       <div className="flex items-start gap-3">
         {/* ASX code badge — clickable → company page */}
@@ -118,7 +132,7 @@ function AnnouncementCard({ ann }: { ann: AnnouncementFeedItem }) {
         </Link>
 
         <div className="flex-1 min-w-0">
-          {/* Title row */}
+          {/* Title + open button row */}
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               {ann.url ? (
@@ -145,44 +159,66 @@ function AnnouncementCard({ ann }: { ann: AnnouncementFeedItem }) {
               )}
             </div>
 
-            {/* Open link button */}
+            {/* Open button */}
             {ann.url && (
               <a
                 href={ann.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Open announcement"
-                className="shrink-0 flex items-center gap-1 px-2 py-1 text-xs text-gray-500 border border-gray-200 rounded-lg hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 transition-colors"
+                title={btnLabel}
+                className={cn(
+                  'shrink-0 flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap',
+                  isOfficial
+                    ? 'border-blue-200 text-blue-700 hover:bg-blue-50'
+                    : 'border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700',
+                )}
               >
                 <ExternalLink className="w-3 h-3" />
-                Open
+                {btnLabel}
               </a>
             )}
           </div>
 
           {/* Badge row */}
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            {ann.document_type && (
+
+            {/* Market sensitive — prominent badge */}
+            {ann.market_sensitive && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-bold shadow-sm">
+                <AlertTriangle className="w-2.5 h-2.5" />
+                MARKET SENSITIVE
+              </span>
+            )}
+
+            {/* Doc type */}
+            {ann.document_type && ann.document_type.toLowerCase() !== 'general' && (
               <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full', typeBadge(ann.document_type))}>
                 {ann.document_type}
               </span>
             )}
-            {ann.market_sensitive && (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 flex items-center gap-1">
-                <AlertTriangle className="w-2.5 h-2.5" />
-                Market Sensitive
-              </span>
-            )}
+
+            {/* Page count */}
             {ann.num_pages && (
               <span className="text-[10px] text-gray-400 px-1.5 py-0.5 rounded bg-gray-50 border border-gray-100">
                 {ann.num_pages}p
               </span>
             )}
 
-            {/* Right-aligned: source + time */}
-            <div className="ml-auto flex items-center gap-2 text-xs text-gray-400">
-              <span className="font-medium text-gray-500">{source}</span>
-              <span title={fmtDate(ann.released_at)} className="flex items-center gap-1">
+            {/* Right-aligned: source label + time */}
+            <div className="ml-auto flex items-center gap-2">
+              {/* Source badge */}
+              <span className={cn(
+                'inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full',
+                srcCfg.color,
+              )}>
+                <span className={cn('w-1.5 h-1.5 rounded-full', srcCfg.dot)} />
+                {srcLabel}
+              </span>
+
+              <span
+                title={fmtDate(ann.released_at)}
+                className="text-xs text-gray-400 flex items-center gap-1"
+              >
                 <Clock className="w-3 h-3" />
                 {timeAgo(ann.released_at)}
               </span>

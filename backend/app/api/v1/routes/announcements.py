@@ -76,6 +76,8 @@ def _row_to_dict(r) -> dict:
         "price_sensitive":  r.price_sensitive if hasattr(r, "price_sensitive") else r.market_sensitive,
         "released_at":      r.released_at.isoformat() if r.released_at else None,
         "num_pages":        r.num_pages if hasattr(r, "num_pages") else None,
+        "source_type":      r.source_type  if hasattr(r, "source_type")  else "market_news",
+        "source_label":     r.source_label if hasattr(r, "source_label") else "Finance News",
     }
 
 
@@ -160,7 +162,9 @@ async def get_announcements(
                 a.id, a.asx_code, c.company_name, a.title,
                 a.document_type, a.url,
                 a.market_sensitive, a.price_sensitive,
-                a.released_at, a.num_pages
+                a.released_at, a.num_pages,
+                COALESCE(a.source_type, 'market_news')   AS source_type,
+                COALESCE(a.source_label, 'Finance News') AS source_label
             FROM market.asx_announcements a
             LEFT JOIN market.companies c ON c.asx_code = a.asx_code
             WHERE {where}
@@ -210,7 +214,9 @@ async def get_latest_announcements(
                 a.id, a.asx_code, c.company_name, a.title,
                 a.document_type, a.url,
                 a.market_sensitive, a.price_sensitive,
-                a.released_at, a.num_pages
+                a.released_at, a.num_pages,
+                COALESCE(a.source_type, 'market_news')   AS source_type,
+                COALESCE(a.source_label, 'Finance News') AS source_label
             FROM market.asx_announcements a
             LEFT JOIN market.companies c ON c.asx_code = a.asx_code
             ORDER BY a.asx_code, a.title, a.released_at, a.id
@@ -241,7 +247,9 @@ async def get_company_announcements(
                 a.id, a.asx_code, c.company_name, a.title,
                 a.document_type, a.url,
                 a.market_sensitive, a.price_sensitive,
-                a.released_at, a.num_pages
+                a.released_at, a.num_pages,
+                COALESCE(a.source_type, 'market_news')   AS source_type,
+                COALESCE(a.source_label, 'Finance News') AS source_label
             FROM market.asx_announcements a
             LEFT JOIN market.companies c ON c.asx_code = a.asx_code
             WHERE a.asx_code = :code

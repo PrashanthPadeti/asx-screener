@@ -1553,6 +1553,8 @@ export interface AnnouncementFeedItem {
   price_sensitive:  boolean
   released_at:      string | null
   num_pages:        number | null
+  source_type:      'asx_filing' | 'company_filing' | 'market_news'
+  source_label:     string
 }
 
 export interface AnnouncementFeed {

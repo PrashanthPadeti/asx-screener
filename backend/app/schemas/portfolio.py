@@ -100,8 +100,10 @@ class PortfolioPerformance(BaseModel):
     total_value: Optional[float]
     total_gain_loss: Optional[float]
     total_gain_loss_pct: Optional[float]
+    total_change_1d: Optional[float]       # today's $ P&L vs previous close
+    total_change_1d_pct: Optional[float]   # today's % change
     annual_income: Optional[float]
-    portfolio_yield: Optional[float]   # annual_income / total_value
+    portfolio_yield: Optional[float]       # annual_income / total_value
     holdings: List[HoldingRow]
 
 

@@ -1021,6 +1021,8 @@ export interface PortfolioPerformance {
   total_value: number | null
   total_gain_loss: number | null
   total_gain_loss_pct: number | null
+  total_change_1d: number | null       // today's $ change vs previous close
+  total_change_1d_pct: number | null   // today's % change
   annual_income: number | null
   portfolio_yield: number | null
   holdings: HoldingRow[]
@@ -1065,6 +1067,10 @@ export const updatePortfolio = async (id: string, name: string, description?: st
 
 export const deletePortfolio = async (id: string): Promise<void> => {
   await api.delete(`/api/v1/portfolio/${id}`)
+}
+
+export const removeHolding = async (portfolioId: string, asxCode: string): Promise<void> => {
+  await api.delete(`/api/v1/portfolio/${portfolioId}/holdings/${asxCode}`)
 }
 
 export const getPortfolioPerformance = async (id: string): Promise<PortfolioPerformance> => {

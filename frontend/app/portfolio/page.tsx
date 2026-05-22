@@ -12,6 +12,7 @@ import {
   createPortfolio,
   updatePortfolio,
   deletePortfolio,
+  removeHolding,
   getPortfolioPerformance,
   getPortfolioHistory,
   getPortfolioDividends,
@@ -1282,12 +1283,19 @@ export default function PortfolioPage() {
 
   const handleDeletePortfolio = async (id: string) => {
     setShowSettings(false)
-    if (!confirm('Delete this portfolio and all its transactions? This cannot be undone.')) return
+    if (!confirm('Are you sure you want to delete this portfolio? This cannot be undone.')) return
     await deletePortfolio(id)
     const updated = portfolios.filter(p => p.id !== id)
     setPortfolios(updated)
     setActiveId(updated[0]?.id ?? null)
     if (updated.length === 0) { setPerf(null); setTxns([]) }
+  }
+
+  const handleRemoveHolding = async (asxCode: string) => {
+    if (!activeId) return
+    if (!confirm('Are you sure you want to remove this holding from your portfolio?')) return
+    await removeHolding(activeId, asxCode)
+    refresh()
   }
 
   const handleDeleteTxn = async (txnId: number) => {
@@ -1449,8 +1457,8 @@ export default function PortfolioPage() {
           )}
 
           {perfLoading ? (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[1,2,3,4].map(i => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              {[1,2,3,4,5].map(i => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}
             </div>
           ) : perfError ? (
             <div className="bg-red-50 border border-red-200 rounded-xl p-5 flex items-start gap-3">
@@ -1464,7 +1472,7 @@ export default function PortfolioPage() {
           ) : perf && (
             <>
               {/* Summary cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <SummaryCard
                   label="Market Value"
                   value={fmtMoney(perf.total_value)}
@@ -1486,6 +1494,12 @@ export default function PortfolioPage() {
                   value={fmtMoney(perf.annual_income)}
                   sub={perf.portfolio_yield != null ? `${perf.portfolio_yield.toFixed(2)}% yield` : 'Based on trailing DPS'}
                   subColor="text-blue-600"
+                />
+                <SummaryCard
+                  label="Today's Change"
+                  value={fmtMoney(perf.total_change_1d)}
+                  sub={perf.total_change_1d_pct != null ? fmtPct(perf.total_change_1d_pct) : undefined}
+                  subColor={glColor(perf.total_change_1d)}
                 />
               </div>
 
@@ -1608,6 +1622,12 @@ export default function PortfolioPage() {
                                         onClick={() => { setRowMenu(null); setEditHoldingCode(h.asx_code) }}
                                         className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
                                         <span>✏️</span> Edit holding
+                                      </button>
+                                      <div className="border-t border-slate-100 my-1" />
+                                      <button
+                                        onClick={() => { setRowMenu(null); handleRemoveHolding(h.asx_code) }}
+                                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                                        <span>🗑</span> Remove holding
                                       </button>
                                     </div>
                                   )}

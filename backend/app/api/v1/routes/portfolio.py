@@ -202,6 +202,24 @@ async def delete_portfolio(
     await db.commit()
 
 
+# ── Remove all transactions for a holding ────────────────────────────────────
+
+@router.delete("/{portfolio_id}/holdings/{asx_code}", status_code=204)
+async def remove_holding(
+    portfolio_id: str,
+    asx_code: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete every transaction for the given ASX code within this portfolio."""
+    await _get_portfolio_or_404(portfolio_id, current_user["id"], db)
+    await db.execute(
+        text("DELETE FROM users.portfolio_transactions WHERE portfolio_id = :pid AND asx_code = :code"),
+        {"pid": portfolio_id, "code": asx_code.upper()},
+    )
+    await db.commit()
+
+
 # ── Performance (live P&L) ────────────────────────────────────────────────────
 
 @router.get("/{portfolio_id}/performance", response_model=PortfolioPerformance)
@@ -230,7 +248,8 @@ async def get_performance(
             portfolio_id=portfolio_id,
             portfolio_name=p["name"],
             total_cost=0, total_value=None, total_gain_loss=None,
-            total_gain_loss_pct=None, annual_income=None, portfolio_yield=None,
+            total_gain_loss_pct=None, total_change_1d=None, total_change_1d_pct=None,
+            annual_income=None, portfolio_yield=None,
             holdings=[],
         )
 
@@ -249,29 +268,47 @@ async def get_performance(
     )).mappings().all()
     live = {r["asx_code"]: r for r in universe_rows}
 
+    # Fetch previous trading day's close for daily change calculation
+    prev_rows = (await db.execute(
+        text(f"""
+            SELECT DISTINCT ON (asx_code) asx_code, close AS prev_close
+            FROM market.daily_prices
+            WHERE asx_code IN ({placeholders})
+              AND time::date < CURRENT_DATE
+            ORDER BY asx_code, time DESC
+        """),
+        code_params,
+    )).mappings().all()
+    prev_prices = {r["asx_code"]: float(r["prev_close"]) for r in prev_rows if r["prev_close"] is not None}
+
     rows: list[HoldingRow] = []
-    total_cost = total_value = total_income = 0.0
+    total_cost = total_value = total_income = total_change_1d = 0.0
 
     for code, h in sorted(holdings.items()):
-        qty       = h["quantity"]
-        avg_cost  = h["avg_cost"]
+        qty        = h["quantity"]
+        avg_cost   = h["avg_cost"]
         cost_basis = h["cost_basis"]
         total_cost += cost_basis
 
         u = live.get(code)
-        cur_price   = float(u["price"])         if u and u["price"]    is not None else None
-        cur_value   = qty * cur_price            if cur_price is not None else None
-        gain_loss   = (cur_value - cost_basis)   if cur_value is not None else None
+        cur_price   = float(u["price"])          if u and u["price"]         is not None else None
+        cur_value   = qty * cur_price             if cur_price is not None    else None
+        gain_loss   = (cur_value - cost_basis)    if cur_value is not None    else None
         gain_pct    = (gain_loss / cost_basis * 100) if (gain_loss is not None and cost_basis > 0) else None
-        dps         = float(u["dps_ttm"])        if u and u["dps_ttm"] is not None else None
-        ann_income  = qty * dps                  if dps is not None else None
-        d_yield     = float(u["dividend_yield"]) if u and u["dividend_yield"] is not None else None
-        franking    = float(u["franking_pct"])   if u and u["franking_pct"] is not None else None
+        dps         = float(u["dps_ttm"])         if u and u["dps_ttm"]       is not None else None
+        ann_income  = qty * dps                   if dps is not None          else None
+        d_yield     = float(u["dividend_yield"])  if u and u["dividend_yield"] is not None else None
+        franking    = float(u["franking_pct"])    if u and u["franking_pct"]  is not None else None
+
+        prev_close  = prev_prices.get(code)
+        chg_1d      = ((cur_price - prev_close) * qty) if (cur_price and prev_close) else None
 
         if cur_value is not None:
             total_value = (total_value or 0) + cur_value
         if ann_income is not None:
             total_income = (total_income or 0) + ann_income
+        if chg_1d is not None:
+            total_change_1d = (total_change_1d or 0) + chg_1d
 
         rows.append(HoldingRow(
             asx_code=code,
@@ -289,9 +326,14 @@ async def get_performance(
             franking_pct=franking,
         ))
 
-    total_gl      = (total_value - total_cost)   if total_value is not None else None
+    total_gl      = (total_value - total_cost)    if total_value is not None  else None
     total_gl_pct  = (total_gl / total_cost * 100) if (total_gl is not None and total_cost > 0) else None
     port_yield    = (total_income / total_value * 100) if (total_income and total_value) else None
+
+    # Daily change: use prev total value as denominator so the % is correct
+    _chg          = total_change_1d if total_change_1d else None
+    _prev_total   = ((total_value or 0) - (total_change_1d or 0)) if total_value else None
+    _chg_pct      = (_chg / _prev_total * 100) if (_chg and _prev_total and _prev_total > 0) else None
 
     return PortfolioPerformance(
         portfolio_id=portfolio_id,
@@ -300,6 +342,8 @@ async def get_performance(
         total_value=total_value,
         total_gain_loss=total_gl,
         total_gain_loss_pct=total_gl_pct,
+        total_change_1d=_chg,
+        total_change_1d_pct=_chg_pct,
         annual_income=total_income if total_income else None,
         portfolio_yield=port_yield,
         holdings=rows,

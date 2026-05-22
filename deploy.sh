@@ -3,24 +3,23 @@
 # ASX Screener — Full Deploy Script
 # =============================================================================
 # Usage:
-#   ./deploy.sh            # pull latest code + restart both services
-#   ./deploy.sh --backend  # restart backend only
-#   ./deploy.sh --frontend # restart frontend only
+#   ./deploy.sh            # pull + build frontend + restart both services
+#   ./deploy.sh --backend  # restart backend only (no build)
+#   ./deploy.sh --frontend # build + restart frontend only
 #   ./deploy.sh --status   # show status of both services
 #
 # Architecture:
 #   Backend  → systemd  (asx-api.service)   — FastAPI/uvicorn on port 8000
-#   Frontend → PM2      (asx-frontend)      — Next.js
+#   Frontend → PM2      (asx-frontend)      — Next.js standalone
 #
-# NOTE: Backend must NEVER be added to PM2. Systemd owns it exclusively.
+# IMPORTANT: Backend must NEVER be added to PM2.
+#            Systemd owns it exclusively to prevent port 8000 conflicts.
 # =============================================================================
 
 set -e
 
-BACKEND_DIR="/opt/asx-screener/backend"
-FRONTEND_DIR="/opt/asx-screener/frontend"
-VENV="/opt/asx-venv"
 REPO_DIR="/opt/asx-screener"
+FRONTEND_DIR="/opt/asx-screener/frontend"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -50,20 +49,13 @@ show_status() {
 pull_code() {
     log "Pulling latest code..."
     cd "$REPO_DIR"
-    git pull origin main
+    git pull
     log "Code updated ✓"
 }
 
 # ── Backend ───────────────────────────────────────────────────────────────────
 restart_backend() {
     log "Restarting backend (systemd)..."
-
-    # Kill any stray uvicorn not owned by systemd (e.g. leftover PM2 process)
-    if ss -tlnp sport = :8000 | grep -q uvicorn; then
-        warn "Stray process on port 8000 — killing..."
-        sudo fuser -k 8000/tcp 2>/dev/null || true
-        sleep 2
-    fi
 
     sudo systemctl reset-failed asx-api 2>/dev/null || true
     sudo systemctl restart asx-api
@@ -72,15 +64,28 @@ restart_backend() {
     if systemctl is-active --quiet asx-api; then
         log "Backend running ✓  (PID: $(systemctl show asx-api -p MainPID --value))"
     else
-        err "Backend failed to start — check: sudo journalctl -u asx-api -n 30"
+        err "Backend failed — check: sudo journalctl -u asx-api -n 30"
     fi
 }
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
-restart_frontend() {
-    log "Restarting frontend (PM2)..."
+build_frontend() {
+    log "Building frontend..."
     cd "$FRONTEND_DIR"
 
+    npm run build
+
+    # Copy static assets into standalone output (required for Next.js standalone mode)
+    cp -r .next/static   .next/standalone/.next/static
+    cp -r public         .next/standalone/public
+
+    log "Frontend built ✓"
+}
+
+restart_frontend() {
+    cd "$FRONTEND_DIR"
+
+    log "Restarting frontend (PM2)..."
     if pm2 describe asx-frontend > /dev/null 2>&1; then
         pm2 restart asx-frontend
     else
@@ -104,6 +109,7 @@ case "${1:-}" in
         restart_backend
         ;;
     --frontend)
+        build_frontend
         restart_frontend
         ;;
     --status)
@@ -112,6 +118,7 @@ case "${1:-}" in
     "")
         pull_code
         restart_backend
+        build_frontend
         restart_frontend
         echo ""
         log "============================================"

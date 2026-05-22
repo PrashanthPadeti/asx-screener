@@ -28,6 +28,7 @@ from app.core.plans import get_limits
 from app.db.session import get_db
 from app.schemas.portfolio import (
     PortfolioCreate,
+    PortfolioUpdate,
     PortfolioOut,
     PortfoliosResponse,
     TransactionAdd,
@@ -137,6 +138,38 @@ async def create_portfolio(
             RETURNING id, name, description, is_smsf, created_at
         """),
         {"uid": current_user["id"], "name": body.name, "desc": body.description, "smsf": body.is_smsf},
+    )).mappings().one()
+    await db.commit()
+    return PortfolioOut(
+        id=str(row["id"]),
+        name=row["name"],
+        description=row["description"],
+        is_smsf=row["is_smsf"],
+        created_at=row["created_at"].isoformat(),
+    )
+
+
+# ── Rename / update portfolio ─────────────────────────────────────────────────
+
+@router.patch("/{portfolio_id}", response_model=PortfolioOut)
+async def update_portfolio(
+    portfolio_id: str,
+    body: PortfolioUpdate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_portfolio_or_404(portfolio_id, current_user["id"], db)
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="Portfolio name cannot be empty")
+    row = (await db.execute(
+        text("""
+            UPDATE users.portfolios
+            SET name = :name, description = :desc
+            WHERE id = :pid
+            RETURNING id, name, description, is_smsf, created_at
+        """),
+        {"name": name, "desc": body.description, "pid": portfolio_id},
     )).mappings().one()
     await db.commit()
     return PortfolioOut(

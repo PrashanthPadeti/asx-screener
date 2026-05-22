@@ -1058,6 +1058,11 @@ export const createPortfolio = async (name: string, description?: string, is_sms
   return data
 }
 
+export const updatePortfolio = async (id: string, name: string, description?: string): Promise<PortfolioOut> => {
+  const { data } = await api.patch(`/api/v1/portfolio/${id}`, { name, description })
+  return data
+}
+
 export const deletePortfolio = async (id: string): Promise<void> => {
   await api.delete(`/api/v1/portfolio/${id}`)
 }

@@ -1,15 +1,16 @@
 'use client'
 
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import Link from 'next/link'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell,
 } from 'recharts'
 import { useAuth } from '@/lib/auth'
 import {
   listPortfolios,
   createPortfolio,
+  updatePortfolio,
   deletePortfolio,
   getPortfolioPerformance,
   getPortfolioHistory,
@@ -49,6 +50,31 @@ const PIE_COLORS = [
   '#06b6d4','#84cc16','#f97316','#ec4899','#6366f1',
   '#14b8a6','#a855f7','#eab308','#64748b','#0ea5e9',
 ]
+
+// ── Plan config ───────────────────────────────────────────────
+
+const PORTFOLIO_LIMITS: Record<string, number> = {
+  free: 1, pro: 10, premium: 50,
+  enterprise_pro: 10, enterprise_premium: 50,
+}
+
+const PLAN_LABEL: Record<string, string> = {
+  free: 'Free Plan', pro: 'Pro', premium: 'Premium',
+  enterprise_pro: 'Enterprise Pro', enterprise_premium: 'Enterprise Premium',
+}
+
+type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends' | 'tax' | 'insights'
+
+const FREE_TABS   = new Set<ViewTab>(['holdings', 'transactions'])
+const PRO_TABS    = new Set<ViewTab>(['holdings', 'transactions', 'chart', 'allocation', 'dividends', 'tax'])
+const PREM_TABS   = new Set<ViewTab>(['holdings', 'transactions', 'chart', 'allocation', 'dividends', 'tax', 'insights'])
+
+const TAB_ACCESS: Record<string, Set<ViewTab>> = {
+  free: FREE_TABS, pro: PRO_TABS, premium: PREM_TABS,
+  enterprise_pro: PRO_TABS, enterprise_premium: PREM_TABS,
+}
+
+const getTabAccess = (plan?: string | null) => TAB_ACCESS[plan ?? 'free'] ?? FREE_TABS
 
 // ── Subcomponents ─────────────────────────────────────────────
 
@@ -140,7 +166,7 @@ function PortfolioChart({ portfolioId }: { portfolioId: string }) {
               labelFormatter={d => new Date(d).toLocaleDateString('en-AU')}
               contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
             />
-            <Line type="monotone" dataKey="cost" stroke="#94a3b8" strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="cost" />
+            <Line type="monotone" dataKey="cost"  stroke="#94a3b8" strokeWidth={1.5} dot={false} strokeDasharray="4 2" name="cost" />
             <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2.5} dot={false} name="value" />
           </LineChart>
         </ResponsiveContainer>
@@ -152,7 +178,7 @@ function PortfolioChart({ portfolioId }: { portfolioId: string }) {
 // ── Allocation Charts ─────────────────────────────────────────
 
 function AllocationCharts({ perf }: { perf: PortfolioPerformance }) {
-  const holdings = perf.holdings.filter(h => h.current_value != null && h.current_value > 0)
+  const holdings   = perf.holdings.filter(h => h.current_value != null && h.current_value > 0)
   const totalValue = holdings.reduce((s, h) => s + (h.current_value ?? 0), 0)
 
   const byStock = holdings
@@ -175,11 +201,6 @@ function AllocationCharts({ perf }: { perf: PortfolioPerformance }) {
         No holdings with live prices to display allocation.
       </div>
     )
-  }
-
-  const customLabel = ({ name, value }: { name: string; value: number }) => {
-    const pct = totalValue > 0 ? ((value / totalValue) * 100).toFixed(1) : '0'
-    return `${pct}%`
   }
 
   return (
@@ -219,7 +240,7 @@ function AllocationCharts({ perf }: { perf: PortfolioPerformance }) {
         <ResponsiveContainer width="100%" height={220}>
           <PieChart>
             <Pie data={bySector} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80}
-              label={({ name, value }) => `${totalValue > 0 ? ((value / totalValue) * 100).toFixed(0) : 0}%`}
+              label={({ value }) => `${totalValue > 0 ? ((value / totalValue) * 100).toFixed(0) : 0}%`}
               labelLine={false}>
               {bySector.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
             </Pie>
@@ -261,10 +282,9 @@ function DividendCalendar({ portfolioId }: { portfolioId: string }) {
       .finally(() => setLoading(false))
   }, [portfolioId])
 
-  const upcomingTotal  = data?.upcoming.reduce((s, d) => s + (d.est_income ?? 0), 0) ?? 0
-  const receivedTotal  = data?.received.reduce((s, d) => s + (d.est_income ?? 0), 0) ?? 0
-
-  const events = tab === 'upcoming' ? (data?.upcoming ?? []) : (data?.received ?? [])
+  const upcomingTotal = data?.upcoming.reduce((s, d) => s + (d.est_income ?? 0), 0) ?? 0
+  const receivedTotal = data?.received.reduce((s, d) => s + (d.est_income ?? 0), 0) ?? 0
+  const events        = tab === 'upcoming' ? (data?.upcoming ?? []) : (data?.received ?? [])
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5">
@@ -285,7 +305,6 @@ function DividendCalendar({ portfolioId }: { portfolioId: string }) {
         </div>
       </div>
 
-      {/* Summary strip */}
       {data && (
         <div className="mb-4 grid grid-cols-2 gap-3">
           <div className="bg-blue-50 rounded-lg p-3">
@@ -358,16 +377,23 @@ function DividendCalendar({ portfolioId }: { portfolioId: string }) {
 
 function AddTransactionModal({
   portfolioId,
+  initialCode,
   onClose,
   onAdded,
 }: {
   portfolioId: string
+  initialCode?: string
   onClose: () => void
   onAdded: () => void
 }) {
   const [form, setForm] = useState({
-    asx_code: '', transaction_type: 'buy', transaction_date: new Date().toISOString().slice(0, 10),
-    shares: '', price_per_share: '', brokerage: '0', notes: '',
+    asx_code:         initialCode ?? '',
+    transaction_type: 'buy',
+    transaction_date: new Date().toISOString().slice(0, 10),
+    shares:           '',
+    price_per_share:  '',
+    brokerage:        '0',
+    notes:            '',
   })
   const [saving, setSaving] = useState(false)
   const [error, setError]   = useState<string | null>(null)
@@ -381,7 +407,7 @@ function AddTransactionModal({
     setError(null)
     try {
       await addTransaction(portfolioId, {
-        asx_code:        form.asx_code.toUpperCase().trim(),
+        asx_code:         form.asx_code.toUpperCase().trim(),
         transaction_type: form.transaction_type,
         transaction_date: form.transaction_date,
         shares:           parseFloat(form.shares),
@@ -484,9 +510,7 @@ function ImportModal({
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    setLoading(true)
-    setError(null)
-    setResult(null)
+    setLoading(true); setError(null); setResult(null)
     try {
       const res = mode === 'holdings'
         ? await importHoldingsCsv(portfolioId, file)
@@ -518,7 +542,6 @@ function ImportModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
         <h2 className="text-lg font-bold text-slate-900 mb-4">Import from CSV</h2>
-
         <div className="flex gap-2 mb-4">
           {(['holdings', 'transactions'] as const).map(m => (
             <button key={m} onClick={() => { setMode(m); setResult(null); if (fileRef.current) fileRef.current.value = '' }}
@@ -527,26 +550,22 @@ function ImportModal({
             </button>
           ))}
         </div>
-
         <div className="bg-slate-50 rounded-lg p-3 mb-4 text-xs text-slate-600 font-mono">
           {mode === 'holdings'
             ? 'asx_code, quantity, avg_cost, purchase_date (optional)'
             : 'date, asx_code, type (buy/sell/drp), quantity, price, brokerage (optional)'}
         </div>
-
-        <div className="flex gap-2 mb-4">
+        <div className="mb-4">
           <button onClick={downloadTemplate} className="text-xs text-blue-600 hover:underline">
             ↓ Download template
           </button>
         </div>
-
         <label className="block w-full border-2 border-dashed border-slate-300 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 transition-colors">
           <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFile} />
           {loading
             ? <span className="text-sm text-slate-500">Importing…</span>
             : <span className="text-sm text-slate-500">Click to upload CSV file</span>}
         </label>
-
         {result && (
           <div className={`mt-3 rounded-lg px-4 py-3 text-sm ${result.imported > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
             <p className="font-semibold">{result.imported} row{result.imported !== 1 ? 's' : ''} imported{result.skipped > 0 ? `, ${result.skipped} skipped` : ''}</p>
@@ -558,7 +577,6 @@ function ImportModal({
           </div>
         )}
         {error && <p className="mt-3 text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
-
         <div className="flex justify-end mt-4">
           <button onClick={onClose} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Close</button>
         </div>
@@ -577,10 +595,10 @@ const CURRENT_FY = (() => {
 const FY_OPTIONS = Array.from({ length: 6 }, (_, i) => CURRENT_FY - i)
 
 function TaxReportView({ portfolioId }: { portfolioId: string }) {
-  const [taxYear, setTaxYear]   = useState(CURRENT_FY)
-  const [report, setReport]     = useState<TaxReport | null>(null)
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState<string | null>(null)
+  const [taxYear, setTaxYear] = useState(CURRENT_FY)
+  const [report, setReport]   = useState<TaxReport | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
 
   useEffect(() => {
     setLoading(true); setError(null)
@@ -602,7 +620,7 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
         d.discounted_gain.toFixed(2),
       ]),
     ]
-    const csv = rows.map(r => r.join(',')).join('\n')
+    const csv  = rows.map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
@@ -613,7 +631,7 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
   }
 
   const fmtG = (n: number) => {
-    const s = Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    const s     = Math.abs(n).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     const color = n >= 0 ? 'text-emerald-600' : 'text-red-500'
     const sign  = n >= 0 ? '+' : '-'
     return <span className={`font-semibold ${color}`}>{sign}${s}</span>
@@ -621,7 +639,6 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
 
   return (
     <div className="space-y-4">
-      {/* Header row */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h3 className="text-sm font-semibold text-slate-800">Capital Gains Tax Report</h3>
@@ -651,7 +668,6 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
         <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-600">{error}</div>
       ) : report && (
         <>
-          {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-white rounded-xl border border-slate-200 p-4">
               <p className="text-xs text-slate-500 mb-1">Total Proceeds</p>
@@ -675,7 +691,6 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
             </div>
           </div>
 
-          {/* Disposals table */}
           {report.disposals.length === 0 ? (
             <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
               No disposals in {report.fy_label}. Sell transactions will appear here.
@@ -724,7 +739,7 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
                       <td className="px-4 py-3 text-right tabular-nums">${report.summary.total_proceeds.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-4 py-3 text-right tabular-nums">${report.summary.total_cost_base.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-4 py-3 text-right">{fmtG(report.summary.gross_gain)}</td>
-                      <td className="px-4 py-3"></td>
+                      <td className="px-4 py-3" />
                       <td className="px-4 py-3 text-right text-amber-600">−${report.summary.discount_amount.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td className="px-4 py-3 text-right">{fmtG(report.summary.net_gain)}</td>
                     </tr>
@@ -734,7 +749,6 @@ function TaxReportView({ portfolioId }: { portfolioId: string }) {
             </div>
           )}
 
-          {/* Disclaimer */}
           <p className="text-xs text-slate-400">
             This report is for reference only and does not constitute tax advice. Consult a registered tax agent for your tax obligations.
           </p>
@@ -780,7 +794,6 @@ function AiInsightsView({
       .finally(() => { setLoading(false); setRefreshing(false) })
   }
 
-  // Only fetch on mount if we don't already have a result for this portfolio
   useEffect(() => {
     if (!cached) load()
   }, [portfolioId])
@@ -817,31 +830,28 @@ function AiInsightsView({
   if (!result) return null
   const ins = result.insights
 
-  const genDate    = new Date(result.generated_at)
-  const expDate    = new Date(result.expires_at)
-  const daysLeft   = Math.ceil((expDate.getTime() - Date.now()) / 86_400_000)
+  const genDate     = new Date(result.generated_at)
+  const expDate     = new Date(result.expires_at)
+  const daysLeft    = Math.ceil((expDate.getTime() - Date.now()) / 86_400_000)
   const genRelative = Math.floor((Date.now() - genDate.getTime()) / 86_400_000)
 
   return (
     <div className="space-y-5">
-      {/* Header stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCard label="Portfolio Value"    value={fmtMoney(result.total_value)} />
-        <SummaryCard label="Total Return"       value={fmtPct(result.total_return_pct)}
+        <SummaryCard label="Portfolio Value"  value={fmtMoney(result.total_value)} />
+        <SummaryCard label="Total Return"     value={fmtPct(result.total_return_pct)}
           subColor={glColor(result.total_return_pct)} sub={result.total_return_pct >= 0 ? 'gain' : 'loss'} />
-        <SummaryCard label="Annual Income"      value={fmtMoney(result.annual_income)}
+        <SummaryCard label="Annual Income"    value={fmtMoney(result.annual_income)}
           sub={`${result.portfolio_yield.toFixed(1)}% yield`} />
-        <SummaryCard label="Top 3 Holdings"     value={`${result.top3_concentration.toFixed(1)}%`}
+        <SummaryCard label="Top 3 Holdings"   value={`${result.top3_concentration.toFixed(1)}%`}
           sub="of portfolio" />
       </div>
 
-      {/* Summary */}
       <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
         <p className="text-sm font-semibold text-blue-800 mb-1">Portfolio Summary</p>
         <p className="text-sm text-blue-700">{ins.summary}</p>
       </div>
 
-      {/* Risk & Sector cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
           <div className="flex items-center gap-2">
@@ -865,7 +875,6 @@ function AiInsightsView({
           <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Income &amp; Dividends</p>
           <p className="text-sm text-slate-600">{ins.income_analysis.comment}</p>
         </div>
-        {/* Sector allocation mini-bar */}
         <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-2">
           <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Sector Allocation</p>
           <div className="space-y-1.5">
@@ -882,15 +891,12 @@ function AiInsightsView({
         </div>
       </div>
 
-      {/* Risks / Opportunities / Recommendations */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white rounded-xl border border-slate-200 p-4">
           <p className="text-xs font-semibold text-red-600 uppercase tracking-wide mb-3">Key Risks</p>
           <ul className="space-y-2">
             {ins.key_risks.map((r, i) => (
-              <li key={i} className="flex gap-2 text-sm text-slate-600">
-                <span className="text-red-400 mt-0.5">▸</span>{r}
-              </li>
+              <li key={i} className="flex gap-2 text-sm text-slate-600"><span className="text-red-400 mt-0.5">▸</span>{r}</li>
             ))}
           </ul>
         </div>
@@ -898,9 +904,7 @@ function AiInsightsView({
           <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide mb-3">Opportunities</p>
           <ul className="space-y-2">
             {ins.opportunities.map((o, i) => (
-              <li key={i} className="flex gap-2 text-sm text-slate-600">
-                <span className="text-emerald-500 mt-0.5">▸</span>{o}
-              </li>
+              <li key={i} className="flex gap-2 text-sm text-slate-600"><span className="text-emerald-500 mt-0.5">▸</span>{o}</li>
             ))}
           </ul>
         </div>
@@ -908,9 +912,7 @@ function AiInsightsView({
           <p className="text-xs font-semibold text-blue-600 uppercase tracking-wide mb-3">Recommendations</p>
           <ul className="space-y-2">
             {ins.recommendations.map((rec, i) => (
-              <li key={i} className="flex gap-2 text-sm text-slate-600">
-                <span className="text-blue-400 mt-0.5">▸</span>{rec}
-              </li>
+              <li key={i} className="flex gap-2 text-sm text-slate-600"><span className="text-blue-400 mt-0.5">▸</span>{rec}</li>
             ))}
           </ul>
         </div>
@@ -938,9 +940,30 @@ function AiInsightsView({
   )
 }
 
-// ── Main page ─────────────────────────────────────────────────
+// ── Upgrade gate banner ───────────────────────────────────────
 
-type ViewTab = 'holdings' | 'transactions' | 'chart' | 'allocation' | 'dividends' | 'tax' | 'insights'
+function UpgradeBanner({ tab, plan }: { tab: ViewTab; plan?: string | null }) {
+  const needsPlan = ['chart','allocation','dividends','tax'].includes(tab) ? 'Pro' : 'Premium'
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl p-10 flex flex-col items-center gap-4 text-center">
+      <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-xl">🔒</div>
+      <div>
+        <p className="font-semibold text-slate-800">{needsPlan} feature</p>
+        <p className="text-sm text-slate-500 mt-1 max-w-xs">
+          {tab === 'insights'
+            ? 'AI Portfolio Insights is available on the Premium plan.'
+            : `This tab requires a ${needsPlan} plan.`}
+        </p>
+      </div>
+      <Link href="/settings/billing"
+        className="px-5 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+        Upgrade to {needsPlan}
+      </Link>
+    </div>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────
 
 export default function PortfolioPage() {
   const { user, loading: authLoading } = useAuth()
@@ -950,21 +973,62 @@ export default function PortfolioPage() {
   const [perf, setPerf]               = useState<PortfolioPerformance | null>(null)
   const [txns, setTxns]               = useState<TransactionOut[]>([])
   const [view, setView]               = useState<ViewTab>('holdings')
-  // Keyed by portfolioId — survives tab navigation within the same page session
   const [insightsCache, setInsightsCache] = useState<Record<string, PortfolioInsightsResult>>({})
 
   const [loading, setLoading]         = useState(false)
   const [perfLoading, setPerfLoading] = useState(false)
   const [perfError, setPerfError]     = useState<string | null>(null)
 
-  const [showCreate, setShowCreate]   = useState(false)
-  const [newName, setNewName]         = useState('')
-  const [newSmsf, setNewSmsf]         = useState(false)
-  const [creating, setCreating]       = useState(false)
+  // ── Create portfolio ──────────────────────────────────────
+  const [showCreate, setShowCreate] = useState(false)
+  const [newName, setNewName]       = useState('')
+  const [newSmsf, setNewSmsf]       = useState(false)
+  const [creating, setCreating]     = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
-  const [showAddTxn, setShowAddTxn]   = useState(false)
-  const [showImport, setShowImport]   = useState(false)
+  // ── Rename portfolio ──────────────────────────────────────
+  const [showRename, setShowRename] = useState(false)
+  const [renameName, setRenameName] = useState('')
+  const [renaming, setRenaming]     = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
 
+  // ── Portfolio settings menu ───────────────────────────────
+  const [showSettings, setShowSettings] = useState(false)
+  const settingsRef   = useRef<HTMLDivElement>(null)
+  const settingsBtnRef = useRef<HTMLButtonElement>(null)
+
+  // ── Row actions menu ──────────────────────────────────────
+  const [rowMenu, setRowMenu]   = useState<string | null>(null)
+  const [txnCode, setTxnCode]   = useState<string | undefined>(undefined)
+  const rowMenuRef = useRef<HTMLDivElement>(null)
+
+  // ── Modals ────────────────────────────────────────────────
+  const [showAddTxn, setShowAddTxn] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+
+  // ── Plan limits ───────────────────────────────────────────
+  const plan            = user?.plan ?? 'free'
+  const portfolioLimit  = PORTFOLIO_LIMITS[plan] ?? 1
+  const planLabel       = PLAN_LABEL[plan] ?? 'Free Plan'
+  const tabAccess       = getTabAccess(plan)
+  const atPortfolioLimit = portfolios.length >= portfolioLimit
+
+  // ── Click-outside for menus ───────────────────────────────
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        settingsRef.current &&
+        !settingsRef.current.contains(e.target as Node) &&
+        settingsBtnRef.current &&
+        !settingsBtnRef.current.contains(e.target as Node)
+      ) setShowSettings(false)
+      if (rowMenuRef.current && !rowMenuRef.current.contains(e.target as Node)) setRowMenu(null)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // ── Data loading ──────────────────────────────────────────
   useEffect(() => {
     if (!user) return
     setLoading(true)
@@ -976,64 +1040,77 @@ export default function PortfolioPage() {
       .finally(() => setLoading(false))
   }, [user])
 
+  const loadPortfolioData = useCallback((id: string) => {
+    setPerfLoading(true)
+    setPerfError(null)
+    Promise.all([
+      getPortfolioPerformance(id),
+      listTransactions(id),
+    ]).then(([p, t]) => {
+      setPerf(p)
+      setTxns(t.transactions)
+    }).catch(e => {
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      const msg    = detail ? (typeof detail === 'string' ? detail : JSON.stringify(detail)) : (e?.message ?? 'Unknown error')
+      setPerfError(status ? `HTTP ${status}: ${msg}` : msg)
+    }).finally(() => setPerfLoading(false))
+  }, [])
+
   useEffect(() => {
     if (!activeId) return
-    setPerfLoading(true)
-    setPerfError(null)
-    Promise.all([
-      getPortfolioPerformance(activeId),
-      listTransactions(activeId),
-    ]).then(([p, t]) => {
-      setPerf(p)
-      setTxns(t.transactions)
-    }).catch(e => {
-      const status = e?.response?.status
-      const detail = e?.response?.data?.detail
-      const msg = detail
-        ? (typeof detail === 'string' ? detail : JSON.stringify(detail))
-        : (e?.message ?? 'Unknown error')
-      setPerfError(status ? `HTTP ${status}: ${msg}` : msg)
-    })
-    .finally(() => setPerfLoading(false))
-  }, [activeId])
+    loadPortfolioData(activeId)
+  }, [activeId, loadPortfolioData])
 
-  const refresh = () => {
-    if (!activeId) return
-    setPerfLoading(true)
-    setPerfError(null)
-    Promise.all([
-      getPortfolioPerformance(activeId),
-      listTransactions(activeId),
-    ]).then(([p, t]) => {
-      setPerf(p)
-      setTxns(t.transactions)
-    }).catch(e => {
-      const status = e?.response?.status
-      const detail = e?.response?.data?.detail
-      const msg = detail
-        ? (typeof detail === 'string' ? detail : JSON.stringify(detail))
-        : (e?.message ?? 'Unknown error')
-      setPerfError(status ? `HTTP ${status}: ${msg}` : msg)
-    })
-    .finally(() => setPerfLoading(false))
-  }
+  const refresh = () => { if (activeId) loadPortfolioData(activeId) }
 
+  // ── Handlers ──────────────────────────────────────────────
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!newName.trim()) return
     setCreating(true)
+    setCreateError(null)
     try {
       const p = await createPortfolio(newName.trim(), undefined, newSmsf)
       setPortfolios(prev => [...prev, p])
       setActiveId(p.id)
       setShowCreate(false)
       setNewName('')
+      setNewSmsf(false)
+    } catch (err: any) {
+      setCreateError(err?.response?.data?.detail ?? 'Failed to create portfolio')
     } finally {
       setCreating(false)
     }
   }
 
+  const openRename = () => {
+    const p = portfolios.find(x => x.id === activeId)
+    if (!p) return
+    setRenameName(p.name)
+    setRenameError(null)
+    setShowRename(true)
+    setShowSettings(false)
+  }
+
+  const handleRename = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!activeId || !renameName.trim()) return
+    setRenaming(true)
+    setRenameError(null)
+    try {
+      const updated = await updatePortfolio(activeId, renameName.trim())
+      setPortfolios(prev => prev.map(p => p.id === activeId ? { ...p, name: updated.name } : p))
+      setShowRename(false)
+    } catch (err: any) {
+      setRenameError(err?.response?.data?.detail ?? 'Failed to rename portfolio')
+    } finally {
+      setRenaming(false)
+    }
+  }
+
   const handleDeletePortfolio = async (id: string) => {
+    setShowSettings(false)
     if (!confirm('Delete this portfolio and all its transactions? This cannot be undone.')) return
     await deletePortfolio(id)
     const updated = portfolios.filter(p => p.id !== id)
@@ -1044,8 +1121,14 @@ export default function PortfolioPage() {
 
   const handleDeleteTxn = async (txnId: number) => {
     if (!activeId) return
+    if (!confirm('Delete this transaction?')) return
     await deleteTransaction(activeId, txnId)
     refresh()
+  }
+
+  const handleViewTab = (key: ViewTab) => {
+    if (!tabAccess.has(key)) return   // locked — no-op, the tab shows the upgrade banner when selected via direct URL
+    setView(key)
   }
 
   if (authLoading) return <div className="flex items-center justify-center h-64 text-slate-500">Loading…</div>
@@ -1060,21 +1143,26 @@ export default function PortfolioPage() {
 
   const VIEW_TABS: { key: ViewTab; label: string }[] = [
     { key: 'holdings',     label: `Holdings${perf ? ` (${perf.holdings.length})` : ''}` },
+    { key: 'transactions', label: `Transactions${txns.length ? ` (${txns.length})` : ''}` },
     { key: 'chart',        label: 'Performance' },
     { key: 'allocation',   label: 'Allocation' },
     { key: 'dividends',    label: 'Dividends' },
     { key: 'tax',          label: 'Tax Report' },
     { key: 'insights',     label: 'AI Insights ✨' },
-    { key: 'transactions', label: `Transactions${txns.length ? ` (${txns.length})` : ''}` },
   ]
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* ── Header ─────────────────────────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Portfolio</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Track your ASX holdings, P&amp;L, and dividend income</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {planLabel} · {portfolios.length} of {portfolioLimit} portfolio{portfolioLimit !== 1 ? 's' : ''} used
+            {atPortfolioLimit && plan === 'free' && (
+              <> · <Link href="/settings/billing" className="text-blue-500 hover:underline">Upgrade for more</Link></>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <HelpDrawer sections={PORTFOLIO_SECTIONS} title="Portfolio Guide" subtitle="Transactions, performance, dividends, and AI insights" />
@@ -1084,32 +1172,64 @@ export default function PortfolioPage() {
                 className="px-3 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600">
                 ↑ Import CSV
               </button>
-              <button onClick={() => setShowAddTxn(true)}
+              <button onClick={() => { setTxnCode(undefined); setShowAddTxn(true) }}
                 className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
                 + Add Transaction
               </button>
             </>
           )}
-          <button onClick={() => setShowCreate(true)}
-            className="px-3 py-2 text-sm border border-blue-300 rounded-lg hover:bg-blue-50 text-blue-600">
+          <button
+            onClick={() => atPortfolioLimit ? undefined : setShowCreate(true)}
+            title={atPortfolioLimit ? `${planLabel} allows up to ${portfolioLimit} portfolio${portfolioLimit !== 1 ? 's' : ''}` : undefined}
+            className={`px-3 py-2 text-sm border rounded-lg font-medium transition-colors
+              ${atPortfolioLimit
+                ? 'border-slate-200 text-slate-300 cursor-not-allowed'
+                : 'border-blue-300 hover:bg-blue-50 text-blue-600'}`}>
             + New Portfolio
           </button>
         </div>
       </div>
 
-      {/* Portfolio tabs */}
+      {/* ── Portfolio selector + settings ──────────────────── */}
       {portfolios.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
           {portfolios.map(p => (
-            <button key={p.id} onClick={() => setActiveId(p.id)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${activeId === p.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-              {p.name}{p.is_smsf ? ' 🏦' : ''}
-            </button>
+            <div key={p.id} className="flex items-center gap-0.5">
+              <button onClick={() => { setActiveId(p.id); setView('holdings') }}
+                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${activeId === p.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                {p.name}{p.is_smsf ? ' 🏦' : ''}
+              </button>
+              {activeId === p.id && (
+                <div className="relative">
+                  <button
+                    ref={settingsBtnRef}
+                    onClick={() => setShowSettings(v => !v)}
+                    className={`p-1.5 rounded-full text-sm transition-colors ${showSettings ? 'bg-slate-200 text-slate-700' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600'}`}
+                    title="Portfolio settings"
+                    aria-label="Portfolio settings">
+                    ⋯
+                  </button>
+                  {showSettings && (
+                    <div ref={settingsRef} className="absolute left-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-40">
+                      <button onClick={openRename}
+                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                        <span className="text-base">✏️</span> Rename
+                      </button>
+                      <div className="border-t border-slate-100 my-1" />
+                      <button onClick={() => handleDeletePortfolio(p.id)}
+                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50">
+                        <span className="text-base">🗑</span> Delete portfolio
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
 
-      {/* Create portfolio form */}
+      {/* ── Create portfolio form ───────────────────────────── */}
       {showCreate && (
         <form onSubmit={handleCreate} className="bg-white border border-slate-200 rounded-xl p-4 flex items-end gap-3 flex-wrap">
           <div className="flex-1 min-w-48">
@@ -1121,16 +1241,19 @@ export default function PortfolioPage() {
             <input type="checkbox" checked={newSmsf} onChange={e => setNewSmsf(e.target.checked)} className="rounded" />
             SMSF
           </label>
-          <div className="flex gap-2 pb-0.5">
-            <button type="button" onClick={() => setShowCreate(false)} className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
-            <button type="submit" disabled={creating} className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {creating ? 'Creating…' : 'Create'}
-            </button>
+          <div className="flex flex-col gap-1 pb-0.5">
+            {createError && <p className="text-xs text-red-600">{createError}</p>}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { setShowCreate(false); setCreateError(null) }} className="px-3 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+              <button type="submit" disabled={creating} className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                {creating ? 'Creating…' : 'Create'}
+              </button>
+            </div>
           </div>
         </form>
       )}
 
-      {/* Empty state */}
+      {/* ── Empty state ─────────────────────────────────────── */}
       {!loading && portfolios.length === 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
           <div className="text-4xl mb-3">📊</div>
@@ -1142,9 +1265,14 @@ export default function PortfolioPage() {
         </div>
       )}
 
-      {/* Performance */}
+      {/* ── Portfolio content ───────────────────────────────── */}
       {activeId && (
         <>
+          {/* Active portfolio name */}
+          {activePortfolio && (
+            <h2 className="text-base font-semibold text-slate-800">{activePortfolio.name}</h2>
+          )}
+
           {perfLoading ? (
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[1,2,3,4].map(i => <div key={i} className="h-20 bg-slate-100 rounded-xl animate-pulse" />)}
@@ -1162,48 +1290,58 @@ export default function PortfolioPage() {
             <>
               {/* Summary cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <SummaryCard label="Market Value" value={fmtMoney(perf.total_value)} />
+                <SummaryCard
+                  label="Market Value"
+                  value={fmtMoney(perf.total_value)}
+                  sub={perf.total_value == null ? 'No live prices yet' : undefined}
+                />
                 <SummaryCard
                   label="Total Gain / Loss"
                   value={fmtMoney(perf.total_gain_loss)}
                   sub={fmtPct(perf.total_gain_loss_pct)}
                   subColor={glColor(perf.total_gain_loss)}
                 />
-                <SummaryCard label="Cost Basis" value={fmtMoney(perf.total_cost)} />
+                <SummaryCard
+                  label="Cost Basis"
+                  value={fmtMoney(perf.total_cost)}
+                  sub="Total amount invested"
+                />
                 <SummaryCard
                   label="Est. Annual Income"
                   value={fmtMoney(perf.annual_income)}
-                  sub={perf.portfolio_yield != null ? `${perf.portfolio_yield.toFixed(2)}% yield` : undefined}
+                  sub={perf.portfolio_yield != null ? `${perf.portfolio_yield.toFixed(2)}% yield` : 'Based on trailing DPS'}
                   subColor="text-blue-600"
                 />
               </div>
 
               {/* View tabs */}
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div className="flex gap-1 bg-slate-100 p-1 rounded-lg overflow-x-auto">
-                  {VIEW_TABS.map(({ key, label }) => (
+              <div className="flex gap-1 bg-slate-100 p-1 rounded-lg overflow-x-auto">
+                {VIEW_TABS.map(({ key, label }) => {
+                  const accessible = tabAccess.has(key)
+                  return (
                     <button key={key} onClick={() => setView(key)}
-                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${view === key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                      title={!accessible ? (key === 'insights' ? 'Requires Premium plan' : 'Requires Pro plan') : undefined}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors whitespace-nowrap flex items-center gap-1
+                        ${view === key
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : accessible
+                            ? 'text-slate-500 hover:text-slate-700'
+                            : 'text-slate-300 cursor-default'}`}>
+                      {!accessible && <span className="text-xs">🔒</span>}
                       {label}
                     </button>
-                  ))}
-                </div>
-                {activePortfolio && (
-                  <button onClick={() => handleDeletePortfolio(activePortfolio.id)}
-                    className="text-xs text-red-400 hover:text-red-600">
-                    Delete portfolio
-                  </button>
-                )}
+                  )
+                })}
               </div>
 
-              {/* Holdings table */}
+              {/* ── Holdings ─────────────────────────────── */}
               {view === 'holdings' && (
                 perf.holdings.length === 0 ? (
                   <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
                     No holdings yet. Add a transaction or import a CSV to get started.
                   </div>
                 ) : (
-                  <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="bg-white border border-slate-200 rounded-xl" style={{ overflow: 'clip' }}>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
@@ -1218,6 +1356,7 @@ export default function PortfolioPage() {
                             <th className="px-4 py-3 text-right">Yield</th>
                             <th className="px-4 py-3 text-right">Ann. Income</th>
                             <th className="px-4 py-3 text-right">Franking</th>
+                            <th className="px-4 py-3 w-10" />
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -1228,20 +1367,70 @@ export default function PortfolioPage() {
                                 {h.company_name && <div className="text-xs text-slate-400 truncate max-w-36">{h.company_name}</div>}
                               </td>
                               <td className="px-4 py-3 text-right tabular-nums">{fmt(h.quantity, 0)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(h.avg_cost)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(h.cost_basis)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(h.current_price)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums font-medium">{fmtMoney(h.current_value)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums">
+                              <td className="px-4 py-3 text-right tabular-nums"
+                                title="Weighted average purchase price including brokerage">
+                                {fmtMoney(h.avg_cost)}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums"
+                                title={`Quantity × Avg Cost = ${fmt(h.quantity, 0)} × ${fmtMoney(h.avg_cost)}`}>
+                                {fmtMoney(h.cost_basis)}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums"
+                                title={h.current_price == null ? 'Live price not yet available for this stock' : undefined}>
+                                {fmtMoney(h.current_price)}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums font-medium"
+                                title={h.current_value == null ? 'Requires live price data' : `Quantity × Current Price = ${fmt(h.quantity, 0)} × ${fmtMoney(h.current_price)}`}>
+                                {fmtMoney(h.current_value)}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums"
+                                title={h.gain_loss == null ? 'Requires live price data' : `Current Value − Cost Basis = ${fmtMoney(h.current_value)} − ${fmtMoney(h.cost_basis)}`}>
                                 <div className={`font-medium ${glColor(h.gain_loss)}`}>{fmtMoney(h.gain_loss)}</div>
                                 <div className={`text-xs ${glColor(h.gain_loss_pct)}`}>{fmtPct(h.gain_loss_pct)}</div>
                               </td>
-                              <td className="px-4 py-3 text-right tabular-nums text-slate-600">
+                              <td className="px-4 py-3 text-right tabular-nums text-slate-600"
+                                title={h.dividend_yield == null ? 'No dividend data available' : 'Trailing twelve-month dividend yield'}>
                                 {h.dividend_yield != null ? `${(h.dividend_yield * 100).toFixed(2)}%` : '—'}
                               </td>
-                              <td className="px-4 py-3 text-right tabular-nums text-blue-600">{fmtMoney(h.annual_income)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums text-slate-500">
+                              <td className="px-4 py-3 text-right tabular-nums text-blue-600"
+                                title={h.annual_income == null ? 'No DPS data available' : `Quantity × DPS (TTM) = ${fmt(h.quantity, 0)} × $${(h.annual_income / h.quantity).toFixed(4)}`}>
+                                {fmtMoney(h.annual_income)}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums text-slate-500"
+                                title={h.franking_pct == null ? 'No franking data available' : `${h.franking_pct.toFixed(0)}% of dividend is franked (carries attached company tax credit)`}>
                                 {h.franking_pct != null ? `${h.franking_pct.toFixed(0)}%` : '—'}
+                              </td>
+                              {/* Row actions */}
+                              <td className="px-2 py-3 text-right">
+                                <div className="relative inline-block">
+                                  <button
+                                    onClick={() => setRowMenu(rowMenu === h.asx_code ? null : h.asx_code)}
+                                    className="p-1 rounded text-slate-300 hover:text-slate-600 hover:bg-slate-100 transition-colors text-base leading-none"
+                                    aria-label="Row actions">
+                                    ⋯
+                                  </button>
+                                  {rowMenu === h.asx_code && (
+                                    <div ref={rowMenuRef} className="absolute right-0 top-full mt-1 z-30 bg-white border border-slate-200 rounded-xl shadow-lg py-1 min-w-44">
+                                      <Link
+                                        href={`/company/${h.asx_code}`}
+                                        onClick={() => setRowMenu(null)}
+                                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                                        <span>📈</span> View Stock
+                                      </Link>
+                                      <button
+                                        onClick={() => { setRowMenu(null); setTxnCode(h.asx_code); setShowAddTxn(true) }}
+                                        className="w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                                        <span>+</span> Add Transaction
+                                      </button>
+                                      <Link
+                                        href={`/alerts?code=${h.asx_code}`}
+                                        onClick={() => setRowMenu(null)}
+                                        className="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                                        <span>🔔</span> Set Alert
+                                      </Link>
+                                    </div>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1252,26 +1441,7 @@ export default function PortfolioPage() {
                 )
               )}
 
-              {/* Performance chart */}
-              {view === 'chart' && <PortfolioChart portfolioId={activeId} />}
-
-              {/* Allocation */}
-              {view === 'allocation' && <AllocationCharts perf={perf} />}
-
-              {/* Dividends */}
-              {view === 'dividends' && <DividendCalendar portfolioId={activeId} />}
-
-              {/* Tax Report */}
-              {view === 'tax'      && <TaxReportView portfolioId={activeId} />}
-              {view === 'insights' && (
-                <AiInsightsView
-                  portfolioId={activeId}
-                  cached={insightsCache[activeId] ?? null}
-                  onResult={r => setInsightsCache(prev => ({ ...prev, [activeId]: r }))}
-                />
-              )}
-
-              {/* Transactions table */}
+              {/* ── Transactions ─────────────────────────── */}
               {view === 'transactions' && (
                 txns.length === 0 ? (
                   <div className="bg-white border border-slate-200 rounded-xl p-8 text-center text-slate-500 text-sm">
@@ -1291,7 +1461,7 @@ export default function PortfolioPage() {
                             <th className="px-4 py-3 text-right">Brokerage</th>
                             <th className="px-4 py-3 text-right">Total</th>
                             <th className="px-4 py-3 text-left">Notes</th>
-                            <th className="px-4 py-3"></th>
+                            <th className="px-4 py-3" />
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -1308,11 +1478,17 @@ export default function PortfolioPage() {
                               </td>
                               <td className="px-4 py-3 text-right tabular-nums">{fmt(t.shares, 2)}</td>
                               <td className="px-4 py-3 text-right tabular-nums">{fmtMoney(t.price_per_share)}</td>
-                              <td className="px-4 py-3 text-right tabular-nums text-slate-400">{t.brokerage > 0 ? fmtMoney(t.brokerage) : '—'}</td>
-                              <td className="px-4 py-3 text-right tabular-nums font-medium">{fmtMoney(t.total_cost)}</td>
+                              <td className="px-4 py-3 text-right tabular-nums text-slate-400"
+                                title={t.brokerage > 0 ? `$${t.brokerage.toFixed(2)} brokerage fee` : undefined}>
+                                {t.brokerage > 0 ? fmtMoney(t.brokerage) : '—'}
+                              </td>
+                              <td className="px-4 py-3 text-right tabular-nums font-medium"
+                                title={`Qty × Price + Brokerage = ${fmt(t.shares, 2)} × ${fmtMoney(t.price_per_share)} + ${fmtMoney(t.brokerage)}`}>
+                                {fmtMoney(t.total_cost)}
+                              </td>
                               <td className="px-4 py-3 text-slate-400 text-xs">{t.notes ?? '—'}</td>
                               <td className="px-4 py-3 text-right">
-                                <button onClick={() => handleDeleteTxn(t.id)} className="text-slate-300 hover:text-red-500 transition-colors text-xs">✕</button>
+                                <button onClick={() => handleDeleteTxn(t.id)} className="text-slate-300 hover:text-red-500 transition-colors text-xs" title="Delete transaction">✕</button>
                               </td>
                             </tr>
                           ))}
@@ -1322,15 +1498,55 @@ export default function PortfolioPage() {
                   </div>
                 )
               )}
+
+              {/* ── Gated tabs ───────────────────────────── */}
+              {view === 'chart'      && (tabAccess.has('chart')      ? <PortfolioChart portfolioId={activeId} />     : <UpgradeBanner tab="chart"      plan={plan} />)}
+              {view === 'allocation' && (tabAccess.has('allocation') ? <AllocationCharts perf={perf} />             : <UpgradeBanner tab="allocation" plan={plan} />)}
+              {view === 'dividends'  && (tabAccess.has('dividends')  ? <DividendCalendar portfolioId={activeId} />  : <UpgradeBanner tab="dividends"  plan={plan} />)}
+              {view === 'tax'        && (tabAccess.has('tax')        ? <TaxReportView portfolioId={activeId} />     : <UpgradeBanner tab="tax"        plan={plan} />)}
+              {view === 'insights'   && (tabAccess.has('insights')   ? (
+                <AiInsightsView
+                  portfolioId={activeId}
+                  cached={insightsCache[activeId] ?? null}
+                  onResult={r => setInsightsCache(prev => ({ ...prev, [activeId]: r }))}
+                />
+              ) : <UpgradeBanner tab="insights" plan={plan} />)}
             </>
           )}
         </>
       )}
 
-      {/* Modals */}
+      {/* ── Rename modal ───────────────────────────────────── */}
+      {showRename && activePortfolio && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">Rename Portfolio</h2>
+            <form onSubmit={handleRename} className="space-y-3">
+              <input
+                autoFocus
+                value={renameName}
+                onChange={e => setRenameName(e.target.value)}
+                required
+                placeholder="Portfolio name"
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {renameError && <p className="text-xs text-red-600 bg-red-50 rounded px-3 py-2">{renameError}</p>}
+              <div className="flex justify-end gap-3 pt-1">
+                <button type="button" onClick={() => setShowRename(false)} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                <button type="submit" disabled={renaming} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+                  {renaming ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modals ─────────────────────────────────────────── */}
       {showAddTxn && activeId && (
         <AddTransactionModal
           portfolioId={activeId}
+          initialCode={txnCode}
           onClose={() => setShowAddTxn(false)}
           onAdded={() => { setShowAddTxn(false); refresh() }}
         />

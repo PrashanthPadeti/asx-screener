@@ -32,7 +32,7 @@ PLAN_LIMITS: dict[str, PlanLimits] = {
         "portfolios":         1,
         "watchlists":         1,
         "stocks_per_wl":      50,
-        "alerts":             5,
+        "alerts":             3,
         "nl_screener":        False,
         "csv_export":         False,
         "portfolio_insights": False,

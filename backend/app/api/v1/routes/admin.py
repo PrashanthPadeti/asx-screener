@@ -852,7 +852,7 @@ async def list_users(
     )
     total = int(count_result.scalar() or 0)
 
-    # User rows
+    # User rows (without override flag — fetched separately to be safe)
     rows_result = await db.execute(text(f"""
         SELECT
             u.id, u.email, u.name, u.plan, u.subscription_status,
@@ -864,16 +864,24 @@ async def list_users(
             (SELECT COUNT(*) FROM screener.saved_screens s WHERE s.user_id = u.id)          AS screen_count,
             (SELECT COUNT(*) FROM support.tickets t WHERE t.user_id = u.id)                 AS ticket_count,
             (SELECT ip_address FROM users.sessions si
-             WHERE si.user_id = u.id ORDER BY si.created_at DESC LIMIT 1)                   AS last_ip,
-            EXISTS (
-                SELECT 1 FROM users.subscription_events se
-                WHERE se.user_id = u.id AND se.event_type = 'admin_override'
-            ) AS is_admin_override
+             WHERE si.user_id = u.id ORDER BY si.created_at DESC LIMIT 1)                   AS last_ip
         FROM users.users u
         {where_sql}
         ORDER BY u.{sort_by} {sort_dir} NULLS LAST
         LIMIT :limit OFFSET :offset
     """), params)
+
+    # Safely fetch which users have admin overrides (table may not exist yet)
+    override_ids: set = set()
+    try:
+        async with db.begin_nested():
+            ov_result = await db.execute(text("""
+                SELECT DISTINCT user_id FROM users.subscription_events
+                WHERE event_type = 'admin_override'
+            """))
+            override_ids = {str(r.user_id) for r in ov_result.fetchall()}
+    except Exception:
+        pass  # subscription_events table doesn't exist yet
 
     users = []
     for r in rows_result.fetchall():
@@ -893,7 +901,7 @@ async def list_users(
             "screen_count":          int(r.screen_count or 0),
             "ticket_count":          int(r.ticket_count or 0),
             "last_ip":               r.last_ip,
-            "is_admin_override":     bool(r.is_admin_override),
+            "is_admin_override":     str(r.id) in override_ids,
         })
 
     return {
@@ -993,28 +1001,31 @@ async def get_user(
         for n in notif_result.fetchall()
     ]
 
-    # Admin override history
-    override_result = await db.execute(text("""
-        SELECT old_plan, new_plan, stripe_event_id, created_at
-        FROM users.subscription_events
-        WHERE user_id = :uid AND event_type = 'admin_override'
-        ORDER BY created_at DESC
-        LIMIT 20
-    """), {"uid": user_id})
-
+    # Admin override history (safe — table may not exist yet)
     admin_overrides = []
-    for o in override_result.fetchall():
-        # stripe_event_id format: "admin:{email}|{old_status}→{new_status}"
-        ref = o.stripe_event_id or ""
-        admin_email  = ref.split("|")[0].replace("admin:", "") if ref.startswith("admin:") else ref
-        status_change = ref.split("|")[1] if "|" in ref else None
-        admin_overrides.append({
-            "old_plan":     o.old_plan,
-            "new_plan":     o.new_plan,
-            "admin_email":  admin_email,
-            "status_change": status_change,
-            "changed_at":   _iso(o.created_at),
-        })
+    try:
+        async with db.begin_nested():
+            override_result = await db.execute(text("""
+                SELECT old_plan, new_plan, stripe_event_id, created_at
+                FROM users.subscription_events
+                WHERE user_id = :uid AND event_type = 'admin_override'
+                ORDER BY created_at DESC
+                LIMIT 20
+            """), {"uid": user_id})
+            for o in override_result.fetchall():
+                # stripe_event_id format: "admin:{email}|{old_status}→{new_status}"
+                ref = o.stripe_event_id or ""
+                admin_email   = ref.split("|")[0].replace("admin:", "") if ref.startswith("admin:") else ref
+                status_change = ref.split("|")[1] if "|" in ref else None
+                admin_overrides.append({
+                    "old_plan":      o.old_plan,
+                    "new_plan":      o.new_plan,
+                    "admin_email":   admin_email,
+                    "status_change": status_change,
+                    "changed_at":    _iso(o.created_at),
+                })
+    except Exception:
+        pass  # subscription_events table doesn't exist yet
 
     is_admin_override = len(admin_overrides) > 0
 

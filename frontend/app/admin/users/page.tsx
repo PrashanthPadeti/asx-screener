@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { api } from '@/lib/api'
 import {
   Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
-  CheckCircle, XCircle, Clock, AlertCircle, ArrowRight,
+  CheckCircle, XCircle, Clock, AlertCircle, ArrowRight, ShieldAlert,
 } from 'lucide-react'
 
 interface AdminUser {
@@ -24,6 +24,7 @@ interface AdminUser {
   screen_count: number
   ticket_count: number
   last_ip: string | null
+  is_admin_override: boolean
 }
 
 interface UserListResponse {
@@ -260,9 +261,16 @@ function AdminUsersContent() {
 
                       {/* Plan */}
                       <td className="py-3 px-4">
-                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PLAN_BADGE[u.plan] ?? 'bg-slate-100 text-slate-600'}`}>
-                          {PLAN_LABEL[u.plan] ?? u.plan}
-                        </span>
+                        <div className="flex flex-col gap-1">
+                          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full w-fit ${PLAN_BADGE[u.plan] ?? 'bg-slate-100 text-slate-600'}`}>
+                            {PLAN_LABEL[u.plan] ?? u.plan}
+                          </span>
+                          {u.is_admin_override && (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded w-fit">
+                              <ShieldAlert className="w-2.5 h-2.5" /> Admin Override
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Status */}

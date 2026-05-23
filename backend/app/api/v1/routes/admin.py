@@ -862,9 +862,13 @@ async def list_users(
             (SELECT COUNT(*) FROM users.alerts    a    WHERE a.user_id = u.id AND a.is_active) AS alert_count,
             (SELECT COUNT(*) FROM users.portfolios p   WHERE p.user_id = u.id)              AS portfolio_count,
             (SELECT COUNT(*) FROM screener.saved_screens s WHERE s.user_id = u.id)          AS screen_count,
-            (SELECT COUNT(*) FROM support.tickets t WHERE t.user_id = u.id)           AS ticket_count,
+            (SELECT COUNT(*) FROM support.tickets t WHERE t.user_id = u.id)                 AS ticket_count,
             (SELECT ip_address FROM users.sessions si
-             WHERE si.user_id = u.id ORDER BY si.created_at DESC LIMIT 1)                   AS last_ip
+             WHERE si.user_id = u.id ORDER BY si.created_at DESC LIMIT 1)                   AS last_ip,
+            EXISTS (
+                SELECT 1 FROM users.subscription_events se
+                WHERE se.user_id = u.id AND se.event_type = 'admin_override'
+            ) AS is_admin_override
         FROM users.users u
         {where_sql}
         ORDER BY u.{sort_by} {sort_dir} NULLS LAST
@@ -889,6 +893,7 @@ async def list_users(
             "screen_count":          int(r.screen_count or 0),
             "ticket_count":          int(r.ticket_count or 0),
             "last_ip":               r.last_ip,
+            "is_admin_override":     bool(r.is_admin_override),
         })
 
     return {
@@ -988,6 +993,31 @@ async def get_user(
         for n in notif_result.fetchall()
     ]
 
+    # Admin override history
+    override_result = await db.execute(text("""
+        SELECT old_plan, new_plan, stripe_event_id, created_at
+        FROM users.subscription_events
+        WHERE user_id = :uid AND event_type = 'admin_override'
+        ORDER BY created_at DESC
+        LIMIT 20
+    """), {"uid": user_id})
+
+    admin_overrides = []
+    for o in override_result.fetchall():
+        # stripe_event_id format: "admin:{email}|{old_status}→{new_status}"
+        ref = o.stripe_event_id or ""
+        admin_email  = ref.split("|")[0].replace("admin:", "") if ref.startswith("admin:") else ref
+        status_change = ref.split("|")[1] if "|" in ref else None
+        admin_overrides.append({
+            "old_plan":     o.old_plan,
+            "new_plan":     o.new_plan,
+            "admin_email":  admin_email,
+            "status_change": status_change,
+            "changed_at":   _iso(o.created_at),
+        })
+
+    is_admin_override = len(admin_overrides) > 0
+
     return {
         "id":                    str(row.id),
         "email":                 row.email,
@@ -1008,9 +1038,11 @@ async def get_user(
             "public_screen_count":   int(row.public_screen_count or 0),
             "notification_count":    int(row.notification_count or 0),
         },
-        "sessions":       sessions,
-        "tickets":        tickets,
-        "notifications":  notifications,
+        "sessions":         sessions,
+        "tickets":          tickets,
+        "notifications":    notifications,
+        "admin_overrides":  admin_overrides,
+        "is_admin_override": is_admin_override,
     }
 
 
@@ -1040,6 +1072,14 @@ async def update_user(
     if body.subscription_status and body.subscription_status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status. Valid: {VALID_STATUSES}")
 
+    # Fetch current values before update so we can log what changed
+    before = (await db.execute(
+        text("SELECT plan, subscription_status FROM users.users WHERE id = :uid"),
+        {"uid": user_id},
+    )).fetchone()
+    if not before:
+        raise HTTPException(status_code=404, detail="User not found")
+
     set_parts = []
     params: dict = {"uid": user_id}
 
@@ -1063,10 +1103,39 @@ async def update_user(
         RETURNING id, email, plan, subscription_status, name
     """), params)
     row = result.fetchone()
-    await db.commit()
 
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # ── Audit log ─────────────────────────────────────────────────────────────
+    # Write to subscription_events whenever plan or status is manually changed
+    plan_changed   = body.plan is not None and body.plan != before.plan
+    status_changed = body.subscription_status is not None and body.subscription_status != before.subscription_status
+
+    if plan_changed or status_changed:
+        old_plan = before.plan or "free"
+        new_plan = body.plan if body.plan is not None else old_plan
+        old_status = before.subscription_status or "inactive"
+        new_status = body.subscription_status if body.subscription_status is not None else old_status
+        try:
+            await db.execute(text("""
+                INSERT INTO users.subscription_events
+                    (user_id, event_type, old_plan, new_plan, stripe_event_id)
+                VALUES (:uid, 'admin_override', :old_plan, :new_plan, :admin_ref)
+            """), {
+                "uid":       user_id,
+                "old_plan":  old_plan,
+                "new_plan":  new_plan,
+                "admin_ref": f"admin:{admin['email']}|{old_status}→{new_status}",
+            })
+            log.info(
+                f"Admin override: user={user_id} plan={old_plan}→{new_plan} "
+                f"status={old_status}→{new_status} by={admin['email']}"
+            )
+        except Exception as e:
+            log.warning(f"Failed to write admin_override audit event: {e}")
+
+    await db.commit()
 
     return {
         "id":                  str(row.id),

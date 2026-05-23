@@ -1124,21 +1124,24 @@ async def update_user(
     status_changed = body.subscription_status is not None and body.subscription_status != before.subscription_status
 
     if plan_changed or status_changed:
-        old_plan = before.plan or "free"
-        new_plan = body.plan if body.plan is not None else old_plan
+        old_plan   = before.plan or "free"
+        new_plan   = body.plan if body.plan is not None else old_plan
         old_status = before.subscription_status or "inactive"
         new_status = body.subscription_status if body.subscription_status is not None else old_status
         try:
-            await db.execute(text("""
-                INSERT INTO users.subscription_events
-                    (user_id, event_type, old_plan, new_plan, stripe_event_id)
-                VALUES (:uid, 'admin_override', :old_plan, :new_plan, :admin_ref)
-            """), {
-                "uid":       user_id,
-                "old_plan":  old_plan,
-                "new_plan":  new_plan,
-                "admin_ref": f"admin:{admin['email']}|{old_status}→{new_status}",
-            })
+            # Use begin_nested() (SAVEPOINT) so a failure here doesn't abort
+            # the outer transaction that holds the plan/status UPDATE.
+            async with db.begin_nested():
+                await db.execute(text("""
+                    INSERT INTO users.subscription_events
+                        (user_id, event_type, old_plan, new_plan, stripe_event_id)
+                    VALUES (:uid, 'admin_override', :old_plan, :new_plan, :admin_ref)
+                """), {
+                    "uid":       user_id,
+                    "old_plan":  old_plan,
+                    "new_plan":  new_plan,
+                    "admin_ref": f"admin:{admin['email']}|{old_status}→{new_status}",
+                })
             log.info(
                 f"Admin override: user={user_id} plan={old_plan}→{new_plan} "
                 f"status={old_status}→{new_status} by={admin['email']}"

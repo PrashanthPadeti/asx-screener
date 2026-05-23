@@ -184,14 +184,14 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
         <Link
           href={alertHref}
           className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-700 transition-colors"
-          title="Create price alert"
+          title="Create price alert for this index"
         >
           <Bell className="w-3.5 h-3.5" />
         </Link>
         <Link
-          href={detailHref}
-          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-slate-700 transition-colors"
-          title="View index detail"
+          href={`/watchlist?add_index=${encodeURIComponent(idx.index_code)}`}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-yellow-400 hover:bg-slate-700 transition-colors"
+          title="Add to watchlist"
         >
           <Star className="w-3.5 h-3.5" />
         </Link>

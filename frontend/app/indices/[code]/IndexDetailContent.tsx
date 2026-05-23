@@ -2,9 +2,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
-  ArrowLeft, TrendingUp, TrendingDown, Minus, BarChart2,
-  Building2, Info, RefreshCw, ChevronUp, ChevronDown,
-  Search, ExternalLink,
+  ArrowLeft, TrendingUp, TrendingDown, Minus,
+  Info, RefreshCw, ChevronUp, ChevronDown,
+  Search, ExternalLink, Download, Bell, Bookmark,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
@@ -59,6 +59,54 @@ function fmtNum(v: number | null, decimals = 0) {
 function retColor(v: number | null) {
   if (v == null) return 'text-gray-400'
   return v > 0 ? 'text-emerald-600' : v < 0 ? 'text-red-500' : 'text-gray-500'
+}
+
+/**
+ * Format index total market cap.
+ * Backend stores total_market_cap_bn in millions of AUD (despite the "_bn" suffix).
+ * Divide by 1,000,000 → billions, then auto-scale to T when ≥ 1 000 B.
+ */
+function fmtIndexTotalCap(v: number | null): string {
+  if (v == null) return '—'
+  const billions = v / 1_000_000
+  if (billions >= 1_000) return `$${(billions / 1_000).toFixed(2)}T`
+  if (billions >= 1)     return `$${billions.toLocaleString('en-AU', { maximumFractionDigits: 0 })}B`
+  return `$${(billions * 1_000).toFixed(0)}M`
+}
+
+/**
+ * Format a constituent market cap stored in millions of AUD.
+ * Produces M / B / T suffixes with sensible decimal places.
+ */
+function fmtMktCapM(v: number | null): string {
+  if (v == null) return '—'
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}T`
+  if (v >= 1_000)     return `$${(v / 1_000).toFixed(1)}B`
+  if (v >= 1)         return `$${v.toFixed(0)}M`
+  return '—'
+}
+
+function exportDetailCSV(constituents: IndexConstituent[], code: string) {
+  const headers = ['#', 'Code', 'Company', 'Sector', 'Mkt Cap', 'Weight %', '1D %', '1Y %', 'Div Yield %']
+  const rows = constituents.map((c, i) => [
+    i + 1,
+    c.asx_code,
+    `"${c.company_name}"`,
+    c.sector ?? '',
+    c.market_cap != null ? (c.market_cap >= 1000 ? `${(c.market_cap / 1000).toFixed(1)}B` : `${c.market_cap}M`) : '',
+    c.weight_pct != null ? c.weight_pct.toFixed(2) : '',
+    c.return_1d  != null ? (c.return_1d  * 100).toFixed(2) : '',
+    c.return_1y  != null ? (c.return_1y  * 100).toFixed(2) : '',
+    c.dividend_yield != null ? (c.dividend_yield * 100).toFixed(1) : '',
+  ])
+  const csv  = [headers, ...rows].map(r => r.join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `${code}-constituents-${new Date().toISOString().split('T')[0]}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 function ReturnBadge({ value }: { value: number | null }) {
@@ -435,7 +483,7 @@ function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] 
                   )}
                 </td>
                 <td className="px-3 py-2 text-right text-xs text-gray-700">
-                  {c.market_cap ? `$${(c.market_cap / 1000).toFixed(1)}B` : '—'}
+                  {fmtMktCapM(c.market_cap)}
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center gap-2 justify-end">
@@ -560,14 +608,42 @@ export default function IndexDetailContent({
               )}
             </div>
 
-            <button
-              onClick={refresh}
-              disabled={refreshing}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
-              Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              {data.constituents.length > 0 && (
+                <button
+                  onClick={() => exportDetailCSV(data.constituents, code)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
+                  title="Export constituents as CSV"
+                >
+                  <Download className="w-4 h-4" />
+                  Export CSV
+                </button>
+              )}
+              <Link
+                href={`/alerts?index=${encodeURIComponent(code)}`}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-amber-600 rounded-lg transition-colors"
+                title="Create a price alert for this index"
+              >
+                <Bell className="w-4 h-4" />
+                Alert
+              </Link>
+              <Link
+                href={`/watchlist?add_index=${encodeURIComponent(code)}`}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-blue-600 rounded-lg transition-colors"
+                title="Add this index to your watchlist"
+              >
+                <Bookmark className="w-4 h-4" />
+                Watchlist
+              </Link>
+              <button
+                onClick={refresh}
+                disabled={refreshing}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={cn('w-4 h-4', refreshing && 'animate-spin')} />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -596,7 +672,7 @@ export default function IndexDetailContent({
         {/* Stats row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <StatCard label="Constituents" value={String(data.constituent_count)} />
-          <StatCard label="Total Market Cap" value={data.total_market_cap_bn != null ? `$${data.total_market_cap_bn.toFixed(0)}B` : '—'} />
+          <StatCard label="Total Market Cap" value={fmtIndexTotalCap(data.total_market_cap_bn)} />
           {p?.high_52w && <StatCard label="52W High" value={fmtNum(p.high_52w, 2)} />}
           {p?.low_52w  && <StatCard label="52W Low"  value={fmtNum(p.low_52w, 2)} />}
         </div>

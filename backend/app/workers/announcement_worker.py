@@ -275,7 +275,7 @@ async def _run(db) -> None:
                         ON CONFLICT (asx_code, announcement_id) DO UPDATE
                             SET source_type  = EXCLUDED.source_type,
                                 source_label = EXCLUDED.source_label
-                        RETURNING id
+                        RETURNING id, (xmax = 0) AS is_new_insert
                     """), {
                         "code":         code,
                         "ann_id":       ann_id or f"{code}_{released_at.isoformat()}",
@@ -287,7 +287,10 @@ async def _run(db) -> None:
                         "source_type":  source_type,
                         "source_label": source_label,
                     })
-                    if result2.fetchone():
+                    row2 = result2.fetchone()
+                    # xmax = 0 means genuine INSERT; non-zero means ON CONFLICT UPDATE
+                    # Only count/notify for brand-new announcements, not re-seen ones
+                    if row2 and row2.is_new_insert:
                         inserted += 1
                         if sensitive:
                             sensitive_new.append({

@@ -6,13 +6,14 @@ import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, Activity, LifeBuoy,
-  ChevronRight, Shield, Menu, X,
+  ChevronRight, Shield, Menu, X, Mail,
 } from 'lucide-react'
 
 const NAV = [
   { href: '/admin',           label: 'Dashboard',        icon: LayoutDashboard },
   { href: '/admin/users',     label: 'User Management',  icon: Users },
   { href: '/admin/pipeline',  label: 'Pipeline Monitor', icon: Activity },
+  { href: '/admin/comms',     label: 'Communications',   icon: Mail },
   { href: '/admin/support',   label: 'Support Tickets',  icon: LifeBuoy },
 ]
 

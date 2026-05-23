@@ -598,8 +598,16 @@ async def admin_stats(
     public_screens  = int(await _scalar(db, "SELECT COUNT(*) FROM screener.saved_screens WHERE is_public = TRUE") or 0)
 
     # Universe stats
-    universe_stocks = int(await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE status = 'active'") or 0)
+    universe_stocks  = int(await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE status = 'active'") or 0)
     anomalies_active = int(await _scalar(db, "SELECT COUNT(*) FROM market.anomalies WHERE is_active = TRUE") or 0)
+
+    # Comms stats (quick counts for dashboard cards)
+    notifs_today    = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE sent_at >= CURRENT_DATE AND status = 'sent'") or 0)
+    notifs_7d       = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE sent_at >= NOW() - INTERVAL '7 days' AND status = 'sent'") or 0)
+    failed_24h      = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE status = 'failed' AND (sent_at >= NOW() - INTERVAL '24 hours' OR sent_at IS NULL)") or 0)
+    triggers_today  = int(await _scalar(db, "SELECT COUNT(*) FROM users.alert_triggers WHERE triggered_at >= CURRENT_DATE") or 0)
+    ann_today       = int(await _scalar(db, "SELECT COUNT(*) FROM market.asx_announcements WHERE released_at >= CURRENT_DATE") or 0)
+    ann_sensitive7d = int(await _scalar(db, "SELECT COUNT(*) FROM market.asx_announcements WHERE market_sensitive = TRUE AND released_at >= NOW() - INTERVAL '7 days'") or 0)
 
     return {
         "users": {
@@ -627,6 +635,175 @@ async def admin_stats(
             "universe_stocks": universe_stocks,
             "active_anomalies": anomalies_active,
         },
+        "comms": {
+            "notifications_today":        notifs_today,
+            "notifications_7d":           notifs_7d,
+            "failed_24h":                 failed_24h,
+            "alert_triggers_today":       triggers_today,
+            "announcements_today":        ann_today,
+            "announcements_sensitive_7d": ann_sensitive7d,
+        },
+    }
+
+
+# ── Communications Centre ─────────────────────────────────────────────────────
+
+@router.get("/comms")
+async def comms_overview(
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Full communications visibility:
+    - Notification volume + breakdown by type/channel
+    - Recent 50 outbound notifications with user info
+    - Recent 50 alert trigger firings
+    - Recent 30 ASX announcements (newest first, market-sensitive flagged)
+    """
+
+    # ── Volume stats ──────────────────────────────────────────────
+    sent_today   = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE sent_at >= CURRENT_DATE AND status = 'sent'") or 0)
+    sent_7d      = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE sent_at >= NOW() - INTERVAL '7 days' AND status = 'sent'") or 0)
+    sent_30d     = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE sent_at >= NOW() - INTERVAL '30 days' AND status = 'sent'") or 0)
+    failed_24h   = int(await _scalar(db, "SELECT COUNT(*) FROM users.notification_history WHERE status = 'failed'") or 0)
+    triggers_today = int(await _scalar(db, "SELECT COUNT(*) FROM users.alert_triggers WHERE triggered_at >= CURRENT_DATE") or 0)
+    triggers_7d    = int(await _scalar(db, "SELECT COUNT(*) FROM users.alert_triggers WHERE triggered_at >= NOW() - INTERVAL '7 days'") or 0)
+    ann_today      = int(await _scalar(db, "SELECT COUNT(*) FROM market.asx_announcements WHERE released_at >= CURRENT_DATE") or 0)
+    ann_sensitive7d = int(await _scalar(db, "SELECT COUNT(*) FROM market.asx_announcements WHERE market_sensitive = TRUE AND released_at >= NOW() - INTERVAL '7 days'") or 0)
+
+    # ── Breakdown by type (30d) ───────────────────────────────────
+    type_rows = (await db.execute(text("""
+        SELECT notification_type, COUNT(*) AS cnt
+        FROM users.notification_history
+        WHERE sent_at >= NOW() - INTERVAL '30 days' AND status = 'sent'
+        GROUP BY notification_type ORDER BY cnt DESC
+    """))).fetchall()
+    by_type = {r.notification_type: int(r.cnt) for r in type_rows}
+
+    # ── Breakdown by channel (30d) ────────────────────────────────
+    chan_rows = (await db.execute(text("""
+        SELECT channel, COUNT(*) AS cnt
+        FROM users.notification_history
+        WHERE sent_at >= NOW() - INTERVAL '30 days' AND status = 'sent'
+        GROUP BY channel
+    """))).fetchall()
+    by_channel = {r.channel: int(r.cnt) for r in chan_rows}
+
+    # ── Recent notifications (last 100) ──────────────────────────
+    notif_rows = (await db.execute(text("""
+        SELECT
+            nh.notification_type, nh.channel, nh.subject,
+            nh.recipient, nh.status, nh.error_message,
+            nh.attempt_count, nh.sent_at,
+            u.email AS user_email, u.name AS user_name, u.plan AS user_plan
+        FROM users.notification_history nh
+        LEFT JOIN users.users u ON u.id = nh.user_id
+        ORDER BY nh.sent_at DESC NULLS LAST
+        LIMIT 100
+    """))).fetchall()
+
+    notifications = [
+        {
+            "notification_type": r.notification_type,
+            "channel":           r.channel,
+            "subject":           r.subject,
+            "recipient":         r.recipient,
+            "status":            r.status,
+            "error_message":     r.error_message,
+            "attempt_count":     int(r.attempt_count or 1),
+            "sent_at":           _iso(r.sent_at),
+            "user_email":        r.user_email,
+            "user_name":         r.user_name,
+            "user_plan":         r.user_plan,
+        }
+        for r in notif_rows
+    ]
+
+    # ── Alert triggers (last 100) ─────────────────────────────────
+    trig_rows = (await db.execute(text("""
+        SELECT
+            at.triggered_at, at.trigger_value, at.notification_sent,
+            a.asx_code, a.alert_type, a.threshold_value, a.repeat_mode,
+            u.email AS user_email, u.name AS user_name, u.plan AS user_plan,
+            s.company_name
+        FROM users.alert_triggers at
+        JOIN  users.alerts a   ON at.alert_id = a.id
+        JOIN  users.users  u   ON u.id = a.user_id
+        LEFT JOIN screener.universe s ON s.asx_code = a.asx_code
+        ORDER BY at.triggered_at DESC
+        LIMIT 100
+    """))).fetchall()
+
+    triggers = [
+        {
+            "triggered_at":      _iso(r.triggered_at),
+            "trigger_value":     float(r.trigger_value),
+            "notification_sent": bool(r.notification_sent),
+            "asx_code":          r.asx_code,
+            "company_name":      r.company_name,
+            "alert_type":        r.alert_type,
+            "threshold_value":   float(r.threshold_value),
+            "repeat_mode":       r.repeat_mode,
+            "user_email":        r.user_email,
+            "user_name":         r.user_name,
+            "user_plan":         r.user_plan,
+        }
+        for r in trig_rows
+    ]
+
+    # ── Recent announcements (last 50) ────────────────────────────
+    ann_rows = (await db.execute(text("""
+        SELECT
+            aa.asx_code, aa.title, aa.document_type,
+            aa.url, aa.market_sensitive, aa.released_at,
+            aa.source_type, aa.source_label,
+            s.company_name,
+            (
+                SELECT COUNT(*) FROM users.notification_history nh
+                WHERE nh.notification_type = 'announcement'
+                  AND nh.status = 'sent'
+                  AND nh.metadata::jsonb ->> 'asx_code' = aa.asx_code
+                  AND nh.sent_at >= aa.released_at
+                  AND nh.sent_at <= aa.released_at + INTERVAL '30 minutes'
+            ) AS notif_sent_count
+        FROM market.asx_announcements aa
+        LEFT JOIN screener.universe s ON s.asx_code = aa.asx_code
+        ORDER BY aa.released_at DESC
+        LIMIT 50
+    """))).fetchall()
+
+    announcements = [
+        {
+            "asx_code":          r.asx_code,
+            "company_name":      r.company_name,
+            "title":             r.title,
+            "document_type":     r.document_type,
+            "url":               r.url,
+            "market_sensitive":  bool(r.market_sensitive),
+            "released_at":       _iso(r.released_at),
+            "source_type":       r.source_type,
+            "source_label":      r.source_label,
+            "notif_sent_count":  int(r.notif_sent_count or 0),
+        }
+        for r in ann_rows
+    ]
+
+    return {
+        "summary": {
+            "notifications_today":        sent_today,
+            "notifications_7d":           sent_7d,
+            "notifications_30d":          sent_30d,
+            "failed_24h":                 failed_24h,
+            "alert_triggers_today":       triggers_today,
+            "alert_triggers_7d":          triggers_7d,
+            "announcements_today":        ann_today,
+            "announcements_sensitive_7d": ann_sensitive7d,
+        },
+        "by_type":        by_type,
+        "by_channel":     by_channel,
+        "notifications":  notifications,
+        "triggers":       triggers,
+        "announcements":  announcements,
     }
 
 

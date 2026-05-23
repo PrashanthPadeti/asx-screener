@@ -6,6 +6,7 @@ import {
   Users, TrendingUp, DollarSign, LifeBuoy,
   Bell, Star, PieChart, Monitor, Activity,
   ArrowRight, RefreshCw, Layers, AlertTriangle,
+  Mail, Zap, Megaphone, XCircle,
 } from 'lucide-react'
 
 interface Stats {
@@ -22,6 +23,14 @@ interface Stats {
     conversion_rate: number
   }
   support: { open_tickets: number; total_tickets: number }
+  comms: {
+    notifications_today: number
+    notifications_7d: number
+    failed_24h: number
+    alert_triggers_today: number
+    announcements_today: number
+    announcements_sensitive_7d: number
+  }
   platform: {
     active_alerts: number
     watchlists: number
@@ -210,6 +219,43 @@ export default function AdminDashboard() {
               <StatCard label="Active Stocks"       value={stats.platform.universe_stocks.toLocaleString()} icon={Layers}  color="blue" />
               <StatCard label="Active Anomalies"    value={stats.platform.active_anomalies.toLocaleString()} icon={AlertTriangle} color="amber" />
               <StatCard label="Pipeline Jobs"       value="12"  sub="View health status" icon={Activity}  color="green"  href="/admin/pipeline" />
+            </div>
+          </section>
+
+          {/* ── Communications ──────────────────────────────── */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">Communications</h2>
+              <Link href="/admin/comms" className="text-xs text-blue-600 hover:underline flex items-center gap-1">
+                View all <ArrowRight className="w-3 h-3" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <StatCard
+                label="Emails Sent Today"
+                value={stats.comms.notifications_today.toLocaleString()}
+                sub={`${stats.comms.notifications_7d.toLocaleString()} this week`}
+                icon={Mail} color="blue" href="/admin/comms"
+              />
+              <StatCard
+                label="Failed (24h)"
+                value={stats.comms.failed_24h.toLocaleString()}
+                sub={stats.comms.failed_24h > 0 ? 'Needs attention' : 'All clear'}
+                icon={XCircle}
+                color={stats.comms.failed_24h > 0 ? 'red' : 'slate'}
+                href="/admin/comms"
+              />
+              <StatCard
+                label="Alert Triggers Today"
+                value={stats.comms.alert_triggers_today.toLocaleString()}
+                icon={Zap} color="amber" href="/admin/comms"
+              />
+              <StatCard
+                label="Announcements Today"
+                value={stats.comms.announcements_today.toLocaleString()}
+                sub={`${stats.comms.announcements_sensitive_7d} sensitive (7d)`}
+                icon={Megaphone} color="purple" href="/admin/comms"
+              />
             </div>
           </section>
 

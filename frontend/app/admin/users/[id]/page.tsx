@@ -6,7 +6,7 @@ import { api } from '@/lib/api'
 import {
   ChevronLeft, CheckCircle, XCircle, Clock, AlertCircle,
   User, Bell, Star, PieChart, Monitor, LifeBuoy, Mail,
-  Globe, Shield, Save, Loader2, ShieldAlert, History,
+  Globe, Shield, Save, Loader2, ShieldAlert, History, Send,
 } from 'lucide-react'
 
 interface Session {
@@ -167,6 +167,25 @@ export default function UserDetailPage() {
 
   const [activeTab, setActiveTab] = useState<'overview' | 'sessions' | 'tickets' | 'notifications' | 'history'>('overview')
 
+  const [sendingVerify, setSendingVerify] = useState(false)
+  const [verifyMsg,     setVerifyMsg]     = useState<string | null>(null)
+
+  const handleSendVerification = async () => {
+    if (!user) return
+    setSendingVerify(true); setVerifyMsg(null)
+    try {
+      const { data } = await api.post('/api/v1/admin/send-verification-reminders', {
+        user_ids: [id],
+        resend_cooldown_hours: 0,  // force-send regardless of cooldown
+      })
+      setVerifyMsg(data.message)
+    } catch (e: any) {
+      setVerifyMsg(e?.response?.data?.detail || 'Failed to send verification email')
+    } finally {
+      setSendingVerify(false)
+    }
+  }
+
   useEffect(() => {
     const load = async () => {
       setLoading(true); setError(null)
@@ -200,8 +219,13 @@ export default function UserDetailPage() {
         return
       }
 
-      const { data } = await api.patch(`/api/v1/admin/users/${id}`, body)
-      setUser(prev => prev ? { ...prev, plan: data.plan, subscription_status: data.subscription_status, name: data.name } : prev)
+      await api.patch(`/api/v1/admin/users/${id}`, body)
+      // Reload full user so admin_overrides, is_admin_override, etc. are fresh
+      const { data: fresh } = await api.get(`/api/v1/admin/users/${id}`)
+      setUser(fresh)
+      setEditPlan(fresh.plan)
+      setEditStatus(fresh.subscription_status)
+      setEditName(fresh.name || '')
       setSaveMsg('Changes saved.')
     } catch (e: any) {
       setSaveMsg(e?.response?.data?.detail || 'Save failed')
@@ -372,7 +396,24 @@ export default function UserDetailPage() {
                 <InfoRow label="User ID"              value={<span className="font-mono text-xs">{user.id}</span>} />
                 <InfoRow label="Email"                value={user.email} />
                 <InfoRow label="Name"                 value={user.name || <span className="text-slate-300">Not set</span>} />
-                <InfoRow label="Email Verified"       value={user.email_verified ? '✅ Verified' : '⚠️ Not verified'} />
+                <InfoRow label="Email Verified" value={
+                  user.email_verified
+                    ? <span className="flex items-center gap-1.5 text-emerald-600 text-sm"><CheckCircle className="w-4 h-4" /> Verified</span>
+                    : (
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="flex items-center gap-1.5 text-amber-600 text-sm"><AlertCircle className="w-4 h-4" /> Not verified</span>
+                        <button
+                          onClick={handleSendVerification}
+                          disabled={sendingVerify}
+                          className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                        >
+                          {sendingVerify ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                          Send Verification Email
+                        </button>
+                        {verifyMsg && <span className="text-xs text-slate-500">{verifyMsg}</span>}
+                      </div>
+                    )
+                } />
                 <InfoRow label="Joined"               value={fmtDate(user.created_at)} />
                 <InfoRow label="Last Login"           value={user.last_login_at ? fmtDate(user.last_login_at) : 'Never'} />
               </Section>

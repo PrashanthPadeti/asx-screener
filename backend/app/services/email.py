@@ -184,6 +184,52 @@ def send_password_reset_email(to_email: str, reset_url: str, name: Optional[str]
         return False
 
 
+def send_verification_reminder_email(to_email: str, verify_url: str, name: Optional[str] = None) -> bool:
+    """Send an email-verification reminder with a one-click verify link."""
+    resend = _client()
+    if resend is None:
+        log.info(f"[email no-op] Verification reminder for {to_email}: {verify_url}")
+        return False
+
+    greeting = f"Hi {name}," if name else "Hi,"
+    html = f"""
+    <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
+      <h2 style="color:#1d4ed8;margin-bottom:4px">Verify your email address</h2>
+      <p>{greeting}</p>
+      <p style="color:#374151">
+        You're almost set! Please verify your email address to unlock all features
+        of ASX Screener — including price alerts, watchlist digests, and weekly summaries.
+      </p>
+      <a href="{verify_url}"
+         style="display:inline-block;margin-top:16px;padding:12px 24px;
+                background:#2563eb;color:white;border-radius:8px;
+                text-decoration:none;font-weight:600">
+        Verify My Email
+      </a>
+      <p style="margin-top:24px;font-size:13px;color:#6b7280">
+        This link expires in 48 hours. If you didn't create an ASX Screener account,
+        you can safely ignore this email.
+      </p>
+      <hr style="margin-top:32px;border-color:#e5e7eb"/>
+      <p style="font-size:12px;color:#9ca3af">
+        ASX Screener · <a href="https://asxscreener.com.au">asxscreener.com.au</a>
+      </p>
+    </div>
+    """
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [to_email],
+            "subject": "Verify your ASX Screener email address",
+            "html":    html,
+        })
+        log.info(f"Verification reminder sent to {to_email}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send verification reminder to {to_email}: {e}")
+        return False
+
+
 def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
     """Send a welcome email to a new user."""
     resend = _client()

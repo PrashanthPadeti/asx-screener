@@ -17,7 +17,9 @@ Endpoints:
 """
 import logging
 import math
-from typing import Optional
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +28,7 @@ from pydantic import BaseModel
 
 from app.db.session import get_db
 from app.core.deps import require_admin
+from app.core.config import settings
 
 log = logging.getLogger(__name__)
 
@@ -871,17 +874,23 @@ async def list_users(
         LIMIT :limit OFFSET :offset
     """), params)
 
-    # Safely fetch which users have admin overrides (table may not exist yet)
+    # Safely fetch which users have admin overrides
     override_ids: set = set()
     try:
-        async with db.begin_nested():
+        tbl_check = (await db.execute(text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'users' AND table_name = 'subscription_events'
+            )
+        """))).scalar()
+        if tbl_check:
             ov_result = await db.execute(text("""
                 SELECT DISTINCT user_id FROM users.subscription_events
                 WHERE event_type = 'admin_override'
             """))
             override_ids = {str(r.user_id) for r in ov_result.fetchall()}
-    except Exception:
-        pass  # subscription_events table doesn't exist yet
+    except Exception as e:
+        log.warning(f"list_users: failed to fetch override_ids: {e!r}")
 
     users = []
     for r in rows_result.fetchall():
@@ -1001,10 +1010,17 @@ async def get_user(
         for n in notif_result.fetchall()
     ]
 
-    # Admin override history (safe — table may not exist yet)
+    # Admin override history
     admin_overrides = []
     try:
-        async with db.begin_nested():
+        tbl_check = (await db.execute(text("""
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE table_schema = 'users' AND table_name = 'subscription_events'
+            )
+        """))).scalar()
+        log.info(f"get_user: subscription_events table exists={tbl_check}")
+        if tbl_check:
             override_result = await db.execute(text("""
                 SELECT old_plan, new_plan, stripe_event_id, created_at
                 FROM users.subscription_events
@@ -1012,7 +1028,9 @@ async def get_user(
                 ORDER BY created_at DESC
                 LIMIT 20
             """), {"uid": user_id})
-            for o in override_result.fetchall():
+            rows = override_result.fetchall()
+            log.info(f"get_user: found {len(rows)} admin_override rows for user {user_id}")
+            for o in rows:
                 # stripe_event_id format: "admin:{email}|{old_status}→{new_status}"
                 ref = o.stripe_event_id or ""
                 admin_email   = ref.split("|")[0].replace("admin:", "") if ref.startswith("admin:") else ref
@@ -1024,8 +1042,8 @@ async def get_user(
                     "status_change": status_change,
                     "changed_at":    _iso(o.created_at),
                 })
-    except Exception:
-        pass  # subscription_events table doesn't exist yet
+    except Exception as e:
+        log.warning(f"get_user: failed to fetch admin_overrides for {user_id}: {e!r}")
 
     is_admin_override = len(admin_overrides) > 0
 
@@ -1128,10 +1146,25 @@ async def update_user(
         new_plan   = body.plan if body.plan is not None else old_plan
         old_status = before.subscription_status or "inactive"
         new_status = body.subscription_status if body.subscription_status is not None else old_status
+        log.info(
+            f"Admin override detected: user={user_id} "
+            f"plan={old_plan}→{new_plan} status={old_status}→{new_status} by={admin['email']}"
+        )
         try:
             # Use begin_nested() (SAVEPOINT) so a failure here doesn't abort
             # the outer transaction that holds the plan/status UPDATE.
             async with db.begin_nested():
+                await db.execute(text("""
+                    CREATE TABLE IF NOT EXISTS users.subscription_events (
+                        id              BIGSERIAL PRIMARY KEY,
+                        user_id         UUID        NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
+                        event_type      TEXT        NOT NULL,
+                        old_plan        TEXT,
+                        new_plan        TEXT,
+                        stripe_event_id TEXT,
+                        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """))
                 await db.execute(text("""
                     INSERT INTO users.subscription_events
                         (user_id, event_type, old_plan, new_plan, stripe_event_id)
@@ -1143,11 +1176,11 @@ async def update_user(
                     "admin_ref": f"admin:{admin['email']}|{old_status}→{new_status}",
                 })
             log.info(
-                f"Admin override: user={user_id} plan={old_plan}→{new_plan} "
+                f"Admin override audit written: user={user_id} plan={old_plan}→{new_plan} "
                 f"status={old_status}→{new_status} by={admin['email']}"
             )
         except Exception as e:
-            log.warning(f"Failed to write admin_override audit event: {e}")
+            log.warning(f"Failed to write admin_override audit event: {e!r}")
 
     await db.commit()
 
@@ -1157,4 +1190,140 @@ async def update_user(
         "plan":                row.plan,
         "subscription_status": row.subscription_status,
         "name":                row.name,
+    }
+
+
+# ── Email Verification Reminders ──────────────────────────────────────────────
+
+class VerificationReminderBody(BaseModel):
+    user_ids: Optional[List[str]] = None   # None = send to ALL unverified users
+    resend_cooldown_hours: int = 24         # skip users reminded within this window
+
+
+@router.get("/unverified-users")
+async def list_unverified_users(
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Return all users whose email is not yet verified, with last-reminder timestamp.
+    Used to populate the admin verification panel.
+    """
+    result = await db.execute(text("""
+        SELECT id, email, name, plan, created_at,
+               email_verification_sent_at
+        FROM users.users
+        WHERE email_verified = FALSE OR email_verified IS NULL
+        ORDER BY created_at DESC
+    """))
+    users = []
+    for r in result.fetchall():
+        users.append({
+            "id":                          str(r.id),
+            "email":                       r.email,
+            "name":                        r.name,
+            "plan":                        r.plan,
+            "created_at":                  _iso(r.created_at),
+            "last_reminder_sent_at":       _iso(r.email_verification_sent_at),
+        })
+    return {"users": users, "total": len(users)}
+
+
+@router.post("/send-verification-reminders")
+async def send_verification_reminders(
+    body: VerificationReminderBody,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Send (or re-send) email-verification reminders.
+    - If body.user_ids is provided: only those users.
+    - If body.user_ids is None/empty: all unverified users.
+    - Skips users who already received a reminder within resend_cooldown_hours.
+    Returns immediately; emails are sent in a background task.
+    """
+    from app.services.email import send_verification_reminder_email
+
+    # Build the WHERE clause
+    params: dict = {}
+    where_parts = ["(email_verified = FALSE OR email_verified IS NULL)"]
+
+    if body.user_ids:
+        # PostgreSQL ANY with array — cast each to uuid
+        where_parts.append("id = ANY(:uid_list)")
+        params["uid_list"] = body.user_ids
+
+    where_sql = " AND ".join(where_parts)
+
+    result = await db.execute(text(f"""
+        SELECT id, email, name, email_verification_sent_at
+        FROM users.users
+        WHERE {where_sql}
+        ORDER BY created_at DESC
+    """), params)
+    candidates = result.fetchall()
+
+    if not candidates:
+        return {"sent": 0, "skipped": 0, "failed": 0, "message": "No unverified users found"}
+
+    # Separate into "should send" vs "recently reminded (skip)"
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=body.resend_cooldown_hours)
+    to_send = []
+    skipped  = 0
+    for u in candidates:
+        last_sent = u.email_verification_sent_at
+        if last_sent:
+            last_sent_aware = last_sent.replace(tzinfo=timezone.utc) if last_sent.tzinfo is None else last_sent
+            if last_sent_aware > cutoff:
+                skipped += 1
+                continue
+        to_send.append(u)
+
+    if not to_send:
+        return {
+            "sent": 0, "skipped": skipped, "failed": 0,
+            "message": f"All {skipped} user(s) were reminded within the last {body.resend_cooldown_hours}h — no emails sent",
+        }
+
+    # Generate tokens + update DB for all, then send in background
+    frontend_url = getattr(settings, "FRONTEND_URL", "https://asxscreener.com.au")
+    now = datetime.now(timezone.utc)
+    user_data = []
+    for u in to_send:
+        tok = secrets.token_urlsafe(48)
+        await db.execute(text("""
+            UPDATE users.users
+            SET email_verification_token   = :tok,
+                email_verification_sent_at = :now
+            WHERE id = :uid
+        """), {"tok": tok, "uid": str(u.id), "now": now})
+        verify_url = f"{frontend_url}/auth/verify-email?token={tok}"
+        user_data.append((u.email, u.name, verify_url))
+
+    await db.commit()
+
+    log.info(
+        f"Admin {admin['email']} queued {len(user_data)} verification reminder(s) "
+        f"(skipped {skipped} recently reminded)"
+    )
+
+    # Send emails in background so the HTTP response is instant
+    async def _send_all():
+        sent = failed = 0
+        for email, name, url in user_data:
+            ok = send_verification_reminder_email(email, url, name)
+            if ok:
+                sent += 1
+            else:
+                failed += 1
+        log.info(f"Verification reminders: sent={sent} failed={failed}")
+
+    background_tasks.add_task(_send_all)
+
+    return {
+        "sent":    len(user_data),
+        "skipped": skipped,
+        "failed":  0,   # actual send results are async — check server logs
+        "message": f"Sending {len(user_data)} reminder(s) in background. {skipped} skipped (recently reminded).",
     }

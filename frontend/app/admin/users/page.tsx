@@ -6,7 +6,180 @@ import { api } from '@/lib/api'
 import {
   Search, ChevronLeft, ChevronRight, ChevronUp, ChevronDown,
   CheckCircle, XCircle, Clock, AlertCircle, ArrowRight, ShieldAlert,
+  Mail, Send, ChevronDown as Expand, Loader2, RefreshCw,
 } from 'lucide-react'
+
+// ── Verification Reminder Panel ───────────────────────────────────────────────
+
+interface UnverifiedUser {
+  id: string
+  email: string
+  name: string | null
+  plan: string
+  created_at: string | null
+  last_reminder_sent_at: string | null
+}
+
+function VerificationPanel() {
+  const [users,    setUsers]    = useState<UnverifiedUser[]>([])
+  const [total,    setTotal]    = useState(0)
+  const [loading,  setLoading]  = useState(true)
+  const [expanded, setExpanded] = useState(false)
+  const [sending,  setSending]  = useState<string | 'all' | null>(null)
+  const [msg,      setMsg]      = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data } = await api.get('/api/v1/admin/unverified-users')
+      setUsers(data.users)
+      setTotal(data.total)
+    } catch { /* non-critical */ }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  async function sendAll() {
+    setSending('all'); setMsg(null)
+    try {
+      const { data } = await api.post('/api/v1/admin/send-verification-reminders', {
+        resend_cooldown_hours: 24,
+      })
+      setMsg(data.message)
+      await load()
+    } catch (e: any) {
+      setMsg(e?.response?.data?.detail || 'Failed to send reminders')
+    } finally { setSending(null) }
+  }
+
+  async function sendOne(userId: string) {
+    setSending(userId); setMsg(null)
+    try {
+      const { data } = await api.post('/api/v1/admin/send-verification-reminders', {
+        user_ids: [userId],
+        resend_cooldown_hours: 0,   // force-send even if recently reminded
+      })
+      setMsg(data.message)
+      await load()
+    } catch (e: any) {
+      setMsg(e?.response?.data?.detail || 'Failed to send reminder')
+    } finally { setSending(null) }
+  }
+
+  function fmtAgo(iso: string | null) {
+    if (!iso) return null
+    const diff = Date.now() - new Date(iso).getTime()
+    const h = Math.floor(diff / 3600000)
+    const d = Math.floor(h / 24)
+    if (d > 0) return `${d}d ago`
+    if (h > 0) return `${h}h ago`
+    return 'Just now'
+  }
+
+  if (loading) return null  // don't flash panel while loading
+  if (total === 0) return (
+    <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex items-center gap-2 text-sm text-emerald-700">
+      <CheckCircle className="w-4 h-4 shrink-0" />
+      All registered users have verified their email address.
+    </div>
+  )
+
+  return (
+    <div className="bg-white border border-amber-200 rounded-xl overflow-hidden">
+      {/* Header bar */}
+      <div className="flex items-center justify-between px-5 py-3.5 bg-amber-50 border-b border-amber-100">
+        <div className="flex items-center gap-3">
+          <Mail className="w-4 h-4 text-amber-600 shrink-0" />
+          <div>
+            <span className="text-sm font-semibold text-amber-800">
+              {total} unverified user{total !== 1 ? 's' : ''}
+            </span>
+            <span className="text-xs text-amber-600 ml-2">
+              These users haven't clicked their verification link yet
+            </span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={load}
+            className="p-1.5 text-amber-500 hover:text-amber-700 rounded-lg hover:bg-amber-100 transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={sendAll}
+            disabled={sending === 'all'}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-50"
+          >
+            {sending === 'all'
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <Send className="w-3 h-3" />}
+            Send All Reminders
+          </button>
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200 transition-colors"
+          >
+            {expanded ? 'Hide' : 'Show list'}
+            <Expand className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {msg && (
+        <div className="px-5 py-2 bg-blue-50 border-b border-blue-100 text-xs text-blue-700">{msg}</div>
+      )}
+
+      {/* Expandable user list */}
+      {expanded && (
+        <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+          {users.map(u => {
+            const ago = fmtAgo(u.last_reminder_sent_at)
+            return (
+              <div key={u.id} className="flex items-center justify-between px-5 py-2.5 hover:bg-slate-50">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-slate-700 truncate">{u.email}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {u.name && <span className="text-xs text-slate-400">{u.name}</span>}
+                    <span className="text-[10px] text-slate-300">·</span>
+                    <span className="text-[10px] text-slate-400 capitalize">{u.plan}</span>
+                    {ago && (
+                      <>
+                        <span className="text-[10px] text-slate-300">·</span>
+                        <span className="text-[10px] text-amber-500">Reminded {ago}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0 ml-4">
+                  <Link href={`/admin/users/${u.id}`}
+                    className="text-[10px] font-medium text-blue-600 hover:underline">
+                    View
+                  </Link>
+                  <button
+                    onClick={() => sendOne(u.id)}
+                    disabled={sending === u.id}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-semibold bg-slate-100 hover:bg-amber-100 hover:text-amber-700 text-slate-600 rounded-lg transition-colors disabled:opacity-50"
+                  >
+                    {sending === u.id ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Send className="w-2.5 h-2.5" />}
+                    Send
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Footer note */}
+      <div className="px-5 py-2 bg-slate-50 border-t border-slate-100 text-[10px] text-slate-400">
+        "Send All Reminders" respects a 24-hour cooldown per user · Individual "Send" always delivers immediately
+      </div>
+    </div>
+  )
+}
 
 interface AdminUser {
   id: string
@@ -150,6 +323,9 @@ function AdminUsersContent() {
         <h1 className="text-2xl font-bold text-slate-900">User Management</h1>
         {data && <p className="text-sm text-slate-400 mt-0.5">{data.total.toLocaleString()} users found</p>}
       </div>
+
+      {/* Verification Reminders Panel */}
+      <VerificationPanel />
 
       {/* Filters */}
       <div className="bg-white rounded-xl border border-slate-200 p-4">

@@ -34,7 +34,7 @@ from app.schemas.auth import (
     TokenResponse,
     UserProfile,
 )
-from app.services.email import send_password_reset_email
+from app.services.email import send_password_reset_email, send_verification_reminder_email
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -324,6 +324,59 @@ async def reset_password(
     await db.commit()
     log.info(f"Password reset completed for user {user.id}")
     return {"message": "Password updated successfully. You can now sign in."}
+
+
+# ── Verify Email ─────────────────────────────────────────────────────────────
+
+@router.get("/verify-email", status_code=status.HTTP_200_OK)
+async def verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    One-click email verification.  Called when the user clicks the link in their
+    verification reminder email.  Marks email_verified = TRUE and clears the token.
+    """
+    if not token:
+        raise HTTPException(status_code=400, detail="Verification token is required")
+
+    result = await db.execute(
+        text("""
+            SELECT id, email, email_verified, email_verification_sent_at
+            FROM users.users
+            WHERE email_verification_token = :tok
+        """),
+        {"tok": token},
+    )
+    user = result.fetchone()
+
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or already-used verification link")
+
+    if user.email_verified:
+        return {"message": "Email already verified. You're all set!"}
+
+    # Token expires after 48 hours
+    if user.email_verification_sent_at:
+        cutoff = user.email_verification_sent_at.replace(tzinfo=timezone.utc) + timedelta(hours=48)
+        if datetime.now(timezone.utc) > cutoff:
+            raise HTTPException(status_code=400, detail="Verification link has expired — please request a new one")
+
+    await db.execute(
+        text("""
+            UPDATE users.users
+            SET email_verified              = TRUE,
+                email_verification_token    = NULL,
+                email_verification_sent_at  = NULL,
+                updated_at                  = NOW()
+            WHERE id = :uid
+        """),
+        {"uid": str(user.id)},
+    )
+    await db.commit()
+
+    log.info(f"Email verified for user {user.email}")
+    return {"message": "Email verified successfully! You can now close this page."}
 
 
 # ── Me ────────────────────────────────────────────────────────────────────────

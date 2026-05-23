@@ -189,7 +189,7 @@ function FundsContent() {
                 ETFs &amp; Managed Funds
               </h1>
               <p className="text-slate-400 text-sm mt-1">
-                ASX-listed ETFs, LICs, and managed funds — performance, yield, AUM, and MER.
+                Find, filter, compare and research ASX ETFs, LICs and managed funds in one place.
               </p>
               {data?.as_of && <p className="text-slate-500 text-xs mt-1">As of {data.as_of}</p>}
             </div>

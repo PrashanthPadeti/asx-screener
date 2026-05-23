@@ -34,6 +34,35 @@ async def lifespan(app: FastAPI):
     if _missing:
         logger.warning("Stripe env vars not set (payments disabled): %s", ", ".join(_missing))
 
+    # ── Ensure audit tables exist ─────────────────────────────
+    try:
+        from app.db.session import AsyncSessionLocal
+        from sqlalchemy import text as _text
+        async with AsyncSessionLocal() as _db:
+            await _db.execute(_text("""
+                CREATE TABLE IF NOT EXISTS users.subscription_events (
+                    id              BIGSERIAL PRIMARY KEY,
+                    user_id         UUID        NOT NULL REFERENCES users.users(id) ON DELETE CASCADE,
+                    event_type      TEXT        NOT NULL,
+                    old_plan        TEXT,
+                    new_plan        TEXT,
+                    stripe_event_id TEXT,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """))
+            await _db.execute(_text("""
+                CREATE INDEX IF NOT EXISTS idx_sub_events_user_id
+                    ON users.subscription_events (user_id)
+            """))
+            await _db.execute(_text("""
+                CREATE INDEX IF NOT EXISTS idx_sub_events_event_type
+                    ON users.subscription_events (event_type)
+            """))
+            await _db.commit()
+            logger.info("subscription_events table ready")
+    except Exception as _e:
+        logger.warning(f"Could not ensure subscription_events table: {_e}")
+
     # ── Start schedulers ──────────────────────────────────────
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.cron import CronTrigger

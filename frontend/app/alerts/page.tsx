@@ -136,11 +136,13 @@ function fmtDateTime(s: string | null): string {
 function CodeAutocomplete({
   value,
   onChange,
+  onSelect,
   disabled = false,
 }: {
-  value:    string
-  onChange: (code: string) => void
-  disabled?: boolean
+  value:      string
+  onChange:   (code: string) => void
+  onSelect?:  (suggestion: Suggestion) => void
+  disabled?:  boolean
 }) {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [open,        setOpen]        = useState(false)
@@ -170,12 +172,14 @@ function CodeAutocomplete({
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value.toUpperCase()
     onChange(v)
+    onSelect?.({ asx_code: v, company_name: null })  // clear company on manual type
     if (debounceRef.current) clearTimeout(debounceRef.current)
     debounceRef.current = setTimeout(() => fetchSuggestions(v), 200)
   }
 
   const handleSelect = (s: Suggestion) => {
     onChange(s.asx_code)
+    onSelect?.(s)
     setOpen(false)
     setSuggestions([])
   }
@@ -238,13 +242,14 @@ function AlertForm({
   onCancel?:   () => void
   submitLabel: string
 }) {
-  const [code,       setCode]       = useState(initial?.asx_code      ?? '')
-  const [alertType,  setAlertType]  = useState(initial?.alert_type    ?? 'price_above')
-  const [threshold,  setThreshold]  = useState(initial?.threshold_value != null ? String(initial.threshold_value) : '')
-  const [viaEmail,   setViaEmail]   = useState(initial?.via_email     ?? true)
-  const [repeatMode, setRepeatMode] = useState(initial?.repeat_mode   ?? 'every_time')
-  const [loading,    setLoading]    = useState(false)
-  const [error,      setError]      = useState<string | null>(null)
+  const [code,            setCode]            = useState(initial?.asx_code      ?? '')
+  const [selectedCompany, setSelectedCompany] = useState<string | null>(initial?.company_name ?? null)
+  const [alertType,       setAlertType]       = useState(initial?.alert_type    ?? 'price_above')
+  const [threshold,       setThreshold]       = useState(initial?.threshold_value != null ? String(initial.threshold_value) : '')
+  const [viaEmail,        setViaEmail]        = useState(initial?.via_email     ?? true)
+  const [repeatMode,      setRepeatMode]      = useState(initial?.repeat_mode   ?? 'every_time')
+  const [loading,         setLoading]         = useState(false)
+  const [error,           setError]           = useState<string | null>(null)
 
   const userRank    = PLAN_RANK[plan] ?? 0
   const typeDef     = ALERT_TYPE_MAP[alertType]
@@ -281,7 +286,16 @@ function AlertForm({
         {/* ASX Code */}
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">ASX Code</label>
-          <CodeAutocomplete value={code} onChange={setCode} />
+          <CodeAutocomplete
+            value={code}
+            onChange={setCode}
+            onSelect={s => setSelectedCompany(s.company_name)}
+          />
+          {selectedCompany && (
+            <p className="mt-1 text-xs text-slate-500 font-medium truncate">
+              {code} — {selectedCompany}
+            </p>
+          )}
         </div>
 
         {/* Condition */}
@@ -518,8 +532,10 @@ function HistoryTable({
     return (
       <div className="text-center py-16 text-gray-400 bg-white border border-gray-200 rounded-xl">
         <History className="w-8 h-8 mx-auto mb-3 text-gray-200" />
-        <p className="text-sm font-medium">No alerts triggered yet</p>
-        <p className="text-xs mt-1">When an alert fires, it will appear here.</p>
+        <p className="text-sm font-medium">No triggered alerts yet</p>
+        <p className="text-xs mt-1 max-w-xs mx-auto">
+          When an alert condition is met, it will appear here with the triggered price and time.
+        </p>
       </div>
     )
   }

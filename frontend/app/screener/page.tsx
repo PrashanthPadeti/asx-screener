@@ -435,6 +435,10 @@ export default function ScreenerPage() {
   const [presets, setPresets] = useState<ScreenerPreset[]>([])
   const [activePreset, setActivePreset] = useState<string | null>(null)
 
+  // Index auto-run support (?index=ASX200 from Indices page)
+  const [pendingIndexParam, setPendingIndexParam]  = useState<string | null>(null)
+  const [pendingAutoRun,    setPendingAutoRun]     = useState(false)
+
   // Results state
   const [results, setResults]       = useState<ScreenerRow[]>([])
   const [total, setTotal]           = useState(0)
@@ -531,6 +535,12 @@ export default function ScreenerPage() {
       setFilters([{ id: nextId++, field: 'sector', operator: 'eq', value: sectorParam }])
     }
 
+    // Auto-apply index membership filter + auto-run (?index=ASX200 from Indices page)
+    const indexParam = searchParams.get('index')
+    if (indexParam) {
+      setPendingIndexParam(indexParam.toUpperCase())
+    }
+
     // Auto-load community screen from URL ?screen=id
     const screenId = searchParams.get('screen')
     if (screenId) {
@@ -543,6 +553,37 @@ export default function ScreenerPage() {
       }).catch(console.error)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Map ASX index codes to screener boolean field names
+  const INDEX_FIELD_MAP: Record<string, string> = {
+    ASX20:  'is_asx200', // ASX20 is subset; use closest available field
+    ASX50:  'is_asx200',
+    ASX100: 'is_asx200',
+    ASX200: 'is_asx200',
+    ASX300: 'is_asx300',
+    AXJO:   'is_asx200',
+  }
+
+  // When allFields loads and we have a pending index param, set the filter
+  useEffect(() => {
+    if (!pendingIndexParam || allFields.length === 0) return
+    const field = INDEX_FIELD_MAP[pendingIndexParam]
+    if (!field) { setPendingIndexParam(null); return }
+    const fieldMeta = allFields.find(f => f.key === field)
+    if (!fieldMeta) { setPendingIndexParam(null); return }
+    setFilters([{ id: nextId++, field, operator: 'eq', value: 'true' }])
+    setPendingAutoRun(true)
+    setPendingIndexParam(null)
+  }, [pendingIndexParam, allFields]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-run once filters are populated from a URL index param
+  useEffect(() => {
+    if (!pendingAutoRun || filters.length === 0) return
+    setPendingAutoRun(false)
+    // Small delay so buildApiFilters captures the latest filter state
+    const t = setTimeout(() => runScreen(1), 0)
+    return () => clearTimeout(t)
+  }, [pendingAutoRun, filters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter operations
   const addFilter = () => {

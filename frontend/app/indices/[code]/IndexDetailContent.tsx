@@ -3,7 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft, TrendingUp, TrendingDown, Minus,
-  Info, RefreshCw, ChevronUp, ChevronDown,
+  RefreshCw, ChevronUp, ChevronDown,
   Search, ExternalLink, Download, Bell, Bookmark,
 } from 'lucide-react'
 import {
@@ -57,14 +57,14 @@ function fmtNum(v: number | null, decimals = 0) {
 }
 
 function retColor(v: number | null) {
-  if (v == null) return 'text-gray-400'
-  return v > 0 ? 'text-emerald-600' : v < 0 ? 'text-red-500' : 'text-gray-500'
+  if (v == null) return 'text-slate-400'
+  return v > 0 ? 'text-emerald-400' : v < 0 ? 'text-red-400' : 'text-slate-400'
 }
 
 /**
  * Format index total market cap.
- * Backend stores total_market_cap_bn in millions of AUD (despite the "_bn" suffix).
- * Divide by 1,000,000 → billions, then auto-scale to T when ≥ 1 000 B.
+ * total_market_cap_bn is stored in millions of AUD despite the "_bn" suffix.
+ * Divide by 1,000,000 → billions, auto-scale to T when ≥ 1 000 B.
  */
 function fmtIndexTotalCap(v: number | null): string {
   if (v == null) return '—'
@@ -74,10 +74,7 @@ function fmtIndexTotalCap(v: number | null): string {
   return `$${(billions * 1_000).toFixed(0)}M`
 }
 
-/**
- * Format a constituent market cap stored in millions of AUD.
- * Produces M / B / T suffixes with sensible decimal places.
- */
+/** Format a constituent market cap stored in millions of AUD. */
 function fmtMktCapM(v: number | null): string {
   if (v == null) return '—'
   if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}T`
@@ -94,9 +91,9 @@ function exportDetailCSV(constituents: IndexConstituent[], code: string) {
     `"${c.company_name}"`,
     c.sector ?? '',
     c.market_cap != null ? (c.market_cap >= 1000 ? `${(c.market_cap / 1000).toFixed(1)}B` : `${c.market_cap}M`) : '',
-    c.weight_pct != null ? c.weight_pct.toFixed(2) : '',
-    c.return_1d  != null ? (c.return_1d  * 100).toFixed(2) : '',
-    c.return_1y  != null ? (c.return_1y  * 100).toFixed(2) : '',
+    c.weight_pct     != null ? c.weight_pct.toFixed(2) : '',
+    c.return_1d      != null ? (c.return_1d  * 100).toFixed(2) : '',
+    c.return_1y      != null ? (c.return_1y  * 100).toFixed(2) : '',
     c.dividend_yield != null ? (c.dividend_yield * 100).toFixed(1) : '',
   ])
   const csv  = [headers, ...rows].map(r => r.join(',')).join('\n')
@@ -109,38 +106,47 @@ function exportDetailCSV(constituents: IndexConstituent[], code: string) {
   URL.revokeObjectURL(url)
 }
 
+// ── Return badge ──────────────────────────────────────────────────────────────
+
 function ReturnBadge({ value }: { value: number | null }) {
-  if (value == null) return <span className="text-gray-400 text-xs">—</span>
-  const pct = fmtPct(value)
+  if (value == null) return <span className="text-slate-500 text-xs">—</span>
   return (
     <span className={cn('inline-flex items-center gap-0.5 text-xs font-semibold', retColor(value))}>
       {value > 0 ? <TrendingUp className="w-3 h-3" /> : value < 0 ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
-      {pct}
+      {fmtPct(value)}
     </span>
   )
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Dark sub-components ───────────────────────────────────────────────────────
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-4">
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className="text-lg font-bold text-gray-900">{value}</p>
-      {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
+    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4">
+      <p className="text-xs text-slate-400 mb-1">{label}</p>
+      <p className="text-lg font-bold text-slate-100">{value}</p>
+      {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
     </div>
   )
 }
 
 function SectionCard({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className={cn('bg-white border border-gray-200 rounded-xl overflow-hidden', className)}>
-      <div className="px-5 py-3 border-b border-gray-100">
-        <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+    <div className={cn('bg-slate-800 border border-slate-700 rounded-xl overflow-hidden', className)}>
+      <div className="px-5 py-3 border-b border-slate-700">
+        <h2 className="text-sm font-semibold text-slate-200">{title}</h2>
       </div>
       <div className="p-5">{children}</div>
     </div>
   )
+}
+
+// ── Chart tooltip style ───────────────────────────────────────────────────────
+
+const DARK_TOOLTIP = {
+  contentStyle: { background: '#0f172a', border: '1px solid #334155', borderRadius: 8, color: '#f1f5f9' },
+  labelStyle:   { color: '#94a3b8', fontSize: 11 },
+  itemStyle:    { color: '#e2e8f0' },
 }
 
 // ── Performance Chart ─────────────────────────────────────────────────────────
@@ -173,7 +179,7 @@ function PerformanceChart({ code }: { code: string }) {
             onClick={() => setPeriod(p)}
             className={cn(
               'px-3 py-1 text-xs rounded-lg font-medium transition-colors',
-              period === p ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              period === p ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
             )}
           >
             {p}
@@ -182,32 +188,30 @@ function PerformanceChart({ code }: { code: string }) {
       </div>
       {loading ? (
         <div className="h-64 flex items-center justify-center">
-          <RefreshCw className="w-5 h-5 text-gray-300 animate-spin" />
+          <RefreshCw className="w-5 h-5 text-slate-500 animate-spin" />
         </div>
       ) : formatted.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-gray-400 text-sm">
+        <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
           No price history available yet
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={formatted} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
             <XAxis
               dataKey="date"
-              tickFormatter={d => {
-                const dt = new Date(d)
-                return dt.toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })
-              }}
-              tick={{ fontSize: 11 }}
+              tickFormatter={d => new Date(d).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' })}
+              tick={{ fontSize: 11, fill: '#94a3b8' }}
               interval="preserveStartEnd"
             />
             <YAxis
               domain={[minY, maxY]}
               tickFormatter={v => v.toLocaleString('en-AU', { maximumFractionDigits: 0 })}
-              tick={{ fontSize: 11 }}
+              tick={{ fontSize: 11, fill: '#94a3b8' }}
               width={60}
             />
             <Tooltip
+              {...DARK_TOOLTIP}
               formatter={(v: unknown) => [(v as number).toLocaleString('en-AU', { maximumFractionDigits: 2 }), 'Close']}
               labelFormatter={l => new Date(l).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
             />
@@ -271,8 +275,8 @@ function CompareChart({ currentCode }: { currentCode: string }) {
             className={cn(
               'px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors',
               selected.includes(c)
-                ? 'bg-slate-800 text-white border-slate-800'
-                : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-slate-700 text-slate-300 border-slate-600 hover:border-slate-400'
             )}
           >
             {c}
@@ -283,7 +287,8 @@ function CompareChart({ currentCode }: { currentCode: string }) {
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={cn('px-2 py-1 text-xs rounded font-medium', period === p ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600')}
+              className={cn('px-2 py-1 text-xs rounded font-medium transition-colors',
+                period === p ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600')}
             >
               {p}
             </button>
@@ -292,27 +297,30 @@ function CompareChart({ currentCode }: { currentCode: string }) {
       </div>
 
       {loading ? (
-        <div className="h-64 flex items-center justify-center"><RefreshCw className="w-5 h-5 text-gray-300 animate-spin" /></div>
+        <div className="h-64 flex items-center justify-center">
+          <RefreshCw className="w-5 h-5 text-slate-500 animate-spin" />
+        </div>
       ) : chartData.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-sm text-gray-400">Select indices to compare</div>
+        <div className="h-64 flex items-center justify-center text-sm text-slate-500">Select indices to compare</div>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-            <XAxis dataKey="date" tickFormatter={d => new Date(d).toLocaleDateString('en-AU', { month: 'short', year: '2-digit' })} tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-            <YAxis tickFormatter={v => `${v}`} tick={{ fontSize: 11 }} width={45} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+            <XAxis dataKey="date" tickFormatter={d => new Date(d).toLocaleDateString('en-AU', { month: 'short', year: '2-digit' })} tick={{ fontSize: 11, fill: '#94a3b8' }} interval="preserveStartEnd" />
+            <YAxis tickFormatter={v => `${v}`} tick={{ fontSize: 11, fill: '#94a3b8' }} width={45} />
             <Tooltip
+              {...DARK_TOOLTIP}
               formatter={(v: unknown, name: unknown) => [`${(v as number).toFixed(1)} (rebased 100)`, name as string]}
               labelFormatter={l => new Date(l).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}
             />
-            <Legend />
+            <Legend wrapperStyle={{ color: '#94a3b8', fontSize: 11 }} />
             {allSelected.map((c, i) => (
               <Line key={c} type="monotone" dataKey={c} stroke={COMPARE_COLORS[i % COMPARE_COLORS.length]} strokeWidth={2} dot={false} />
             ))}
           </LineChart>
         </ResponsiveContainer>
       )}
-      <p className="text-[10px] text-gray-400 mt-2">All series rebased to 100 at the start of the selected period.</p>
+      <p className="text-[10px] text-slate-500 mt-2">All series rebased to 100 at the start of the selected period.</p>
     </SectionCard>
   )
 }
@@ -329,7 +337,8 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
           <button
             key={v}
             onClick={() => setView(v)}
-            className={cn('px-3 py-1 text-xs rounded-lg font-medium transition-colors capitalize', view === v ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600')}
+            className={cn('px-3 py-1 text-xs rounded-lg font-medium transition-colors capitalize',
+              view === v ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600')}
           >
             {v === 'pie' ? 'Pie Chart' : 'Bar Chart'}
           </button>
@@ -337,29 +346,34 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
       </div>
 
       {data.length === 0 ? (
-        <p className="text-sm text-gray-400 text-center py-8">No sector data available</p>
+        <p className="text-sm text-slate-500 text-center py-8">No sector data available</p>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {view === 'pie' ? (
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
-                <Pie data={data} dataKey="weight_pct" nameKey="sector" cx="50%" cy="50%" outerRadius={100} label={({ name, value }: { name?: string; value?: number }) => `${(name ?? '').split(' ')[0]} ${(value ?? 0).toFixed(1)}%`} labelLine={false}>
-                  {data.map((entry) => (
+                <Pie
+                  data={data} dataKey="weight_pct" nameKey="sector"
+                  cx="50%" cy="50%" outerRadius={100}
+                  label={({ name, value }: { name?: string; value?: number }) => `${(name ?? '').split(' ')[0]} ${(value ?? 0).toFixed(1)}%`}
+                  labelLine={false}
+                >
+                  {data.map(entry => (
                     <Cell key={entry.sector} fill={SECTOR_COLORS[entry.sector] || SECTOR_COLORS['Other']} />
                   ))}
                 </Pie>
-                <Tooltip formatter={(v: unknown) => [`${(v as number).toFixed(2)}%`, 'Weight']} />
+                <Tooltip {...DARK_TOOLTIP} formatter={(v: unknown) => [`${(v as number).toFixed(2)}%`, 'Weight']} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={data} layout="vertical" margin={{ left: 100, right: 20 }}>
-                <XAxis type="number" tickFormatter={v => `${v.toFixed(0)}%`} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="sector" tick={{ fontSize: 11 }} width={100} />
-                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                <Tooltip formatter={(v: unknown) => [`${(v as number).toFixed(2)}%`, 'Weight']} />
+                <XAxis type="number" tickFormatter={v => `${v.toFixed(0)}%`} tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                <YAxis type="category" dataKey="sector" tick={{ fontSize: 11, fill: '#94a3b8' }} width={100} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <Tooltip {...DARK_TOOLTIP} formatter={(v: unknown) => [`${(v as number).toFixed(2)}%`, 'Weight']} />
                 <Bar dataKey="weight_pct" radius={[0, 4, 4, 0]}>
-                  {data.map((entry) => (
+                  {data.map(entry => (
                     <Cell key={entry.sector} fill={SECTOR_COLORS[entry.sector] || SECTOR_COLORS['Other']} />
                   ))}
                 </Bar>
@@ -371,9 +385,9 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
             {data.map(s => (
               <div key={s.sector} className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-sm shrink-0" style={{ background: SECTOR_COLORS[s.sector] || SECTOR_COLORS['Other'] }} />
-                <span className="text-sm text-gray-700 flex-1">{s.sector}</span>
-                <span className="text-xs text-gray-500">{s.count}co</span>
-                <span className="text-sm font-semibold text-gray-900 w-14 text-right">{s.weight_pct.toFixed(1)}%</span>
+                <span className="text-sm text-slate-300 flex-1">{s.sector}</span>
+                <span className="text-xs text-slate-500">{s.count}co</span>
+                <span className="text-sm font-semibold text-slate-200 w-14 text-right">{s.weight_pct.toFixed(1)}%</span>
               </div>
             ))}
           </div>
@@ -387,10 +401,10 @@ function SectorBreakdown({ data }: { data: IndexSectorBreakdown[] }) {
 
 type SortKey = 'market_cap' | 'weight_pct' | 'return_1d' | 'return_1y' | 'dividend_yield'
 
-function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] }) {
+function ConstituentsTable({ constituents, code }: { constituents: IndexConstituent[]; code: string }) {
   const [sortKey, setSortKey] = useState<SortKey>('weight_pct')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const [search, setSearch] = useState('')
+  const [search, setSearch]   = useState('')
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
@@ -410,16 +424,16 @@ function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] 
   }, [constituents, sortKey, sortDir, search])
 
   function SortIcon({ k }: { k: SortKey }) {
-    if (sortKey !== k) return <ChevronDown className="w-3 h-3 text-gray-300" />
+    if (sortKey !== k) return <ChevronDown className="w-3 h-3 text-slate-600" />
     return sortDir === 'desc'
-      ? <ChevronDown className="w-3 h-3 text-blue-600" />
-      : <ChevronUp className="w-3 h-3 text-blue-600" />
+      ? <ChevronDown className="w-3 h-3 text-blue-400" />
+      : <ChevronUp className="w-3 h-3 text-blue-400" />
   }
 
   function ColHeader({ label, k }: { label: string; k: SortKey }) {
     return (
-      <th className="px-3 py-2 text-right cursor-pointer hover:bg-gray-50 select-none" onClick={() => toggleSort(k)}>
-        <span className="inline-flex items-center gap-1 justify-end text-xs font-semibold text-gray-600">
+      <th className="px-3 py-2 text-right cursor-pointer hover:bg-slate-700/50 select-none transition-colors" onClick={() => toggleSort(k)}>
+        <span className="inline-flex items-center gap-1 justify-end text-xs font-semibold text-slate-400">
           {label}<SortIcon k={k} />
         </span>
       </th>
@@ -430,25 +444,34 @@ function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] 
 
   return (
     <SectionCard title={`Constituents (${constituents.length})`}>
-      <div className="mb-3 relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <input
-          type="text"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Search by code or name…"
-          className="w-full max-w-xs pl-9 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+      <div className="mb-3 flex items-center justify-between gap-3 flex-wrap">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by code or name…"
+            className="pl-9 pr-3 py-1.5 text-sm bg-slate-700 border border-slate-600 text-slate-200 placeholder-slate-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
+          />
+        </div>
+        <button
+          onClick={() => exportDetailCSV(constituents, code)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-300 transition-colors"
+        >
+          <Download className="w-3.5 h-3.5" />
+          Export CSV
+        </button>
       </div>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-gray-200 bg-gray-50">
-              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600 w-8">#</th>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Code</th>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Company</th>
-              <th className="px-3 py-2 text-left text-xs font-semibold text-gray-600">Sector</th>
+            <tr className="border-b border-slate-700 bg-slate-900/50">
+              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-400 w-8">#</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-400">Code</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-400">Company</th>
+              <th className="px-3 py-2 text-left text-xs font-semibold text-slate-400">Sector</th>
               <ColHeader label="Mkt Cap" k="market_cap" />
               <ColHeader label="Weight" k="weight_pct" />
               <ColHeader label="1D" k="return_1d" />
@@ -456,25 +479,25 @@ function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] 
               <ColHeader label="Div Yield" k="dividend_yield" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
+          <tbody className="divide-y divide-slate-700/50">
             {sorted.map((c, i) => (
-              <tr key={c.asx_code} className="hover:bg-gray-50 transition-colors">
-                <td className="px-3 py-2 text-xs text-gray-400">{i + 1}</td>
+              <tr key={c.asx_code} className="hover:bg-slate-700/30 transition-colors">
+                <td className="px-3 py-2 text-xs text-slate-500">{i + 1}</td>
                 <td className="px-3 py-2">
                   <Link
                     href={`/company/${c.asx_code}`}
-                    className="inline-block px-2 py-0.5 bg-slate-800 text-white text-xs font-bold rounded hover:bg-slate-700 transition-colors"
+                    className="inline-block px-2 py-0.5 bg-slate-700 text-slate-200 text-xs font-bold rounded hover:bg-blue-600 hover:text-white transition-colors"
                   >
                     {c.asx_code}
                   </Link>
                 </td>
-                <td className="px-3 py-2 text-sm text-gray-800 max-w-[180px] truncate">{c.company_name}</td>
+                <td className="px-3 py-2 text-sm text-slate-300 max-w-[180px] truncate">{c.company_name}</td>
                 <td className="px-3 py-2">
                   {c.sector && (
                     <span
                       className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
                       style={{
-                        background: `${SECTOR_COLORS[c.sector] || '#94a3b8'}20`,
+                        background: `${SECTOR_COLORS[c.sector] || '#94a3b8'}25`,
                         color: SECTOR_COLORS[c.sector] || '#94a3b8',
                       }}
                     >
@@ -482,25 +505,25 @@ function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] 
                     </span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-right text-xs text-gray-700">
+                <td className="px-3 py-2 text-right text-xs text-slate-300">
                   {fmtMktCapM(c.market_cap)}
                 </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex items-center gap-2 justify-end">
-                    <div className="w-16 bg-gray-100 rounded-full h-1.5 hidden sm:block">
+                    <div className="w-16 bg-slate-700 rounded-full h-1.5 hidden sm:block">
                       <div
                         className="bg-blue-500 h-1.5 rounded-full"
                         style={{ width: `${maxWeight > 0 ? ((c.weight_pct ?? 0) / maxWeight) * 100 : 0}%` }}
                       />
                     </div>
-                    <span className="text-xs font-medium text-gray-800 w-10 text-right">
+                    <span className="text-xs font-medium text-slate-200 w-10 text-right">
                       {c.weight_pct != null ? `${c.weight_pct.toFixed(2)}%` : '—'}
                     </span>
                   </div>
                 </td>
                 <td className="px-3 py-2 text-right"><ReturnBadge value={c.return_1d} /></td>
                 <td className="px-3 py-2 text-right"><ReturnBadge value={c.return_1y} /></td>
-                <td className="px-3 py-2 text-right text-xs text-gray-700">
+                <td className="px-3 py-2 text-right text-xs text-slate-300">
                   {c.dividend_yield != null ? `${(c.dividend_yield * 100).toFixed(1)}%` : '—'}
                 </td>
               </tr>
@@ -515,17 +538,17 @@ function ConstituentsTable({ constituents }: { constituents: IndexConstituent[] 
 // ── Gainers / Losers ──────────────────────────────────────────────────────────
 
 function GainersLosers({ constituents }: { constituents: IndexConstituent[] }) {
-  const valid = constituents.filter(c => c.return_1d != null)
+  const valid   = constituents.filter(c => c.return_1d != null)
   const gainers = [...valid].sort((a, b) => (b.return_1d ?? 0) - (a.return_1d ?? 0)).slice(0, 5)
   const losers  = [...valid].sort((a, b) => (a.return_1d ?? 0) - (b.return_1d ?? 0)).slice(0, 5)
 
   function MoverRow({ c }: { c: IndexConstituent }) {
     return (
-      <div className="flex items-center gap-2 py-2 border-b border-gray-50 last:border-0">
-        <Link href={`/company/${c.asx_code}`} className="text-xs font-bold px-2 py-0.5 bg-slate-800 text-white rounded hover:bg-slate-700">
+      <div className="flex items-center gap-2 py-2 border-b border-slate-700/50 last:border-0">
+        <Link href={`/company/${c.asx_code}`} className="text-xs font-bold px-2 py-0.5 bg-slate-700 text-slate-200 rounded hover:bg-blue-600 hover:text-white transition-colors">
           {c.asx_code}
         </Link>
-        <span className="text-sm text-gray-700 flex-1 truncate">{c.company_name}</span>
+        <span className="text-sm text-slate-300 flex-1 truncate">{c.company_name}</span>
         <ReturnBadge value={c.return_1d} />
       </div>
     )
@@ -533,15 +556,15 @@ function GainersLosers({ constituents }: { constituents: IndexConstituent[] }) {
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      <SectionCard title="Top Gainers (1D)" className="flex-1">
+      <SectionCard title="Top Gainers (1D)">
         {gainers.length === 0
-          ? <p className="text-sm text-gray-400">No data available</p>
+          ? <p className="text-sm text-slate-500">No data available</p>
           : gainers.map(c => <MoverRow key={c.asx_code} c={c} />)
         }
       </SectionCard>
-      <SectionCard title="Top Losers (1D)" className="flex-1">
+      <SectionCard title="Top Losers (1D)">
         {losers.length === 0
-          ? <p className="text-sm text-gray-400">No data available</p>
+          ? <p className="text-sm text-slate-500">No data available</p>
           : losers.map(c => <MoverRow key={c.asx_code} c={c} />)
         }
       </SectionCard>
@@ -558,7 +581,7 @@ export default function IndexDetailContent({
   initialData: IndexDetail
   code: string
 }) {
-  const [data, setData] = useState<IndexDetail>(initialData)
+  const [data, setData]         = useState<IndexDetail>(initialData)
   const [refreshing, setRefreshing] = useState(false)
 
   function refresh() {
@@ -570,19 +593,32 @@ export default function IndexDetailContent({
 
   const p = data.price
 
+  const screenerHref = {
+    ASX20:  '/screener?index=ASX20',
+    ASX50:  '/screener?index=ASX50',
+    ASX100: '/screener?index=ASX100',
+    ASX200: '/screener?index=ASX200',
+    ASX300: '/screener?index=ASX300',
+    AXJO:   '/screener?index=ASX200',
+    AXFJ:   '/screener?sector=Financials',
+    AXMJ:   '/screener?sector=Materials',
+    AXEJ:   '/screener?sector=Energy',
+    AXHJ:   '/screener?sector=Health%20Care',
+  }[code]
+
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-slate-900 text-slate-100">
       {/* Hero */}
-      <div className="bg-slate-900 text-white">
+      <div className="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-6">
           <Link href="/indices" className="inline-flex items-center gap-1.5 text-slate-400 hover:text-white text-sm mb-4 transition-colors">
             <ArrowLeft className="w-4 h-4" /> Back to Indices
           </Link>
 
-          <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-2xl font-bold tracking-tight">{code}</span>
+              <div className="flex items-center gap-3 mb-2 flex-wrap">
+                <span className="text-2xl font-bold tracking-tight text-white">{code}</span>
                 <span className="text-lg text-slate-300">{data.display_name}</span>
                 {data.rebalance_freq && (
                   <span className="text-xs px-2 py-0.5 bg-slate-700 rounded-full text-slate-300">
@@ -592,8 +628,8 @@ export default function IndexDetailContent({
               </div>
 
               {p?.close_price && (
-                <div className="flex items-center gap-4 mt-2">
-                  <span className="text-3xl font-bold">{fmtNum(p.close_price, 2)}</span>
+                <div className="flex items-center gap-4 mt-2 flex-wrap">
+                  <span className="text-3xl font-bold text-white">{fmtNum(p.close_price, 2)}</span>
                   <ReturnBadge value={p.return_1d} />
                   {p.price_date && (
                     <span className="text-xs text-slate-400">
@@ -606,9 +642,19 @@ export default function IndexDetailContent({
               {data.market_coverage && (
                 <p className="text-sm text-slate-400 mt-2">{data.market_coverage}</p>
               )}
+
+              {screenerHref && (
+                <Link
+                  href={screenerHref}
+                  className="inline-flex items-center gap-1.5 mt-3 text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  View in Screener
+                </Link>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {data.constituents.length > 0 && (
                 <button
                   onClick={() => exportDetailCSV(data.constituents, code)}
@@ -622,7 +668,7 @@ export default function IndexDetailContent({
               <Link
                 href={`/alerts?index=${encodeURIComponent(code)}`}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-amber-600 rounded-lg transition-colors"
-                title="Create a price alert for this index"
+                title="Create a price alert"
               >
                 <Bell className="w-4 h-4" />
                 Alert
@@ -630,7 +676,7 @@ export default function IndexDetailContent({
               <Link
                 href={`/watchlist?add_index=${encodeURIComponent(code)}`}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-700 hover:bg-blue-600 rounded-lg transition-colors"
-                title="Add this index to your watchlist"
+                title="Add to watchlist"
               >
                 <Bookmark className="w-4 h-4" />
                 Watchlist
@@ -649,7 +695,7 @@ export default function IndexDetailContent({
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-6 space-y-6">
-        {/* Performance summary */}
+        {/* Performance cards — 1D / 1W / 1M / 3M / 6M / 1Y / YTD */}
         {p && (
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
             {[
@@ -661,8 +707,8 @@ export default function IndexDetailContent({
               { label: '1 Year',  value: fmtPct(p.return_1y),  color: retColor(p.return_1y) },
               { label: 'YTD',     value: fmtPct(p.return_ytd), color: retColor(p.return_ytd) },
             ].map(({ label, value, color }) => (
-              <div key={label} className="bg-white border border-gray-200 rounded-xl p-3 text-center">
-                <p className="text-[10px] text-gray-500 mb-1">{label}</p>
+              <div key={label} className="bg-slate-800 border border-slate-700 rounded-xl p-3 text-center">
+                <p className="text-[10px] text-slate-500 mb-1 uppercase tracking-wide">{label}</p>
                 <p className={cn('text-sm font-bold', color)}>{value}</p>
               </div>
             ))}
@@ -671,52 +717,48 @@ export default function IndexDetailContent({
 
         {/* Stats row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <StatCard label="Constituents" value={String(data.constituent_count)} />
+          <StatCard label="Constituents"    value={String(data.constituent_count)} />
           <StatCard label="Total Market Cap" value={fmtIndexTotalCap(data.total_market_cap_bn)} />
           {p?.high_52w && <StatCard label="52W High" value={fmtNum(p.high_52w, 2)} />}
-          {p?.low_52w  && <StatCard label="52W Low"  value={fmtNum(p.low_52w, 2)} />}
+          {p?.low_52w  && <StatCard label="52W Low"  value={fmtNum(p.low_52w,  2)} />}
         </div>
 
-        {/* Overview + ETF */}
+        {/* About + ETF */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
+          <div className="lg:col-span-2">
             <SectionCard title="About this Index">
-              {data.description && <p className="text-sm text-gray-700 leading-relaxed mb-4">{data.description}</p>}
+              {data.description && (
+                <p className="text-sm text-slate-300 leading-relaxed mb-4">{data.description}</p>
+              )}
               {data.eligibility && (
-                <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
-                  <p className="text-xs font-semibold text-blue-700 mb-1">Eligibility Criteria</p>
-                  <p className="text-xs text-blue-800 leading-relaxed">{data.eligibility}</p>
+                <div className="bg-blue-900/20 border border-blue-800/40 rounded-lg p-3 mb-4">
+                  <p className="text-xs font-semibold text-blue-400 mb-1">Eligibility Criteria</p>
+                  <p className="text-xs text-blue-300 leading-relaxed">{data.eligibility}</p>
                 </div>
               )}
               {data.methodology && (
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-3">
-                  <p className="text-xs font-semibold text-gray-600 mb-1">Methodology</p>
-                  <p className="text-xs text-gray-700 leading-relaxed">{data.methodology}</p>
+                <div className="bg-slate-700/40 border border-slate-600/40 rounded-lg p-3">
+                  <p className="text-xs font-semibold text-slate-400 mb-1">Methodology</p>
+                  <p className="text-xs text-slate-300 leading-relaxed">{data.methodology}</p>
                 </div>
               )}
             </SectionCard>
           </div>
 
-          {data.primary_etf && data.primary_etf.asx_code && (
+          {data.primary_etf?.asx_code && (
             <SectionCard title="Primary Tracking ETF">
               <div className="text-center space-y-3">
-                <Link
-                  href={`/funds/${data.primary_etf.asx_code}`}
-                  className="inline-block text-2xl font-bold text-blue-600 hover:underline"
-                >
+                <Link href={`/funds/${data.primary_etf.asx_code}`} className="inline-block text-2xl font-bold text-blue-400 hover:text-blue-300 transition-colors">
                   {data.primary_etf.asx_code}
                 </Link>
-                <p className="text-sm text-gray-700">{data.primary_etf.name}</p>
+                <p className="text-sm text-slate-300">{data.primary_etf.name}</p>
                 {data.primary_etf.mer_pct != null && (
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <p className="text-xs text-gray-500">Management Expense Ratio</p>
-                    <p className="text-xl font-bold text-gray-900">{(data.primary_etf.mer_pct * 100).toFixed(2)}% p.a.</p>
+                  <div className="bg-slate-700/50 rounded-lg p-3">
+                    <p className="text-xs text-slate-400">Management Expense Ratio</p>
+                    <p className="text-xl font-bold text-slate-100">{(data.primary_etf.mer_pct * 100).toFixed(2)}% p.a.</p>
                   </div>
                 )}
-                <Link
-                  href={`/funds/${data.primary_etf.asx_code}`}
-                  className="flex items-center justify-center gap-1.5 text-sm text-blue-600 hover:underline"
-                >
+                <Link href={`/funds/${data.primary_etf.asx_code}`} className="flex items-center justify-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors">
                   View ETF Details <ExternalLink className="w-3.5 h-3.5" />
                 </Link>
               </div>
@@ -724,7 +766,7 @@ export default function IndexDetailContent({
           )}
         </div>
 
-        {/* Performance chart */}
+        {/* Historical chart */}
         <PerformanceChart code={code} />
 
         {/* Compare */}
@@ -736,8 +778,16 @@ export default function IndexDetailContent({
         {/* Gainers / Losers */}
         {data.constituents.length > 0 && <GainersLosers constituents={data.constituents} />}
 
-        {/* Constituents */}
-        {data.constituents.length > 0 && <ConstituentsTable constituents={data.constituents} />}
+        {/* Constituents table */}
+        {data.constituents.length > 0 && <ConstituentsTable constituents={data.constituents} code={code} />}
+
+        {/* Footer note */}
+        <div className="flex items-start gap-2 text-xs text-slate-600 pb-4">
+          <p>
+            Index data is updated from the latest available market data. Returns are price returns and do not include dividends.
+            S&P/ASX indices are rebalanced quarterly. Past performance is not indicative of future results.
+          </p>
+        </div>
       </div>
     </div>
   )

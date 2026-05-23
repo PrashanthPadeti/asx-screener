@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy, Trophy } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy, Trophy, LayoutDashboard, Users, Mail } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
@@ -41,8 +41,11 @@ const PLAN_BADGE: Record<string, string> = {
 }
 
 const ADMIN_LINKS = [
-  { href: '/admin/pipeline', label: 'Pipeline Monitor', icon: Activity, desc: 'Daily job health & last-run status' },
-  { href: '/admin/support',  label: 'Support Tickets',  icon: LifeBuoy, desc: 'User support requests & inquiries' },
+  { href: '/admin',          label: 'Dashboard',        icon: LayoutDashboard, desc: 'Platform overview & key stats' },
+  { href: '/admin/users',    label: 'User Management',  icon: Users,           desc: 'Search, filter & manage users' },
+  { href: '/admin/pipeline', label: 'Pipeline Monitor', icon: Activity,        desc: 'Daily job health & last-run status' },
+  { href: '/admin/comms',    label: 'Communications',   icon: Mail,            desc: 'Notifications, alerts & announcements' },
+  { href: '/admin/support',  label: 'Support Tickets',  icon: LifeBuoy,        desc: 'User support requests & inquiries' },
 ]
 
 // Paths that activate the Premium Data dropdown as "active"

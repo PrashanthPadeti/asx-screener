@@ -13,29 +13,30 @@ const REGION_DISPLAY: Record<string, string> = {
   Asia:   'Asia',
 }
 
-const COUNTRY_FLAGS: Record<string, string> = {
-  'United States':  '🇺🇸',
-  'United Kingdom': '🇬🇧',
-  'Germany':        '🇩🇪',
-  'France':         '🇫🇷',
-  'Japan':          '🇯🇵',
-  'Hong Kong':      '🇭🇰',
-  'China':          '🇨🇳',
-  'South Korea':    '🇰🇷',
+// Two-letter country codes for styled badges (no emoji dependency)
+const COUNTRY_CODES: Record<string, string> = {
+  'United States':  'US',
+  'United Kingdom': 'GB',
+  'Germany':        'DE',
+  'France':         'FR',
+  'Japan':          'JP',
+  'Hong Kong':      'HK',
+  'China':          'CN',
+  'South Korea':    'KR',
 }
 
-const REGION_FLAGS: Record<string, string> = {
-  US:     '🇺🇸',
-  Europe: '🇪🇺',
-  Asia:   '🌏',
+const REGION_ICONS: Record<string, string> = {
+  US:     'US',
+  Europe: 'EU',
+  Asia:   'AS',
 }
 
-const FX_META: Record<string, { flag: string; desc: string }> = {
-  AUDUSD: { flag: '🇺🇸', desc: 'US Dollar'       },
-  AUDEUR: { flag: '🇪🇺', desc: 'Euro'             },
-  AUDGBP: { flag: '🇬🇧', desc: 'British Pound'    },
-  AUDJPY: { flag: '🇯🇵', desc: 'Japanese Yen'     },
-  AUDCNY: { flag: '🇨🇳', desc: 'Chinese Yuan'     },
+const FX_META: Record<string, { code: string; desc: string }> = {
+  AUDUSD: { code: 'USD', desc: 'US Dollar'       },
+  AUDEUR: { code: 'EUR', desc: 'Euro'             },
+  AUDGBP: { code: 'GBP', desc: 'British Pound'   },
+  AUDJPY: { code: 'JPY', desc: 'Japanese Yen'    },
+  AUDCNY: { code: 'CNY', desc: 'Chinese Yuan'    },
 }
 
 // Display order for FX pairs
@@ -80,6 +81,15 @@ function fmtTimestamp(d: Date): string {
 
 // ── Index row ─────────────────────────────────────────────────────────────────
 
+function CountryBadge({ country }: { country: string }) {
+  const code = COUNTRY_CODES[country] ?? country.slice(0, 2).toUpperCase()
+  return (
+    <span className="shrink-0 w-7 h-7 flex items-center justify-center rounded-md bg-slate-700 text-[10px] font-bold text-slate-300 uppercase tracking-wide">
+      {code}
+    </span>
+  )
+}
+
 function IndexRow({ idx }: { idx: GlobalIndexPrice }) {
   const isLargePrice = (idx.close_price ?? 0) >= 1000
   const priceStr = fmtPrice(idx.close_price, isLargePrice)
@@ -92,7 +102,7 @@ function IndexRow({ idx }: { idx: GlobalIndexPrice }) {
     >
       {/* Name + country */}
       <div className="col-span-2 flex items-center gap-2.5">
-        <span className="text-xl leading-none">{COUNTRY_FLAGS[idx.country] ?? '🌐'}</span>
+        <CountryBadge country={idx.country} />
         <div>
           <div className="text-sm font-semibold text-slate-100 group-hover:text-blue-400 transition-colors">{idx.index_name}</div>
           <div className="text-xs text-slate-500">{idx.country} · {idx.currency}</div>
@@ -130,13 +140,15 @@ function IndexRow({ idx }: { idx: GlobalIndexPrice }) {
 // ── FX card ───────────────────────────────────────────────────────────────────
 
 function FxCard({ fx }: { fx: GlobalFxRate }) {
-  const meta = FX_META[fx.fx_pair] ?? { flag: '🌐', desc: fx.fx_pair }
+  const meta = FX_META[fx.fx_pair] ?? { code: fx.fx_pair.slice(3), desc: fx.fx_pair }
   const quote = fx.fx_pair.slice(3)
   const rateStr = fx.fx_pair === 'AUDJPY' ? fx.rate?.toFixed(2) : fx.rate?.toFixed(4)
   return (
     <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50 hover:border-slate-600/50 transition-colors">
       <div className="flex items-center gap-2 mb-3">
-        <span className="text-2xl leading-none">{meta.flag}</span>
+        <span className="w-9 h-9 flex items-center justify-center rounded-lg bg-slate-700 text-[11px] font-bold text-slate-200 uppercase tracking-wide shrink-0">
+          {meta.code}
+        </span>
         <div>
           <div className="text-sm font-bold text-slate-100">AUD/{quote}</div>
           <div className="text-xs text-slate-500">{meta.desc}</div>
@@ -275,14 +287,16 @@ export default function GlobalMarketsPage() {
         {/* Region sections */}
         {data && data.regions.map(region => {
           const displayName = REGION_DISPLAY[region.region] ?? region.region
-          const flag = REGION_FLAGS[region.region] ?? '🌐'
+          const regionCode = REGION_ICONS[region.region] ?? region.region.slice(0, 2).toUpperCase()
           return (
             <div key={region.region} className="bg-slate-900 rounded-xl border border-slate-700/50 overflow-hidden">
               {/* Region header */}
-              <div className="px-5 py-4 border-b border-slate-700/50 flex items-center gap-2.5">
-                <span className="text-xl leading-none">{flag}</span>
+              <div className="px-5 py-4 border-b border-slate-700/50 flex items-center gap-3">
+                <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-700 text-[11px] font-bold text-slate-300 uppercase tracking-wide shrink-0">
+                  {regionCode}
+                </span>
                 <h2 className="text-lg font-semibold text-white">{displayName}</h2>
-                <span className="text-xs text-slate-500 ml-1">· {region.indices.length} indices</span>
+                <span className="text-xs text-slate-500">· {region.indices.length} indices</span>
               </div>
 
               {/* Table — horizontal scroll on mobile */}
@@ -319,8 +333,8 @@ export default function GlobalMarketsPage() {
         {/* AUD FX rates */}
         {data && sortedFx.length > 0 && (
           <div className="bg-slate-900 rounded-xl border border-slate-700/50 overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-700/50 flex items-center gap-2.5">
-              <span className="text-xl leading-none">💱</span>
+            <div className="px-5 py-4 border-b border-slate-700/50 flex items-center gap-3">
+              <span className="w-8 h-8 flex items-center justify-center rounded-lg bg-slate-700 text-[11px] font-bold text-slate-300 tracking-wide shrink-0">FX</span>
               <h2 className="text-lg font-semibold text-white">AUD Exchange Rates</h2>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 p-5">

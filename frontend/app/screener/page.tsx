@@ -436,8 +436,7 @@ export default function ScreenerPage() {
   const [activePreset, setActivePreset] = useState<string | null>(null)
 
   // Index auto-run support (?index=ASX200 from Indices page)
-  const [pendingIndexParam, setPendingIndexParam]  = useState<string | null>(null)
-  const [pendingAutoRun,    setPendingAutoRun]     = useState(false)
+  const [pendingIndexParam, setPendingIndexParam] = useState<string | null>(null)
 
   // Results state
   const [results, setResults]       = useState<ScreenerRow[]>([])
@@ -530,13 +529,19 @@ export default function ScreenerPage() {
     }).catch(console.error)
 
     // Auto-apply sector filter (?sector=Energy)
-    // ?autorun=true (added by Indices page links) triggers immediate auto-run.
+    // ?autorun=true (added by Indices page links) immediately runs the screen.
     // Without autorun (e.g. Market heatmap links), filter is set but user clicks Run Screen.
     const sectorParam  = searchParams.get('sector')
     const autorunParam = searchParams.get('autorun') === 'true'
     if (sectorParam) {
       setFilters([{ id: nextId++, field: 'sector', operator: 'eq', value: sectorParam }])
-      if (autorunParam) setPendingAutoRun(true)
+      if (autorunParam) {
+        // Call fetchResults directly to avoid stale-closure issues with buildApiFilters.
+        // fetchResults has stable [] deps so it's safe to reference here.
+        setTimeout(() => fetchResults(1, 'market_cap', 'desc', [
+          { field: 'sector', operator: 'eq', value: sectorParam },
+        ]), 50)
+      }
     }
 
     // Auto-apply index membership filter + auto-run (?index=ASX200 from Indices page)
@@ -568,7 +573,8 @@ export default function ScreenerPage() {
     ASX300: 'is_asx300',
   }
 
-  // When allFields loads and we have a pending index param, set the filter
+  // When allFields loads and we have a pending index param, set the filter and auto-run.
+  // Calls fetchResults directly (stable [] deps) to avoid stale-closure issues.
   useEffect(() => {
     if (!pendingIndexParam || allFields.length === 0) return
     const field = INDEX_FIELD_MAP[pendingIndexParam]
@@ -576,18 +582,11 @@ export default function ScreenerPage() {
     const fieldMeta = allFields.find(f => f.key === field)
     if (!fieldMeta) { setPendingIndexParam(null); return }
     setFilters([{ id: nextId++, field, operator: 'eq', value: 'true' }])
-    setPendingAutoRun(true)
+    setTimeout(() => fetchResults(1, 'market_cap', 'desc', [
+      { field, operator: 'eq', value: 'true' },
+    ]), 50)
     setPendingIndexParam(null)
   }, [pendingIndexParam, allFields]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-run once filters are populated from a URL index param
-  useEffect(() => {
-    if (!pendingAutoRun || filters.length === 0) return
-    setPendingAutoRun(false)
-    // Small delay so buildApiFilters captures the latest filter state
-    const t = setTimeout(() => runScreen(1), 0)
-    return () => clearTimeout(t)
-  }, [pendingAutoRun, filters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Filter operations
   const addFilter = () => {

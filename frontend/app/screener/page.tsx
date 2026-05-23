@@ -529,10 +529,14 @@ export default function ScreenerPage() {
       }
     }).catch(console.error)
 
-    // Auto-apply sector filter from Market page heatmap (?sector=Energy)
-    const sectorParam = searchParams.get('sector')
+    // Auto-apply sector filter (?sector=Energy)
+    // ?autorun=true (added by Indices page links) triggers immediate auto-run.
+    // Without autorun (e.g. Market heatmap links), filter is set but user clicks Run Screen.
+    const sectorParam  = searchParams.get('sector')
+    const autorunParam = searchParams.get('autorun') === 'true'
     if (sectorParam) {
       setFilters([{ id: nextId++, field: 'sector', operator: 'eq', value: sectorParam }])
+      if (autorunParam) setPendingAutoRun(true)
     }
 
     // Auto-apply index membership filter + auto-run (?index=ASX200 from Indices page)

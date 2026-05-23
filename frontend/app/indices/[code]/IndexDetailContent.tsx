@@ -600,10 +600,10 @@ export default function IndexDetailContent({
     ASX100: '/screener?index=ASX100',
     ASX200: '/screener?index=ASX200',
     ASX300: '/screener?index=ASX300',
-    AXFJ:   '/screener?sector=Financials',
-    AXMJ:   '/screener?sector=Materials',
-    AXEJ:   '/screener?sector=Energy',
-    AXHJ:   '/screener?sector=Health%20Care',
+    AXFJ:   '/screener?sector=Financials&autorun=true',
+    AXMJ:   '/screener?sector=Materials&autorun=true',
+    AXEJ:   '/screener?sector=Energy&autorun=true',
+    AXHJ:   '/screener?sector=Health%20Care&autorun=true',
   }
   const currentScreenerHref = screenerHref[code]
 

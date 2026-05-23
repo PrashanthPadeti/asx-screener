@@ -556,12 +556,12 @@ export default function ScreenerPage() {
 
   // Map ASX index codes to screener boolean field names
   const INDEX_FIELD_MAP: Record<string, string> = {
-    ASX20:  'is_asx200', // ASX20 is subset; use closest available field
-    ASX50:  'is_asx200',
-    ASX100: 'is_asx200',
+    ASX20:  'is_asx20',
+    ASX50:  'is_asx50',
+    ASX100: 'is_asx100',
     ASX200: 'is_asx200',
     ASX300: 'is_asx300',
-    AXJO:   'is_asx200',
+    AXJO:   'is_asx200', // All Ordinaries tracks the same constituents as ASX200
   }
 
   // When allFields loads and we have a pending index param, set the filter

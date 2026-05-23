@@ -1,9 +1,31 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Info } from 'lucide-react'
+import { TrendingUp, TrendingDown, BarChart2, RefreshCw, Info, ExternalLink, Download, Bell, Star } from 'lucide-react'
 import { getIndices, IndicesResponse, IndexPrice } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
+
+// ── Screener link mapping ─────────────────────────────────────────────────────
+
+const SCREENER_HREF: Record<string, string> = {
+  ASX20:  '/screener?index=ASX20',
+  ASX50:  '/screener?index=ASX50',
+  ASX100: '/screener?index=ASX100',
+  ASX200: '/screener?index=ASX200',
+  ASX300: '/screener?index=ASX300',
+  AXJO:   '/screener?index=ASX200',
+  AXFJ:   '/screener?sector=Financials',
+  AXMJ:   '/screener?sector=Materials',
+  AXEJ:   '/screener?sector=Energy',
+  AXHJ:   '/screener?sector=Health%20Care',
+  AXPJ:   '/screener?sector=Property',
+  AXIJ:   '/screener?sector=Industrials',
+  AXDJ:   '/screener?sector=Consumer%20Discretionary',
+  AXSJ:   '/screener?sector=Consumer%20Staples',
+  AXUJ:   '/screener?sector=Utilities',
+  AXTJ:   '/screener?sector=Information%20Technology',
+  AXCJ:   '/screener?sector=Communication%20Services',
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,6 +57,30 @@ function retBg(v: number | null): string {
   return 'bg-red-600'
 }
 
+function exportCSV(indices: IndexPrice[], asOf?: string) {
+  const headers = ['Code', 'Name', 'Price', '1D %', '1W %', '1M %', '3M %', '1Y %', '52W Low', '52W High']
+  const rows = indices.map(i => [
+    i.index_code,
+    `"${i.display_name}"`,
+    i.close_price ?? '',
+    i.return_1d != null ? (i.return_1d * 100).toFixed(2) : '',
+    i.return_1w != null ? (i.return_1w * 100).toFixed(2) : '',
+    i.return_1m != null ? (i.return_1m * 100).toFixed(2) : '',
+    i.return_3m != null ? (i.return_3m * 100).toFixed(2) : '',
+    i.return_1y != null ? (i.return_1y * 100).toFixed(2) : '',
+    i.low_52w ?? '',
+    i.high_52w ?? '',
+  ])
+  const csv = [headers, ...rows].map(r => r.join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `asx-indices${asOf ? '-' + asOf : ''}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── Row component ─────────────────────────────────────────────────────────────
 
 function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: boolean }) {
@@ -45,51 +91,69 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
     ? ((idx.close_price - idx.low_52w) / idx.low_52w) * 100
     : null
 
+  const screenerHref = SCREENER_HREF[idx.index_code]
+  const alertHref    = `/alerts?index=${encodeURIComponent(idx.index_code)}`
+  const detailHref   = `/indices/${idx.index_code}`
+
   return (
-    <div className={`grid grid-cols-8 gap-4 px-5 py-4 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors ${isHighlighted ? 'bg-slate-700/20' : ''}`}>
-      {/* Index name */}
-      <div className="col-span-2">
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/indices/${idx.index_code}`}
-            className={`text-xs font-bold px-2 py-0.5 rounded ${retBg(idx.return_1d)} text-white hover:opacity-80 transition-opacity`}
-          >
+    <div
+      className={`relative grid grid-cols-9 gap-3 px-5 py-4 border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors cursor-pointer ${isHighlighted ? 'bg-slate-700/20' : ''}`}
+    >
+      {/* Full-row click overlay — sits below interactive children */}
+      <Link
+        href={detailHref}
+        className="absolute inset-0 z-[1]"
+        aria-label={`View ${idx.display_name} detail`}
+      />
+
+      {/* Index name — interactive, above overlay */}
+      <div className="col-span-2 relative z-[2]">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-xs font-bold px-2 py-0.5 rounded ${retBg(idx.return_1d)} text-white`}>
             {idx.index_code}
-          </Link>
+          </span>
         </div>
-        <Link href={`/indices/${idx.index_code}`} className="text-xs text-slate-400 hover:text-slate-200 mt-1 leading-tight block transition-colors">
-          {idx.display_name}
-        </Link>
+        <span className="text-xs text-slate-400 mt-1 leading-tight block">{idx.display_name}</span>
+        {screenerHref && (
+          <Link
+            href={screenerHref}
+            className="inline-flex items-center gap-1 mt-1.5 text-[10px] text-blue-400 hover:text-blue-300 transition-colors font-medium"
+            title={`Screen ${idx.display_name} constituents`}
+          >
+            <ExternalLink className="w-2.5 h-2.5" />
+            View in Screener
+          </Link>
+        )}
       </div>
 
-      {/* Close price */}
-      <div className="text-right">
+      {/* Close price — pointer-events-none, overlay handles click */}
+      <div className="text-right pointer-events-none">
         <div className="text-sm font-semibold text-slate-100">{fmtPrice(idx.close_price)}</div>
         <div className={`text-xs font-medium ${retColor(idx.return_1d)}`}>{fmtPct(idx.return_1d)}</div>
       </div>
 
       {/* 1W */}
-      <div className={`text-right text-sm font-medium ${retColor(idx.return_1w)}`}>
+      <div className={`text-right text-sm font-medium pointer-events-none ${retColor(idx.return_1w)}`}>
         {fmtPct(idx.return_1w)}
       </div>
 
       {/* 1M */}
-      <div className={`text-right text-sm font-medium ${retColor(idx.return_1m)}`}>
+      <div className={`text-right text-sm font-medium pointer-events-none ${retColor(idx.return_1m)}`}>
         {fmtPct(idx.return_1m)}
       </div>
 
       {/* 3M */}
-      <div className={`text-right text-sm font-medium ${retColor(idx.return_3m)}`}>
+      <div className={`text-right text-sm font-medium pointer-events-none ${retColor(idx.return_3m)}`}>
         {fmtPct(idx.return_3m)}
       </div>
 
       {/* 1Y */}
-      <div className={`text-right text-sm font-medium ${retColor(idx.return_1y)}`}>
+      <div className={`text-right text-sm font-medium pointer-events-none ${retColor(idx.return_1y)}`}>
         {fmtPct(idx.return_1y)}
       </div>
 
       {/* 52W range */}
-      <div className="text-right">
+      <div className="text-right pointer-events-none">
         {idx.high_52w && idx.low_52w && idx.close_price ? (
           <div>
             <div className="flex items-center justify-end gap-1 text-xs">
@@ -114,6 +178,24 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
           <span className="text-slate-500 text-xs">No data</span>
         )}
       </div>
+
+      {/* Actions — interactive, above overlay */}
+      <div className="relative z-[2] flex items-center justify-end gap-1">
+        <Link
+          href={alertHref}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-700 transition-colors"
+          title="Create price alert"
+        >
+          <Bell className="w-3.5 h-3.5" />
+        </Link>
+        <Link
+          href={detailHref}
+          className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-slate-700 transition-colors"
+          title="View index detail"
+        >
+          <Star className="w-3.5 h-3.5" />
+        </Link>
+      </div>
     </div>
   )
 }
@@ -122,9 +204,12 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
 
 function SummaryCard({ idx }: { idx: IndexPrice }) {
   const r = idx.return_1d
+  const screenerHref = SCREENER_HREF[idx.index_code]
   return (
-    <Link href={`/indices/${idx.index_code}`} className="block group">
-    <div className="bg-slate-800 border border-slate-700 rounded-xl p-4 group-hover:border-slate-500 transition-colors">
+    <div className="relative group bg-slate-800 border border-slate-700 rounded-xl p-4 hover:border-slate-500 transition-colors">
+      {/* Full card click — goes to index detail */}
+      <Link href={`/indices/${idx.index_code}`} className="absolute inset-0 rounded-xl z-[1]" aria-label={idx.display_name} />
+
       <div className="flex items-start justify-between mb-3">
         <div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wide">{idx.index_code}</div>
@@ -156,8 +241,20 @@ function SummaryCard({ idx }: { idx: IndexPrice }) {
           <div className={`text-xs font-semibold ${retColor(idx.return_1y)}`}>{fmtPct(idx.return_1y, 1)}</div>
         </div>
       </div>
+
+      {/* View in Screener — interactive, sits above the card overlay */}
+      {screenerHref && (
+        <div className="relative z-[2] mt-3 pt-2.5 border-t border-slate-700/60">
+          <Link
+            href={screenerHref}
+            className="inline-flex items-center gap-1 text-[11px] text-blue-400 hover:text-blue-300 transition-colors font-medium"
+          >
+            <ExternalLink className="w-3 h-3" />
+            View in Screener
+          </Link>
+        </div>
+      )}
     </div>
-    </Link>
   )
 }
 
@@ -186,7 +283,7 @@ function IndicesContent() {
 
   useEffect(() => { load() }, [])
 
-  const mainIndices = data?.indices.filter(i => ['ASX20','ASX50','ASX100','ASX200','ASX300','AXJO'].includes(i.index_code)) ?? []
+  const mainIndices   = data?.indices.filter(i =>  ['ASX20','ASX50','ASX100','ASX200','ASX300','AXJO'].includes(i.index_code)) ?? []
   const sectorIndices = data?.indices.filter(i => !['ASX20','ASX50','ASX100','ASX200','ASX300','AXJO'].includes(i.index_code)) ?? []
 
   return (
@@ -201,7 +298,7 @@ function IndicesContent() {
                 <h1 className="text-2xl font-bold text-white">ASX Indices</h1>
               </div>
               <p className="text-slate-400 text-sm mt-1">
-                Live performance for S&P/ASX benchmark indices and GICS sector indices.
+                Latest performance for S&P/ASX benchmark indices and GICS sector indices.
               </p>
               {data?.as_of && (
                 <p className="text-slate-500 text-xs mt-1">As of {data.as_of}</p>
@@ -275,13 +372,27 @@ function IndicesContent() {
           <div className="bg-slate-800 border border-slate-700 rounded-xl overflow-hidden">
             <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
               <h2 className="text-base font-semibold text-slate-200">All Indices — Performance</h2>
-              {lastUpdated && (
-                <span className="text-xs text-slate-500">Updated {lastUpdated.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}</span>
-              )}
+              <div className="flex items-center gap-3">
+                {lastUpdated && (
+                  <span className="text-xs text-slate-500">
+                    Updated {lastUpdated.toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+                {data.indices.length > 0 && (
+                  <button
+                    onClick={() => exportCSV(data.indices, data.as_of)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-300 transition-colors"
+                    title="Export all index data as CSV"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Export CSV
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Table header */}
-            <div className="grid grid-cols-8 gap-4 px-5 py-3 bg-slate-900/50 border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase tracking-wide">
+            <div className="grid grid-cols-9 gap-3 px-5 py-3 bg-slate-900/50 border-b border-slate-700 text-xs font-semibold text-slate-400 uppercase tracking-wide">
               <div className="col-span-2">Index</div>
               <div className="text-right">Price / 1D</div>
               <div className="text-right">1W</div>
@@ -289,6 +400,7 @@ function IndicesContent() {
               <div className="text-right">3M</div>
               <div className="text-right">1Y</div>
               <div className="text-right">52W Range</div>
+              <div className="text-right">Actions</div>
             </div>
 
             {/* Benchmark rows */}
@@ -321,7 +433,7 @@ function IndicesContent() {
         <div className="flex items-start gap-2 text-xs text-slate-600 pb-4">
           <Info className="w-3.5 h-3.5 mt-0.5 shrink-0" />
           <p>
-            Index data is populated by the nightly compute pipeline. All returns are price returns and do not include dividends.
+            Index data is updated from the latest available market data. Returns are price returns and do not include dividends.
             S&P/ASX indices are rebalanced quarterly. Past performance is not indicative of future results.
           </p>
         </div>

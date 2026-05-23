@@ -593,18 +593,19 @@ export default function IndexDetailContent({
 
   const p = data.price
 
-  const screenerHref = {
+  // AXJO (All Ordinaries, ~500 stocks) has no dedicated screener field — no link shown.
+  const screenerHref: Record<string, string> = {
     ASX20:  '/screener?index=ASX20',
     ASX50:  '/screener?index=ASX50',
     ASX100: '/screener?index=ASX100',
     ASX200: '/screener?index=ASX200',
     ASX300: '/screener?index=ASX300',
-    AXJO:   '/screener?index=ASX200',
     AXFJ:   '/screener?sector=Financials',
     AXMJ:   '/screener?sector=Materials',
     AXEJ:   '/screener?sector=Energy',
     AXHJ:   '/screener?sector=Health%20Care',
-  }[code]
+  }
+  const currentScreenerHref = screenerHref[code]
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
@@ -643,9 +644,9 @@ export default function IndexDetailContent({
                 <p className="text-sm text-slate-400 mt-2">{data.market_coverage}</p>
               )}
 
-              {screenerHref && (
+              {currentScreenerHref && (
                 <Link
-                  href={screenerHref}
+                  href={currentScreenerHref}
                   className="inline-flex items-center gap-1.5 mt-3 text-sm text-blue-400 hover:text-blue-300 transition-colors font-medium"
                 >
                   <ExternalLink className="w-4 h-4" />

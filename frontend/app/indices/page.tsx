@@ -7,13 +7,13 @@ import { PlanGate } from '@/components/PlanGate'
 
 // ── Screener link mapping ─────────────────────────────────────────────────────
 
+// AXJO (All Ordinaries, ~500 stocks) has no dedicated screener field — excluded intentionally.
 const SCREENER_HREF: Record<string, string> = {
   ASX20:  '/screener?index=ASX20',
   ASX50:  '/screener?index=ASX50',
   ASX100: '/screener?index=ASX100',
   ASX200: '/screener?index=ASX200',
   ASX300: '/screener?index=ASX300',
-  AXJO:   '/screener?index=ASX200',
   AXFJ:   '/screener?sector=Financials',
   AXMJ:   '/screener?sector=Materials',
   AXEJ:   '/screener?sector=Energy',

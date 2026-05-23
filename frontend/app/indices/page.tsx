@@ -380,7 +380,7 @@ function IndicesContent() {
                 )}
                 {data.indices.length > 0 && (
                   <button
-                    onClick={() => exportCSV(data.indices, data.as_of)}
+                    onClick={() => exportCSV(data.indices, data.as_of ?? undefined)}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs text-slate-300 transition-colors"
                     title="Export all index data as CSV"
                   >

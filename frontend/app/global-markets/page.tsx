@@ -7,10 +7,18 @@ import { PlanGate } from '@/components/PlanGate'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const REGION_DISPLAY: Record<string, string> = {
-  US:     'United States',
-  Europe: 'Europe',
-  Asia:   'Asia',
+function getRegionDisplay(region: string): string {
+  if (region === 'US') return 'United States'
+  if (region === 'Europe') return 'Europe'
+  if (region === 'Asia') return 'Asia'
+  return region
+}
+
+function getRegionCode(region: string): string {
+  if (region === 'US') return 'US'
+  if (region === 'Europe') return 'EU'
+  if (region === 'Asia') return 'AS'
+  return region.slice(0, 2).toUpperCase()
 }
 
 // Two-letter country codes for styled badges (no emoji dependency)
@@ -25,11 +33,6 @@ const COUNTRY_CODES: Record<string, string> = {
   'South Korea':    'KR',
 }
 
-const REGION_ICONS: Record<string, string> = {
-  US:     'US',
-  Europe: 'EU',
-  Asia:   'AS',
-}
 
 const FX_META: Record<string, { code: string; desc: string }> = {
   AUDUSD: { code: 'USD', desc: 'US Dollar'       },
@@ -286,8 +289,8 @@ export default function GlobalMarketsPage() {
 
         {/* Region sections */}
         {data && data.regions.map(region => {
-          const displayName = REGION_DISPLAY[region.region] ?? region.region
-          const regionCode = REGION_ICONS[region.region] ?? region.region.slice(0, 2).toUpperCase()
+          const displayName = getRegionDisplay(region.region)
+          const regionCode = getRegionCode(region.region)
           return (
             <div key={region.region} className="bg-slate-900 rounded-xl border border-slate-700/50 overflow-hidden">
               {/* Region header */}

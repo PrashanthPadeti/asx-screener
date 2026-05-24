@@ -964,6 +964,9 @@ export default function ScreenerPage() {
                       ))}
                     </div>
                     <p className="text-xs text-slate-500">{nlTotal.toLocaleString()} stocks matched</p>
+                    <p className="text-xs text-amber-400/80 border-t border-white/10 pt-2 mt-1">
+                      Results are filtered data only — not investment advice. Always verify independently before acting.
+                    </p>
                   </div>
                 )}
               </div>

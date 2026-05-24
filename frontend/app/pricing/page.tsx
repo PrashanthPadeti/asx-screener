@@ -6,6 +6,7 @@ import { Check, X, Zap, Shield, Building2, ArrowRight, Star } from 'lucide-react
 import { useAuth } from '@/lib/auth'
 import { createCheckoutSession } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import Link from 'next/link'
 
 // ── Static plan data (matches backend plans.py) ───────────────────────────────
 
@@ -259,27 +260,38 @@ export default function PricingPage() {
                     {user ? 'Go to Screener' : 'Get Started Free'}
                   </Link>
                 ) : (
-                  <button
-                    onClick={() => handleUpgrade(plan)}
-                    disabled={ctaDisabled(plan)}
-                    className={cn(
-                      'w-full py-2.5 px-4 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2',
-                      isCurrent
-                        ? 'bg-gray-100 text-gray-500 cursor-default'
-                        : plan.highlight
-                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
-                        : 'bg-gray-900 text-white hover:bg-gray-800'
+                  <div className="space-y-2">
+                    <button
+                      onClick={() => handleUpgrade(plan)}
+                      disabled={ctaDisabled(plan)}
+                      className={cn(
+                        'w-full py-2.5 px-4 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2',
+                        isCurrent
+                          ? 'bg-gray-100 text-gray-500 cursor-default'
+                          : plan.highlight
+                          ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm'
+                          : 'bg-gray-900 text-white hover:bg-gray-800'
+                      )}
+                    >
+                      {isLoadingThis ? (
+                        <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          {ctaLabel(plan)}
+                          {!isCurrent && <ArrowRight className="w-3.5 h-3.5" />}
+                        </>
+                      )}
+                    </button>
+                    {!isCurrent && (
+                      <p className="text-[10px] text-center text-gray-400 leading-snug">
+                        By upgrading you agree to our{' '}
+                        <Link href="/terms" className="underline hover:text-gray-600">Terms of Service</Link>
+                        {' '}and{' '}
+                        <Link href="/privacy" className="underline hover:text-gray-600">Privacy Policy</Link>.
+                        Cancel anytime.
+                      </p>
                     )}
-                  >
-                    {isLoadingThis ? (
-                      <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <>
-                        {ctaLabel(plan)}
-                        {!isCurrent && <ArrowRight className="w-3.5 h-3.5" />}
-                      </>
-                    )}
-                  </button>
+                  </div>
                 )}
               </div>
             )

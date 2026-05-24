@@ -8,10 +8,9 @@ import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, Log
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
-  { href: '/screener',  label: 'Screener',  icon: BarChart2 },
-  { href: '/market',    label: 'Market',    icon: Globe },
-  { href: '/scans',     label: 'Scans',     icon: ScanLine },
-  { href: '/news',      label: 'News',      icon: Newspaper },
+  { href: '/screener', label: 'Screener', icon: BarChart2 },
+  { href: '/market',   label: 'Market',   icon: Globe },
+  { href: '/scans',    label: 'Scans',    icon: ScanLine },
 ]
 
 const MARKET_DATA_LINKS = [
@@ -23,10 +22,14 @@ const MARKET_DATA_LINKS = [
 ]
 
 const RESOURCES_LINKS = [
-  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', plan: 'pro' },
-  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   desc: 'Guides, tutorials & courses',                        plan: 'pro' },
-  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    plan: 'pro' },
-  { href: '/contact',  label: 'Contact Support',  icon: Bell,       desc: 'Get help or report an issue',                       plan: null  },
+  { href: '/news',      label: 'News',             icon: Newspaper,  desc: 'Latest ASX announcements & market news',             plan: null  },
+  { href: '/watchlist', label: 'Watchlist',         icon: Star,       desc: 'Track your favourite stocks',                        plan: null  },
+  { href: '/portfolio', label: 'Portfolio',         icon: PieChart,   desc: 'Monitor your holdings & performance',                plan: null  },
+  { href: '/alerts',    label: 'Alerts',            icon: Bell,       desc: 'Price & volume alerts for your stocks',              plan: null  },
+  { href: '/glossary',  label: 'Metrics Glossary',  icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', plan: 'pro' },
+  { href: '/learn',     label: 'Education Hub',     icon: BookOpen,   desc: 'Guides, tutorials & courses',                        plan: 'pro' },
+  { href: '/brokers',   label: 'Broker Compare',    icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    plan: 'pro' },
+  { href: '/contact',   label: 'Contact Support',   icon: LifeBuoy,   desc: 'Get help or report an issue',                       plan: null  },
 ]
 
 const PLAN_BADGE: Record<string, string> = {
@@ -47,7 +50,7 @@ const ADMIN_LINKS = [
 // Prefixes that activate the Premium Data dropdown as "active"
 const PREMIUM_DATA_PREFIXES = ['/indices', '/funds', '/global-markets', '/commodities', '/top5']
 // Prefixes that activate the Resources dropdown as "active"
-const RESOURCES_PREFIXES = ['/learn', '/brokers', '/glossary', '/contact']
+const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/contact']
 
 // Helper: true if pathname matches any prefix (exact or sub-path)
 const matchesPrefix = (pathname: string, prefixes: string[]) =>
@@ -135,39 +138,6 @@ export default function Navbar() {
               )
             })}
 
-            {/* Premium Data dropdown */}
-            <div className="relative" ref={marketDropRef}>
-              <button
-                onClick={() => setMarketDropOpen(v => !v)}
-                className={dropBtn(matchesPrefix(pathname, PREMIUM_DATA_PREFIXES))}
-              >
-                <Building2 className="w-3.5 h-3.5 shrink-0" />
-                Premium Data
-                <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', marketDropOpen && 'rotate-180')} />
-              </button>
-              {marketDropOpen && (
-                <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, desc, premium }) => (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setMarketDropOpen(false)}
-                      className={cn('flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
-                    >
-                      <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn('text-sm font-medium', pathname === href ? 'text-blue-700' : 'text-gray-800')}>{label}</span>
-                          {premium && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              )}
-            </div>
-
             {/* Resources dropdown */}
             <div className="relative" ref={resourceDropRef}>
               <button
@@ -193,6 +163,39 @@ export default function Navbar() {
                           <span className={cn('text-sm font-medium', pathname === href ? 'text-blue-700' : 'text-gray-800')}>{label}</span>
                           {plan === 'pro'     && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pro+</span>}
                           {plan === 'premium' && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
+                        </div>
+                        <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Premium Data dropdown */}
+            <div className="relative" ref={marketDropRef}>
+              <button
+                onClick={() => setMarketDropOpen(v => !v)}
+                className={dropBtn(matchesPrefix(pathname, PREMIUM_DATA_PREFIXES))}
+              >
+                <Building2 className="w-3.5 h-3.5 shrink-0" />
+                Premium Data
+                <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', marketDropOpen && 'rotate-180')} />
+              </button>
+              {marketDropOpen && (
+                <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, desc, premium }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMarketDropOpen(false)}
+                      className={cn('flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
+                    >
+                      <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
+                      <div className="flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn('text-sm font-medium', pathname === href ? 'text-blue-700' : 'text-gray-800')}>{label}</span>
+                          {premium && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
                       </div>
@@ -327,14 +330,14 @@ export default function Navbar() {
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
-            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Premium Data</div>
-            {MARKET_DATA_LINKS.map(({ href, label, icon: Icon }) => (
+            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Resources</div>
+            {RESOURCES_LINKS.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
-            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Resources</div>
-            {RESOURCES_LINKS.map(({ href, label, icon: Icon }) => (
+            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Premium Data</div>
+            {MARKET_DATA_LINKS.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
                 <Icon className="w-4 h-4" />{label}
               </Link>

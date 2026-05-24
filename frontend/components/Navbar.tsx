@@ -48,10 +48,14 @@ const ADMIN_LINKS = [
   { href: '/admin/support',  label: 'Support Tickets',  icon: LifeBuoy,        desc: 'User support requests & inquiries' },
 ]
 
-// Paths that activate the Premium Data dropdown as "active"
-const PREMIUM_DATA_PATHS = ['/indices', '/funds', '/global-markets', '/commodities', '/top5']
-// Paths that activate the Resources dropdown as "active"
-const RESOURCES_PATHS = ['/learn', '/brokers', '/glossary', '/contact']
+// Prefixes that activate the Premium Data dropdown as "active"
+const PREMIUM_DATA_PREFIXES = ['/indices', '/funds', '/global-markets', '/commodities', '/top5']
+// Prefixes that activate the Resources dropdown as "active"
+const RESOURCES_PREFIXES = ['/learn', '/brokers', '/glossary', '/contact']
+
+// Helper: true if pathname matches any prefix (exact or sub-path)
+const matchesPrefix = (pathname: string, prefixes: string[]) =>
+  prefixes.some(p => pathname === p || pathname.startsWith(p + '/'))
 
 export default function Navbar() {
   const pathname = usePathname()
@@ -139,7 +143,7 @@ export default function Navbar() {
             <div className="relative" ref={marketDropRef}>
               <button
                 onClick={() => setMarketDropOpen(v => !v)}
-                className={dropBtn(PREMIUM_DATA_PATHS.includes(pathname))}
+                className={dropBtn(matchesPrefix(pathname, PREMIUM_DATA_PREFIXES))}
               >
                 <Building2 className="w-3.5 h-3.5 shrink-0" />
                 Premium Data
@@ -172,7 +176,7 @@ export default function Navbar() {
             <div className="relative" ref={resourceDropRef}>
               <button
                 onClick={() => setResourceDropOpen(v => !v)}
-                className={dropBtn(RESOURCES_PATHS.includes(pathname))}
+                className={dropBtn(matchesPrefix(pathname, RESOURCES_PREFIXES))}
               >
                 <BookOpen className="w-3.5 h-3.5 shrink-0" />
                 Resources

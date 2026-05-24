@@ -1,0 +1,11 @@
+User-agent: *
+Allow: /
+
+# Block admin and auth pages from indexing
+Disallow: /admin/
+Disallow: /auth/
+Disallow: /account/
+Disallow: /notifications/
+Disallow: /api/
+
+Sitemap: https://asxscreener.com.au/sitemap.xml

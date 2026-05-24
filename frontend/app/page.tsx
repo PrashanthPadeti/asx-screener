@@ -1,8 +1,15 @@
 import Link from 'next/link'
 import { BarChart2, Search, TrendingUp, Star, Zap, Shield, ArrowUpRight, ArrowDownRight, Database, Calculator, Building2, Brain } from 'lucide-react'
 import { getMarketMovers, getMarketSectors } from '@/lib/api'
+import type { Metadata } from 'next'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
+
+export const metadata: Metadata = {
+  title: 'ASX Screener — Screen Every ASX Stock',
+  description: 'The most powerful ASX stock screener. Filter by PE ratio, dividend yield, franking credits, ROE, debt and 80+ more metrics. Free to start.',
+  alternates: { canonical: 'https://asxscreener.com.au/' },
+}
 
 // Force dynamic rendering so every request fetches live data.
 export const dynamic = 'force-dynamic'

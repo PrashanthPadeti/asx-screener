@@ -9,8 +9,15 @@ import { ClientGuard } from '@/components/ClientGuard'
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
-  title: 'ASX Screener — Australian Stock Screener',
+  metadataBase: new URL('https://asxscreener.com.au'),
+  title: {
+    default:  'ASX Screener — Australian Stock Screener',
+    template: '%s | ASX Screener',
+  },
   description: 'Screen ASX stocks with franking credits, mining & REIT depth, and AI insights',
+  alternates: {
+    canonical: 'https://asxscreener.com.au',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,10 +1,10 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Check, X, Zap, Shield, Building2, ArrowRight, Star } from 'lucide-react'
+import { Check, X, Zap, Shield, Building2, ArrowRight, Star, Users } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
-import { createCheckoutSession } from '@/lib/api'
+import { createCheckoutSession, api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 // ── Static plan data (matches backend plans.py) ───────────────────────────────
@@ -84,12 +84,28 @@ const FEATURE_ROWS: { label: string; key: keyof typeof PLANS[0]['features'] | nu
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
+interface FoundingStatus {
+  enabled:   boolean
+  limit:     number
+  claimed:   number
+  remaining: number
+  available: boolean
+}
+
 export default function PricingPage() {
   const { user } = useAuth()
   const router   = useRouter()
   const [yearly, setYearly]   = useState(true)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError]     = useState<string | null>(null)
+  const [founding, setFounding] = useState<FoundingStatus | null>(null)
+
+  // Fetch founding-member availability on mount
+  useEffect(() => {
+    api.get<FoundingStatus>('/api/v1/billing/founding-member-status')
+      .then(r => setFounding(r.data))
+      .catch(() => {/* non-critical — hide banner on error */})
+  }, [])
 
   const currentPlan = user?.plan ?? 'free'
   const isPro       = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(currentPlan)
@@ -163,6 +179,59 @@ export default function PricingPage() {
           </div>
         </div>
       </div>
+
+      {/* Founding Members banner */}
+      {founding?.enabled && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+          <div className={cn(
+            'rounded-2xl px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center gap-3',
+            founding.available
+              ? 'bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200'
+              : 'bg-gray-50 border border-gray-200'
+          )}>
+            <div className={cn(
+              'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
+              founding.available ? 'bg-amber-100' : 'bg-gray-200'
+            )}>
+              <Users className={cn('w-5 h-5', founding.available ? 'text-amber-600' : 'text-gray-400')} />
+            </div>
+            <div className="flex-1 min-w-0">
+              {founding.available ? (
+                <>
+                  <p className="font-bold text-amber-900 text-sm">
+                    🎉 Founding Members — {founding.remaining} of {founding.limit} spots remaining
+                  </p>
+                  <p className="text-amber-700 text-xs mt-0.5 leading-relaxed">
+                    Be one of our first {founding.limit} paying subscribers and get extended access:
+                    {' '}<strong>monthly plan → 6 months</strong>,{' '}
+                    <strong>annual plan → 3 years</strong>. No extra charge.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="font-bold text-gray-600 text-sm">Founding Members — All {founding.limit} spots have been claimed</p>
+                  <p className="text-gray-500 text-xs mt-0.5">Standard pricing applies. Thank you to our founding members!</p>
+                </>
+              )}
+            </div>
+            {founding.available && (
+              <div className="shrink-0 flex items-center gap-2">
+                <div className="text-right">
+                  <div className="text-2xl font-black text-amber-700 leading-none">{founding.remaining}</div>
+                  <div className="text-[10px] text-amber-600 font-medium uppercase tracking-wide">left</div>
+                </div>
+                {/* Progress bar */}
+                <div className="w-20 h-2 bg-amber-200 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-amber-500 rounded-full transition-all"
+                    style={{ width: `${Math.round((founding.claimed / founding.limit) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Plan cards */}
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
@@ -283,6 +352,11 @@ export default function PricingPage() {
                     </button>
                     {!isCurrent && (
                       <p className="text-[10px] text-center text-gray-400 leading-snug">
+                        {founding?.enabled && founding.available && (
+                          <span className="block text-amber-600 font-semibold mb-0.5">
+                            🎉 Founding member offer applies
+                          </span>
+                        )}
                         By upgrading you agree to our{' '}
                         <Link href="/terms" className="underline hover:text-gray-600">Terms of Service</Link>
                         {' '}and{' '}

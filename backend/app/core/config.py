@@ -89,6 +89,13 @@ class Settings(BaseSettings):
     RATE_LIMIT_PRO: int = 120
     RATE_LIMIT_PREMIUM: int = 300
 
+    # Founding Members promotion
+    # First N paying subscribers get extended access:
+    #   Monthly plan → 6 months access  (instead of 1 month)
+    #   Annual plan  → 3 years access   (instead of 1 year)
+    # Set to 0 to disable the promotion entirely.
+    FOUNDING_MEMBER_LIMIT: int = 100
+
     class Config:
         env_file = ".env"
         case_sensitive = True

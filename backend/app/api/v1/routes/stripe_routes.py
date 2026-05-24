@@ -61,6 +61,30 @@ def _build_price_plan_map() -> dict[str, tuple[str, int, str]]:
 
 # ── Plans endpoint ────────────────────────────────────────────────────────────
 
+@router.get("/founding-member-status")
+async def founding_member_status(db: AsyncSession = Depends(get_db)):
+    """
+    Public endpoint — no auth required.
+    Returns how many founding-member slots have been claimed and how many remain.
+    """
+    limit = settings.FOUNDING_MEMBER_LIMIT
+    if limit <= 0:
+        return {"enabled": False, "limit": 0, "claimed": 0, "remaining": 0, "available": False}
+
+    result = await db.execute(
+        text("SELECT COUNT(*) FROM users.users WHERE is_founding_member = TRUE")
+    )
+    claimed = result.scalar() or 0
+    remaining = max(0, limit - claimed)
+    return {
+        "enabled":   True,
+        "limit":     limit,
+        "claimed":   claimed,
+        "remaining": remaining,
+        "available": remaining > 0,
+    }
+
+
 @router.get("/plans")
 async def get_plans():
     """Return full plan catalogue with resolved Stripe price IDs."""
@@ -276,7 +300,7 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             plan, seat_limit, billing_period = "free", 1, "monthly"
 
         result = await db.execute(
-            text("SELECT id, plan FROM users.users WHERE stripe_customer_id = :cid"),
+            text("SELECT id, plan, is_founding_member FROM users.users WHERE stripe_customer_id = :cid"),
             {"cid": cid},
         )
         user_row = result.fetchone()
@@ -305,6 +329,55 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             f"Subscription {sub_id} updated: plan='{plan}' status='{sub_status}' "
             f"interval='{billing_period}' for customer {cid}"
         )
+
+        # ── Founding Member bonus (new subscriptions only, active plan only) ──
+        founding_limit = getattr(settings, "FOUNDING_MEMBER_LIMIT", 100)
+        is_new_sub     = event_type == "customer.subscription.created"
+        is_paid_plan   = plan not in ("free",)
+        already_member = getattr(user_row, "is_founding_member", False) if user_row else False
+
+        if (founding_limit > 0 and is_new_sub and is_paid_plan
+                and sub_status in ("active", "trialing") and user_row and not already_member):
+            try:
+                # Atomically claim the next founding-member slot (if any remain)
+                claim_result = await db.execute(text("""
+                    WITH next_slot AS (
+                        SELECT COALESCE(MAX(founding_member_number), 0) + 1 AS slot_num
+                        FROM users.users
+                        WHERE is_founding_member = TRUE
+                    )
+                    UPDATE users.users
+                    SET is_founding_member     = TRUE,
+                        founding_member_number = (SELECT slot_num FROM next_slot),
+                        subscription_ends_at   = CASE
+                            WHEN :billing_period = 'monthly'
+                                THEN NOW() + INTERVAL '6 months'
+                            ELSE
+                                NOW() + INTERVAL '3 years'
+                        END
+                    WHERE id = :uid
+                      AND (SELECT slot_num FROM next_slot) <= :limit
+                    RETURNING founding_member_number
+                """), {
+                    "billing_period": billing_period,
+                    "uid":   user_row.id,
+                    "limit": founding_limit,
+                })
+                await db.commit()
+                slot = claim_result.scalar()
+                if slot:
+                    log.info(
+                        f"Founding member #{slot} granted to user {user_row.id} "
+                        f"(plan={plan} interval={billing_period})"
+                    )
+                else:
+                    log.info(
+                        f"Founding member limit ({founding_limit}) already reached — "
+                        f"no bonus for user {user_row.id}"
+                    )
+            except Exception as fm_err:
+                log.warning(f"Founding member bonus failed (non-fatal): {fm_err}")
+                await db.rollback()
 
     # ── Subscription cancelled ────────────────────────────────────────────────
     elif event_type == "customer.subscription.deleted":

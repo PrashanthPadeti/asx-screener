@@ -64,28 +64,81 @@ function retColor(v: number | null): string {
   return v >= 0 ? 'text-emerald-600' : 'text-red-500'
 }
 
-/** Determine the top 2 scoring factors and generate a plain-English "why selected" reason */
+/** Score-level adjective */
+function adj(score: number): string {
+  if (score >= 88) return 'exceptional'
+  if (score >= 78) return 'strong'
+  if (score >= 68) return 'above-average'
+  if (score >= 58) return 'solid'
+  return 'moderate'
+}
+
+/** Score-aware description per factor */
+function factorDesc(label: string, score: number): string {
+  const a = adj(score)
+  switch (label) {
+    case 'Momentum':
+      if (score >= 85) return `top-decile price momentum (${score.toFixed(0)}) — accelerating trend with strong technical signals`
+      if (score >= 72) return `${a} price momentum (${score.toFixed(0)}) with positive 1M, 3M and 6M returns`
+      return `${a} recent price performance (${score.toFixed(0)}) relative to ASX 200 peers`
+    case 'Quality':
+      if (score >= 85) return `exceptional financial quality (${score.toFixed(0)}) — among the highest F-Score and ROE in the index`
+      if (score >= 72) return `${a} balance sheet health (${score.toFixed(0)}) with high Piotroski F-Score and low insolvency risk`
+      return `${a} financial quality score (${score.toFixed(0)}) — consistent profitability and manageable debt`
+    case 'Value':
+      if (score >= 85) return `deeply attractive valuation (${score.toFixed(0)}) — P/E and P/B well below sector peers`
+      if (score >= 72) return `${a} value score (${score.toFixed(0)}) on P/E, EV/EBITDA and free cash flow yield`
+      return `${a} valuation (${score.toFixed(0)}) relative to earnings and book value within the ASX 200`
+    case 'Income':
+      if (score >= 85) return `one of the highest grossed-up yields in the ASX 200 (score ${score.toFixed(0)}), with strong franking`
+      if (score >= 72) return `${a} income score (${score.toFixed(0)}) — above-average yield with consistent franking credits`
+      return `${a} dividend profile (${score.toFixed(0)}) with reliable payout and partial franking support`
+    case 'Growth':
+      if (score >= 85) return `top-tier earnings growth (${score.toFixed(0)}) — accelerating EPS and revenue well above index median`
+      if (score >= 72) return `${a} growth trajectory (${score.toFixed(0)}) with improving revenue and earnings over 1–3 years`
+      return `${a} growth score (${score.toFixed(0)}) showing steady improvement in earnings and revenue`
+    default:
+      return `${a} score of ${score.toFixed(0)}`
+  }
+}
+
+/** Opening phrase that varies by rank */
+function rankPhrase(rank: number): string {
+  switch (rank) {
+    case 1: return 'Ranked #1 overall this month'
+    case 2: return 'Second-highest composite score'
+    case 3: return 'Third across all five factors'
+    case 4: return 'Fourth in the ASX 200 this month'
+    case 5: return 'Well-rounded #5 pick'
+    default: return `Ranked #${rank} this month`
+  }
+}
+
+/** Generate a plain-English "why selected" reason, varied by score levels */
 function whySelected(pick: Pick): { summary: string; details: string } {
   const scored = [
-    { label: 'Momentum', score: pick.momentum_score, desc: 'strong recent price trend and technical strength' },
-    { label: 'Quality',  score: pick.quality_score,  desc: 'high Piotroski F-Score, solid ROE and low financial risk' },
-    { label: 'Value',    score: pick.value_score,    desc: 'attractive valuation relative to earnings and book value' },
-    { label: 'Income',   score: pick.income_score,   desc: 'above-average dividend yield with good franking credits' },
-    { label: 'Growth',   score: pick.growth_score,   desc: 'accelerating revenue and earnings growth trajectory' },
+    { label: 'Momentum', score: pick.momentum_score },
+    { label: 'Quality',  score: pick.quality_score  },
+    { label: 'Value',    score: pick.value_score    },
+    { label: 'Income',   score: pick.income_score   },
+    { label: 'Growth',   score: pick.growth_score   },
   ]
-    .filter(f => f.score != null)
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+    .filter((f): f is { label: string; score: number } => f.score != null)
+    .sort((a, b) => b.score - a.score)
 
-  if (scored.length === 0) return { summary: 'Top composite scorer this month', details: 'Ranked #' + pick.rank + ' across all factors in the ASX 200.' }
+  if (scored.length === 0) {
+    return { summary: 'Top composite scorer', details: `${rankPhrase(pick.rank)} in the ASX 200.` }
+  }
 
-  const top = scored.slice(0, 2)
-  const summary = top.length === 2
-    ? `Leads on ${top[0].label} & ${top[1].label}`
-    : `Leads on ${top[0].label}`
+  const [first, second] = scored
+  const summary = second
+    ? `Leads on ${first.label} & ${second.label}`
+    : `Leads on ${first.label}`
 
-  const details = top.length === 2
-    ? `Selected for ${top[0].desc}, combined with ${top[1].desc}. Ranks #${pick.rank} overall in the ASX 200 this month.`
-    : `Selected for ${top[0].desc}. Ranks #${pick.rank} overall in the ASX 200 this month.`
+  const intro = rankPhrase(pick.rank)
+  const details = second
+    ? `${intro} — ${factorDesc(first.label, first.score)}, combined with ${factorDesc(second.label, second.score)}.`
+    : `${intro} — ${factorDesc(first.label, first.score)}.`
 
   return { summary, details }
 }

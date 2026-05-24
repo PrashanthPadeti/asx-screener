@@ -23,7 +23,7 @@ const MARKET_DATA_LINKS = [
   { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',             premium: true },
   { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',     premium: true },
   { href: '/commodities',    label: 'Commodities',    icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more',     premium: true },
-  { href: '/top5',           label: 'Top 5 Strategy', icon: Trophy,     desc: 'Monthly algo-ranked top 5 from ASX200',  premium: true },
+  { href: '/top5',           label: 'AlphaFive',       icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',  premium: true },
 ]
 
 const RESOURCES_LINKS = [

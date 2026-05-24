@@ -1,9 +1,9 @@
 """
-ASX Screener — Top 5 Strategy API
-===================================
+ASX Screener — AlphaFive Strategy API
+=======================================
 Endpoints:
-  GET /api/v1/top5/current   — latest month's top-5 picks
-  GET /api/v1/top5/history   — last N months of picks (grouped by month)
+  GET /api/v1/top5/current   — latest week's top-5 picks
+  GET /api/v1/top5/history   — last N weeks of picks (grouped by week)
 """
 
 from datetime import date
@@ -62,8 +62,8 @@ async def get_current_picks(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Returns the most recent monthly top-5 picks.
-    Falls back to the latest available month if current month has no data yet.
+    Returns the most recent weekly top-5 picks (AlphaFive).
+    Falls back to the latest available week if current week has no data yet.
     """
     result = await db.execute(text("""
         SELECT *
@@ -76,17 +76,17 @@ async def get_current_picks(
     rows = result.mappings().all()
 
     if not rows:
-        return {"pick_month": None, "picks": [], "total_months": 0}
+        return {"pick_week": None, "picks": [], "total_weeks": 0}
 
     result2 = await db.execute(text(
         "SELECT COUNT(DISTINCT pick_month) AS n FROM strategy.monthly_picks"
     ))
-    total_months = result2.scalar() or 0
+    total_weeks = result2.scalar() or 0
 
     return {
-        "pick_month":    rows[0]["pick_month"].isoformat(),
-        "picks":         [_row_to_dict(r) for r in rows],
-        "total_months":  total_months,
+        "pick_week":   rows[0]["pick_month"].isoformat(),
+        "picks":       [_row_to_dict(r) for r in rows],
+        "total_weeks": total_weeks,
     }
 
 
@@ -94,26 +94,26 @@ async def get_current_picks(
 
 @router.get("/history")
 async def get_pick_history(
-    months: int = Query(default=12, ge=1, le=60),
+    weeks: int = Query(default=12, ge=1, le=104),
     _user: dict = Depends(require_plan("premium")),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Returns the last `months` monthly cohorts of picks, newest first.
-    Each cohort contains all picks for that month ordered by rank.
+    Returns the last `weeks` weekly cohorts of AlphaFive picks, newest first.
+    Each cohort contains all picks for that week ordered by rank.
     """
     result = await db.execute(text("""
         SELECT *
         FROM strategy.monthly_picks
         WHERE pick_month >= (
-            SELECT MAX(pick_month) - (:months - 1) * INTERVAL '1 month'
+            SELECT MAX(pick_month) - (:weeks - 1) * INTERVAL '1 week'
             FROM strategy.monthly_picks
         )
         ORDER BY pick_month DESC, rank
-    """), {"months": months})
+    """), {"weeks": weeks})
     rows = result.mappings().all()
 
-    # Group by pick_month
+    # Group by pick_month (which now stores the Monday of the week)
     cohorts: dict[str, list] = {}
     for r in rows:
         key = r["pick_month"].isoformat()
@@ -123,7 +123,7 @@ async def get_pick_history(
 
     return {
         "history": [
-            {"pick_month": k, "picks": v}
+            {"pick_week": k, "picks": v}
             for k, v in cohorts.items()
         ]
     }

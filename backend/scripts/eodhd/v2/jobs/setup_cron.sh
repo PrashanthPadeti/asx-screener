@@ -42,6 +42,8 @@ mkdir -p "$LOG_DIR"
 DAILY_CMD="30 8 * * 1-5  cd ${PROJECT_DIR} && ${VENV_PYTHON} scripts/eodhd/v2/jobs/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
 WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${VENV_PYTHON} scripts/eodhd/v2/jobs/weekly_refresh.py >> ${LOG_DIR}/weekly_refresh.log 2>&1"
 WEEKLY_COMPUTE_CMD="0 21 * * 0   cd ${PROJECT_DIR} && ${VENV_PYTHON} scripts/eodhd/v2/jobs/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
+# AlphaFive: runs Monday 8am AEST (22:00 UTC Sunday), after weekly pipeline completes
+ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
 
 # ── Install (append only if not already present) ─────────────────────────────
 TMPFILE=$(mktemp)
@@ -74,6 +76,14 @@ else
     echo "  - Weekly compute pipeline already in crontab — skipped"
 fi
 
+if ! grep -qF "top5_strategy" "$TMPFILE"; then
+    echo "$ALPHAFIVE_CMD" >> "$TMPFILE"
+    echo "  ✓ Added: AlphaFive weekly picks (Monday 08:00 AEST)"
+    CHANGED=1
+else
+    echo "  - AlphaFive picks already in crontab — skipped"
+fi
+
 if [ "$CHANGED" = "1" ]; then
     crontab "$TMPFILE"
     echo ""
@@ -95,6 +105,7 @@ echo "                  → daily_metrics → halfyearly_metrics → screener.un
 echo "  Sun download — Sunday  22:00 AEST: fundamentals + dividends + splits download"
 echo "  Mon compute  — Monday  07:00 AEST: load staging → transforms → yearly/"
 echo "                 halfyearly/weekly/monthly compute → screener.universe"
+echo "  AlphaFive    — Monday  08:00 AEST: weekly top-5 picks (AlphaFive strategy)"
 echo ""
 echo "Logs:"
 echo "  tail -f ${LOG_DIR}/daily_pipeline.log"

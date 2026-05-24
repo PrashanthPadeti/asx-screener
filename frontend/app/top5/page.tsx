@@ -36,13 +36,13 @@ interface Pick {
 }
 
 interface CurrentResponse {
-  pick_month: string | null
+  pick_week: string | null
   picks: Pick[]
-  total_months: number
+  total_weeks: number
 }
 
 interface HistoryMonth {
-  pick_month: string
+  pick_week: string
   picks: Pick[]
 }
 
@@ -55,8 +55,8 @@ const fmt = {
   price:     (v: number | null) => v == null ? null : `$${v.toFixed(2)}`,
   cap:       (v: number | null) => v == null ? null : v >= 1e9 ? `$${(v / 1e9).toFixed(1)}B` : `$${(v / 1e6).toFixed(0)}M`,
   pe:        (v: number | null) => v == null ? null : `${v.toFixed(1)}x`,
-  month:     (iso: string) => new Date(iso + 'T00:00:00').toLocaleString('en-AU', { month: 'long', year: 'numeric' }),
-  monthShort:(iso: string) => new Date(iso + 'T00:00:00').toLocaleString('en-AU', { month: 'short', year: '2-digit' }),
+  week:      (iso: string) => 'Week of ' + new Date(iso + 'T00:00:00').toLocaleString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }),
+  weekShort: (iso: string) => new Date(iso + 'T00:00:00').toLocaleString('en-AU', { day: 'numeric', month: 'short' }),
 }
 
 function retColor(v: number | null): string {
@@ -105,12 +105,12 @@ function factorDesc(label: string, score: number): string {
 /** Opening phrase that varies by rank */
 function rankPhrase(rank: number): string {
   switch (rank) {
-    case 1: return 'Ranked #1 overall this month'
+    case 1: return 'Ranked #1 overall this week'
     case 2: return 'Second-highest composite score'
     case 3: return 'Third across all five factors'
-    case 4: return 'Fourth in the ASX 200 this month'
+    case 4: return 'Fourth in the ASX 200 this week'
     case 5: return 'Well-rounded #5 pick'
-    default: return `Ranked #${rank} this month`
+    default: return `Ranked #${rank} this week`
   }
 }
 
@@ -352,37 +352,35 @@ function Disclaimer() {
   )
 }
 
-// ── Monthly performance tracker ───────────────────────────────────────────────
+// ── Weekly performance tracker ────────────────────────────────────────────────
 
 function PerformanceTracker({ history }: { history: HistoryMonth[] }) {
   if (history.length < 2) return null
 
-  // ASX 200 approximate monthly benchmarks (proxy — shown as reference)
-  // In a real implementation these would come from the backend
-  const rows = history.map(({ pick_month, picks }) => {
+  const rows = history.map(({ pick_week, picks }) => {
     const avg3m = avgReturn3m(picks)
     const avgScore = picks.reduce((s, p) => s + (p.composite_score ?? 0), 0) / Math.max(picks.length, 1)
-    return { pick_month, avg3m, avgScore, picks }
+    return { pick_week, avg3m, avgScore, picks }
   })
 
   return (
     <section>
       <div className="flex items-center gap-2 mb-4">
         <BarChart2 className="w-4 h-4 text-blue-500" />
-        <h2 className="text-base font-bold text-gray-900">Monthly Strategy Performance</h2>
-        <span className="text-xs text-gray-400 ml-1">— avg 3M return of each month's picks</span>
+        <h2 className="text-base font-bold text-gray-900">Weekly Strategy Performance</h2>
+        <span className="text-xs text-gray-400 ml-1">— avg 3M return of each week's picks</span>
       </div>
 
       <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
         {/* Bar chart */}
         <div className="p-5 border-b border-gray-100">
           <div className="flex items-end gap-1.5 h-24">
-            {rows.slice(-12).map(({ pick_month, avg3m }) => {
+            {rows.slice(-12).map(({ pick_week, avg3m }) => {
               const pct   = avg3m != null ? avg3m * 100 : null
               const barH  = pct != null ? Math.min(100, Math.abs(pct) * 4) : 4
               const isPos = pct == null || pct >= 0
               return (
-                <div key={pick_month} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                <div key={pick_week} className="flex-1 flex flex-col items-center gap-1 min-w-0">
                   <div className="w-full flex flex-col justify-end" style={{ height: '80px' }}>
                     <div
                       className={cn('w-full rounded-t-sm transition-all', isPos ? 'bg-emerald-400' : 'bg-red-400')}
@@ -390,7 +388,7 @@ function PerformanceTracker({ history }: { history: HistoryMonth[] }) {
                     />
                   </div>
                   <span className="text-[8px] text-gray-400 truncate w-full text-center">
-                    {fmt.monthShort(pick_month)}
+                    {fmt.weekShort(pick_week)}
                   </span>
                 </div>
               )
@@ -403,17 +401,17 @@ function PerformanceTracker({ history }: { history: HistoryMonth[] }) {
           <table className="w-full text-xs">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100">
-                <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Month</th>
+                <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Week</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Avg Score</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Avg 3M Ret</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600 hidden sm:table-cell">Picks</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {rows.map(({ pick_month, avg3m, avgScore, picks }) => (
-                <tr key={pick_month} className="hover:bg-gray-50 transition-colors">
+              {rows.map(({ pick_week, avg3m, avgScore, picks }) => (
+                <tr key={pick_week} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-2.5 font-medium text-gray-700 whitespace-nowrap">
-                    {fmt.monthShort(pick_month)}
+                    {fmt.weekShort(pick_week)}
                   </td>
                   <td className="px-3 py-2.5 text-gray-600">
                     {avgScore.toFixed(1)}
@@ -438,7 +436,7 @@ function PerformanceTracker({ history }: { history: HistoryMonth[] }) {
         </div>
         <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100">
           <p className="text-[10px] text-gray-400">
-            Avg 3M Ret = average 3-month return of that month's picks as at the time of data capture.
+            Avg 3M Ret = average 3-month return of that week's picks as at the time of data capture.
             This is not a backtest. Past performance does not guarantee future results.
           </p>
         </div>
@@ -462,7 +460,7 @@ function HistoryTable({ history }: { history: HistoryMonth[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="text-left px-4 py-3 font-semibold text-gray-700 text-xs">Month</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700 text-xs">Week</th>
                 {[1,2,3,4,5].map(r => (
                   <th key={r} className="text-left px-3 py-3 font-semibold text-gray-700 text-xs">
                     <span className={cn('inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] font-bold text-white bg-gradient-to-br', RANK_COLOURS[r-1])}>
@@ -473,10 +471,10 @@ function HistoryTable({ history }: { history: HistoryMonth[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {history.map(({ pick_month, picks }) => (
-                <tr key={pick_month} className="hover:bg-gray-50 transition-colors">
+              {history.map(({ pick_week, picks }) => (
+                <tr key={pick_week} className="hover:bg-gray-50 transition-colors">
                   <td className="px-4 py-3 font-medium text-gray-700 text-xs whitespace-nowrap">
-                    {fmt.monthShort(pick_month)}
+                    {fmt.weekShort(pick_week)}
                   </td>
                   {[1,2,3,4,5].map(rank => {
                     const p = picks.find(x => x.rank === rank)
@@ -648,7 +646,7 @@ function HowItWorks() {
       <div className="mt-5 pt-4 border-t border-gray-100">
         <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-gray-500 mb-3">
           <span>📊 Universe: ASX 200</span>
-          <span>📅 Refreshed: Monthly (1st of each month)</span>
+          <span>📅 Refreshed: Weekly (every Monday)</span>
           <span>⚖️ Weighting: Equal — 5 × 20%</span>
           <span>📐 Method: Percentile rank within index</span>
         </div>
@@ -674,7 +672,7 @@ function Top5Content() {
   useEffect(() => {
     Promise.all([
       api.get('/api/v1/top5/current'),
-      api.get('/api/v1/top5/history?months=12'),
+      api.get('/api/v1/top5/history?weeks=12'),
     ])
       .then(([cur, hist]) => {
         setCurrent(cur.data)
@@ -697,12 +695,12 @@ function Top5Content() {
       <div className="flex flex-col items-center justify-center py-24 text-center">
         <Trophy className="w-12 h-12 text-gray-200 mb-3" />
         <p className="text-gray-500 font-medium">No picks available yet</p>
-        <p className="text-sm text-gray-400 mt-1">The strategy runs on the 1st of each month. Check back soon.</p>
+        <p className="text-sm text-gray-400 mt-1">The strategy runs every Monday. Check back soon.</p>
       </div>
     )
   }
 
-  const { pick_month, picks, total_months } = current
+  const { pick_week, picks, total_weeks } = current
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8 space-y-10">
@@ -713,13 +711,13 @@ function Top5Content() {
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 uppercase tracking-wide">
-                {pick_month ? fmt.month(pick_month) : 'Latest'}
+                {pick_week ? fmt.week(pick_week) : 'Latest'}
               </span>
-              {total_months > 1 && (
-                <span className="text-xs text-gray-400">{total_months} months of history</span>
+              {total_weeks > 1 && (
+                <span className="text-xs text-gray-400">{total_weeks} weeks of history</span>
               )}
             </div>
-            <h2 className="text-xl font-bold text-gray-900">This Month's Top 5</h2>
+            <h2 className="text-xl font-bold text-gray-900">This Week's Top 5</h2>
             <p className="text-sm text-gray-500 mt-0.5">
               Highest composite-scored ASX 200 stocks across all 5 factors
             </p>
@@ -738,7 +736,7 @@ function Top5Content() {
       {/* How it works */}
       <HowItWorks />
 
-      {/* Monthly performance tracker */}
+      {/* Weekly performance tracker */}
       <PerformanceTracker history={history} />
 
       {/* History table */}
@@ -765,10 +763,10 @@ export default function Top5Page() {
               <Trophy className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold text-gray-900">ASX Top 5 Strategy</h1>
+              <h1 className="text-2xl font-bold text-gray-900">ASX-Screener AlphaFive</h1>
               <p className="text-gray-500 text-sm mt-0.5">
-                Monthly algo-ranked top 5 from the ASX 200 — scored across momentum, quality,
-                value, income and growth. Refreshed on the 1st of each month.
+                Weekly algo-ranked top 5 from the ASX 200 — scored across momentum, quality,
+                value, income and growth. Refreshed every Monday.
               </p>
             </div>
           </div>

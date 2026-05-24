@@ -1,8 +1,8 @@
 """
-Top 5 Strategy Compute Engine
-==============================
-Selects the top 5 ASX200 stocks by composite factor score each month and
-writes them to strategy.monthly_picks.
+AlphaFive Strategy Compute Engine
+===================================
+Selects the top 5 ASX200 stocks by composite factor score each week and
+writes them to strategy.monthly_picks (pick_month stores the Monday date).
 
 Scoring uses pre-computed score columns on screener.universe
 (value_score, quality_score, growth_score, momentum_score, income_score,
@@ -11,9 +11,10 @@ composite_score) which are populated by compute.engine.composite_score.
 Rules:
   - Only ASX200 constituents (is_asx200 = TRUE) with status = 'active'
   - Composite score must be non-null
-  - Runs once per month — if picks already exist for the current month,
+  - Runs once per week (Monday) — if picks already exist for the current week,
     the run is a no-op unless --force is passed
-  - Stores exactly 5 picks (rank 1–5) per month
+  - Stores exactly 5 picks (rank 1–5) per week
+  - pick_month column stores the Monday date of the week
 
 Usage:
     python -m compute.engine.top5_strategy [--date YYYY-MM-DD] [--force] [--dry-run]
@@ -24,7 +25,7 @@ import asyncio
 import logging
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -49,24 +50,24 @@ async def run(
         log.error("DATABASE_URL not set")
         sys.exit(1)
 
-    # Normalise pick_month to 1st of month
+    # Normalise pick_month to Monday of the week
     today = date.today()
     if pick_month is None:
-        pick_month = today.replace(day=1)
+        pick_month = today - timedelta(days=today.weekday())
     else:
-        pick_month = pick_month.replace(day=1)
+        pick_month = pick_month - timedelta(days=pick_month.weekday())
 
     engine = create_async_engine(DATABASE_URL, echo=False)
     async with AsyncSession(engine) as session:
 
-        # ── Guard: skip if picks already exist for this month ────────────────
+        # ── Guard: skip if picks already exist for this week ─────────────────
         if not force:
             existing = (await session.execute(
                 text("SELECT COUNT(*) FROM strategy.monthly_picks WHERE pick_month = :m"),
                 {"m": pick_month},
             )).scalar() or 0
             if existing > 0:
-                log.info("Picks already exist for %s (%d rows) — skipping. Use --force to overwrite.", pick_month, existing)
+                log.info("Picks already exist for week of %s (%d rows) — skipping. Use --force to overwrite.", pick_month, existing)
                 return
 
         # ── Query top N stocks from screener.universe ────────────────────────
@@ -107,7 +108,7 @@ async def run(
             log.warning("No eligible ASX200 stocks found — nothing written.")
             return
 
-        log.info("Top %d picks for %s:", len(rows), pick_month)
+        log.info("AlphaFive top %d picks for week of %s:", len(rows), pick_month)
         for i, r in enumerate(rows, 1):
             log.info(
                 "  #%d %s %-30s  composite=%.1f  momentum=%.1f  quality=%.1f  value=%.1f",
@@ -177,13 +178,13 @@ async def run(
             })
 
         await session.commit()
-        log.info("Committed %d picks for %s", len(rows), pick_month)
+        log.info("Committed %d picks for week of %s", len(rows), pick_month)
 
 
 # ── CLI entry point ────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Compute monthly Top 5 picks")
+    parser = argparse.ArgumentParser(description="Compute weekly AlphaFive picks")
     parser.add_argument("--date",    help="Pick month as YYYY-MM-DD (defaults to current month)")
     parser.add_argument("--force",   action="store_true", help="Overwrite existing picks for the month")
     parser.add_argument("--dry-run", action="store_true", help="Print picks without writing to DB")

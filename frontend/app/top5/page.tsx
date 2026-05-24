@@ -515,16 +515,91 @@ function HistoryTable({ history }: { history: HistoryMonth[] }) {
 // ── How it works ──────────────────────────────────────────────────────────────
 
 function HowItWorks() {
-  const factors = [
-    { icon: TrendingUp,  colour: 'text-blue-600 bg-blue-50',     label: 'Momentum',  desc: 'Price returns (1M, 3M, 6M), RSI and ADX trend strength'                    },
-    { icon: Shield,      colour: 'text-emerald-600 bg-emerald-50',label: 'Quality',   desc: 'Piotroski F-Score, ROE, ROCE, Altman Z-Score, profit margins'              },
-    { icon: Star,        colour: 'text-amber-600 bg-amber-50',    label: 'Value',     desc: 'P/E, P/B, EV/EBITDA, FCF yield, Price-to-Sales vs sector'                  },
-    { icon: DollarSign,  colour: 'text-purple-600 bg-purple-50',  label: 'Income',    desc: 'Grossed-up yield, franking %, dividend consistency and payout coverage'     },
-    { icon: BarChart2,   colour: 'text-rose-600 bg-rose-50',      label: 'Growth',    desc: 'Revenue & EPS growth (1Y, 3Y CAGR, half-yearly acceleration)'              },
+  const factors: {
+    icon: React.ComponentType<{ className?: string }>
+    iconColour: string
+    headerColour: string
+    borderColour: string
+    label: string
+    weight: string
+    summary: string
+    metrics: { name: string; what: string }[]
+    asxNote: string
+  }[] = [
+    {
+      icon: TrendingUp, iconColour: 'text-blue-600 bg-blue-50',
+      headerColour: 'text-blue-700', borderColour: 'border-blue-100',
+      label: 'Momentum', weight: '20%',
+      summary: 'Measures how strongly a stock has been trending — stocks with rising prices and improving technicals tend to continue outperforming in the short-to-medium term.',
+      metrics: [
+        { name: '1M / 3M / 6M Price Return',   what: 'Raw price performance over each period, percentile-ranked within the ASX 200' },
+        { name: 'Relative Strength (RSI)',       what: 'Indicates whether the stock is in an overbought or oversold condition vs its own history' },
+        { name: 'ADX Trend Strength',            what: 'Average Directional Index — measures whether the stock is trending strongly or moving sideways' },
+        { name: 'Price vs 52W High',             what: 'How close the current price is to its 52-week peak — a proxy for breakout strength' },
+      ],
+      asxNote: 'Particularly relevant for ASX miners and energy stocks, where commodity price cycles drive sharp momentum moves.',
+    },
+    {
+      icon: Shield, iconColour: 'text-emerald-600 bg-emerald-50',
+      headerColour: 'text-emerald-700', borderColour: 'border-emerald-100',
+      label: 'Quality', weight: '20%',
+      summary: 'Identifies financially healthy companies with strong balance sheets, high returns and low risk of distress. Quality stocks tend to be more resilient during market downturns.',
+      metrics: [
+        { name: 'Piotroski F-Score (0–9)',       what: '9-point checklist across profitability, leverage and operating efficiency — 8+ is considered high quality' },
+        { name: 'Return on Equity (ROE)',         what: 'How efficiently management generates profit from shareholders\' equity — higher is better' },
+        { name: 'Return on Capital Employed',     what: 'Measures how well the company uses all its capital (equity + debt) to generate operating profit' },
+        { name: 'Altman Z-Score',                 what: 'Predicts financial distress risk — scores above 2.99 indicate low bankruptcy risk' },
+        { name: 'Net Profit Margin',              what: 'Percentage of revenue retained as profit after all expenses — measures operational efficiency' },
+      ],
+      asxNote: 'Critical for ASX industrials and financials where balance sheet discipline separates strong performers from value traps.',
+    },
+    {
+      icon: Star, iconColour: 'text-amber-600 bg-amber-50',
+      headerColour: 'text-amber-700', borderColour: 'border-amber-100',
+      label: 'Value', weight: '20%',
+      summary: 'Finds stocks trading cheaply relative to their earnings, assets and cash generation. Value stocks can offer a margin of safety and outperform when sentiment improves.',
+      metrics: [
+        { name: 'Price-to-Earnings (P/E)',        what: 'Share price divided by earnings per share — compared to sector median within the ASX 200' },
+        { name: 'Price-to-Book (P/B)',             what: 'Share price vs net asset value — useful for capital-heavy businesses like banks and miners' },
+        { name: 'EV / EBITDA',                     what: 'Enterprise value relative to operating earnings — a debt-adjusted measure of valuation' },
+        { name: 'Free Cash Flow Yield',            what: 'Operating cash flow minus capex, expressed as a yield — indicates how much real cash the business generates' },
+        { name: 'Price-to-Sales vs Sector',        what: 'Revenue multiple relative to industry peers — useful when earnings are temporarily distorted' },
+      ],
+      asxNote: 'Well-suited to ASX resource and financial stocks where asset-heavy businesses are better measured by P/B and EV/EBITDA.',
+    },
+    {
+      icon: DollarSign, iconColour: 'text-purple-600 bg-purple-50',
+      headerColour: 'text-purple-700', borderColour: 'border-purple-100',
+      label: 'Income', weight: '20%',
+      summary: 'Ranks stocks by their income-generating ability — with special weight on Australian franking credits, which add significant after-tax value for domestic investors.',
+      metrics: [
+        { name: 'Grossed-Up Dividend Yield',      what: 'Dividend yield adjusted for franking credits — reflects the true pre-tax value of the income stream' },
+        { name: 'Franking Percentage',             what: '0–100% — a fully franked dividend passes on a 30% company tax credit to shareholders' },
+        { name: 'Dividend Consistency (3–5Y)',     what: 'Whether dividends have been paid without interruption over recent years — rewards reliability' },
+        { name: 'Payout Ratio',                    what: 'Dividends as a percentage of earnings — too high (>90%) may indicate an unsustainable payout' },
+        { name: 'Dividend Growth Rate',            what: '1-year and 3-year CAGR of the dividend per share — rewards companies that grow their income over time' },
+      ],
+      asxNote: 'Franking credits are a uniquely Australian advantage — fully franked dividends from large caps like CBA and BHP carry significant extra value for Australian tax residents.',
+    },
+    {
+      icon: BarChart2, iconColour: 'text-rose-600 bg-rose-50',
+      headerColour: 'text-rose-700', borderColour: 'border-rose-100',
+      label: 'Growth', weight: '20%',
+      summary: 'Identifies companies growing their revenue and earnings faster than peers — sustained growth is one of the strongest long-term drivers of share price appreciation.',
+      metrics: [
+        { name: 'Revenue Growth (1Y)',             what: 'Year-on-year top-line growth rate, percentile-ranked within the ASX 200' },
+        { name: 'EPS Growth (1Y)',                 what: 'Earnings per share growth — filters out revenue growth that doesn\'t flow to the bottom line' },
+        { name: '3-Year Revenue CAGR',             what: 'Compound annual growth rate over 3 years — rewards sustained growth over flash-in-the-pan results' },
+        { name: '3-Year EPS CAGR',                 what: 'Long-term earnings growth rate — the single most reliable predictor of long-run share price performance' },
+        { name: 'Half-Year Acceleration',          what: 'Whether the most recent half-year growth rate is faster than the prior half — signals improving momentum' },
+      ],
+      asxNote: 'Growth stocks on the ASX tend to be concentrated in healthcare (CSL, RMD), tech (WTC, XRO) and select industrials — sectors where earnings can compound over many years.',
+    },
   ]
+
   return (
     <section className="bg-white border border-gray-200 rounded-2xl p-6">
-      <div className="flex items-start gap-2 mb-5">
+      <div className="flex items-start gap-2 mb-6">
         <Info className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
         <div>
           <h2 className="text-base font-bold text-gray-900">How the ranking works</h2>
@@ -534,17 +609,42 @@ function HowItWorks() {
           </p>
         </div>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-        {factors.map(({ icon: Icon, colour, label, desc }) => (
-          <div key={label} className="flex flex-col gap-2">
-            <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center', colour)}>
-              <Icon className="w-4 h-4" />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {factors.map(({ icon: Icon, iconColour, headerColour, borderColour, label, weight, summary, metrics, asxNote }) => (
+          <div key={label} className={cn('flex flex-col gap-3 rounded-xl border p-4', borderColour)}>
+            {/* Icon + label */}
+            <div className="flex items-center gap-2">
+              <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center shrink-0', iconColour)}>
+                <Icon className="w-4 h-4" />
+              </div>
+              <div>
+                <p className={cn('font-bold text-xs', headerColour)}>{label}</p>
+                <p className="text-[9px] text-gray-400 uppercase tracking-wide">{weight} of score</p>
+              </div>
             </div>
-            <p className="font-semibold text-xs text-gray-800">{label} (20%)</p>
-            <p className="text-[11px] text-gray-500 leading-relaxed">{desc}</p>
+
+            {/* Summary */}
+            <p className="text-[11px] text-gray-500 leading-relaxed">{summary}</p>
+
+            {/* Metrics list */}
+            <div className="space-y-2">
+              {metrics.map(m => (
+                <div key={m.name} className="text-[10px]">
+                  <p className="font-semibold text-gray-700">{m.name}</p>
+                  <p className="text-gray-400 leading-relaxed mt-0.5">{m.what}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* ASX note */}
+            <div className="mt-auto pt-2 border-t border-gray-100">
+              <p className="text-[10px] text-gray-400 italic leading-relaxed">{asxNote}</p>
+            </div>
           </div>
         ))}
       </div>
+
       <div className="mt-5 pt-4 border-t border-gray-100">
         <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-[11px] text-gray-500 mb-3">
           <span>📊 Universe: ASX 200</span>

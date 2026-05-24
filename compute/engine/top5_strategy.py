@@ -131,14 +131,18 @@ def run(pick_month: date, top_n: int = 5, dry_run: bool = False) -> list[dict]:
         return rows
 
     # ── Upsert into strategy.monthly_picks ───────────────────────────────────
-    # Delete existing picks for this month first (clean slate each run)
+    # Step 1: deactivate all existing picks (keep as history)
+    cur.execute("UPDATE strategy.monthly_picks SET is_active = FALSE WHERE is_active = TRUE")
+    log.info("Deactivated previous active picks")
+
+    # Step 2: delete any existing rows for this week (clean slate for re-runs)
     cur.execute(
         "DELETE FROM strategy.monthly_picks WHERE pick_month = %s",
         (pick_month,)
     )
     deleted = cur.rowcount
     if deleted:
-        log.info(f"Replaced {deleted} existing picks for week of {pick_month}")
+        log.info(f"Removed {deleted} existing picks for week of {pick_month}")
 
     insert_rows = [
         (
@@ -168,6 +172,7 @@ def run(pick_month: date, top_n: int = 5, dry_run: bool = False) -> list[dict]:
         for rank, r in enumerate(rows, 1)
     ]
 
+    # Step 3: insert new week's picks as active
     execute_values(cur, """
         INSERT INTO strategy.monthly_picks (
             pick_month, rank, asx_code, company_name, sector, industry,
@@ -175,31 +180,10 @@ def run(pick_month: date, top_n: int = 5, dry_run: bool = False) -> list[dict]:
             value_score, income_score, growth_score,
             price, market_cap, pe_ratio,
             dividend_yield, grossed_up_yield, franking_pct,
-            return_3m, return_1y, roe, piotroski_f_score
+            return_3m, return_1y, roe, piotroski_f_score,
+            is_active
         ) VALUES %s
-        ON CONFLICT (pick_month, rank) DO UPDATE SET
-            asx_code         = EXCLUDED.asx_code,
-            company_name     = EXCLUDED.company_name,
-            sector           = EXCLUDED.sector,
-            industry         = EXCLUDED.industry,
-            composite_score  = EXCLUDED.composite_score,
-            momentum_score   = EXCLUDED.momentum_score,
-            quality_score    = EXCLUDED.quality_score,
-            value_score      = EXCLUDED.value_score,
-            income_score     = EXCLUDED.income_score,
-            growth_score     = EXCLUDED.growth_score,
-            price            = EXCLUDED.price,
-            market_cap       = EXCLUDED.market_cap,
-            pe_ratio         = EXCLUDED.pe_ratio,
-            dividend_yield   = EXCLUDED.dividend_yield,
-            grossed_up_yield = EXCLUDED.grossed_up_yield,
-            franking_pct     = EXCLUDED.franking_pct,
-            return_3m        = EXCLUDED.return_3m,
-            return_1y        = EXCLUDED.return_1y,
-            roe              = EXCLUDED.roe,
-            piotroski_f_score = EXCLUDED.piotroski_f_score,
-            computed_at      = NOW()
-    """, insert_rows)
+    """, [r + (True,) for r in insert_rows])
 
     conn.commit()
     log.info(f"Inserted {len(rows)} picks for week of {pick_month}")

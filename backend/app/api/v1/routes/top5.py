@@ -68,9 +68,7 @@ async def get_current_picks(
     result = await db.execute(text("""
         SELECT *
         FROM strategy.monthly_picks
-        WHERE pick_month = (
-            SELECT MAX(pick_month) FROM strategy.monthly_picks
-        )
+        WHERE is_active = TRUE
         ORDER BY rank
     """))
     rows = result.mappings().all()
@@ -81,7 +79,7 @@ async def get_current_picks(
     result2 = await db.execute(text(
         "SELECT COUNT(DISTINCT pick_month) AS n FROM strategy.monthly_picks"
     ))
-    total_weeks = result2.scalar() or 0
+    total_weeks = (result2.scalar() or 0)
 
     return {
         "pick_week":   rows[0]["pick_month"].isoformat(),

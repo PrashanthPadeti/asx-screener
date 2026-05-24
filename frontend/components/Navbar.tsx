@@ -21,15 +21,20 @@ const MARKET_DATA_LINKS = [
   { href: '/top5',           label: 'AlphaFive',       icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',  premium: true },
 ]
 
-const RESOURCES_LINKS = [
-  { href: '/news',      label: 'News',             icon: Newspaper,  desc: 'Latest ASX announcements & market news',             plan: null  },
-  { href: '/watchlist', label: 'Watchlist',         icon: Star,       desc: 'Track your favourite stocks',                        plan: null  },
-  { href: '/portfolio', label: 'Portfolio',         icon: PieChart,   desc: 'Monitor your holdings & performance',                plan: null  },
-  { href: '/alerts',    label: 'Alerts',            icon: Bell,       desc: 'Price & volume alerts for your stocks',              plan: null  },
-  { href: '/glossary',  label: 'Metrics Glossary',  icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', plan: 'pro' },
-  { href: '/learn',     label: 'Education Hub',     icon: BookOpen,   desc: 'Guides, tutorials & courses',                        plan: 'pro' },
-  { href: '/brokers',   label: 'Broker Compare',    icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    plan: 'pro' },
-  { href: '/contact',   label: 'Contact Support',   icon: LifeBuoy,   desc: 'Get help or report an issue',                       plan: null  },
+// Shown to all users (logged in or out)
+const RESOURCES_LINKS_BASE = [
+  { href: '/news',     label: 'News',            icon: Newspaper,  desc: 'Latest ASX announcements & market news',             plan: null  },
+  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', plan: 'pro' },
+  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   desc: 'Guides, tutorials & courses',                        plan: 'pro' },
+  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    plan: 'pro' },
+  { href: '/contact',  label: 'Contact Support',  icon: LifeBuoy,   desc: 'Get help or report an issue',                       plan: null  },
+]
+
+// Extra links shown only to guests (not logged in) so they discover the features
+const RESOURCES_LINKS_GUEST_EXTRA = [
+  { href: '/watchlist', label: 'Watchlist', icon: Star,     desc: 'Track your favourite stocks',             plan: null },
+  { href: '/portfolio', label: 'Portfolio', icon: PieChart, desc: 'Monitor your holdings & performance',     plan: null },
+  { href: '/alerts',    label: 'Alerts',    icon: Bell,     desc: 'Price & volume alerts for your stocks',   plan: null },
 ]
 
 const PLAN_BADGE: Record<string, string> = {
@@ -150,7 +155,7 @@ export default function Navbar() {
               </button>
               {resourceDropOpen && (
                 <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50 max-h-[calc(100vh-4rem)] overflow-y-auto">
-                  {RESOURCES_LINKS.map(({ href, label, icon: Icon, desc, plan }) => (
+                  {[...RESOURCES_LINKS_BASE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon, desc, plan }) => (
                     <Link
                       key={href}
                       href={href}
@@ -331,7 +336,7 @@ export default function Navbar() {
               </Link>
             ))}
             <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Resources</div>
-            {RESOURCES_LINKS.map(({ href, label, icon: Icon }) => (
+            {[...RESOURCES_LINKS_BASE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
                 <Icon className="w-4 h-4" />{label}
               </Link>

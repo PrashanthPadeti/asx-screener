@@ -1,6 +1,6 @@
 'use client'
-import { useState, useMemo } from 'react'
-import { Search, BookOpen, ChevronDown, ChevronUp, Tag, MapPin, Calculator, Target, Info } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { Search, BookOpen, ChevronDown, ChevronUp, Tag, MapPin, Calculator, Target, Info, BarChart2, Link2, Zap, ChevronsUpDown } from 'lucide-react'
 import { PlanGate } from '@/components/PlanGate'
 import { cn } from '@/lib/utils'
 
@@ -15,6 +15,10 @@ interface Metric {
   formula?: string
   interpretation?: string
   benchmark?: string
+  example?: string
+  beginnerTip?: string
+  beginner?: boolean
+  relatedMetrics?: string[]
   usedIn: string[]
   tags: string[]
 }
@@ -32,6 +36,10 @@ const METRICS: Metric[] = [
     formula: 'P/E = Share Price ÷ Earnings Per Share (EPS)',
     interpretation: 'Lower P/E = cheaper relative to earnings. A negative P/E means the company is loss-making. Compare P/E within the same sector — a "fair" P/E differs greatly between banks (12–15×) and tech growth stocks (30–60×).',
     benchmark: 'ASX average: ~16–18×. Defensive sectors (utilities, banks): 10–15×. Growth sectors (tech, healthcare): 25–50×+',
+    example: 'Stock X trades at $20.00 with EPS of $1.25 → P/E = 20÷1.25 = 16×. If the sector average is 12×, the stock is trading at a 33% premium — potentially justified by faster growth or expensive.',
+    beginnerTip: 'Think of P/E like this: if a business earns $1 of profit per year, how many dollars would you pay to own it? A P/E of 16× means you\'re paying $16 for every $1 of annual profit. Lower is cheaper, higher means you\'re paying more for expected future growth.',
+    beginner: true,
+    relatedMetrics: ['forward_pe', 'peg_ratio', 'ev_to_ebitda', 'eps'],
     usedIn: ['Screener', 'Company Detail', 'Value Scans', 'Composite Score (Value Factor)'],
     tags: ['earnings', 'valuation', 'price'],
   },
@@ -56,6 +64,10 @@ const METRICS: Metric[] = [
     formula: 'P/B = Share Price ÷ Book Value Per Share',
     interpretation: 'P/B < 1 means the stock trades below net asset value — potentially undervalued or a sign of deteriorating assets. P/B > 3 often signals a high-quality, asset-light business or market premium. Financial stocks (banks, insurers) are best evaluated on P/B.',
     benchmark: 'Banks/financials: 1–2×. Industrials: 1.5–3×. Tech/high-quality: 3–10×+',
+    example: 'A bank has total assets of $10B, total liabilities of $9B — book value = $1B. With 100M shares on issue, book value per share = $10. If the stock trades at $12, P/B = 1.2×.',
+    beginnerTip: 'P/B is like asking: if this company sold everything it owned and paid all its debts, how much would be left per share? A P/B below 1× means you\'re buying $1 of assets for less than $1 — potentially a bargain, but check why it\'s so cheap.',
+    beginner: true,
+    relatedMetrics: ['pe_ratio', 'roe', 'nta_per_share', 'graham_number'],
     usedIn: ['Screener', 'Company Detail', 'Value Scans', 'Composite Score (Value Factor)'],
     tags: ['book value', 'assets', 'valuation'],
   },
@@ -199,6 +211,10 @@ const METRICS: Metric[] = [
     formula: 'ROE = Net Profit ÷ Shareholders\' Equity × 100',
     interpretation: 'Higher is better. ROE above 15% is generally excellent. However, very high ROE can be artificially inflated by excessive debt (leverage), so always check alongside debt-to-equity.',
     benchmark: 'Below 10%: weak. 10–15%: adequate. 15–20%: good. Above 20%: excellent',
+    example: 'A company with $500M shareholders\' equity earns $100M net profit → ROE = 100÷500 = 20%. Held for 5 years with reinvested profits, this compounds the equity base significantly.',
+    beginnerTip: 'ROE tells you: for every $100 shareholders have invested in this company, how much profit did it earn? An ROE of 20% means it earned $20 for every $100 invested — like getting 20% interest on a bank deposit. The higher the better, as long as it\'s not driven by excessive debt.',
+    beginner: true,
+    relatedMetrics: ['roa', 'roic', 'roce', 'debt_to_equity'],
     usedIn: ['Screener', 'Company Detail', 'Composite Score (Quality Factor)', 'Quality Scans'],
     tags: ['equity', 'return', 'profitability'],
   },
@@ -237,6 +253,10 @@ const METRICS: Metric[] = [
     formula: 'Dividend Yield = Annual DPS ÷ Share Price × 100',
     interpretation: 'Higher yield sounds better but can signal a distressed business. A yield significantly above peers often means the market expects a dividend cut. Always check payout ratio and cash flow sustainability alongside yield.',
     benchmark: 'ASX average: 3.5–4.5%. Banks: 4–7%. REITs: 4–7%. Growth stocks: 0–2%',
+    example: 'A stock at $10.00 pays $0.45/year in dividends → Yield = 0.45÷10 = 4.5%. If the price falls to $8.00, the yield rises to 5.6% — making it look more attractive, but check if the business is in trouble first.',
+    beginnerTip: 'Dividend yield is like the annual "interest rate" you earn just for holding the stock. A 5% yield on a $10,000 investment means you\'d receive $500/year in cash without selling anything. But be careful — very high yields can mean the market expects the dividend to be cut.',
+    beginner: true,
+    relatedMetrics: ['grossed_up_yield', 'payout_ratio', 'franking_pct', 'dividend_cagr_3y'],
     usedIn: ['Screener', 'Company Detail', 'Dividend Scans', 'Composite Score (Income Factor)', 'Market Overview'],
     tags: ['dividends', 'income', 'yield'],
   },
@@ -249,6 +269,10 @@ const METRICS: Metric[] = [
     formula: 'Grossed-Up Yield = Dividend Yield × (1 + Franking% × (Corporate Tax Rate ÷ (1 − Corporate Tax Rate)))\n= Dividend Yield × (1 + Franking% × 0.4286) at 30% corporate tax',
     interpretation: 'The true income for Australian resident investors. Critical for superannuation funds and retirees who can receive franking credits as cash refunds. Always compare ASX stocks on grossed-up yield rather than raw yield.',
     benchmark: 'Fully franked 4% yield = ~5.7% grossed-up. A grossed-up yield above 6% is excellent for income investors',
+    example: 'Stock pays a 5% fully franked dividend. Grossed-up yield = 5% × (1 + 1.0 × 0.4286) = 5% × 1.4286 = 7.14%. An SMSF in pension phase would receive the full 7.14% value (2.14% as a tax refund cheque).',
+    beginnerTip: 'This is the "true" yield for Australian investors. Franking credits are like a bonus tax refund from the ATO. A fully franked 5% dividend is actually worth 7.14% to you — the company already paid the 30% tax and passes it on as a credit you can claim. Always compare ASX income stocks using this number, not the raw yield.',
+    beginner: true,
+    relatedMetrics: ['dividend_yield', 'franking_pct', 'payout_ratio'],
     usedIn: ['Screener', 'Company Detail', 'Dividend Scans', 'Composite Score (Income Factor)', 'Top 5 Strategy'],
     tags: ['franking', 'dividends', 'Australia', 'tax', 'income'],
   },
@@ -371,6 +395,10 @@ const METRICS: Metric[] = [
     formula: 'F-Score = Profitability (4 pts) + Leverage/Liquidity (3 pts) + Operating Efficiency (2 pts)\nSignals include: positive ROA, positive CFO, improving ROA, accruals ratio, improving leverage, improving current ratio, no dilution, improving gross margin, improving asset turnover',
     interpretation: 'F-Score 0–2: financially weak, potential short candidate. F-Score 3–6: average. F-Score 7–9: financially strong, historically outperforms. Strong backtests show buying F-Score 8–9 stocks significantly outperforms the market.',
     benchmark: '0–2: weak (avoid or short). 3–6: neutral. 7–9: strong (buy signal)',
+    example: 'A company scores: positive ROA ✓, positive CFO ✓, improving ROA ✓, low accruals ✓, falling debt ✓, improving current ratio ✓, no dilution ✓, improving gross margin ✓, improving asset turnover ✗ → F-Score = 8/9 — financially very strong.',
+    beginnerTip: 'Think of the Piotroski F-Score like a health check-up for a company\'s finances. It checks 9 simple yes/no questions: Is it making money? Is it generating real cash? Is it getting more or less debt? A score of 8 or 9 out of 9 means the company is in excellent financial shape across the board.',
+    beginner: true,
+    relatedMetrics: ['altman_z_score', 'debt_to_equity', 'current_ratio', 'roe'],
     usedIn: ['Screener', 'Company Detail', 'Quality Scans', 'Composite Score (Quality Factor)', 'Top 5 Strategy'],
     tags: ['quality', 'financial health', 'Piotroski', 'score'],
   },
@@ -395,6 +423,10 @@ const METRICS: Metric[] = [
     formula: 'D/E = Total Debt ÷ Shareholders\' Equity',
     interpretation: 'Below 0.5: conservative. 0.5–1.5: moderate. Above 1.5: elevated (acceptable in stable cash-flow businesses). Above 3: high risk unless in capital-intensive industry like utilities or property. Negative equity makes D/E meaningless.',
     benchmark: 'Tech/services: <0.3. Industrials: 0.3–1.0. Banks: 8–12× (different measure). REITs: 0.5–1.5',
+    example: 'Company has $300M total debt and $500M shareholders\' equity → D/E = 0.6×. For every $1 of equity, there is $0.60 of debt. A utility with $2B debt and $1B equity has D/E = 2.0× — high, but acceptable given stable cash flows.',
+    beginnerTip: 'D/E is like a personal finance check: if someone earns $100k but owes $50k on their mortgage, their D/E is 0.5× — manageable. If they owe $300k, it\'s 3× — very leveraged. High debt isn\'t automatically bad (it amplifies gains too), but it amplifies losses and creates risk if the business hits trouble.',
+    beginner: true,
+    relatedMetrics: ['current_ratio', 'debt_to_ebitda', 'net_debt_to_ebitda', 'altman_z_score'],
     usedIn: ['Screener', 'Company Detail', 'Composite Score (Quality Factor)', 'Value Scans'],
     tags: ['debt', 'leverage', 'risk'],
   },
@@ -432,6 +464,10 @@ const METRICS: Metric[] = [
     formula: 'RSI = 100 − (100 ÷ (1 + RS))\nRS = Average Gain over 14 periods ÷ Average Loss over 14 periods',
     interpretation: 'RSI below 30: oversold — potential buy signal or downtrend continuation. RSI above 70: overbought — potential sell signal or strong trend. RSI between 40–60: neutral zone. In strong uptrends, RSI can stay above 60 for extended periods.',
     benchmark: '<30: oversold. 30–50: bearish bias. 50–70: bullish bias. >70: overbought',
+    example: 'Stock falls 8 of the last 14 days, avg gain = 0.3%, avg loss = 0.9% → RS = 0.3÷0.9 = 0.33 → RSI = 100 − (100÷1.33) = 24.8. Below 30 signals potential oversold bounce — but confirm with a trend check.',
+    beginnerTip: 'RSI is like a thermometer for a stock\'s recent price momentum. A reading below 30 means the stock has been falling fast and might be "oversold" (due for a bounce). Above 70 means it\'s been rising very quickly and might be "overbought" (due for a pullback). It doesn\'t tell you which direction — only how hot or cold the recent moves have been.',
+    beginner: true,
+    relatedMetrics: ['adx_14', 'macd', 'sma_50', 'momentum_3m'],
     usedIn: ['Screener', 'Company Detail', 'Technical Tab', 'RSI Oversold Scan', 'RSI Overbought Scan', 'Turnaround Scan', 'Composite Score (Momentum Factor)'],
     tags: ['RSI', 'momentum', 'overbought', 'oversold', 'technical'],
   },
@@ -1676,125 +1712,177 @@ const METRICS: Metric[] = [
 // ── Category config ───────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  { key: 'all',                   label: 'All Metrics',          colour: 'bg-gray-100 text-gray-700' },
-  { key: 'Valuation',             label: 'Valuation',            colour: 'bg-blue-100 text-blue-700' },
-  { key: 'Profitability',         label: 'Profitability',        colour: 'bg-emerald-100 text-emerald-700' },
-  { key: 'Growth',                label: 'Growth',               colour: 'bg-violet-100 text-violet-700' },
-  { key: 'Dividends & Income',    label: 'Dividends & Income',   colour: 'bg-amber-100 text-amber-700' },
-  { key: 'Financial Health',      label: 'Financial Health',     colour: 'bg-rose-100 text-rose-700' },
-  { key: 'Technical Indicators',  label: 'Technicals',           colour: 'bg-cyan-100 text-cyan-700' },
-  { key: 'Price & Returns',       label: 'Price & Returns',      colour: 'bg-orange-100 text-orange-700' },
-  { key: 'Quality Scores',        label: 'Quality Scores',       colour: 'bg-purple-100 text-purple-700' },
-  { key: 'ASX-Specific',          label: 'ASX-Specific',         colour: 'bg-green-100 text-green-700' },
+  { key: 'all',                   label: 'All Metrics',          colour: 'bg-gray-100 text-gray-700',     bar: 'bg-gray-300' },
+  { key: 'Valuation',             label: 'Valuation',            colour: 'bg-blue-100 text-blue-700',     bar: 'bg-blue-400' },
+  { key: 'Profitability',         label: 'Profitability',        colour: 'bg-emerald-100 text-emerald-700', bar: 'bg-emerald-400' },
+  { key: 'Growth',                label: 'Growth',               colour: 'bg-violet-100 text-violet-700', bar: 'bg-violet-400' },
+  { key: 'Dividends & Income',    label: 'Dividends & Income',   colour: 'bg-amber-100 text-amber-700',   bar: 'bg-amber-400' },
+  { key: 'Financial Health',      label: 'Financial Health',     colour: 'bg-rose-100 text-rose-700',     bar: 'bg-rose-400' },
+  { key: 'Technical Indicators',  label: 'Technicals',           colour: 'bg-cyan-100 text-cyan-700',     bar: 'bg-cyan-400' },
+  { key: 'Price & Returns',       label: 'Price & Returns',      colour: 'bg-orange-100 text-orange-700', bar: 'bg-orange-400' },
+  { key: 'Quality Scores',        label: 'Quality Scores',       colour: 'bg-purple-100 text-purple-700', bar: 'bg-purple-400' },
+  { key: 'ASX-Specific',          label: 'ASX-Specific',         colour: 'bg-green-100 text-green-700',   bar: 'bg-green-400' },
 ]
 
 function catColour(cat: string) {
   return CATEGORIES.find(c => c.key === cat)?.colour ?? 'bg-gray-100 text-gray-600'
 }
+function catBar(cat: string) {
+  return CATEGORIES.find(c => c.key === cat)?.bar ?? 'bg-gray-300'
+}
+
+// ── Section label helper ──────────────────────────────────────────────────────
+
+function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div className="flex items-center gap-1.5 mb-2.5">
+      {icon}
+      <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">{label}</span>
+    </div>
+  )
+}
 
 // ── Metric card ───────────────────────────────────────────────────────────────
 
-function MetricCard({ metric }: { metric: Metric }) {
+function MetricCard({ metric, expandAll }: { metric: Metric; expandAll: boolean | null }) {
   const [open, setOpen] = useState(false)
+
+  useEffect(() => {
+    if (expandAll !== null) setOpen(expandAll)
+  }, [expandAll])
+
   return (
     <div className={cn(
-      'bg-white border rounded-xl transition-all duration-150',
-      open ? 'border-blue-300 shadow-md' : 'border-gray-200 hover:border-gray-300',
+      'bg-white border rounded-xl transition-all duration-150 overflow-hidden',
+      open ? 'border-blue-300 shadow-md' : 'border-gray-200 hover:border-blue-200 hover:shadow-sm',
     )}>
+      {/* Category colour accent bar */}
+      <div className={cn('h-0.5', catBar(metric.category))} />
+
       {/* Header — always visible */}
       <button
         className="w-full text-left px-5 py-4 flex items-start justify-between gap-3"
         onClick={() => setOpen(o => !o)}
       >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap mb-1">
+          <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
             <span className={cn('text-[10px] font-semibold px-2 py-0.5 rounded-full', catColour(metric.category))}>
               {metric.category}
             </span>
+            {metric.beginner && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                ✦ Beginner Friendly
+              </span>
+            )}
           </div>
           <h3 className="font-semibold text-sm text-gray-900">{metric.name}</h3>
-          <p className="text-xs text-gray-500 mt-0.5">{metric.shortDesc}</p>
+          <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{metric.shortDesc}</p>
         </div>
-        <div className="flex-shrink-0 mt-0.5">
-          {open
-            ? <ChevronUp className="w-4 h-4 text-blue-500" />
-            : <ChevronDown className="w-4 h-4 text-gray-400" />
-          }
+        <div className="flex items-center gap-1.5 flex-shrink-0 mt-1">
+          {metric.formula    && <span className="hidden sm:inline text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">∑ formula</span>}
+          {metric.benchmark  && <span className="hidden sm:inline text-[9px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded">⬡ benchmark</span>}
+          {open ? <ChevronUp className="w-4 h-4 text-blue-500" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
         </div>
       </button>
 
       {/* Expanded content */}
       {open && (
-        <div className="px-5 pb-5 space-y-4 border-t border-gray-100">
+        <div className="border-t border-gray-100">
 
-          {/* Definition */}
-          <div className="pt-4">
-            <div className="flex items-center gap-1.5 mb-2">
-              <Info className="w-3.5 h-3.5 text-blue-500" />
-              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Definition</span>
+          {/* Beginner tip — amber highlight block */}
+          {metric.beginnerTip && (
+            <div className="mx-5 mt-5 bg-gradient-to-r from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="text-base">💡</span>
+                <span className="text-[10px] font-bold text-amber-800 uppercase tracking-widest">Simple Explanation</span>
+              </div>
+              <p className="text-sm text-amber-900 leading-relaxed">{metric.beginnerTip}</p>
             </div>
-            <p className="text-sm text-gray-600 leading-relaxed">{metric.definition}</p>
-          </div>
+          )}
 
-          {/* Formula */}
-          {metric.formula && (
+          <div className="px-5 pb-6 pt-5 space-y-5">
+
+            {/* What it measures */}
             <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <Calculator className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Formula / Calculation</span>
-              </div>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
-                <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">{metric.formula}</pre>
-              </div>
+              <SectionLabel icon={<Info className="w-3.5 h-3.5 text-blue-500" />} label="What it measures" />
+              <p className="text-sm text-gray-700 leading-relaxed">{metric.definition}</p>
             </div>
-          )}
 
-          {/* Interpretation */}
-          {metric.interpretation && (
-          <div>
-            <div className="flex items-center gap-1.5 mb-2">
-              <Target className="w-3.5 h-3.5 text-amber-600" />
-              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Interpretation</span>
-            </div>
-            <p className="text-sm text-gray-600 leading-relaxed">{metric.interpretation}</p>
-          </div>
-          )}
+            {/* Formula */}
+            {metric.formula && (
+              <div>
+                <SectionLabel icon={<Calculator className="w-3.5 h-3.5 text-emerald-500" />} label="Formula / Calculation" />
+                <div className="bg-slate-900 rounded-xl px-4 py-3.5 overflow-x-auto">
+                  <pre className="text-xs text-emerald-300 font-mono leading-relaxed whitespace-pre-wrap">{metric.formula}</pre>
+                </div>
+              </div>
+            )}
 
-          {/* Benchmark */}
-          {metric.benchmark && (
+            {/* Real-world example */}
+            {metric.example && (
+              <div>
+                <SectionLabel icon={<BarChart2 className="w-3.5 h-3.5 text-blue-400" />} label="Real-World Example" />
+                <div className="bg-blue-50 border border-blue-100 rounded-xl px-4 py-3.5">
+                  <p className="text-sm text-blue-900 leading-relaxed font-medium">{metric.example}</p>
+                </div>
+              </div>
+            )}
+
+            {/* How to interpret */}
+            {metric.interpretation && (
+              <div>
+                <SectionLabel icon={<Target className="w-3.5 h-3.5 text-amber-500" />} label="How to Interpret It" />
+                <p className="text-sm text-gray-700 leading-relaxed">{metric.interpretation}</p>
+              </div>
+            )}
+
+            {/* Benchmarks */}
+            {metric.benchmark && (
+              <div>
+                <SectionLabel icon={<Tag className="w-3.5 h-3.5 text-purple-500" />} label="Benchmarks & Ranges" />
+                <div className="bg-gradient-to-r from-purple-50 to-white border border-purple-100 rounded-xl px-4 py-3">
+                  <p className="text-xs text-purple-900 leading-relaxed font-medium">{metric.benchmark}</p>
+                </div>
+              </div>
+            )}
+
+            {/* Related metrics */}
+            {metric.relatedMetrics && metric.relatedMetrics.length > 0 && (
+              <div>
+                <SectionLabel icon={<Link2 className="w-3.5 h-3.5 text-gray-400" />} label="Related Metrics" />
+                <div className="flex flex-wrap gap-1.5">
+                  {metric.relatedMetrics.map(id => {
+                    const m = METRICS.find(x => x.id === id)
+                    return m ? (
+                      <span key={id} className="text-xs px-2.5 py-1 rounded-full bg-gray-100 text-gray-700 border border-gray-200 font-medium hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 transition-colors cursor-default">
+                        {m.name}
+                      </span>
+                    ) : null
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Used in */}
             <div>
-              <div className="flex items-center gap-1.5 mb-2">
-                <Tag className="w-3.5 h-3.5 text-purple-600" />
-                <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Benchmarks & Ranges</span>
-              </div>
-              <div className="bg-purple-50 border border-purple-100 rounded-lg px-4 py-2.5">
-                <p className="text-xs text-purple-800 leading-relaxed">{metric.benchmark}</p>
+              <SectionLabel icon={<MapPin className="w-3.5 h-3.5 text-rose-400" />} label="Where you'll see this" />
+              <div className="flex flex-wrap gap-1.5">
+                {metric.usedIn.map(u => (
+                  <span key={u} className="text-[11px] px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100 font-medium">
+                    {u}
+                  </span>
+                ))}
               </div>
             </div>
-          )}
 
-          {/* Used in */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-2">
-              <MapPin className="w-3.5 h-3.5 text-rose-500" />
-              <span className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Used In</span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {metric.usedIn.map(u => (
-                <span key={u} className="text-[11px] px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
-                  {u}
+            {/* Tags */}
+            <div className="flex flex-wrap gap-1.5 pt-3 border-t border-gray-100">
+              {metric.tags.map(t => (
+                <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
+                  #{t}
                 </span>
               ))}
             </div>
-          </div>
-
-          {/* Tags */}
-          <div className="flex flex-wrap gap-1.5 pt-1">
-            {metric.tags.map(t => (
-              <span key={t} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">
-                #{t}
-              </span>
-            ))}
           </div>
         </div>
       )}
@@ -1802,15 +1890,48 @@ function MetricCard({ metric }: { metric: Metric }) {
   )
 }
 
+// ── Quick filter chip ─────────────────────────────────────────────────────────
+
+type QuickFilter = 'formula' | 'benchmark' | 'screener' | 'alphafive' | 'beginner'
+
+const QUICK_FILTERS: { key: QuickFilter; label: string; colour: string }[] = [
+  { key: 'formula',    label: '∑ Has Formula',          colour: 'border-emerald-300 text-emerald-700 bg-emerald-50' },
+  { key: 'benchmark',  label: '⬡ Has Benchmark',         colour: 'border-purple-300 text-purple-700 bg-purple-50' },
+  { key: 'screener',   label: '🔍 Used in Screener',     colour: 'border-blue-300 text-blue-700 bg-blue-50' },
+  { key: 'alphafive',  label: '🏆 Used in AlphaFive',    colour: 'border-amber-300 text-amber-700 bg-amber-50' },
+  { key: 'beginner',   label: '✦ Beginner Friendly',    colour: 'border-green-300 text-green-700 bg-green-50' },
+]
+
+function matchesQuickFilter(m: Metric, f: QuickFilter): boolean {
+  switch (f) {
+    case 'formula':   return !!m.formula
+    case 'benchmark': return !!m.benchmark
+    case 'screener':  return m.usedIn.some(u => u.includes('Screener'))
+    case 'alphafive': return m.usedIn.some(u => u.toLowerCase().includes('top 5') || u.toLowerCase().includes('alphafive'))
+    case 'beginner':  return !!m.beginner
+  }
+}
+
 // ── Main content ──────────────────────────────────────────────────────────────
 
 function GlossaryContent() {
-  const [search, setSearch] = useState('')
-  const [activeCat, setActiveCat] = useState('all')
+  const [search,       setSearch]       = useState('')
+  const [activeCat,    setActiveCat]    = useState('all')
+  const [activeQF,     setActiveQF]     = useState<Set<QuickFilter>>(new Set())
+  const [expandAll,    setExpandAll]    = useState<boolean | null>(null)
+
+  function toggleQF(f: QuickFilter) {
+    setActiveQF(prev => {
+      const next = new Set(prev)
+      next.has(f) ? next.delete(f) : next.add(f)
+      return next
+    })
+  }
 
   const filtered = useMemo(() => {
     let m = METRICS
     if (activeCat !== 'all') m = m.filter(x => x.category === activeCat)
+    if (activeQF.size > 0)   m = m.filter(x => [...activeQF].every(f => matchesQuickFilter(x, f)))
     if (search.trim()) {
       const q = search.toLowerCase()
       m = m.filter(x =>
@@ -1822,7 +1943,7 @@ function GlossaryContent() {
       )
     }
     return m
-  }, [search, activeCat])
+  }, [search, activeCat, activeQF])
 
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: METRICS.length }
@@ -1836,15 +1957,15 @@ function GlossaryContent() {
 
         {/* Sidebar */}
         <aside className="hidden lg:block w-56 flex-shrink-0">
-          <div className="sticky top-6 space-y-1">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3 px-2">Categories</p>
+          <div className="sticky top-20 space-y-1">
+            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3 px-2">Categories</p>
             {CATEGORIES.map(cat => (
               <button
                 key={cat.key}
-                onClick={() => setActiveCat(cat.key!)}
+                onClick={() => setActiveCat(cat.key)}
                 className={cn(
                   'w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors',
-                  activeCat === cat.key!
+                  activeCat === cat.key
                     ? 'bg-blue-50 text-blue-700 font-semibold'
                     : 'text-gray-600 hover:bg-gray-100',
                 )}
@@ -1852,9 +1973,9 @@ function GlossaryContent() {
                 <span>{cat.label}</span>
                 <span className={cn(
                   'text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[20px] text-center',
-                  activeCat === cat.key! ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500',
+                  activeCat === cat.key ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500',
                 )}>
-                  {counts[cat.key!] ?? 0}
+                  {counts[cat.key] ?? 0}
                 </span>
               </button>
             ))}
@@ -1863,62 +1984,88 @@ function GlossaryContent() {
 
         {/* Main */}
         <div className="flex-1 min-w-0">
-          {/* Search */}
-          <div className="relative mb-6">
+
+          {/* Search bar */}
+          <div className="relative mb-4">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search metrics, formulas, concepts..."
+              placeholder="Search 140+ metrics, formulas, concepts..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+              className="w-full pl-10 pr-20 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white shadow-sm"
             />
             {search && (
-              <button onClick={() => setSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+              <button onClick={() => setSearch('')} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs font-medium">
                 Clear
               </button>
             )}
           </div>
 
-          {/* Mobile category pills */}
-          <div className="flex gap-2 overflow-x-auto pb-2 mb-6 lg:hidden">
-            {CATEGORIES.map(cat => (
+          {/* Quick filter chips */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {QUICK_FILTERS.map(f => (
               <button
-                key={cat.key}
-                onClick={() => setActiveCat(cat.key!)}
+                key={f.key}
+                onClick={() => toggleQF(f.key)}
                 className={cn(
-                  'flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors',
-                  activeCat === cat.key!
-                    ? 'bg-blue-600 text-white border-blue-600'
-                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300',
+                  'text-xs px-3 py-1.5 rounded-full border font-medium transition-all',
+                  activeQF.has(f.key)
+                    ? f.colour + ' shadow-sm'
+                    : 'border-gray-200 text-gray-600 bg-white hover:border-gray-300',
                 )}
               >
-                {cat.label} ({counts[cat.key!] ?? 0})
+                {f.label}
               </button>
             ))}
           </div>
 
-          {/* Results count */}
+          {/* Mobile category pills */}
+          <div className="flex gap-2 overflow-x-auto pb-2 mb-4 lg:hidden scrollbar-hide">
+            {CATEGORIES.map(cat => (
+              <button
+                key={cat.key}
+                onClick={() => setActiveCat(cat.key)}
+                className={cn(
+                  'flex-shrink-0 text-xs px-3 py-1.5 rounded-full border transition-colors',
+                  activeCat === cat.key
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300',
+                )}
+              >
+                {cat.label} ({counts[cat.key] ?? 0})
+              </button>
+            ))}
+          </div>
+
+          {/* Results bar + Expand All */}
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm text-gray-500">
               {filtered.length === METRICS.length
-                ? `${METRICS.length} metrics`
-                : `${filtered.length} of ${METRICS.length} metrics`
+                ? <><span className="font-semibold text-gray-700">{METRICS.length}</span> metrics</>
+                : <><span className="font-semibold text-gray-700">{filtered.length}</span> of {METRICS.length} metrics</>
               }
               {activeCat !== 'all' && <span className="text-blue-600"> in {activeCat}</span>}
             </p>
+            <button
+              onClick={() => setExpandAll(v => v === true ? false : true)}
+              className="flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-blue-600 transition-colors px-3 py-1.5 rounded-lg border border-gray-200 hover:border-blue-200 bg-white"
+            >
+              <ChevronsUpDown className="w-3.5 h-3.5" />
+              {expandAll === true ? 'Collapse All' : 'Expand All'}
+            </button>
           </div>
 
           {/* Metric cards */}
           {filtered.length > 0 ? (
-            <div className="space-y-3">
-              {filtered.map(m => <MetricCard key={m.id} metric={m} />)}
+            <div className="space-y-2.5">
+              {filtered.map(m => <MetricCard key={m.id} metric={m} expandAll={expandAll} />)}
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 text-center">
               <Search className="w-10 h-10 text-gray-200 mb-3" />
               <p className="text-gray-500 font-medium">No metrics found</p>
-              <p className="text-sm text-gray-400 mt-1">Try a different search term or clear the filter</p>
+              <p className="text-sm text-gray-400 mt-1">Try a different search term or clear the filters</p>
             </div>
           )}
         </div>
@@ -1941,10 +2088,15 @@ export default function GlossaryPage() {
               <BookOpen className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
-              <h1 className="text-2xl font-bold text-gray-900">Metrics Glossary</h1>
-              <p className="text-gray-500 text-sm mt-0.5">
-                Plain-English definitions, formulas, benchmarks and context for every metric
-                used across the ASX Screener platform.
+              <div className="flex items-center gap-2.5 flex-wrap mb-1">
+                <h1 className="text-2xl font-bold text-gray-900">Metrics Glossary</h1>
+                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                  <Zap className="w-3 h-3" /> Pro &amp; Premium
+                </span>
+              </div>
+              <p className="text-gray-500 text-sm mt-0.5 max-w-2xl">
+                Your investment education library — plain-English definitions, formulas, benchmarks,
+                real-world examples and beginner explanations for every metric across the ASX Screener platform.
               </p>
               <div className="flex flex-wrap items-center gap-4 mt-4">
                 <div className="text-center">
@@ -1969,6 +2121,13 @@ export default function GlossaryPage() {
                     {METRICS.filter(m => m.benchmark).length}
                   </p>
                   <p className="text-xs text-gray-500">With Benchmarks</p>
+                </div>
+                <div className="w-px h-8 bg-gray-200" />
+                <div className="text-center">
+                  <p className="text-xl font-bold text-gray-900">
+                    {METRICS.filter(m => m.beginner).length}
+                  </p>
+                  <p className="text-xs text-gray-500">Beginner Tips</p>
                 </div>
               </div>
             </div>

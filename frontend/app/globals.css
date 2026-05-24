@@ -32,3 +32,12 @@ body {
 .animate-marquee {
   animation: marquee linear infinite;
 }
+
+/* Hide scrollbars while keeping scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

@@ -149,7 +149,7 @@ export default function Navbar() {
                 <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', resourceDropOpen && 'rotate-180')} />
               </button>
               {resourceDropOpen && (
-                <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50 max-h-[calc(100vh-4rem)] overflow-y-auto">
                   {RESOURCES_LINKS.map(({ href, label, icon: Icon, desc, plan }) => (
                     <Link
                       key={href}

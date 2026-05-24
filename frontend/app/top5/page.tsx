@@ -143,23 +143,14 @@ function ScoreBar({ label, score, colour, icon: Icon }: {
   )
 }
 
-// ── Value display with null explanation ───────────────────────────────────────
+// ── Value display with null handling ─────────────────────────────────────────
 
-function MetricCell({ value, label, nullReason }: { value: string | null; label: string; nullReason?: string }) {
+function MetricCell({ value, label }: { value: string | null; label: string }) {
   return (
     <div className="text-center">
-      {value != null ? (
-        <p className="text-xs font-semibold text-gray-800">{value}</p>
-      ) : (
-        <div className="group relative inline-block">
-          <p className="text-xs font-semibold text-gray-300 cursor-help">—</p>
-          {nullReason && (
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-40 bg-gray-800 text-white text-[10px] rounded-lg px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 text-center leading-relaxed">
-              {nullReason}
-            </div>
-          )}
-        </div>
-      )}
+      <p className={`text-xs font-semibold ${value != null ? 'text-gray-800' : 'text-gray-300'}`}>
+        {value ?? '—'}
+      </p>
       <p className="text-[9px] text-gray-400">{label}</p>
     </div>
   )
@@ -247,42 +238,19 @@ function PickCard({ pick }: { pick: Pick }) {
 
         {/* Key metrics strip */}
         <div className="grid grid-cols-3 gap-2 pt-2 border-t border-gray-100">
+          <MetricCell value={fmt.price(pick.price)} label="Price" />
           <MetricCell
-            value={fmt.price(pick.price)}
-            label="Price"
-            nullReason="Price not available"
-          />
-          <MetricCell
-            value={pick.return_3m != null ? (
-              `${pick.return_3m >= 0 ? '+' : ''}${(pick.return_3m * 100).toFixed(1)}%`
-            ) : null}
+            value={pick.return_3m != null ? `${pick.return_3m >= 0 ? '+' : ''}${(pick.return_3m * 100).toFixed(1)}%` : null}
             label="3M Ret"
-            nullReason="Insufficient price history for 3-month return"
           />
-          <MetricCell
-            value={fmt.pct(pick.grossed_up_yield)}
-            label="Gr. Yield"
-            nullReason="Dividend or franking data not available"
-          />
+          <MetricCell value={fmt.pct(pick.grossed_up_yield)} label="Gr. Yield" />
         </div>
 
         {/* Secondary metrics */}
         <div className="grid grid-cols-3 gap-2 pt-1">
-          <MetricCell
-            value={fmt.pe(pick.pe_ratio)}
-            label="P/E"
-            nullReason="P/E ratio unavailable (negative earnings or no data)"
-          />
-          <MetricCell
-            value={pick.piotroski_f_score != null ? `${pick.piotroski_f_score}/9` : null}
-            label="F-Score"
-            nullReason="Piotroski F-Score requires full financial statements"
-          />
-          <MetricCell
-            value={pick.roe != null ? `${(pick.roe * 100).toFixed(1)}%` : null}
-            label="ROE"
-            nullReason="Return on equity data not available"
-          />
+          <MetricCell value={fmt.pe(pick.pe_ratio)} label="P/E" />
+          <MetricCell value={pick.piotroski_f_score != null ? `${pick.piotroski_f_score}/9` : null} label="F-Score" />
+          <MetricCell value={pick.roe != null ? `${(pick.roe * 100).toFixed(1)}%` : null} label="ROE" />
         </div>
 
         {/* Why selected — collapsible */}

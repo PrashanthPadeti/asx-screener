@@ -8,7 +8,6 @@ import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, Log
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
-  { href: '/',          label: 'Home',      icon: TrendingUp },
   { href: '/screener',  label: 'Screener',  icon: BarChart2 },
   { href: '/market',    label: 'Market',    icon: Globe },
   { href: '/scans',     label: 'Scans',     icon: ScanLine },
@@ -247,7 +246,7 @@ export default function Navbar() {
           </div>
 
           {/* ── Search bar — grows to fill available space ─────── */}
-          <div className="flex-1 min-w-[180px] max-w-[280px] ml-auto">
+          <div className="flex-1 min-w-[140px] max-w-[260px] ml-auto">
             <SearchBar />
           </div>
 

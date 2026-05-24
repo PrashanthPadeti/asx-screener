@@ -729,9 +729,6 @@ function Top5Content() {
           </Link>
         </div>
 
-        {/* Disclaimer — prominent, above cards */}
-        <Disclaimer />
-
         {/* Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mt-5">
           {picks.map(p => <PickCard key={p.asx_code} pick={p} />)}
@@ -746,6 +743,11 @@ function Top5Content() {
 
       {/* History table */}
       <HistoryTable history={history} />
+
+      {/* Disclaimer — bottom of page */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 pb-10">
+        <Disclaimer />
+      </div>
 
     </div>
   )

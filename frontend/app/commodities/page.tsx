@@ -59,19 +59,27 @@ function isAUD(unit: string | null): boolean {
 }
 
 /** Human-friendly unit label */
-function fmtUnit(unit: string | null): string {
+function fmtUnit(unit: string | null, price?: number | null): string {
   if (!unit) return ''
-  // Replace USD/ or AUD/ with A$/ for AUD, or US$/ for USD
-  if (unit.startsWith('AUD/')) return 'A$/' + unit.slice(4)
-  if (unit.startsWith('USD/')) return 'US$/' + unit.slice(4)
-  return unit
+  // Copper (and other metals) stored as USD/lb in DB but value is actually per tonne
+  // Detect: if unit says /lb but price > 500, it's really /t
+  const effectiveUnit = (unit.endsWith('/lb') && price != null && price > 500)
+    ? unit.replace('/lb', '/t')
+    : unit
+  if (effectiveUnit.startsWith('AUD/')) return 'A$/' + effectiveUnit.slice(4)
+  if (effectiveUnit.startsWith('USD/')) return 'US$/' + effectiveUnit.slice(4)
+  return effectiveUnit
 }
 
 /** Format price with correct currency prefix */
 function fmtPrice(v: number | null, unit: string | null): string {
   if (v == null) return '—'
   const prefix = isAUD(unit) ? 'A$' : 'US$'
-  const baseUnit = unit?.split('/')[1] ?? ''
+  // Detect copper-style mislabelling: unit says /lb but value > 500 → treat as /t
+  const effectiveUnit = (unit?.endsWith('/lb') && v > 500)
+    ? unit.replace('/lb', '/t')
+    : unit
+  const baseUnit = effectiveUnit?.split('/')[1] ?? ''
 
   if (baseUnit === 'oz')    return prefix + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   if (baseUnit === 'bbl')   return prefix + v.toFixed(2)
@@ -150,7 +158,7 @@ function CommodityCard({ c }: { c: CommodityPrice }) {
   const iconCode = COMMODITY_ICONS[c.commodity_code] ?? c.commodity_code.slice(0, 3)
   const meta     = CATEGORY_META[c.category] ?? { color: 'text-slate-400', border: 'border-slate-700', bg: 'bg-slate-700/20' }
   const related  = RELATED_STOCKS[c.commodity_code]
-  const unitLabel = fmtUnit(c.unit)
+  const unitLabel = fmtUnit(c.unit, c.close_price)
 
   return (
     <div className={`bg-slate-800/60 rounded-xl border ${meta.border} hover:border-slate-500/50 transition-colors p-5 flex flex-col`}>

@@ -12,9 +12,6 @@ const NAV_LINKS = [
   { href: '/market',    label: 'Market',    icon: Globe },
   { href: '/scans',     label: 'Scans',     icon: ScanLine },
   { href: '/news',      label: 'News',      icon: Newspaper },
-  { href: '/watchlist', label: 'Watchlist', icon: Star },
-  { href: '/portfolio', label: 'Portfolio', icon: PieChart },
-  { href: '/alerts',    label: 'Alerts',    icon: Bell },
 ]
 
 const MARKET_DATA_LINKS = [
@@ -258,19 +255,14 @@ export default function Navbar() {
               <div className="relative" ref={dropRef}>
                 <button
                   onClick={() => setUserDropOpen(v => !v)}
-                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                  className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm text-gray-700 hover:bg-gray-100 transition-colors"
                 >
                   <div className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-semibold shrink-0">
                     {(user.name || user.email)[0].toUpperCase()}
                   </div>
-                  <div className="flex flex-col items-start leading-tight">
-                    <span className="max-w-[90px] truncate text-sm font-medium text-gray-700 whitespace-nowrap">
-                      {user.name || user.email}
-                    </span>
-                    <span className={cn('text-[10px] px-1.5 py-0 rounded font-semibold capitalize', PLAN_BADGE[user.plan] ?? PLAN_BADGE.free)}>
-                      {user.plan}
-                    </span>
-                  </div>
+                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-semibold capitalize shrink-0', PLAN_BADGE[user.plan] ?? PLAN_BADGE.free)}>
+                    {user.plan}
+                  </span>
                   <ChevronDown className={cn('w-3.5 h-3.5 transition-transform shrink-0', userDropOpen && 'rotate-180')} />
                 </button>
 
@@ -279,6 +271,10 @@ export default function Navbar() {
                     <div className="px-3 py-2 border-b border-gray-100">
                       <p className="text-xs font-medium text-gray-900 truncate">{user.email}</p>
                     </div>
+                    <Link href="/watchlist"     onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Star className="w-4 h-4" />Watchlist</Link>
+                    <Link href="/portfolio"     onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><PieChart className="w-4 h-4" />Portfolio</Link>
+                    <Link href="/alerts"        onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Bell className="w-4 h-4" />Alerts</Link>
+                    <div className="border-t border-gray-100 mt-1 pt-1" />
                     <Link href="/account"       onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><User className="w-4 h-4" />Account settings</Link>
                     <Link href="/pricing"        onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Zap className="w-4 h-4" />Plans &amp; Pricing</Link>
                     <Link href="/notifications"  onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Settings className="w-4 h-4" />Notifications</Link>

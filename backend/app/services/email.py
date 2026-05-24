@@ -94,12 +94,38 @@ def send_support_notification(
     subject: str,
     description: str,
     user_id: Optional[str] = None,
+    context_url: Optional[str] = None,
+    context_user_agent: Optional[str] = None,
+    context_viewport: Optional[str] = None,
+    context_timestamp: Optional[str] = None,
+    subscription_tier: Optional[str] = None,
 ) -> bool:
     """Send a new support ticket notification to the support team."""
     resend = _client()
     support_to = settings.SUPPORT_EMAIL
 
     cat_label = category.replace("_", " ").title()
+    tier_label = (subscription_tier or "—").replace("_", " ").title()
+
+    # Build optional context rows
+    ctx_rows = ""
+    if context_url:
+        ctx_rows += f'<tr><td style="padding:4px 0;color:#6b7280;width:120px">URL</td><td style="padding:4px 0;font-size:12px;word-break:break-all;color:#374151">{context_url}</td></tr>'
+    if context_user_agent:
+        ctx_rows += f'<tr><td style="padding:4px 0;color:#6b7280">Browser</td><td style="padding:4px 0;font-size:11px;color:#6b7280">{context_user_agent}</td></tr>'
+    if context_viewport:
+        ctx_rows += f'<tr><td style="padding:4px 0;color:#6b7280">Viewport</td><td style="padding:4px 0;font-size:12px;color:#374151">{context_viewport}</td></tr>'
+    if context_timestamp:
+        ctx_rows += f'<tr><td style="padding:4px 0;color:#6b7280">Submitted</td><td style="padding:4px 0;font-size:12px;color:#374151">{context_timestamp}</td></tr>'
+
+    context_block = ""
+    if ctx_rows:
+        context_block = f"""
+      <div style="margin-top:16px;padding:16px;background:#f0f9ff;border-radius:8px;border:1px solid #bae6fd">
+        <p style="margin:0 0 8px;font-size:11px;font-weight:600;color:#0369a1;text-transform:uppercase;letter-spacing:0.05em">Browser context</p>
+        <table style="width:100%;border-collapse:collapse">{ctx_rows}</table>
+      </div>"""
+
     html = f"""
     <div style="font-family:sans-serif;max-width:600px;margin:auto;padding:24px">
       <h2 style="color:#1d4ed8;margin-bottom:4px">🎫 New Support Ticket #{ticket_number}</h2>
@@ -112,12 +138,15 @@ def send_support_notification(
             <td style="padding:6px 0">{name} &lt;{email}&gt;</td></tr>
         <tr><td style="padding:6px 0;color:#6b7280">Phone</td>
             <td style="padding:6px 0">{phone or '—'}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280">Plan</td>
+            <td style="padding:6px 0">{tier_label}</td></tr>
         <tr><td style="padding:6px 0;color:#6b7280">User ID</td>
             <td style="padding:6px 0;font-size:12px;color:#9ca3af">{user_id or 'Not logged in'}</td></tr>
       </table>
       <div style="margin-top:16px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
         <p style="margin:0;white-space:pre-wrap;color:#374151">{description}</p>
       </div>
+      {context_block}
       <a href="https://asxscreener.com.au/admin/support"
          style="display:inline-block;margin-top:16px;padding:10px 20px;
                 background:#2563eb;color:white;border-radius:8px;text-decoration:none">
@@ -130,16 +159,82 @@ def send_support_notification(
         return False
     try:
         resend.Emails.send({
-            "from":    settings.EMAIL_FROM,
-            "to":      [support_to],
+            "from":     settings.EMAIL_FROM,
+            "to":       [support_to],
             "reply_to": email,
-            "subject": f"[Ticket #{ticket_number}] {subject}",
-            "html":    html,
+            "subject":  f"[Ticket #{ticket_number}] {subject}",
+            "html":     html,
         })
         log.info(f"Support notification sent for ticket #{ticket_number}")
         return True
     except Exception as e:
         log.error(f"Failed to send support notification: {e}")
+        return False
+
+
+def send_support_confirmation(
+    ticket_number: int,
+    name: str,
+    email: str,
+    category: str,
+    subject: str,
+) -> bool:
+    """Send a confirmation email to the user after they submit a support ticket."""
+    resend = _client()
+    greeting = f"Hi {name}," if name else "Hi,"
+    cat_label = category.replace("_", " ").title()
+    html = f"""
+    <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:24px">
+      <h2 style="color:#1d4ed8;margin-bottom:4px">✅ Support request received</h2>
+      <p style="color:#374151">{greeting}</p>
+      <p style="color:#374151">
+        Thanks for reaching out. We've received your support request and will get back to you
+        within <strong>1 business day</strong>.
+      </p>
+      <div style="margin:20px 0;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="padding:5px 0;color:#6b7280;width:120px">Reference</td>
+            <td style="padding:5px 0;font-weight:700;color:#111827">#{ticket_number}</td>
+          </tr>
+          <tr>
+            <td style="padding:5px 0;color:#6b7280">Category</td>
+            <td style="padding:5px 0;color:#374151">{cat_label}</td>
+          </tr>
+          <tr>
+            <td style="padding:5px 0;color:#6b7280">Subject</td>
+            <td style="padding:5px 0;color:#374151">{subject}</td>
+          </tr>
+        </table>
+      </div>
+      <p style="color:#374151">
+        Please keep your reference number <strong>#{ticket_number}</strong> handy.
+        Our team will reply directly to this email address.
+      </p>
+      <p style="font-size:13px;color:#6b7280">
+        If you didn't submit this request, you can safely ignore this email.
+      </p>
+      <hr style="margin-top:32px;border-color:#e5e7eb"/>
+      <p style="font-size:12px;color:#9ca3af">
+        ASX Screener ·
+        <a href="https://asxscreener.com.au" style="color:#9ca3af">asxscreener.com.au</a>
+      </p>
+    </div>
+    """
+    if resend is None:
+        log.info(f"[email no-op] Support confirmation #{ticket_number} to {email}")
+        return False
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [email],
+            "subject": f"[Ticket #{ticket_number}] We received your support request — ASX Screener",
+            "html":    html,
+        })
+        log.info(f"Support confirmation sent to {email} for ticket #{ticket_number}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send support confirmation to {email}: {e}")
         return False
 
 

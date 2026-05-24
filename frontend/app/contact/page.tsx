@@ -1,20 +1,24 @@
 'use client'
 import { useState, useEffect, useRef, useCallback, FormEvent } from 'react'
-import { BarChart2, Loader2, CheckCircle, Paperclip, X, AlertCircle, Mail, Lock, FileText } from 'lucide-react'
+import {
+  BarChart2, Loader2, CheckCircle, Paperclip, X, AlertCircle,
+  Mail, Lock, FileText, Info, Clock,
+} from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 
 // ── Support categories ────────────────────────────────────────────────────────
 
 const CATEGORIES = [
-  { value: 'general',       label: 'General Question'          },
-  { value: 'bug',           label: 'Bug / Technical Issue'     },
-  { value: 'data',          label: 'Data Issue'                },
-  { value: 'billing',       label: 'Billing / Subscription'    },
-  { value: 'account',       label: 'Login / Account Access'    },
-  { value: 'feature',       label: 'Feature Request'           },
-  { value: 'portfolio',     label: 'Portfolio / Watchlist Issue'},
-  { value: 'alerts',        label: 'Alerts Issue'              },
+  { value: 'general',        label: 'General Question'            },
+  { value: 'bug',            label: 'Bug / Technical Issue'       },
+  { value: 'billing',        label: 'Billing / Subscription'      },
+  { value: 'data',           label: 'Data Issue'                  },
+  { value: 'data_incorrect', label: 'Data looks incorrect'        },
+  { value: 'feature',        label: 'Feature Request'             },
+  { value: 'account',        label: 'Account / Login Issue'       },
+  { value: 'broker',         label: 'Broker / Affiliate Query'    },
+  { value: 'portfolio',      label: 'Portfolio / Watchlist Issue' },
 ]
 
 // ── File helpers ──────────────────────────────────────────────────────────────
@@ -55,6 +59,9 @@ function ConfirmationScreen({ ticketNum, email, onReset }: {
           <CheckCircle className="w-9 h-9 text-emerald-600" />
         </div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Request submitted!</h1>
+        <p className="text-sm text-slate-500 mb-5">
+          Support request submitted successfully. We&apos;ll respond within 1 business day.
+        </p>
 
         <div className="bg-slate-50 border border-slate-200 rounded-xl px-5 py-4 mb-5 text-left space-y-2">
           <div className="flex items-center justify-between text-sm">
@@ -72,7 +79,8 @@ function ConfirmationScreen({ ticketNum, email, onReset }: {
         </div>
 
         <p className="text-sm text-slate-500 mb-6">
-          Keep your reference number handy. You&apos;ll receive a confirmation email shortly.
+          A confirmation email has been sent to <strong>{email}</strong> with your reference number.
+          Keep it handy in case you need to follow up.
         </p>
 
         <div className="flex flex-col sm:flex-row gap-3 justify-center">
@@ -125,7 +133,6 @@ export default function ContactPage() {
   }, [user])
 
   // ── Submit guard ────────────────────────────────────────────────────────────
-  // Required: name, valid email, subject (≥3 chars), description (≥10 chars)
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
   const canSubmit  = (
     name.trim().length >= 2 &&
@@ -163,7 +170,6 @@ export default function ContactPage() {
     })
 
     setFileErrors(errs)
-    // Clear file input so the same file can be re-added after removal
     if (fileRef.current) fileRef.current.value = ''
   }, [])
 
@@ -190,11 +196,18 @@ export default function ContactPage() {
       fd.append('subject',     subject.trim())
       fd.append('description', description.trim())
 
-      // Context fields — sent to backend but never displayed to user
+      // Context fields — sent to backend, never displayed to user
       fd.append('context_url',        ctx.url        ?? '')
       fd.append('context_user_agent', ctx.userAgent  ?? '')
       fd.append('context_viewport',   ctx.viewport   ?? '')
       fd.append('context_timestamp',  ctx.timestamp  ?? '')
+
+      // Subscription tier for logged-in users
+      if (user) {
+        const u = user as Record<string, unknown>
+        const tier = (u.subscription_tier ?? u.tier ?? u.plan ?? 'unknown') as string
+        fd.append('subscription_tier', tier)
+      }
 
       files.forEach(f => fd.append('files', f))
 
@@ -233,8 +246,8 @@ export default function ContactPage() {
     return <ConfirmationScreen ticketNum={ticketNum} email={email} onReset={resetForm} />
   }
 
-  // ── Input class helper ──────────────────────────────────────────────────────
-  const field = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
+  // ── Input class helpers ─────────────────────────────────────────────────────
+  const field         = 'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
   const fieldDisabled = 'bg-slate-50 text-slate-500 cursor-not-allowed border-slate-200'
 
   return (
@@ -258,8 +271,8 @@ export default function ContactPage() {
       {/* ── Form ─────────────────────────────────────────────────────────── */}
       <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 space-y-5">
 
-        {/* Logged-in context banner — no raw IDs shown */}
-        {user && (
+        {/* Auth context banner */}
+        {user ? (
           <div className="flex items-start gap-2.5 px-4 py-3 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-800 leading-relaxed">
             <Lock className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-500" />
             <span>
@@ -267,6 +280,11 @@ export default function ContactPage() {
               Your account details (subscription tier, account ID, and browser information) will be
               attached automatically to help support investigate faster.
             </span>
+          </div>
+        ) : (
+          <div className="flex items-start gap-2.5 px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 leading-relaxed">
+            <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
+            <span>Not logged in. Please enter your email so we can reply.</span>
           </div>
         )}
 
@@ -302,7 +320,6 @@ export default function ContactPage() {
                   Email address <span className="text-red-500">*</span>
                 </label>
                 {user ? (
-                  /* Logged-in: show as read-only with lock indicator */
                   <div className="relative">
                     <input
                       type="email"
@@ -314,7 +331,6 @@ export default function ContactPage() {
                     <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 shrink-0" />
                   </div>
                 ) : (
-                  /* Guest: editable */
                   <input
                     required
                     type="email"
@@ -356,6 +372,15 @@ export default function ContactPage() {
                     <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
                 </select>
+                {/* Bug hint: URL will be attached automatically */}
+                {(category === 'bug' || category === 'data_incorrect' || category === 'data') && (
+                  <p className="text-xs text-blue-600 mt-1.5 flex items-center gap-1">
+                    <Info className="w-3 h-3 shrink-0" />
+                    {category === 'bug'
+                      ? 'Current page URL will be attached automatically to help us reproduce the issue.'
+                      : 'Current page URL will be attached so we can check the right data.'}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -402,16 +427,15 @@ export default function ContactPage() {
                 </span>
               </label>
 
-              {/* Drop zone */}
               <div
                 role="button"
                 tabIndex={0}
-                onClick={() => fileRef.current?.click()}
-                onKeyDown={e => e.key === 'Enter' && fileRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                onClick={() => files.length < MAX_FILES && fileRef.current?.click()}
+                onKeyDown={e => e.key === 'Enter' && files.length < MAX_FILES && fileRef.current?.click()}
+                className={`border-2 border-dashed rounded-xl p-5 text-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
                   files.length >= MAX_FILES
                     ? 'border-slate-100 bg-slate-50 cursor-not-allowed'
-                    : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30'
+                    : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50/30 cursor-pointer'
                 }`}
                 aria-label="Click to attach files"
               >
@@ -435,7 +459,6 @@ export default function ContactPage() {
                 disabled={files.length >= MAX_FILES}
               />
 
-              {/* File validation errors */}
               {fileErrors.length > 0 && (
                 <div className="mt-2 space-y-1">
                   {fileErrors.map((err, i) => (
@@ -447,7 +470,6 @@ export default function ContactPage() {
                 </div>
               )}
 
-              {/* Selected files list */}
               {files.length > 0 && (
                 <div className="mt-2 space-y-1.5">
                   {files.map((f, i) => (
@@ -498,7 +520,32 @@ export default function ContactPage() {
               {loading ? 'Submitting…' : 'Submit Support Request'}
             </button>
 
+            {/* Estimated response time */}
+            <p className="text-xs text-center text-slate-400 flex items-center justify-center gap-1 -mt-2">
+              <Clock className="w-3 h-3 shrink-0" />
+              We aim to respond within 1 business day
+            </p>
+
           </form>
+        </div>
+
+        {/* ── What happens next? ────────────────────────────────────────── */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+          <h3 className="text-sm font-semibold text-slate-700 mb-3">What happens next?</h3>
+          <ol className="space-y-2.5">
+            {[
+              "You'll receive a confirmation email with your ticket reference number.",
+              "Our support team reviews your request — typically within a few hours.",
+              "We reply to your email within 1 business day. Complex issues may take slightly longer.",
+            ].map((step, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-sm text-slate-600">
+                <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+                  {i + 1}
+                </span>
+                {step}
+              </li>
+            ))}
+          </ol>
         </div>
 
         {/* ── Backup contact ────────────────────────────────────────────── */}

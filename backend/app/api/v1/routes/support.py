@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_optional_user, require_admin
 from app.db.session import get_db
-from app.services.email import send_support_notification
+from app.services.email import send_support_confirmation, send_support_notification
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -62,17 +62,26 @@ def _ticket_row_to_dict(row) -> dict:
 
 @router.post("/tickets", status_code=status.HTTP_201_CREATED)
 async def create_ticket(
-    name:        str         = Form(...),
-    email:       str         = Form(...),
-    phone:       Optional[str] = Form(None),
-    category:    str         = Form("general"),
-    subject:     str         = Form(...),
-    description: str         = Form(...),
-    files:       list[UploadFile] = File(default=[]),
+    name:               str            = Form(...),
+    email:              str            = Form(...),
+    phone:              Optional[str]  = Form(None),
+    category:           str            = Form("general"),
+    subject:            str            = Form(...),
+    description:        str            = Form(...),
+    # Browser / device context (sent by frontend, never shown to user)
+    context_url:        Optional[str]  = Form(None),
+    context_user_agent: Optional[str]  = Form(None),
+    context_viewport:   Optional[str]  = Form(None),
+    context_timestamp:  Optional[str]  = Form(None),
+    subscription_tier:  Optional[str]  = Form(None),
+    files:              list[UploadFile] = File(default=[]),
     current_user: Optional[dict]  = Depends(get_optional_user),
     db: AsyncSession = Depends(get_db),
 ):
     user_id = current_user["id"] if current_user else None
+    # Prefer subscription tier from auth token over form field
+    if current_user and not subscription_tier:
+        subscription_tier = current_user.get("subscription_tier") or current_user.get("tier")
 
     # Save attachments
     attachment_paths: list[str] = []
@@ -126,7 +135,24 @@ async def create_ticket(
         subject=subject,
         description=description,
         user_id=user_id,
+        context_url=context_url,
+        context_user_agent=context_user_agent,
+        context_viewport=context_viewport,
+        context_timestamp=context_timestamp,
+        subscription_tier=subscription_tier,
     )
+
+    # Confirmation email to the user (best-effort — don't fail the request)
+    try:
+        send_support_confirmation(
+            ticket_number=row.ticket_number,
+            name=name,
+            email=email,
+            category=category,
+            subject=subject,
+        )
+    except Exception as exc:
+        log.warning(f"Could not send support confirmation to {email}: {exc}")
 
     log.info(f"Support ticket #{row.ticket_number} created by {email}")
     return {"ticket": _ticket_row_to_dict(row)}

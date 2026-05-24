@@ -52,7 +52,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 }
 
 const STATUSES = ['all', 'open', 'in_progress', 'resolved', 'closed']
-const CATEGORIES = ['all', 'bug', 'feature', 'data', 'billing', 'account', 'general']
+const CATEGORIES = ['all', 'bug', 'billing', 'data', 'data_incorrect', 'feature', 'account', 'broker', 'portfolio', 'general']
 
 export default function AdminSupportPage() {
   const router = useRouter()

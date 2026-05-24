@@ -21,20 +21,26 @@ const MARKET_DATA_LINKS = [
   { href: '/top5',           label: 'AlphaFive',       icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',  premium: true },
 ]
 
-// Shown to all users (logged in or out)
-const RESOURCES_LINKS_BASE = [
-  { href: '/news',     label: 'News',            icon: Newspaper,  desc: 'Latest ASX announcements & market news',             plan: null  },
-  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', plan: 'pro' },
-  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   desc: 'Guides, tutorials & courses',                        plan: 'pro' },
-  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    plan: 'pro' },
-  { href: '/contact',  label: 'Contact Support',  icon: LifeBuoy,   desc: 'Get help or report an issue',                       plan: null  },
+// Pro+ items — shown at top of Resources dropdown
+const RESOURCES_LINKS_PRO = [
+  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   plan: 'pro' },
+  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   plan: 'pro' },
+  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, plan: 'pro' },
 ]
 
-// Extra links shown only to guests (not logged in) so they discover the features
+// Free items — shown after Pro+ section
+const RESOURCES_LINKS_FREE = [
+  { href: '/news', label: 'News', icon: Newspaper, plan: null },
+]
+
+// Contact Support — always at the bottom
+const RESOURCES_LINK_SUPPORT = { href: '/contact', label: 'Contact Support', icon: LifeBuoy, plan: null }
+
+// Extra links shown only to guests so they discover personal features
 const RESOURCES_LINKS_GUEST_EXTRA = [
-  { href: '/watchlist', label: 'Watchlist', icon: Star,     desc: 'Track your favourite stocks',             plan: null },
-  { href: '/portfolio', label: 'Portfolio', icon: PieChart, desc: 'Monitor your holdings & performance',     plan: null },
-  { href: '/alerts',    label: 'Alerts',    icon: Bell,     desc: 'Price & volume alerts for your stocks',   plan: null },
+  { href: '/watchlist', label: 'Watchlist', icon: Star,     plan: null },
+  { href: '/portfolio', label: 'Portfolio', icon: PieChart, plan: null },
+  { href: '/alerts',    label: 'Alerts',    icon: Bell,     plan: null },
 ]
 
 const PLAN_BADGE: Record<string, string> = {
@@ -55,7 +61,7 @@ const ADMIN_LINKS = [
 // Prefixes that activate the Premium Data dropdown as "active"
 const PREMIUM_DATA_PREFIXES = ['/indices', '/funds', '/global-markets', '/commodities', '/top5']
 // Prefixes that activate the Resources dropdown as "active"
-const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/contact']
+const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/contact', '/pricing']
 
 // Helper: true if pathname matches any prefix (exact or sub-path)
 const matchesPrefix = (pathname: string, prefixes: string[]) =>
@@ -155,19 +161,41 @@ export default function Navbar() {
               </button>
               {resourceDropOpen && (
                 <div className="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {[...RESOURCES_LINKS_BASE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon, plan }) => (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setResourceDropOpen(false)}
-                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
-                    >
+
+                  {/* Pro+ section */}
+                  <div className="flex items-center justify-between px-3 pt-1.5 pb-1">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Pro+</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pro+</span>
+                  </div>
+                  {RESOURCES_LINKS_PRO.map(({ href, label, icon: Icon }) => (
+                    <Link key={href} href={href} onClick={() => setResourceDropOpen(false)}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}>
                       <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
-                      <span className={cn('text-sm flex-1', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
-                      {plan === 'pro'     && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 text-blue-700">Pro+</span>}
-                      {plan === 'premium' && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700">Prem</span>}
+                      <span className={cn('text-sm', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
                     </Link>
                   ))}
+
+                  {/* Free section */}
+                  <div className="border-t border-gray-100 mt-1 pt-1.5 pb-1 px-3">
+                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Free</span>
+                  </div>
+                  {[...RESOURCES_LINKS_FREE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon }) => (
+                    <Link key={href} href={href} onClick={() => setResourceDropOpen(false)}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}>
+                      <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
+                      <span className={cn('text-sm', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
+                    </Link>
+                  ))}
+
+                  {/* Support — always last */}
+                  <div className="border-t border-gray-100 mt-1 pt-1">
+                    <Link href={RESOURCES_LINK_SUPPORT.href} onClick={() => setResourceDropOpen(false)}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === RESOURCES_LINK_SUPPORT.href && 'bg-blue-50')}>
+                      <RESOURCES_LINK_SUPPORT.icon className={cn('w-3.5 h-3.5 shrink-0', pathname === RESOURCES_LINK_SUPPORT.href ? 'text-blue-500' : 'text-gray-400')} />
+                      <span className={cn('text-sm', pathname === RESOURCES_LINK_SUPPORT.href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{RESOURCES_LINK_SUPPORT.label}</span>
+                    </Link>
+                  </div>
+
                 </div>
               )}
             </div>
@@ -322,12 +350,21 @@ export default function Navbar() {
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
-            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Resources</div>
-            {[...RESOURCES_LINKS_BASE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon }) => (
+            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Resources — Pro+</div>
+            {RESOURCES_LINKS_PRO.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
+            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Resources — Free</div>
+            {[...RESOURCES_LINKS_FREE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon }) => (
+              <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
+                <Icon className="w-4 h-4" />{label}
+              </Link>
+            ))}
+            <Link href={RESOURCES_LINK_SUPPORT.href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === RESOURCES_LINK_SUPPORT.href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
+              <RESOURCES_LINK_SUPPORT.icon className="w-4 h-4" />{RESOURCES_LINK_SUPPORT.label}
+            </Link>
             <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Premium Data</div>
             {MARKET_DATA_LINKS.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>

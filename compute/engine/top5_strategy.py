@@ -1,7 +1,8 @@
 """
-ASX Screener — Top 5 Strategy Engine
-=====================================
-Monthly algo-ranked top 5 (default) picks from the ASX200 universe.
+ASX Screener — AlphaFive Strategy Engine
+==========================================
+Weekly algo-ranked top 5 (default) picks from the ASX200 universe.
+pick_month stores the Monday of the week (not 1st of month).
 
 Algorithm:
   - Universe  : screener.universe WHERE is_asx200 = TRUE AND status = 'active'
@@ -12,19 +13,20 @@ Algorithm:
                   value_score     (PE, PB, EV/EBITDA, FCF yield, P/S)
                   income_score    (grossed-up yield, franking, consecutive yrs)
                   growth_score    (revenue/EPS growth 1Y, 3Y CAGR, HoH)
-  - Output    : strategy.monthly_picks  (idempotent — safe to re-run same month)
+  - Output    : strategy.monthly_picks  (idempotent — safe to re-run same week)
 
 Usage:
     python compute/engine/top5_strategy.py
     python compute/engine/top5_strategy.py --top-n 10
-    python compute/engine/top5_strategy.py --date 2026-05-01
+    python compute/engine/top5_strategy.py --date 2026-05-19
     python compute/engine/top5_strategy.py --dry-run
+    python compute/engine/top5_strategy.py --force
 """
 
 import argparse
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import psycopg2
 import psycopg2.extensions
@@ -114,7 +116,7 @@ def run(pick_month: date, top_n: int = 5, dry_run: bool = False) -> list[dict]:
     cols = [d[0] for d in cur.description]
     rows = [dict(zip(cols, r)) for r in cur.fetchall()]
 
-    log.info(f"Top {top_n} picks for {pick_month.strftime('%B %Y')}:")
+    log.info(f"AlphaFive top {top_n} picks for week of {pick_month}:")
     for i, r in enumerate(rows, 1):
         log.info(
             f"  #{i:2d}  {r['asx_code']:6s}  {(r['company_name'] or '')[:35]:35s}"
@@ -136,7 +138,7 @@ def run(pick_month: date, top_n: int = 5, dry_run: bool = False) -> list[dict]:
     )
     deleted = cur.rowcount
     if deleted:
-        log.info(f"Replaced {deleted} existing picks for {pick_month}")
+        log.info(f"Replaced {deleted} existing picks for week of {pick_month}")
 
     insert_rows = [
         (
@@ -200,12 +202,12 @@ def run(pick_month: date, top_n: int = 5, dry_run: bool = False) -> list[dict]:
     """, insert_rows)
 
     conn.commit()
-    log.info(f"Inserted {len(rows)} picks for {pick_month}")
+    log.info(f"Inserted {len(rows)} picks for week of {pick_month}")
 
     # ── Verify total history ──────────────────────────────────────────────────
     cur.execute("SELECT COUNT(DISTINCT pick_month) FROM strategy.monthly_picks")
-    months = cur.fetchone()[0]
-    log.info(f"Total months in strategy.monthly_picks: {months}")
+    weeks = cur.fetchone()[0]
+    log.info(f"Total weeks in strategy.monthly_picks: {weeks}")
 
     cur.close()
     conn.close()
@@ -216,7 +218,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--date",
-        help="Pick month as YYYY-MM-DD (defaults to first day of current month)",
+        help="Pick week as YYYY-MM-DD — will be normalised to Monday of that week",
         default=None,
     )
     parser.add_argument(
@@ -227,17 +229,22 @@ def main():
         "--dry-run", action="store_true",
         help="Print picks without writing to DB",
     )
+    parser.add_argument(
+        "--force", action="store_true",
+        help="Overwrite existing picks for this week (default behaviour — flag accepted for compatibility)",
+    )
     args = parser.parse_args()
 
     if args.date:
         d = datetime.strptime(args.date, "%Y-%m-%d").date()
-        pick_month = d.replace(day=1)
     else:
-        today = date.today()
-        pick_month = today.replace(day=1)
+        d = date.today()
 
-    log.info(f"Top-{args.top_n} Strategy — pick month: {pick_month}")
-    run(pick_month=pick_month, top_n=args.top_n, dry_run=args.dry_run)
+    # Normalise to Monday of the week
+    pick_week = d - timedelta(days=d.weekday())
+
+    log.info(f"AlphaFive top-{args.top_n} — week of {pick_week}")
+    run(pick_month=pick_week, top_n=args.top_n, dry_run=args.dry_run)
     log.info("DONE")
 
 

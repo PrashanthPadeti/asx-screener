@@ -1,7 +1,7 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { RefreshCw, TrendingUp, TrendingDown, Minus, ArrowLeft, Info } from 'lucide-react'
+import { RefreshCw, TrendingUp, TrendingDown, Minus, ArrowLeft, Info, Bell, Star } from 'lucide-react'
 import { getCommodities, CommoditiesResponse, CommodityPrice } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
 
@@ -21,87 +21,85 @@ const CATEGORY_ICONS: Record<string, string> = {
   'Bulk':            'BK',
 }
 
-const COMMODITY_ICONS: Record<string, string> = {
-  GC: 'Au',  // Gold
-  SI: 'Ag',  // Silver
-  PL: 'Pt',  // Platinum
-  HG: 'Cu',  // Copper
-  AL: 'Al',  // Aluminium
-  NI: 'Ni',  // Nickel
-  ZN: 'Zn',  // Zinc
-  CL: 'WTI', // WTI Oil
-  BZ: 'BRT', // Brent Oil
-  NG: 'GAS', // Nat Gas
-  IO: 'Fe',  // Iron Ore
-  CO: 'CC',  // Coal
+// Symbol badge and short ticker label
+const COMMODITY_SYMBOL: Record<string, string> = {
+  GC: 'Au', SI: 'Ag', PL: 'Pt',
+  HG: 'Cu', AL: 'Al', NI: 'Ni', ZN: 'Zn',
+  CL: 'WTI', BZ: 'BRT', NG: 'GAS',
+  IO: 'Fe', CO: 'CC',
+}
+
+const COMMODITY_SHORT: Record<string, string> = {
+  GC: 'Gold', SI: 'Silver', PL: 'Platinum',
+  HG: 'Copper', AL: 'Aluminium', NI: 'Nickel', ZN: 'Zinc',
+  CL: 'WTI Oil', BZ: 'Brent Oil', NG: 'Nat Gas',
+  IO: 'Iron Ore', CO: 'Coal',
 }
 
 // Related ASX stocks per commodity code
 const RELATED_STOCKS: Record<string, { codes: string[]; label: string }> = {
-  GC: { codes: ['NST', 'EVN', 'DEG', 'GMD', 'RRL'], label: 'Gold miners' },
-  SI: { codes: ['SFR', 'AIS'], label: 'Silver/base metals' },
-  HG: { codes: ['SFR', 'AIS', '29M', 'OZL'], label: 'Copper miners' },
-  AL: { codes: ['AWC', 'AIS'], label: 'Aluminium' },
-  NI: { codes: ['IGO', 'WSA', 'NIC'], label: 'Nickel miners' },
-  ZN: { codes: ['CBH', 'AIS'], label: 'Zinc miners' },
-  CL: { codes: ['WDS', 'STO', 'BPT', 'KAR'], label: 'Oil & gas' },
-  BZ: { codes: ['WDS', 'STO', 'BPT'], label: 'Oil & gas' },
-  NG: { codes: ['WDS', 'STO', 'BPT', 'KAR'], label: 'Gas producers' },
-  IO: { codes: ['BHP', 'RIO', 'FMG', 'MIN'], label: 'Iron ore miners' },
-  CO: { codes: ['WHC', 'YAL', 'NHC', 'BHP'], label: 'Coal miners' },
+  GC: { codes: ['NST', 'EVN', 'DEG', 'GMD', 'RRL'],   label: 'Gold miners'       },
+  SI: { codes: ['SFR', 'AIS'],                          label: 'Silver/base metals' },
+  HG: { codes: ['SFR', 'AIS', '29M', 'OZL'],           label: 'Copper miners'     },
+  AL: { codes: ['AWC', 'AIS'],                          label: 'Aluminium'         },
+  NI: { codes: ['IGO', 'WSA', 'NIC'],                   label: 'Nickel miners'     },
+  ZN: { codes: ['CBH', 'AIS'],                          label: 'Zinc miners'       },
+  CL: { codes: ['WDS', 'STO', 'BPT', 'KAR'],           label: 'Oil & gas'         },
+  BZ: { codes: ['WDS', 'STO', 'BPT'],                   label: 'Oil & gas'         },
+  NG: { codes: ['WDS', 'STO', 'BPT', 'KAR'],           label: 'Gas producers'     },
+  IO: { codes: ['BHP', 'RIO', 'FMG', 'MIN'],            label: 'Iron ore miners'   },
+  CO: { codes: ['WHC', 'YAL', 'NHC', 'BHP'],            label: 'Coal miners'       },
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Determine if a unit is AUD-denominated */
 function isAUD(unit: string | null): boolean {
   return unit != null && unit.startsWith('AUD')
 }
 
-/** Human-friendly unit label */
-function fmtUnit(unit: string | null, price?: number | null): string {
-  if (!unit) return ''
-  // Copper (and other metals) stored as USD/lb in DB but value is actually per tonne
-  // Detect: if unit says /lb but price > 500, it's really /t
-  const effectiveUnit = (unit.endsWith('/lb') && price != null && price > 500)
-    ? unit.replace('/lb', '/t')
-    : unit
-  if (effectiveUnit.startsWith('AUD/')) return 'A$/' + effectiveUnit.slice(4)
-  if (effectiveUnit.startsWith('USD/')) return 'US$/' + effectiveUnit.slice(4)
-  return effectiveUnit
+/** Detect copper-style mislabelling: USD/lb with large value → treat as USD/t */
+function effectiveUnit(unit: string | null, price: number | null): string | null {
+  if (!unit) return unit
+  if (unit.endsWith('/lb') && price != null && price > 500) return unit.replace('/lb', '/t')
+  return unit
 }
 
-/** Format price with correct currency prefix */
+/** Display-friendly unit string e.g. "US$/oz", "A$/t" */
+function fmtUnit(unit: string | null, price?: number | null): string {
+  const u = effectiveUnit(unit, price ?? null) ?? ''
+  if (!u) return ''
+  if (u.startsWith('AUD/')) return 'A$/' + u.slice(4)
+  if (u.startsWith('USD/')) return 'US$/' + u.slice(4)
+  return u
+}
+
+/** Format price with correct currency, decimals, and thousands separator */
 function fmtPrice(v: number | null, unit: string | null): string {
   if (v == null) return '—'
-  const prefix = isAUD(unit) ? 'A$' : 'US$'
-  // Detect copper-style mislabelling: unit says /lb but value > 500 → treat as /t
-  const effectiveUnit = (unit?.endsWith('/lb') && v > 500)
-    ? unit.replace('/lb', '/t')
-    : unit
-  const baseUnit = effectiveUnit?.split('/')[1] ?? ''
+  const u        = effectiveUnit(unit, v)
+  const prefix   = isAUD(u) ? 'A$' : 'US$'
+  const baseUnit = u?.split('/')[1] ?? ''
 
   if (baseUnit === 'oz')    return prefix + v.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   if (baseUnit === 'bbl')   return prefix + v.toFixed(2)
   if (baseUnit === 'lb')    return prefix + v.toFixed(4)
-  if (baseUnit === 'MMBtu') return prefix + v.toFixed(3)
+  if (baseUnit === 'MMBtu') return prefix + v.toFixed(2)   // 2dp cleaner than 3dp
   if (baseUnit === 't')     return prefix + v.toLocaleString('en-AU', { maximumFractionDigits: 0 })
   return prefix + v.toLocaleString('en-AU', { maximumFractionDigits: 2 })
 }
 
-/** Format percentage */
 function fmtPct(v: number | null): string {
   if (v == null) return '—'
   return (v >= 0 ? '+' : '') + (v * 100).toFixed(2) + '%'
 }
 
 function retColor(v: number | null): string {
-  if (v == null) return 'text-slate-400'
+  if (v == null) return 'text-slate-500'
   return v > 0 ? 'text-emerald-400' : v < 0 ? 'text-red-400' : 'text-slate-400'
 }
 
 function retBg(v: number | null): string {
-  if (v == null) return 'bg-slate-700/50 text-slate-400'
+  if (v == null) return 'bg-slate-700/50 text-slate-500'
   const p = v * 100
   if (p >= 1)  return 'bg-emerald-500/20 text-emerald-400'
   if (p >= 0)  return 'bg-emerald-900/30 text-emerald-500'
@@ -122,31 +120,41 @@ function TickerStrip({ categories }: { categories: CommoditiesResponse['categori
   const all = categories.flatMap(c => c.commodities)
   if (!all.length) return null
 
-  // Duplicate list for seamless infinite marquee
-  const items = [...all, ...all]
+  // Triple-duplicate for seamless infinite loop on any screen width
+  const items = [...all, ...all, ...all]
+  const speed = Math.max(30, all.length * 5)
 
   return (
-    <div className="overflow-hidden w-full" style={{ maskImage: 'linear-gradient(to right, transparent, black 8%, black 92%, transparent)' }}>
+    <div
+      className="overflow-hidden w-full select-none"
+      style={{
+        maskImage: 'linear-gradient(to right, transparent, black 6%, black 94%, transparent)',
+        WebkitMaskImage: 'linear-gradient(to right, transparent, black 6%, black 94%, transparent)',
+      }}
+    >
       <div
-        className="flex gap-8 animate-marquee"
-        style={{ width: 'max-content', animationDuration: `${Math.max(20, all.length * 4)}s` }}
+        className="flex animate-marquee"
+        style={{ width: 'max-content', animationDuration: `${speed}s`, gap: '0px' }}
       >
-        {items.map((c, i) => (
-          <div key={`${c.commodity_code}-${i}`} className="flex items-center gap-2 shrink-0 py-1">
-            <span className="text-xs font-bold text-slate-400 bg-slate-700/60 px-1.5 py-0.5 rounded">
-              {COMMODITY_ICONS[c.commodity_code] ?? c.commodity_code}
-            </span>
-            <span className="text-sm text-slate-300 font-medium">{c.commodity_name}</span>
-            <span className="text-sm font-bold text-white">{fmtPrice(c.close_price, c.unit)}</span>
-            <span className={`text-xs font-semibold flex items-center gap-0.5 ${retColor(c.return_1d)}`}>
-              {c.return_1d != null && c.return_1d > 0 ? <TrendingUp className="w-3 h-3" /> :
-               c.return_1d != null && c.return_1d < 0 ? <TrendingDown className="w-3 h-3" /> :
-               <Minus className="w-3 h-3" />}
-              {fmtPct(c.return_1d)}
-            </span>
-            <span className="text-slate-700 text-xs">|</span>
-          </div>
-        ))}
+        {items.map((c, i) => {
+          const sym   = COMMODITY_SYMBOL[c.commodity_code] ?? c.commodity_code
+          const short = COMMODITY_SHORT[c.commodity_code] ?? c.commodity_name
+          const up    = c.return_1d != null && c.return_1d > 0
+          const dn    = c.return_1d != null && c.return_1d < 0
+          return (
+            <div key={`${c.commodity_code}-${i}`} className="flex items-center shrink-0 px-4 py-1.5 border-r border-slate-700/40">
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-700/50 px-1.5 py-0.5 rounded mr-2">
+                {sym}
+              </span>
+              <span className="text-xs text-slate-400 mr-1.5">{short}</span>
+              <span className="text-sm font-semibold text-white mr-1.5">{fmtPrice(c.close_price, c.unit)}</span>
+              <span className={`text-xs font-medium flex items-center gap-0.5 ${retColor(c.return_1d)}`}>
+                {up ? <TrendingUp className="w-3 h-3" /> : dn ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                {fmtPct(c.return_1d)}
+              </span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -155,36 +163,61 @@ function TickerStrip({ categories }: { categories: CommoditiesResponse['categori
 // ── Commodity Card ────────────────────────────────────────────────────────────
 
 function CommodityCard({ c }: { c: CommodityPrice }) {
-  const iconCode = COMMODITY_ICONS[c.commodity_code] ?? c.commodity_code.slice(0, 3)
+  const sym      = COMMODITY_SYMBOL[c.commodity_code] ?? c.commodity_code.slice(0, 3)
   const meta     = CATEGORY_META[c.category] ?? { color: 'text-slate-400', border: 'border-slate-700', bg: 'bg-slate-700/20' }
   const related  = RELATED_STOCKS[c.commodity_code]
   const unitLabel = fmtUnit(c.unit, c.close_price)
+  const slug     = c.commodity_code.toLowerCase()
 
   return (
-    <div className={`bg-slate-800/60 rounded-xl border ${meta.border} hover:border-slate-500/50 transition-colors p-5 flex flex-col`}>
-      {/* Header */}
+    <div className={`relative bg-slate-800/60 rounded-xl border ${meta.border} hover:border-slate-500/60 transition-all duration-200 p-5 flex flex-col group`}>
+
+      {/* Overlay link — makes whole card clickable */}
+      <Link href={`/commodities/${slug}`} className="absolute inset-0 z-[1] rounded-xl" aria-label={c.commodity_name} />
+
+      {/* Header row */}
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-2.5">
-          <span className={`w-9 h-9 flex items-center justify-center rounded-lg ${meta.bg} text-[11px] font-bold tracking-wide shrink-0 ${meta.color}`}>
-            {iconCode}
+          <span className={`w-9 h-9 flex items-center justify-center rounded-lg ${meta.bg} text-[11px] font-bold tracking-wide shrink-0 ${meta.color} pointer-events-none`}>
+            {sym}
           </span>
-          <div>
-            <div className="text-sm font-bold text-slate-100">{c.commodity_name}</div>
+          <div className="pointer-events-none">
+            <div className="text-sm font-bold text-slate-100 group-hover:text-white transition-colors">{c.commodity_name}</div>
             <div className="text-xs text-slate-500 mt-0.5">{unitLabel || '—'}</div>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-lg font-bold text-white">{fmtPrice(c.close_price, c.unit)}</div>
-          <span className={`inline-block text-xs font-semibold px-2 py-0.5 rounded mt-1 ${retBg(c.return_1d)}`}>
-            {fmtPct(c.return_1d)}
-          </span>
+
+        {/* Alert + Watchlist actions — above the overlay */}
+        <div className="relative z-[2] flex items-center gap-1 ml-2">
+          <Link
+            href={`/alerts?commodity=${c.commodity_code}`}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-slate-700/60 transition-colors"
+            title="Set price alert"
+          >
+            <Bell className="w-3.5 h-3.5" />
+          </Link>
+          <Link
+            href={`/watchlist?add_commodity=${c.commodity_code}`}
+            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-slate-700/60 transition-colors"
+            title="Add to watchlist"
+          >
+            <Star className="w-3.5 h-3.5" />
+          </Link>
         </div>
+      </div>
+
+      {/* Price + 1D change */}
+      <div className="flex items-center justify-between mb-4 pointer-events-none">
+        <div className="text-2xl font-bold text-white">{fmtPrice(c.close_price, c.unit)}</div>
+        <span className={`text-sm font-semibold px-2.5 py-1 rounded-lg ${retBg(c.return_1d)}`}>
+          {fmtPct(c.return_1d)}
+        </span>
       </div>
 
       {/* 52W range bar */}
       {c.high_52w != null && c.low_52w != null && c.close_price != null && (
-        <div className="mb-4">
-          <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+        <div className="mb-4 pointer-events-none">
+          <div className="flex justify-between text-[10px] text-slate-500 mb-1.5">
             <span>52W Low {fmtPrice(c.low_52w, c.unit)}</span>
             <span>52W High {fmtPrice(c.high_52w, c.unit)}</span>
           </div>
@@ -194,7 +227,7 @@ function CommodityCard({ c }: { c: CommodityPrice }) {
               style={{
                 width: `${Math.min(100, Math.max(2,
                   ((c.close_price - c.low_52w) / (c.high_52w - c.low_52w)) * 100
-                ))}%`
+                ))}%`,
               }}
             />
           </div>
@@ -202,31 +235,30 @@ function CommodityCard({ c }: { c: CommodityPrice }) {
       )}
 
       {/* Period returns */}
-      <div className="grid grid-cols-3 gap-2 text-center mb-4">
-        {[
+      <div className="grid grid-cols-3 gap-2 text-center mb-4 pointer-events-none">
+        {([
           { label: '1W',  v: c.return_1w  },
           { label: '1M',  v: c.return_1m  },
           { label: 'YTD', v: c.return_ytd },
-        ].map(({ label, v }) => (
-          <div key={label} className="bg-slate-900/50 rounded-lg py-2">
+        ] as const).map(({ label, v }) => (
+          <div key={label} className="bg-slate-900/60 rounded-lg py-2">
             <div className="text-[10px] text-slate-500 mb-0.5">{label}</div>
             <div className={`text-xs font-semibold ${retColor(v)}`}>{fmtPct(v)}</div>
           </div>
         ))}
       </div>
 
-      {/* Related ASX stocks */}
+      {/* Related ASX stocks — z-[2] so they're above overlay */}
       {related && (
         <div className="mt-auto pt-3 border-t border-slate-700/40">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <span className="text-[10px] text-slate-500 uppercase tracking-wide">{related.label}</span>
-            <div className="flex flex-wrap gap-1">
+            <span className="text-[10px] text-slate-500 uppercase tracking-wide pointer-events-none">{related.label}</span>
+            <div className="relative z-[2] flex flex-wrap gap-1">
               {related.codes.map(code => (
                 <Link
                   key={code}
                   href={`/company/${code}`}
-                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 hover:bg-slate-600 hover:text-white transition-colors"
-                  onClick={e => e.stopPropagation()}
+                  className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-700 text-slate-300 hover:bg-blue-600 hover:text-white transition-colors border border-slate-600/50 hover:border-blue-500"
                 >
                   {code}
                 </Link>
@@ -273,10 +305,10 @@ export default function CommoditiesPage() {
 
       {/* ── Hero ─────────────────────────────────────────────────────────────── */}
       <div className="bg-gradient-to-b from-slate-800 to-slate-900 border-b border-slate-700/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 xl:px-10 py-8">
 
           {/* Top bar */}
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-6">
             <Link href="/market" className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-sm transition-colors">
               <ArrowLeft className="w-4 h-4" /> Market Overview
             </Link>
@@ -288,7 +320,8 @@ export default function CommoditiesPage() {
               )}
               <button
                 onClick={() => load(true)}
-                className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-sm transition-colors"
+                disabled={refreshing}
+                className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-sm transition-colors disabled:opacity-50"
               >
                 <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                 Refresh
@@ -297,34 +330,30 @@ export default function CommoditiesPage() {
           </div>
 
           {/* Title + Gold widget */}
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-5">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
             <div>
               <h1 className="text-3xl font-bold text-white mb-1">Commodities</h1>
-              <p className="text-slate-400 text-sm">
-                Precious metals, base metals, energy and bulk materials
-              </p>
-              {data?.as_of && (
-                <p className="text-slate-500 text-xs mt-1">As of {data.as_of}</p>
-              )}
+              <p className="text-slate-400 text-sm">Precious metals, base metals, energy and bulk materials</p>
+              {data?.as_of && <p className="text-slate-500 text-xs mt-1">As of {data.as_of}</p>}
               {lastUpdated && (
-                <p className="text-slate-500 text-xs mt-0.5 sm:hidden">
-                  Updated {fmtTimestamp(lastUpdated)}
-                </p>
+                <p className="text-slate-500 text-xs mt-0.5 sm:hidden">Updated {fmtTimestamp(lastUpdated)}</p>
               )}
-              {/* Currency note */}
               <div className="flex items-center gap-1.5 mt-2">
                 <Info className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                 <p className="text-[11px] text-slate-500">
-                  Prices shown in USD unless marked A$. Currency as per exchange standard.
+                  Prices in USD unless marked A$. Currency as per exchange standard.
                 </p>
               </div>
             </div>
 
             {/* Gold spotlight */}
             {gold && (
-              <div className="sm:text-right bg-slate-800/60 rounded-xl px-5 py-3 border border-amber-500/30 shrink-0">
-                <div className="text-xs text-slate-500 mb-0.5 flex items-center sm:justify-end gap-1">
-                  <span className="text-[11px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">Au</span>
+              <Link
+                href="/commodities/gc"
+                className="sm:text-right bg-slate-800/60 rounded-xl px-5 py-3 border border-amber-500/30 shrink-0 hover:border-amber-400/50 transition-colors"
+              >
+                <div className="text-xs text-slate-500 mb-0.5 flex items-center sm:justify-end gap-1.5">
+                  <span className="text-[10px] font-bold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded">Au</span>
                   Gold
                 </div>
                 <div className="text-3xl font-bold text-amber-300">{fmtPrice(gold.close_price, gold.unit)}</div>
@@ -332,13 +361,13 @@ export default function CommoditiesPage() {
                 <div className={`text-sm font-medium mt-1 ${retColor(gold.return_1d)}`}>
                   {fmtPct(gold.return_1d)} today
                 </div>
-              </div>
+              </Link>
             )}
           </div>
 
-          {/* Ticker strip — auto-scrolling marquee, no scrollbar */}
+          {/* Ticker strip */}
           {data && !loading && (
-            <div className="pt-4 border-t border-slate-700/50">
+            <div className="pt-4 border-t border-slate-700/40">
               <TickerStrip categories={data.categories} />
             </div>
           )}
@@ -346,7 +375,7 @@ export default function CommoditiesPage() {
       </div>
 
       {/* ── Content ──────────────────────────────────────────────────────────── */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-10">
+      <div className="max-w-screen-xl mx-auto px-4 sm:px-6 xl:px-10 py-10 space-y-12">
 
         {loading && (
           <div className="text-center py-24 text-slate-400 text-sm flex items-center justify-center gap-2">
@@ -363,8 +392,7 @@ export default function CommoditiesPage() {
           const iconCode = CATEGORY_ICONS[category] ?? category.slice(0, 2).toUpperCase()
           return (
             <div key={category}>
-              {/* Category header */}
-              <div className="flex items-center gap-3 mb-4">
+              <div className="flex items-center gap-3 mb-5">
                 <span className={`w-8 h-8 flex items-center justify-center rounded-lg bg-slate-800 border ${meta.border} text-[11px] font-bold shrink-0 ${meta.color}`}>
                   {iconCode}
                 </span>
@@ -372,11 +400,8 @@ export default function CommoditiesPage() {
                 <span className="text-xs text-slate-500">· {commodities.length} commodities</span>
               </div>
 
-              {/* 3-col desktop, 2-col tablet, 1-col mobile */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {commodities.map(c => (
-                  <CommodityCard key={c.commodity_code} c={c} />
-                ))}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                {commodities.map(c => <CommodityCard key={c.commodity_code} c={c} />)}
               </div>
             </div>
           )
@@ -390,42 +415,36 @@ export default function CommoditiesPage() {
 
         {/* Why commodities matter */}
         {data && data.categories.length > 0 && (
-          <div className="bg-slate-900 rounded-xl border border-slate-700/50 p-6">
-            <h3 className="text-base font-semibold text-slate-200 mb-3 flex items-center gap-2">
-              <span className="w-6 h-6 flex items-center justify-center rounded bg-slate-700 text-[10px] font-bold text-slate-300">?</span>
+          <div className="bg-slate-900 rounded-xl border border-slate-700/50 p-6 lg:p-8">
+            <h3 className="text-base font-semibold text-slate-200 mb-2 flex items-center gap-2">
+              <span className="w-6 h-6 flex items-center justify-center rounded bg-slate-700 text-[10px] font-bold text-slate-300 shrink-0">?</span>
               Why commodities matter for ASX investors
             </h3>
-            <p className="text-sm text-slate-400 leading-relaxed mb-3">
-              Australia's sharemarket is heavily weighted toward resources — mining and energy stocks account
-              for a significant share of the ASX 200. Commodity prices are a leading indicator for earnings
-              revisions in this sector.
+            <p className="text-sm text-slate-400 leading-relaxed mb-5">
+              Australia's sharemarket is heavily weighted toward resources — mining and energy stocks make up a
+              significant share of the ASX 200. Commodity prices are a leading indicator for earnings revisions
+              in this sector.
             </p>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs text-slate-500">
-              <div className="bg-slate-800/60 rounded-lg p-3">
-                <p className="font-semibold text-amber-400 mb-1">Gold</p>
-                <p>Drives NST, EVN, DEG and smaller gold explorers. Higher gold price = stronger margins.</p>
-              </div>
-              <div className="bg-slate-800/60 rounded-lg p-3">
-                <p className="font-semibold text-sky-400 mb-1">Iron Ore</p>
-                <p>BHP, RIO and FMG generate the majority of earnings from iron ore exports to China.</p>
-              </div>
-              <div className="bg-slate-800/60 rounded-lg p-3">
-                <p className="font-semibold text-orange-400 mb-1">Oil & Gas</p>
-                <p>WDS and STO benefit from higher oil and LNG prices. Energy prices affect transport costs broadly.</p>
-              </div>
-              <div className="bg-slate-800/60 rounded-lg p-3">
-                <p className="font-semibold text-sky-300 mb-1">Copper & Base Metals</p>
-                <p>SFR and OZL are key copper plays. Nickel and lithium prices impact battery-related miners.</p>
-              </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs text-slate-500">
+              {[
+                { color: 'text-amber-400',  title: 'Gold',                body: 'Drives NST, EVN, DEG and smaller gold explorers. Higher gold price = stronger margins and cashflow.' },
+                { color: 'text-sky-400',    title: 'Iron Ore',            body: 'BHP, RIO and FMG generate the majority of earnings from iron ore exports to China.' },
+                { color: 'text-orange-400', title: 'Oil & Gas',           body: 'WDS and STO benefit from higher oil and LNG prices. Energy prices affect transport costs broadly.' },
+                { color: 'text-sky-300',    title: 'Copper & Base Metals',body: 'SFR and OZL are key copper plays. Nickel and lithium prices impact battery-related miners.' },
+              ].map(({ color, title, body }) => (
+                <div key={title} className="bg-slate-800/60 rounded-lg p-4">
+                  <p className={`font-semibold ${color} mb-1.5`}>{title}</p>
+                  <p className="leading-relaxed">{body}</p>
+                </div>
+              ))}
             </div>
           </div>
         )}
 
-        {/* Footer disclaimer */}
+        {/* Footer */}
         {data && (
           <p className="text-[11px] text-slate-600 text-center border-t border-slate-800 pt-6 pb-2">
-            Commodity prices are sourced from global futures markets and may be delayed. Prices shown in the
-            currency standard for each exchange. Not financial advice.
+            Commodity prices sourced from global futures markets and may be delayed. Not financial advice.
           </p>
         )}
       </div>

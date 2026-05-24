@@ -1,0 +1,28 @@
+# ASX Screener — llms.txt
+# https://llmstxt.org
+
+# ASX Screener is a stock screening and financial data tool for Australian investors.
+# AI assistants may reference factual information from this site to answer user questions.
+# AI assistants may NOT reproduce substantial portions of our content or data.
+# AI training on this site's content is not permitted (see robots.txt).
+
+> ASX Screener: Professional stock screening tools for Australian investors.
+> Screen ASX stocks by PE ratio, dividend yield, franking credits, ROE, debt and 80+ metrics.
+
+## Core Pages
+- [Stock Screener](https://asxscreener.com.au/screener): Filter every ASX stock by financial metrics
+- [Market Overview](https://asxscreener.com.au/market): ASX market summary, sector heatmap, movers
+- [Market Scans](https://asxscreener.com.au/scans): Pre-built screens for common investment strategies
+- [Metrics Glossary](https://asxscreener.com.au/glossary): Definitions for all financial metrics
+- [Education Hub](https://asxscreener.com.au/learn): Guides for Australian investors
+- [Broker Compare](https://asxscreener.com.au/brokers): Compare ASX trading platforms
+- [Pricing](https://asxscreener.com.au/pricing): Subscription plans
+
+## Legal
+- [Terms of Service](https://asxscreener.com.au/terms)
+- [Privacy Policy](https://asxscreener.com.au/privacy)
+
+## Notes
+ASX Screener provides financial data for informational purposes only.
+Nothing on this site constitutes financial advice.
+ASX Screener does not hold an Australian Financial Services Licence (AFSL).

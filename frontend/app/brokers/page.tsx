@@ -1,21 +1,34 @@
 'use client'
-import { useState } from 'react'
-import { ExternalLink, Check, X, Minus, Shield, Zap, DollarSign, Globe, Star, Users, BookOpen, TrendingUp, BarChart2, Info } from 'lucide-react'
+import { useState, useMemo } from 'react'
+import {
+  ExternalLink, Check, X, Minus, Shield, Zap, DollarSign, Globe,
+  Star, Users, BookOpen, TrendingUp, BarChart2, Info,
+  ChevronUp, ChevronDown, ChevronsUpDown,
+} from 'lucide-react'
 import { PlanGate } from '@/components/PlanGate'
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
 
-type Research   = 'basic' | 'good' | 'excellent'
-type FilterKey  = 'chess' | 'zero_brokerage' | 'international' | 'etf' | 'beginner' | 'research' | 'no_platform_fee'
+const FEE_REVIEW_DATE = 'May 2026'
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+type Research  = 'basic' | 'good' | 'excellent'
+type FilterKey = 'chess' | 'zero_brokerage' | 'international' | 'etf' | 'beginner' | 'research' | 'no_platform_fee'
+type SortKey   = 'name' | 'brokerage_min' | 'chess' | 'international' | 'research' | 'min_deposit' | 'platform_fee'
+type SortDir   = 'asc' | 'desc'
 
 interface Broker {
   name: string
   logo: string
   tagline: string
   brokerage: string
+  brokerageMin: number        // numeric minimum for sorting
   platformFee: string
+  platformFree: boolean       // for sorting
   minDeposit: string
-  chess: boolean | null   // null = partial / unclear
+  minDepositNum: number       // numeric for sorting
+  chess: boolean | null
   international: boolean
   fractional: boolean
   research: Research
@@ -25,9 +38,9 @@ interface Broker {
   promoText?: string
   affiliateUrl: string
   highlight?: boolean
-  // filter helpers
+  // filter flags
   zeroBrokerage: boolean
-  etfFriendly:   boolean
+  etfFriendly: boolean
   beginnerFriendly: boolean
 }
 
@@ -38,9 +51,9 @@ const BROKERS: Broker[] = [
     name: 'CommSec',
     logo: 'CS',
     tagline: "Australia's largest online broker",
-    brokerage: '$10 – $19.95',
-    platformFee: 'Free',
-    minDeposit: '$0',
+    brokerage: '$10 – $19.95', brokerageMin: 10,
+    platformFee: 'Free', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: true, international: true, fractional: false, research: 'excellent',
     bestFor: 'Full-service investing with deep research',
     pros: ['Deep research & analysis tools', 'CHESS-sponsored', 'Strong brand & customer support'],
@@ -52,9 +65,9 @@ const BROKERS: Broker[] = [
     name: 'SelfWealth',
     logo: 'SW',
     tagline: 'Flat $9.50 brokerage, always',
-    brokerage: '$9.50 flat',
-    platformFee: 'Free (Premium $20/mo)',
-    minDeposit: '$0',
+    brokerage: '$9.50 flat', brokerageMin: 9.50,
+    platformFee: 'Free (Premium $20/mo)', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: true, international: true, fractional: false, research: 'good',
     bestFor: 'Cost-conscious investors who buy regularly',
     pros: ['Flat $9.50 regardless of trade size', 'CHESS-sponsored', 'Community peer benchmarking'],
@@ -68,9 +81,9 @@ const BROKERS: Broker[] = [
     name: 'Superhero',
     logo: 'SH',
     tagline: 'Simple investing from $5',
-    brokerage: '$5 ASX · $0 US',
-    platformFee: 'Free',
-    minDeposit: '$100',
+    brokerage: '$5 ASX · $0 US', brokerageMin: 0,
+    platformFee: 'Free', platformFree: true,
+    minDeposit: '$100', minDepositNum: 100,
     chess: false, international: true, fractional: true, research: 'basic',
     bestFor: 'Beginners and US stock investors',
     pros: ['Low $5 ASX brokerage', '$0 US trades', 'Zero brokerage on ETF purchases'],
@@ -83,9 +96,9 @@ const BROKERS: Broker[] = [
     name: 'Pearler',
     logo: 'PL',
     tagline: 'Built for long-term investors',
-    brokerage: '$6.50',
-    platformFee: 'Free',
-    minDeposit: '$0',
+    brokerage: '$6.50', brokerageMin: 6.50,
+    platformFee: 'Free', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: true, international: true, fractional: false, research: 'basic',
     bestFor: 'Passive investors and ETF accumulators',
     pros: ['Auto-invest scheduling', 'CHESS-sponsored', 'Built for set-and-forget investing'],
@@ -98,9 +111,9 @@ const BROKERS: Broker[] = [
     name: 'CMC Invest',
     logo: 'CMC',
     tagline: 'Zero brokerage on small trades',
-    brokerage: '$0 (under $1k) · $11+',
-    platformFee: 'Free',
-    minDeposit: '$0',
+    brokerage: '$0 (under $1k) · $11+', brokerageMin: 0,
+    platformFee: 'Free', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: true, international: false, fractional: false, research: 'good',
     bestFor: 'Active traders who want low costs on smaller trades',
     pros: ['$0 brokerage on trades under $1,000', 'CHESS-sponsored', 'Good research tools'],
@@ -112,9 +125,9 @@ const BROKERS: Broker[] = [
     name: 'nabtrade',
     logo: 'NT',
     tagline: 'Premium research for serious investors',
-    brokerage: '$14.95 – $19.95',
-    platformFee: 'Free',
-    minDeposit: '$0',
+    brokerage: '$14.95 – $19.95', brokerageMin: 14.95,
+    platformFee: 'Free', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: true, international: true, fractional: false, research: 'excellent',
     bestFor: 'NAB customers seeking premium research & ASX depth',
     pros: ['Excellent research & data', 'CHESS-sponsored', 'Deep ASX market data'],
@@ -126,9 +139,9 @@ const BROKERS: Broker[] = [
     name: 'Stake',
     logo: 'SK',
     tagline: 'Modern investing — ASX & US',
-    brokerage: '$3 AUS · $0 US',
-    platformFee: 'Free (Stake Black $9/mo)',
-    minDeposit: '$0',
+    brokerage: '$3 AUS · $0 US', brokerageMin: 0,
+    platformFee: 'Free (Stake Black $9/mo)', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: false, international: true, fractional: true, research: 'basic',
     bestFor: 'Investors who want both ASX and US share exposure',
     pros: ['Low $3 ASX brokerage', '$0 US trades & fractional shares', 'Clean modern interface'],
@@ -140,9 +153,9 @@ const BROKERS: Broker[] = [
     name: 'moomoo',
     logo: 'MM',
     tagline: 'Advanced tools, low fees',
-    brokerage: '$0.99 – $3.99',
-    platformFee: 'Free',
-    minDeposit: '$0',
+    brokerage: '$0.99 – $3.99', brokerageMin: 0.99,
+    platformFee: 'Free', platformFree: true,
+    minDeposit: '$0', minDepositNum: 0,
     chess: false, international: true, fractional: false, research: 'good',
     bestFor: 'Active traders who want advanced charting',
     pros: ['Very low brokerage from $0.99', 'Advanced charting & Level 2 data', 'International markets access'],
@@ -152,6 +165,17 @@ const BROKERS: Broker[] = [
     highlight: true,
     zeroBrokerage: false, etfFriendly: false, beginnerFriendly: false,
   },
+]
+
+// ── Quick picks ───────────────────────────────────────────────────────────────
+
+const QUICK_PICKS = [
+  { type: 'Beginner investor',       brokers: 'CommSec · SelfWealth',       filter: 'beginner'       as FilterKey },
+  { type: 'Low-cost regular buyer',  brokers: 'SelfWealth · CMC Invest',    filter: 'chess'          as FilterKey },
+  { type: 'ETF investor',            brokers: 'Pearler · Superhero',        filter: 'etf'            as FilterKey },
+  { type: 'US shares access',        brokers: 'Stake · Superhero · moomoo', filter: 'international'  as FilterKey },
+  { type: 'Research & analysis',     brokers: 'CommSec · nabtrade',         filter: 'research'       as FilterKey },
+  { type: 'CHESS sponsorship',       brokers: 'Pearler · CMC Invest',       filter: 'chess'          as FilterKey },
 ]
 
 // ── Filter config ─────────────────────────────────────────────────────────────
@@ -166,23 +190,43 @@ const FILTERS: { key: FilterKey; label: string; icon: React.ElementType }[] = [
   { key: 'no_platform_fee', label: 'No platform fee',  icon: Zap        },
 ]
 
-function matchesFilters(broker: Broker, active: Set<FilterKey>): boolean {
+function matchesFilters(b: Broker, active: Set<FilterKey>): boolean {
   if (active.size === 0) return true
-  if (active.has('chess')           && broker.chess !== true)             return false
-  if (active.has('zero_brokerage')  && !broker.zeroBrokerage)             return false
-  if (active.has('international')   && !broker.international)             return false
-  if (active.has('etf')             && !broker.etfFriendly)               return false
-  if (active.has('beginner')        && !broker.beginnerFriendly)          return false
-  if (active.has('research')        && broker.research !== 'excellent')   return false
-  if (active.has('no_platform_fee') && broker.platformFee !== 'Free')     return false
+  if (active.has('chess')           && b.chess !== true)          return false
+  if (active.has('zero_brokerage')  && !b.zeroBrokerage)          return false
+  if (active.has('international')   && !b.international)          return false
+  if (active.has('etf')             && !b.etfFriendly)            return false
+  if (active.has('beginner')        && !b.beginnerFriendly)       return false
+  if (active.has('research')        && b.research !== 'excellent')return false
+  if (active.has('no_platform_fee') && !b.platformFree)           return false
   return true
+}
+
+// ── Sort helpers ──────────────────────────────────────────────────────────────
+
+const RESEARCH_RANK: Record<Research, number> = { basic: 0, good: 1, excellent: 2 }
+
+function sortBrokers(brokers: Broker[], key: SortKey, dir: SortDir): Broker[] {
+  return [...brokers].sort((a, b) => {
+    let cmp = 0
+    switch (key) {
+      case 'name':          cmp = a.name.localeCompare(b.name);                                  break
+      case 'brokerage_min': cmp = a.brokerageMin    - b.brokerageMin;                            break
+      case 'chess':         cmp = (a.chess === true ? 1 : 0) - (b.chess === true ? 1 : 0);      break
+      case 'international': cmp = (a.international  ? 1 : 0) - (b.international  ? 1 : 0);      break
+      case 'research':      cmp = RESEARCH_RANK[a.research] - RESEARCH_RANK[b.research];         break
+      case 'min_deposit':   cmp = a.minDepositNum   - b.minDepositNum;                           break
+      case 'platform_fee':  cmp = (a.platformFree   ? 1 : 0) - (b.platformFree   ? 1 : 0);      break
+    }
+    return dir === 'asc' ? cmp : -cmp
+  })
 }
 
 // ── Style maps ────────────────────────────────────────────────────────────────
 
 const RESEARCH_LABEL: Record<Research, { label: string; cls: string }> = {
-  basic:     { label: 'Basic',     cls: 'bg-slate-100 text-slate-600'   },
-  good:      { label: 'Good',      cls: 'bg-blue-100 text-blue-700'     },
+  basic:     { label: 'Basic',     cls: 'bg-slate-100 text-slate-600'    },
+  good:      { label: 'Good',      cls: 'bg-blue-100 text-blue-700'      },
   excellent: { label: 'Excellent', cls: 'bg-emerald-100 text-emerald-700'},
 }
 
@@ -192,6 +236,13 @@ function TrileanIcon({ value }: { value: boolean | null }) {
   if (value === true)  return <Check className="w-4 h-4 text-emerald-500 mx-auto" />
   if (value === false) return <X     className="w-4 h-4 text-red-400    mx-auto" />
   return <Minus className="w-4 h-4 text-slate-300 mx-auto" />
+}
+
+function SortIcon({ col, current, dir }: { col: SortKey; current: SortKey; dir: SortDir }) {
+  if (col !== current) return <ChevronsUpDown className="w-3 h-3 text-slate-300 inline-block ml-0.5" />
+  return dir === 'asc'
+    ? <ChevronUp   className="w-3 h-3 text-blue-600 inline-block ml-0.5" />
+    : <ChevronDown className="w-3 h-3 text-blue-600 inline-block ml-0.5" />
 }
 
 function BrokerCard({ broker }: { broker: Broker }) {
@@ -237,18 +288,16 @@ function BrokerCard({ broker }: { broker: Broker }) {
       <div className="space-y-1 mb-2 flex-1">
         {broker.pros.map(pro => (
           <div key={pro} className="flex items-start gap-1.5 text-xs text-slate-600">
-            <Check className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />
-            {pro}
+            <Check className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" />{pro}
           </div>
         ))}
       </div>
 
       {/* Cons */}
-      <div className="space-y-1 mb-4">
+      <div className="space-y-1 mb-3">
         {broker.cons.map(con => (
           <div key={con} className="flex items-start gap-1.5 text-xs text-slate-400">
-            <X className="w-3 h-3 text-red-300 shrink-0 mt-0.5" />
-            {con}
+            <X className="w-3 h-3 text-red-300 shrink-0 mt-0.5" />{con}
           </div>
         ))}
       </div>
@@ -259,6 +308,11 @@ function BrokerCard({ broker }: { broker: Broker }) {
           🎁 {broker.promoText}
         </p>
       )}
+
+      {/* Last verified */}
+      <p className="text-[10px] text-slate-400 mb-3">
+        Fees last checked: {FEE_REVIEW_DATE}
+      </p>
 
       {/* CTA */}
       <a
@@ -278,6 +332,7 @@ function BrokerCard({ broker }: { broker: Broker }) {
 
 export default function BrokersPage() {
   const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set())
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({ key: 'name', dir: 'asc' })
 
   function toggleFilter(key: FilterKey) {
     setActiveFilters(prev => {
@@ -287,7 +342,27 @@ export default function BrokersPage() {
     })
   }
 
-  const filtered = BROKERS.filter(b => matchesFilters(b, activeFilters))
+  function handleSort(key: SortKey) {
+    setSort(prev =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: 'asc' }
+    )
+  }
+
+  const filtered = useMemo(
+    () => BROKERS.filter(b => matchesFilters(b, activeFilters)),
+    [activeFilters]
+  )
+
+  const sortedTable = useMemo(
+    () => sortBrokers(BROKERS, sort.key, sort.dir),
+    [sort]
+  )
+
+  const SH = ({ col }: { col: SortKey }) => (
+    <SortIcon col={col} current={sort.key} dir={sort.dir} />
+  )
 
   return (
     <PlanGate required="pro" feature="Broker Compare">
@@ -297,7 +372,7 @@ export default function BrokersPage() {
       <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 sm:p-8 text-white">
         <div className="flex items-center gap-2 text-blue-200 text-sm mb-3">
           <Shield className="w-4 h-4 shrink-0" />
-          Independent comparison · Fees last reviewed: May 2026
+          Independent comparison · Fees last reviewed: {FEE_REVIEW_DATE}
         </div>
         <h1 className="text-2xl sm:text-3xl font-bold mb-3">Best ASX Brokers in Australia</h1>
         <p className="text-blue-100 max-w-2xl text-base sm:text-lg leading-relaxed">
@@ -327,12 +402,63 @@ export default function BrokersPage() {
         </p>
       </div>
 
-      {/* ── 3. Editor's Picks ────────────────────────────────────────────── */}
+      {/* ── 3. Quick-pick table ──────────────────────────────────────────── */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-          <Star className="w-4 h-4 text-amber-500 shrink-0" />
-          Editor&apos;s Picks
+        <h2 className="text-lg font-semibold text-slate-800 mb-1 flex items-center gap-2">
+          <Zap className="w-4 h-4 text-amber-500 shrink-0" />
+          Find your broker in 30 seconds
         </h2>
+        <p className="text-sm text-slate-500 mb-4">Click a row to filter the broker list below.</p>
+        <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200">
+                <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Your investing style</th>
+                <th className="text-left px-4 py-2.5 font-semibold text-slate-600 text-xs uppercase tracking-wide">Suggested brokers</th>
+                <th className="px-4 py-2.5 w-28"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {QUICK_PICKS.map(({ type, brokers, filter }) => {
+                const isActive = activeFilters.has(filter) && activeFilters.size === 1
+                return (
+                  <tr
+                    key={type}
+                    onClick={() => {
+                      setActiveFilters(isActive ? new Set() : new Set([filter]))
+                    }}
+                    className={`cursor-pointer transition-colors ${isActive ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                  >
+                    <td className={`px-4 py-3 font-medium text-sm ${isActive ? 'text-blue-700' : 'text-slate-800'}`}>{type}</td>
+                    <td className={`px-4 py-3 text-sm ${isActive ? 'text-blue-600' : 'text-slate-500'}`}>{brokers}</td>
+                    <td className="px-4 py-3 text-right">
+                      <span className={`text-xs font-medium px-2.5 py-1 rounded-full transition-colors ${
+                        isActive
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-100 text-slate-500 hover:bg-blue-100 hover:text-blue-700'
+                      }`}>
+                        {isActive ? 'Clear' : 'Show'}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── 4. Editor's Picks ────────────────────────────────────────────── */}
+      <div>
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-1">
+          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-500 shrink-0" />
+            Editor&apos;s Picks
+          </h2>
+        </div>
+        <p className="text-xs text-slate-400 mb-4">
+          Featured brokers may include affiliate partners — rankings are based on our comparison criteria, not affiliate arrangements.
+        </p>
         <div className="grid sm:grid-cols-2 gap-4">
           {BROKERS.filter(b => b.highlight).map(broker => (
             <div key={broker.name} className="bg-white border-2 border-blue-200 rounded-2xl p-6 relative overflow-hidden">
@@ -371,11 +497,12 @@ export default function BrokersPage() {
                   <div className="text-slate-500 mt-1">Research</div>
                 </div>
               </div>
+              <p className="text-[10px] text-slate-400 mt-3">Fees last checked: {FEE_REVIEW_DATE}</p>
               <a
                 href={broker.affiliateUrl}
                 target="_blank"
                 rel="noopener noreferrer sponsored"
-                className="mt-4 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors"
+                className="mt-3 w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 rounded-xl transition-colors"
                 aria-label={`Open account with ${broker.name} (opens in new tab)`}
               >
                 Open account <ExternalLink className="w-3.5 h-3.5 shrink-0" />
@@ -385,7 +512,7 @@ export default function BrokersPage() {
         </div>
       </div>
 
-      {/* ── 4. Quick filters ─────────────────────────────────────────────── */}
+      {/* ── 5. All broker cards + filter chips ──────────────────────────── */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <BarChart2 className="w-4 h-4 text-slate-500 shrink-0" />
@@ -413,8 +540,7 @@ export default function BrokersPage() {
                 }`}
                 aria-pressed={active}
               >
-                <Icon className="w-3 h-3 shrink-0" />
-                {label}
+                <Icon className="w-3 h-3 shrink-0" />{label}
               </button>
             )
           })}
@@ -424,7 +550,7 @@ export default function BrokersPage() {
               onClick={() => setActiveFilters(new Set())}
               className="text-xs text-slate-400 hover:text-slate-600 px-2 py-1.5 underline underline-offset-2 transition-colors"
             >
-              Clear filters
+              Clear all
             </button>
           )}
         </div>
@@ -432,46 +558,95 @@ export default function BrokersPage() {
         {/* Broker cards grid */}
         {filtered.length === 0 ? (
           <div className="bg-slate-50 border border-slate-200 rounded-2xl p-10 text-center text-slate-400 text-sm">
-            No brokers match all selected filters. Try removing one.
+            No brokers match all selected filters.{' '}
+            <button type="button" onClick={() => setActiveFilters(new Set())} className="underline text-blue-500">
+              Clear filters
+            </button>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filtered.map(broker => (
-              <BrokerCard key={broker.name} broker={broker} />
-            ))}
+            {filtered.map(broker => <BrokerCard key={broker.name} broker={broker} />)}
           </div>
         )}
       </div>
 
-      {/* ── 5. Full comparison table ─────────────────────────────────────── */}
+      {/* ── 6. Full comparison table (sortable) ─────────────────────────── */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-800 mb-4">Full Comparison Table</h2>
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+          <h2 className="text-lg font-semibold text-slate-800">Full Comparison Table</h2>
+          <span className="text-xs text-slate-400">Click column headers to sort</span>
+        </div>
+
+        {/* Mobile scroll hint */}
+        <p className="sm:hidden text-xs text-slate-400 mb-2 flex items-center gap-1">
+          ← Scroll sideways to see all columns →
+        </p>
+
         <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto -webkit-overflow-scrolling-touch">
+            <table className="w-full text-sm min-w-[700px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700 w-36 whitespace-nowrap">Broker</th>
-                  <th className="text-center px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">Brokerage</th>
-                  <th className="text-center px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">Platform fee</th>
-                  <th className="text-center px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">Min. deposit</th>
-                  <th className="text-center px-3 py-3 font-semibold text-slate-700">CHESS</th>
-                  <th className="text-center px-3 py-3 font-semibold text-slate-700">Intl.</th>
+                  {/* Broker name */}
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700 w-36 whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => handleSort('name')}
+                      className="flex items-center gap-0.5 hover:text-blue-700 transition-colors"
+                    >
+                      Broker <SH col="name" />
+                    </button>
+                  </th>
+                  {/* Brokerage */}
+                  <th className="text-center px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">
+                    <button type="button" onClick={() => handleSort('brokerage_min')} className="hover:text-blue-700 transition-colors">
+                      Brokerage <SH col="brokerage_min" />
+                    </button>
+                  </th>
+                  {/* Platform fee */}
+                  <th className="text-center px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">
+                    <button type="button" onClick={() => handleSort('platform_fee')} className="hover:text-blue-700 transition-colors">
+                      Platform fee <SH col="platform_fee" />
+                    </button>
+                  </th>
+                  {/* Min deposit */}
+                  <th className="text-center px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">
+                    <button type="button" onClick={() => handleSort('min_deposit')} className="hover:text-blue-700 transition-colors">
+                      Min. deposit <SH col="min_deposit" />
+                    </button>
+                  </th>
+                  {/* CHESS */}
+                  <th className="text-center px-3 py-3 font-semibold text-slate-700">
+                    <button type="button" onClick={() => handleSort('chess')} className="hover:text-blue-700 transition-colors">
+                      CHESS <SH col="chess" />
+                    </button>
+                  </th>
+                  {/* International */}
+                  <th className="text-center px-3 py-3 font-semibold text-slate-700">
+                    <button type="button" onClick={() => handleSort('international')} className="hover:text-blue-700 transition-colors">
+                      Intl. <SH col="international" />
+                    </button>
+                  </th>
                   <th className="text-center px-3 py-3 font-semibold text-slate-700">Fractional</th>
-                  <th className="text-center px-3 py-3 font-semibold text-slate-700">Research</th>
+                  {/* Research */}
+                  <th className="text-center px-3 py-3 font-semibold text-slate-700">
+                    <button type="button" onClick={() => handleSort('research')} className="hover:text-blue-700 transition-colors">
+                      Research <SH col="research" />
+                    </button>
+                  </th>
                   <th className="text-left px-3 py-3 font-semibold text-slate-700 whitespace-nowrap">Best for</th>
                   <th className="px-3 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {BROKERS.map(broker => {
+                {sortedTable.map(broker => {
                   const inFilter = matchesFilters(broker, activeFilters)
                   return (
                     <tr
                       key={broker.name}
                       className={`transition-colors ${
                         !inFilter && activeFilters.size > 0
-                          ? 'opacity-30'
+                          ? 'opacity-25'
                           : broker.highlight
                           ? 'bg-blue-50/40 hover:bg-blue-50'
                           : 'hover:bg-slate-50'
@@ -521,11 +696,11 @@ export default function BrokersPage() {
           </div>
         </div>
         <p className="text-[11px] text-slate-400 mt-2 px-1">
-          Fees are checked regularly. Last reviewed: May 2026. Always verify current fees with the broker before opening an account.
+          Fees are checked regularly. Last reviewed: {FEE_REVIEW_DATE}. Always verify current fees with the broker before opening an account.
         </p>
       </div>
 
-      {/* ── 6. CHESS vs Custodial ────────────────────────────────────────── */}
+      {/* ── 7. CHESS vs Custodial + How to choose ────────────────────────── */}
       <div className="grid md:grid-cols-2 gap-6">
         <div className="bg-white rounded-2xl border border-slate-200 p-6">
           <h3 className="font-bold text-slate-900 mb-3 flex items-center gap-2">
@@ -556,15 +731,14 @@ export default function BrokersPage() {
               'New to investing? Look for a clean app, good support, and low minimum deposit.',
             ].map((tip, i) => (
               <li key={i} className="flex gap-2">
-                <span className="text-blue-600 font-bold shrink-0">{i + 1}.</span>
-                {tip}
+                <span className="text-blue-600 font-bold shrink-0">{i + 1}.</span>{tip}
               </li>
             ))}
           </ul>
         </div>
       </div>
 
-      {/* ── 7. How we rank ───────────────────────────────────────────────── */}
+      {/* ── 8. How we rank ───────────────────────────────────────────────── */}
       <div className="bg-blue-50 border border-blue-200 rounded-2xl p-6">
         <h2 className="text-base font-bold text-slate-900 mb-3 flex items-center gap-2">
           <BarChart2 className="w-5 h-5 text-blue-600 shrink-0" />
@@ -575,14 +749,14 @@ export default function BrokersPage() {
         </p>
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
           {[
-            { label: 'Brokerage fees',       desc: 'Per-trade cost on ASX and international markets' },
-            { label: 'CHESS sponsorship',     desc: 'Whether shares are registered in your name on ASX' },
-            { label: 'Platform fees',         desc: 'Monthly or annual account-keeping charges' },
-            { label: 'Research tools',        desc: 'Quality of in-platform data, news, and analysis' },
-            { label: 'International access',  desc: 'Ability to trade US and global markets' },
-            { label: 'Beginner-friendliness', desc: 'App quality, minimum deposit, onboarding experience' },
-            { label: 'ETF support',           desc: 'ETF-specific features like auto-invest and zero brokerage' },
-            { label: 'Overall value',         desc: 'Total cost and features relative to the investor type' },
+            { label: 'Brokerage fees',        desc: 'Per-trade cost on ASX and international markets' },
+            { label: 'CHESS sponsorship',      desc: 'Whether shares are registered in your name on ASX' },
+            { label: 'Platform fees',          desc: 'Monthly or annual account-keeping charges' },
+            { label: 'Research tools',         desc: 'Quality of in-platform data, news, and analysis' },
+            { label: 'International access',   desc: 'Ability to trade US and global markets' },
+            { label: 'Beginner-friendliness',  desc: 'App quality, minimum deposit, onboarding experience' },
+            { label: 'ETF support',            desc: 'ETF-specific features like auto-invest and zero brokerage' },
+            { label: 'Overall value',          desc: 'Total cost and features relative to the investor type' },
           ].map(({ label, desc }) => (
             <div key={label} className="bg-white rounded-xl border border-blue-100 p-3">
               <p className="text-xs font-semibold text-slate-800 mb-0.5">{label}</p>
@@ -595,7 +769,7 @@ export default function BrokersPage() {
         </p>
       </div>
 
-      {/* ── 8. FAQ ───────────────────────────────────────────────────────── */}
+      {/* ── 9. FAQ ───────────────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-800 mb-5">Frequently Asked Questions</h2>
         <div className="space-y-5">
@@ -606,11 +780,11 @@ export default function BrokersPage() {
             },
             {
               q: 'Do I need to pay tax on share trading in Australia?',
-              a: 'Yes. Capital gains and dividends are taxable in Australia. Shares held for 12+ months qualify for the 50% CGT discount. Fully-franked dividends come with franking credits that can offset your tax. We recommend speaking with a registered tax agent or accountant. ASX Screener helps you track portfolio cost basis and dividend income for record-keeping.',
+              a: 'Yes. Capital gains and dividends are taxable in Australia. Shares held for 12+ months qualify for the 50% CGT discount. Fully-franked dividends come with franking credits that can offset your tax. We recommend speaking with a registered tax agent or accountant.',
             },
             {
               q: 'Which broker is best for ETF investing?',
-              a: 'Pearler and Superhero are popular for passive ETF investing — Superhero offers zero brokerage on certain ETF purchases and Pearler has an auto-invest feature. CMC Invest also offers zero brokerage on trades under $1,000. Use the ETF filter above to see brokers best suited to this strategy.',
+              a: 'Pearler and Superhero are popular for passive ETF investing — Superhero offers zero brokerage on certain ETF purchases and Pearler has an auto-invest feature. CMC Invest also offers zero brokerage on trades under $1,000. Use the "Best for ETFs" filter above to see matching brokers.',
             },
             {
               q: 'Can I use multiple brokers?',
@@ -618,7 +792,7 @@ export default function BrokersPage() {
             },
             {
               q: 'What is the difference between brokerage and a platform fee?',
-              a: 'Brokerage is a per-trade cost you pay each time you buy or sell shares. A platform fee (sometimes called an account-keeping fee) is charged periodically — monthly or annually — just for having an account. Most modern discount brokers have eliminated platform fees, but some charge them for premium features or research access.',
+              a: 'Brokerage is a per-trade cost charged each time you buy or sell shares. A platform fee is charged periodically — monthly or annually — just for having an account. Most modern discount brokers have eliminated platform fees, but some charge for premium features or research access.',
             },
           ].map(({ q, a }) => (
             <div key={q} className="border-b border-slate-100 pb-5 last:border-0 last:pb-0">
@@ -629,7 +803,7 @@ export default function BrokersPage() {
         </div>
       </div>
 
-      {/* ── Disclaimer footer ────────────────────────────────────────────── */}
+      {/* ── 10. Disclaimer ───────────────────────────────────────────────── */}
       <p className="text-xs text-slate-400 leading-relaxed pb-2">
         <strong>Disclaimer:</strong> The information on this page is for general informational and educational purposes only. It does not constitute financial advice or a recommendation to open any brokerage account. Brokerage fees, features, and promotional offers change regularly — please verify all details directly with the broker. ASX Screener may receive affiliate commissions from linked brokers at no cost to you. This does not influence our comparison methodology or editorial independence.
       </p>

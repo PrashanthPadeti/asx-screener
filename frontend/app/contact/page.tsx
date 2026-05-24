@@ -204,7 +204,7 @@ export default function ContactPage() {
 
       // Subscription tier for logged-in users
       if (user) {
-        const u = user as Record<string, unknown>
+        const u = user as unknown as Record<string, unknown>
         const tier = (u.subscription_tier ?? u.tier ?? u.plan ?? 'unknown') as string
         fd.append('subscription_tier', tier)
       }

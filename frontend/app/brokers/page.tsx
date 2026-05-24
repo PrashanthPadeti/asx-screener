@@ -154,7 +154,7 @@ function TrileanIcon({ value }: { value: boolean | null }) {
 
 export default function BrokersPage() {
   return (
-    <PlanGate required="premium" feature="Broker Compare">
+    <PlanGate required="pro" feature="Broker Compare">
     <div className="max-w-6xl mx-auto space-y-10 pb-16">
 
       {/* Hero */}

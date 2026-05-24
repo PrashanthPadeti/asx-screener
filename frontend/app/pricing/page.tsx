@@ -6,7 +6,6 @@ import { Check, X, Zap, Shield, Building2, ArrowRight, Star } from 'lucide-react
 import { useAuth } from '@/lib/auth'
 import { createCheckoutSession } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import Link from 'next/link'
 
 // ── Static plan data (matches backend plans.py) ───────────────────────────────
 

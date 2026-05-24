@@ -2,8 +2,39 @@
 ## ASX Screener — Australian Stock Screener Platform
 
 **Prepared:** April 2026  
+**Last updated:** May 2026 (V5.0.0 — commercial launch)  
 **Jurisdiction:** Australia  
 **Business Model:** SaaS subscription — stock data & screening tool (no financial advice)
+
+---
+
+## V5 Legal Status Update (May 2026)
+
+The following legal documents and compliance items were completed and shipped in **V5.0.0**:
+
+| Item | Status | Location |
+|------|--------|----------|
+| Privacy Policy | ✅ LIVE | `/privacy` — `frontend/app/privacy/page.tsx` |
+| Terms of Service | ✅ LIVE | `/terms` — `frontend/app/terms/page.tsx` |
+| Financial disclaimer | ✅ LIVE | Footer on every page |
+| Not-financial-advice wording | ✅ LIVE | Terms §3 (highlighted), screener AI panel, footer |
+| AFSL position stated | ✅ LIVE | Terms §3 explicitly states no AFSL held |
+| Australian Consumer Law rights | ✅ LIVE | Terms §12 |
+| Refund policy | ✅ LIVE | Terms §6 (14-day annual refund) |
+| Affiliate disclosure (brokers) | ✅ LIVE | Terms §10, brokers page |
+| Data accuracy disclaimer | ✅ LIVE | Terms §9 |
+| ToS acceptance pre-checkout | ✅ LIVE | Pricing page |
+| Cookie policy | ✅ LIVE | Privacy §6 |
+| OAIC complaints reference | ✅ LIVE | Privacy §7 |
+| AI output disclaimer | ✅ LIVE | Screener AI results panel |
+| Data provider: EODHD (not Yahoo) | ✅ DONE | Switched in V3 |
+
+**Remaining before full commercial scale:**
+- [ ] Lawyer review of Terms §3 AFSL position (Sprintlaw / LegalVision ~$300–800)
+- [ ] ABN registration (free, abr.gov.au)
+- [ ] Business name registration (ASIC, ~$39/yr)
+- [ ] GST registration when approaching $75k AUD revenue
+- [ ] Replace `asxscreener@gmail.com` with business email domain
 
 ---
 

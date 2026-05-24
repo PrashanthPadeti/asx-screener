@@ -1,9 +1,27 @@
 # ASX Screener — Master Architecture & Design Document
 
-**Version:** 1.0  
-**Date:** 2026-04-27  
-**Status:** Living document — update as decisions are made  
+**Version:** 5.0  
+**Date:** 2026-05-24 (originally 2026-04-27)  
+**Status:** Living document — updated for V5 commercial launch  
 **Server:** 209.38.84.102 (DigitalOcean, 2vCPU / 4GB RAM, Ubuntu)
+
+### V5 Architecture Change Log (May 2026)
+| Component | Change |
+|-----------|--------|
+| `/privacy` + `/terms` | New server-component legal pages added |
+| `Footer.tsx` | Legal links row added (Terms, Privacy, Education, Brokers, Glossary, Contact, Pricing) |
+| `support.py` | Context fields (URL, UA, viewport, timestamp, tier) + user confirmation email |
+| `email.py` | `send_support_confirmation()` added; admin notification enriched with context block |
+| `screener/page.tsx` | AI results disclaimer added |
+| `pricing/page.tsx` | ToS/Privacy acceptance note added pre-checkout |
+| `contact/page.tsx` | Guest support, 9 categories, What happens next?, response time |
+| `brokers/page.tsx` | Sortable table, quick-pick investor table, filter chips, pros/cons |
+| `learn/page.tsx` | Beginner pathway, analytics events, 3 SEO article sub-pages |
+| `glossary/page.tsx` | Pro+ badge, expand/collapse, rich metric cards |
+| `restore_v5.sh` | Automated restore script for V5 rollback |
+| `RESTORE_v5.md` | Full recovery documentation |
+| `V5_VERSION_MANIFEST.md` | Complete version manifest |
+| `V5_INVENTORY_CHECKLIST.md` | Full asset inventory with backup status |
 
 ---
 

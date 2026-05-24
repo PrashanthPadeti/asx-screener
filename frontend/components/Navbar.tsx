@@ -27,10 +27,10 @@ const MARKET_DATA_LINKS = [
 ]
 
 const RESOURCES_LINKS = [
-  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', premium: true },
-  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   desc: 'Guides, tutorials & courses',                        premium: true },
-  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    premium: true },
-  { href: '/contact',  label: 'Contact Support',  icon: Bell,       desc: 'Get help or report an issue',                       premium: false },
+  { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   desc: 'Definitions, formulas & benchmarks for all metrics', plan: 'pro' },
+  { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   desc: 'Guides, tutorials & courses',                        plan: 'pro' },
+  { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, desc: 'Best ASX trading platforms 2026',                    plan: 'pro' },
+  { href: '/contact',  label: 'Contact Support',  icon: Bell,       desc: 'Get help or report an issue',                       plan: null  },
 ]
 
 const PLAN_BADGE: Record<string, string> = {
@@ -180,18 +180,19 @@ export default function Navbar() {
               </button>
               {resourceDropOpen && (
                 <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {RESOURCES_LINKS.map(({ href, label, icon: Icon, desc, premium }) => (
+                  {RESOURCES_LINKS.map(({ href, label, icon: Icon, desc, plan }) => (
                     <Link
                       key={href}
                       href={href}
                       onClick={() => setResourceDropOpen(false)}
-                      className="flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors"
+                      className={cn('flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
                     >
-                      <Icon className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
+                      <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
                       <div className="flex-1">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-sm font-medium text-gray-800">{label}</span>
-                          {premium && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
+                          <span className={cn('text-sm font-medium', pathname === href ? 'text-blue-700' : 'text-gray-800')}>{label}</span>
+                          {plan === 'pro'     && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pro+</span>}
+                          {plan === 'premium' && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
                         </div>
                         <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
                       </div>

@@ -154,23 +154,18 @@ export default function Navbar() {
                 <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', resourceDropOpen && 'rotate-180')} />
               </button>
               {resourceDropOpen && (
-                <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50 max-h-[calc(100vh-4rem)] overflow-y-auto">
-                  {[...RESOURCES_LINKS_BASE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon, desc, plan }) => (
+                <div className="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {[...RESOURCES_LINKS_BASE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon, plan }) => (
                     <Link
                       key={href}
                       href={href}
                       onClick={() => setResourceDropOpen(false)}
-                      className={cn('flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
                     >
-                      <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn('text-sm font-medium', pathname === href ? 'text-blue-700' : 'text-gray-800')}>{label}</span>
-                          {plan === 'pro'     && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700">Pro+</span>}
-                          {plan === 'premium' && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
-                      </div>
+                      <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
+                      <span className={cn('text-sm flex-1', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
+                      {plan === 'pro'     && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-blue-100 text-blue-700">Pro+</span>}
+                      {plan === 'premium' && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700">Prem</span>}
                     </Link>
                   ))}
                 </div>
@@ -188,22 +183,17 @@ export default function Navbar() {
                 <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', marketDropOpen && 'rotate-180')} />
               </button>
               {marketDropOpen && (
-                <div className="absolute left-0 mt-1 w-64 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, desc, premium }) => (
+                <div className="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, premium }) => (
                     <Link
                       key={href}
                       href={href}
                       onClick={() => setMarketDropOpen(false)}
-                      className={cn('flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
                     >
-                      <Icon className={cn('w-4 h-4 mt-0.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-1.5">
-                          <span className={cn('text-sm font-medium', pathname === href ? 'text-blue-700' : 'text-gray-800')}>{label}</span>
-                          {premium && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Premium</span>}
-                        </div>
-                        <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
-                      </div>
+                      <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
+                      <span className={cn('text-sm flex-1', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
+                      {premium && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700">Prem</span>}
                     </Link>
                   ))}
                 </div>
@@ -226,22 +216,19 @@ export default function Navbar() {
                   <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', adminDropOpen && 'rotate-180')} />
                 </button>
                 {adminDropOpen && (
-                  <div className="absolute left-0 mt-1 w-60 bg-white border border-red-100 rounded-xl shadow-lg py-1 z-50">
-                    <div className="px-3 py-1.5 border-b border-red-50">
-                      <p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Admin Tools</p>
+                  <div className="absolute left-0 mt-1 w-48 bg-white border border-red-100 rounded-xl shadow-lg py-1 z-50">
+                    <div className="px-3 py-1 border-b border-red-50">
+                      <p className="text-[9px] font-bold text-red-400 uppercase tracking-wider">Admin Tools</p>
                     </div>
-                    {ADMIN_LINKS.map(({ href, label, icon: Icon, desc }) => (
+                    {ADMIN_LINKS.map(({ href, label, icon: Icon }) => (
                       <Link
                         key={href}
                         href={href}
                         onClick={() => setAdminDropOpen(false)}
-                        className="flex items-start gap-3 px-3 py-2.5 hover:bg-red-50 transition-colors"
+                        className="flex items-center gap-2.5 px-3 py-2 hover:bg-red-50 transition-colors"
                       >
-                        <Icon className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                        <div className="flex-1">
-                          <span className="text-sm font-medium text-gray-800">{label}</span>
-                          <div className="text-xs text-gray-500 mt-0.5">{desc}</div>
-                        </div>
+                        <Icon className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                        <span className="text-sm text-gray-800">{label}</span>
                       </Link>
                     ))}
                   </div>

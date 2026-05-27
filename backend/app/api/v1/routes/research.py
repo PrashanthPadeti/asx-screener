@@ -29,6 +29,29 @@ router = APIRouter()
 # Australian corporate tax rate (for franking credit grossing-up)
 _TAX_RATE = 0.30
 
+# Common English words to exclude from ASX code detection
+_ENGLISH_WORDS = {
+    'THE', 'AND', 'FOR', 'ARE', 'BUT', 'NOT', 'YOU', 'ALL', 'CAN',
+    'HAS', 'HER', 'WAS', 'ONE', 'OUR', 'OUT', 'DAY', 'GET', 'HOW',
+    'ITS', 'NEW', 'NOW', 'OLD', 'SEE', 'TWO', 'WAY', 'WHO', 'DID',
+    'LET', 'PUT', 'SAY', 'SHE', 'TOO', 'USE', 'OF', 'IN', 'TO',
+    'AS', 'AT', 'BE', 'DO', 'GO', 'IF', 'IS', 'IT', 'ME', 'MY',
+    'NO', 'ON', 'OR', 'SO', 'UP', 'US', 'WE', 'WOULD', 'COULD',
+    'SHOULD', 'HAVE', 'BEEN', 'FROM', 'THEY', 'WILL', 'WITH', 'THIS',
+    'THAT', 'THEIR', 'WHAT', 'WHEN', 'WHERE', 'WHICH', 'WHILE',
+    'YIELD', 'RATE', 'RETURN', 'HIGH', 'LOW', 'BEST', 'MORE', 'LESS',
+    'MOST', 'LAST', 'YEAR', 'OVER', 'BOTH', 'ALSO', 'EACH', 'MUCH',
+    'SUCH', 'INTO', 'DOES', 'GIVE', 'JUST', 'THAN', 'THEM', 'THEN',
+    'WELL', 'WERE', 'YOUR', 'STOCK', 'SHARE', 'PRICE', 'FUND', 'BANK',
+    'MINE', 'GOLD', 'COAL', 'IRON', 'DATA', 'TELL', 'SHOW', 'WANT',
+    'LIKE', 'GOOD', 'MAKE', 'TOOK', 'FROM', 'SOME', 'ONLY', 'COME',
+    'THAN', 'BEEN', 'CALL', 'DOWN', 'LOOK', 'FIND', 'HERE', 'GIVE',
+    'LIVE', 'MEAN', 'PLAN', 'KNOW', 'NEED', 'GROW', 'EARN', 'REAL',
+    'RISK', 'SALE', 'SELL', 'HOLD', 'LONG', 'NEXT', 'SAME', 'TIME',
+    'CASH', 'DEBT', 'LOSS', 'GAIN', 'FULL', 'HALF', 'PAST', 'ONCE',
+    'FIVE', 'FOUR', 'NINE', 'ZERO', 'VERY', 'MUCH', 'ALSO', 'EVEN',
+}
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -269,7 +292,7 @@ async def compare(
     codes = [c.upper().strip() for c in body.codes]
 
     result = await db.execute(text(f"""
-        SELECT asx_code, company_name, sector, industry_group,
+        SELECT asx_code, company_name, sector,
                {_COMPARE_COLS}
         FROM market.screener_universe
         WHERE asx_code = ANY(:codes)
@@ -352,15 +375,17 @@ async def ask(
     if len(question) > 2000:
         raise HTTPException(status_code=400, detail="Question too long (max 2 000 chars).")
 
-    # Extract ASX-style codes mentioned in question (2–5 uppercase letters)
-    mentioned = list(dict.fromkeys(re.findall(r'\b([A-Z]{2,5})\b', question.upper())))[:6]
+    # Extract ASX-style codes mentioned in question (2–5 uppercase letters),
+    # filtering out common English words that match the pattern
+    raw_codes = re.findall(r'\b([A-Z]{2,5})\b', question.upper())
+    mentioned = list(dict.fromkeys(c for c in raw_codes if c not in _ENGLISH_WORDS))[:6]
 
     # Fetch company context for mentioned codes
     context_parts: list[str] = []
     if mentioned:
         ctx_r = await db.execute(text("""
             SELECT
-                asx_code, company_name, sector, industry_group,
+                asx_code, company_name, sector,
                 last_price, market_cap, pe_ratio, forward_pe, price_to_book,
                 dividend_yield, grossed_up_yield, franking_pct, dps_ttm,
                 roe, roa, net_margin, gross_margin, debt_to_equity, current_ratio,
@@ -375,7 +400,7 @@ async def ask(
             d = dict(row._mapping)
             def _v(k): return d.get(k)
             context_parts.append(
-                f"**{d['asx_code']} — {d['company_name']}** | {d['sector']} / {d['industry_group']}\n"
+                f"**{d['asx_code']} — {d['company_name']}** | {d['sector']}\n"
                 f"  Price: ${_v('last_price')}  |  Market Cap: ${_v('market_cap')}M  |  52W: ${_v('week_52_low')}–${_v('week_52_high')}\n"
                 f"  P/E: {_v('pe_ratio')}x  |  Fwd P/E: {_v('forward_pe')}x  |  P/B: {_v('price_to_book')}x  |  ROE: {_v('roe')}%  |  Net Margin: {_v('net_margin')}%\n"
                 f"  Div Yield: {_v('dividend_yield')}%  |  Grossed-Up: {_v('grossed_up_yield')}%  |  Franking: {_v('franking_pct')}%  |  DPS TTM: ${_v('dps_ttm')}\n"

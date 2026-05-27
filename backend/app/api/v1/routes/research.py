@@ -11,8 +11,7 @@ All endpoints require admin access via require_admin dependency.
 """
 import re
 import logging
-import math
-from datetime import date, timedelta
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -100,9 +99,9 @@ async def backtest(
         buy_r = await db.execute(text("""
             SELECT time::date AS d, close
             FROM market.daily_prices
-            WHERE asx_code = :c AND time >= :sd::timestamptz
+            WHERE asx_code = :c AND time::date >= :sd
             ORDER BY time ASC LIMIT 1
-        """), {"c": code, "sd": str(start_dt)})
+        """), {"c": code, "sd": start_dt})
         buy_row = buy_r.fetchone()
         if not buy_row or not buy_row.close:
             results.append({"code": code, "error": "No price data for start date"})
@@ -114,9 +113,9 @@ async def backtest(
         sell_r = await db.execute(text("""
             SELECT time::date AS d, close
             FROM market.daily_prices
-            WHERE asx_code = :c AND time < :ed::timestamptz + interval '1 day'
+            WHERE asx_code = :c AND time::date <= :ed
             ORDER BY time DESC LIMIT 1
-        """), {"c": code, "ed": str(end_dt)})
+        """), {"c": code, "ed": end_dt})
         sell_row = sell_r.fetchone()
         if not sell_row or not sell_row.close:
             results.append({"code": code, "error": "No price data for end date"})
@@ -166,11 +165,11 @@ async def backtest(
                 last(close, time)                  AS close
             FROM market.daily_prices
             WHERE asx_code = :c
-              AND time >= :sd::timestamptz
-              AND time < :ed::timestamptz + interval '1 day'
+              AND time::date >= :sd
+              AND time::date <= :ed
             GROUP BY month
             ORDER BY month
-        """), {"c": code, "sd": str(actual_buy), "ed": str(actual_sell)})
+        """), {"c": code, "sd": actual_buy, "ed": actual_sell})
         chart_rows = chart_r.fetchall()
 
         # Accumulate dividends per month point

@@ -189,8 +189,10 @@ function BacktestMode() {
       })
       setResult(data)
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'Request failed')
+      const err = e as { response?: { status?: number; data?: { detail?: string } | string }; message?: string }
+      const detail = typeof err?.response?.data === 'object' ? err.response?.data?.detail : err?.response?.data
+      const status = err?.response?.status
+      setError(detail || (status ? `Server error ${status}` : err?.message || 'Request failed — check backend logs'))
     } finally {
       setLoading(false)
     }
@@ -481,7 +483,9 @@ function ComparatorMode() {
       const { data: d } = await api.post('/api/v1/research/compare', { codes })
       setData(d)
     } catch (e: unknown) {
-      setError((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Request failed')
+      const err = e as { response?: { status?: number; data?: { detail?: string } | string }; message?: string }
+      const detail = typeof err?.response?.data === 'object' ? err.response?.data?.detail : err?.response?.data
+      setError(detail || (err?.response?.status ? `Server error ${err.response.status}` : err?.message || 'Request failed'))
     } finally {
       setLoading(false)
     }
@@ -658,8 +662,9 @@ function ChatMode() {
       })
       setMessages([...newMessages, { role: 'assistant', content: data.answer }])
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setError(msg || 'AI service error — please try again')
+      const err = e as { response?: { status?: number; data?: { detail?: string } | string }; message?: string }
+      const detail = typeof err?.response?.data === 'object' ? err.response?.data?.detail : err?.response?.data
+      setError(detail || (err?.response?.status ? `Server error ${err.response.status}` : err?.message || 'AI service error'))
       setMessages(newMessages)   // leave user message visible
     } finally {
       setLoading(false)

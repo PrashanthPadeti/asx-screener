@@ -54,41 +54,48 @@ if not DATABASE_URL:
 
 
 # ── DDL — create tables if they don't exist ───────────────────────────────────
+# asyncpg does not allow multiple statements in one execute() call,
+# so each DDL statement is kept as a separate string in this list.
 
-DDL = """
-CREATE TABLE IF NOT EXISTS market.heatmap_cache (
-    mode         VARCHAR(10)   NOT NULL,
-    asx_code     VARCHAR(10)   NOT NULL,
-    company_name TEXT,
-    sector       TEXT,
-    industry     TEXT,
-    price        NUMERIC(14,4),
-    market_cap   NUMERIC(22,2),
-    p1           NUMERIC(12,6),   -- most-recent period return (decimal ratio)
-    p2           NUMERIC(12,6),
-    p3           NUMERIC(12,6),
-    p4           NUMERIC(12,6),
-    p5           NUMERIC(12,6),   -- oldest of the 5 periods
-    computed_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
-    PRIMARY KEY (mode, asx_code)
-);
-
-CREATE TABLE IF NOT EXISTS market.heatmap_labels (
-    mode        VARCHAR(10)  PRIMARY KEY,
-    label_1     VARCHAR(30),
-    label_2     VARCHAR(30),
-    label_3     VARCHAR(30),
-    label_4     VARCHAR(30),
-    label_5     VARCHAR(30),
-    computed_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS heatmap_cache_sector_idx
-    ON market.heatmap_cache (mode, sector);
-
-CREATE INDEX IF NOT EXISTS heatmap_cache_mktcap_idx
-    ON market.heatmap_cache (mode, market_cap DESC NULLS LAST);
-"""
+DDL_STATEMENTS = [
+    """
+    CREATE TABLE IF NOT EXISTS market.heatmap_cache (
+        mode         VARCHAR(10)   NOT NULL,
+        asx_code     VARCHAR(10)   NOT NULL,
+        company_name TEXT,
+        sector       TEXT,
+        industry     TEXT,
+        price        NUMERIC(14,4),
+        market_cap   NUMERIC(22,2),
+        p1           NUMERIC(12,6),
+        p2           NUMERIC(12,6),
+        p3           NUMERIC(12,6),
+        p4           NUMERIC(12,6),
+        p5           NUMERIC(12,6),
+        computed_at  TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (mode, asx_code)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS market.heatmap_labels (
+        mode        VARCHAR(10)  PRIMARY KEY,
+        label_1     VARCHAR(30),
+        label_2     VARCHAR(30),
+        label_3     VARCHAR(30),
+        label_4     VARCHAR(30),
+        label_5     VARCHAR(30),
+        computed_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS heatmap_cache_sector_idx
+        ON market.heatmap_cache (mode, sector)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS heatmap_cache_mktcap_idx
+        ON market.heatmap_cache (mode, market_cap DESC NULLS LAST)
+    """,
+]
 
 
 # ── Label formatters ──────────────────────────────────────────────────────────
@@ -317,8 +324,10 @@ async def run(dry_run: bool = False) -> None:
 
     try:
         async with AsyncSession(engine) as session:
-            # Ensure tables exist (idempotent)
-            await session.execute(text(DDL))
+            # Ensure tables exist — each statement executed separately
+            # (asyncpg rejects multi-statement strings in a single execute)
+            for stmt in DDL_STATEMENTS:
+                await session.execute(text(stmt))
             await session.commit()
 
             # Compute days

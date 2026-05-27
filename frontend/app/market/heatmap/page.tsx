@@ -13,9 +13,18 @@ import { cn } from '@/lib/utils'
 
 const SECTORS = [
   'All Sectors',
-  'Materials', 'Energy', 'Financials', 'Industrials', 'Consumer Discretionary',
-  'Consumer Staples', 'Health Care', 'Information Technology', 'Real Estate',
-  'Communication Services', 'Utilities',
+  'Materials',
+  'Financials',
+  'Industrials',
+  'Energy',
+  'Healthcare',
+  'Technology',
+  'Consumer Discretionary',
+  'Consumer Staples',
+  'Real Estate',
+  'Communication Services',
+  'Utilities',
+  'Other',
 ]
 
 const CAP_TIERS: { label: string; minCap: number }[] = [

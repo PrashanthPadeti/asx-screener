@@ -160,12 +160,12 @@ async def backtest(
 
             if body.include_dividends:
                 div_r = await db.execute(text("""
-                    SELECT ex_date, amount, franking_pct
+                    SELECT ex_date, amount_per_share AS amount, franking_pct
                     FROM market.dividends
                     WHERE asx_code = :c
                       AND ex_date >= :sd
                       AND ex_date <= :ed
-                      AND amount IS NOT NULL
+                      AND amount_per_share IS NOT NULL
                     ORDER BY ex_date
                 """), {"c": code, "sd": actual_buy_dt, "ed": actual_sell_dt})
                 for dr in div_r.fetchall():

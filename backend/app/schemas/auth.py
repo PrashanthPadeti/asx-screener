@@ -44,14 +44,27 @@ class AccessTokenResponse(BaseModel):
 
 class UserProfile(BaseModel):
     """Returned by GET /me."""
-    id:                   str
-    email:                str
-    name:                 Optional[str]  = None
-    plan:                 str            = "free"
-    subscription_status:  str            = "inactive"
-    subscription_ends_at: Optional[str]  = None
-    email_verified:       bool           = False
-    created_at:           Optional[str]  = None
-    is_admin:             bool           = False
+    id:                       str
+    email:                    str
+    name:                     Optional[str]  = None
+    plan:                     str            = "free"
+    subscription_status:      str            = "inactive"
+    subscription_ends_at:     Optional[str]  = None
+    email_verified:           bool           = False
+    created_at:               Optional[str]  = None
+    is_admin:                 bool           = False
+    # Notification preferences — returned so frontend can initialise toggles
+    email_alerts_enabled:     bool           = True
+    marketing_emails_enabled: bool           = False
+    push_alerts_enabled:      bool           = True
 
     model_config = {"from_attributes": True}
+
+
+class UpdateProfileRequest(BaseModel):
+    """Body for PATCH /api/v1/users/me."""
+    name:                     Optional[str]  = None
+    timezone:                 Optional[str]  = None
+    email_alerts_enabled:     Optional[bool] = None
+    marketing_emails_enabled: Optional[bool] = None
+    push_alerts_enabled:      Optional[bool] = None

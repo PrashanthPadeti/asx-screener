@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google'
 import './globals.css'
 import Navbar from '@/components/Navbar'
 import Footer from '@/components/Footer'
+import CookieConsent from '@/components/CookieConsent'
 import { AuthProvider } from '@/lib/auth'
 import { ClientGuard } from '@/components/ClientGuard'
 
@@ -32,6 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </ClientGuard>
           </main>
           <Footer />
+          <CookieConsent />
         </AuthProvider>
       </body>
     </html>

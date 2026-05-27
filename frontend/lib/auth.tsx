@@ -30,14 +30,18 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://209.38.84.102:8000'
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface AuthUser {
-  id:                   string
-  email:                string
-  name:                 string | null
-  plan:                 'free' | 'pro' | 'premium' | 'enterprise_pro' | 'enterprise_premium'
-  subscription_status:  'active' | 'inactive' | 'past_due' | 'cancelled' | 'trialing'
-  subscription_ends_at: string | null
-  email_verified:       boolean
-  is_admin:             boolean
+  id:                       string
+  email:                    string
+  name:                     string | null
+  plan:                     'free' | 'pro' | 'premium' | 'enterprise_pro' | 'enterprise_premium'
+  subscription_status:      'active' | 'inactive' | 'past_due' | 'cancelled' | 'trialing'
+  subscription_ends_at:     string | null
+  email_verified:           boolean
+  is_admin:                 boolean
+  // Notification preferences (populated from /api/v1/auth/me)
+  email_alerts_enabled:     boolean
+  marketing_emails_enabled: boolean
+  push_alerts_enabled:      boolean
 }
 
 interface TokenPair {

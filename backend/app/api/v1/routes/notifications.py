@@ -205,6 +205,80 @@ async def get_history(
 
 # ── Test notification ─────────────────────────────────────────────────────────
 
+# ── Unsubscribe (Spam Act 2003) ───────────────────────────────────────────────
+
+class UnsubscribeRequest(BaseModel):
+    token: str
+    type:  str = "all_marketing"   # all_marketing | alerts | digest
+
+
+@router.post("/unsubscribe", status_code=status.HTTP_200_OK)
+async def process_unsubscribe(
+    body: UnsubscribeRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    One-click email unsubscribe — Spam Act 2003 (Cth) s.18.
+
+    Processes immediately. Token is single-use (marked used after processing).
+    No authentication required — token itself is the credential.
+    """
+    valid_types = {"all_marketing", "alerts", "digest"}
+    if body.type not in valid_types:
+        raise HTTPException(status_code=400, detail=f"type must be one of {sorted(valid_types)}")
+
+    # Look up the token
+    result = await db.execute(text("""
+        SELECT id, user_id, unsubscribe_type, used, expires_at
+        FROM users.unsubscribe_tokens
+        WHERE token = :tok
+    """), {"tok": body.token})
+    row = result.fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Invalid unsubscribe link")
+
+    if row.used:
+        return {"status": "already_done", "type": row.unsubscribe_type}
+
+    from datetime import datetime, timezone
+    if row.expires_at and row.expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="Unsubscribe link has expired — please contact support")
+
+    # Mark token as used
+    await db.execute(text("""
+        UPDATE users.unsubscribe_tokens
+        SET used = TRUE, used_at = NOW()
+        WHERE id = :id
+    """), {"id": row.id})
+
+    # Update user preference
+    col_map = {
+        "all_marketing": "marketing_emails_enabled",
+        "alerts":        "email_alerts_enabled",
+        "digest":        "marketing_emails_enabled",  # digest falls under marketing
+    }
+    col = col_map[body.type]
+
+    await db.execute(text(f"""
+        UPDATE users.users SET {col} = FALSE, updated_at = NOW()
+        WHERE id = :uid
+    """), {"uid": str(row.user_id)})
+
+    # Audit log
+    await db.execute(text("""
+        INSERT INTO users.audit_log (user_id, action, entity_type, metadata)
+        VALUES (:uid, 'prefs.unsubscribed', 'user', :meta::jsonb)
+    """), {
+        "uid":  str(row.user_id),
+        "meta": f'{{"type": "{body.type}", "channel": "email_link"}}',
+    })
+
+    await db.commit()
+    log.info(f"Unsubscribe processed: user={row.user_id}, type={body.type}")
+    return {"status": "success", "type": body.type}
+
+
 class TestRequest(BaseModel):
     channel: str  # 'email' or 'sms'
 

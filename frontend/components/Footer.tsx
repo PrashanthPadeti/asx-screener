@@ -1,4 +1,16 @@
+'use client'
 import Link from 'next/link'
+
+function CookieSettingsButton() {
+  return (
+    <button
+      onClick={() => window.dispatchEvent(new Event('open-cookie-settings'))}
+      className="hover:text-slate-600 transition-colors cursor-pointer"
+    >
+      Cookie Settings
+    </button>
+  )
+}
 
 export default function Footer() {
   const year = new Date().getFullYear()
@@ -44,6 +56,7 @@ export default function Footer() {
         <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-xs text-slate-400">
           <Link href="/terms"   className="hover:text-slate-600 transition-colors">Terms of Service</Link>
           <Link href="/privacy" className="hover:text-slate-600 transition-colors">Privacy Policy</Link>
+          <CookieSettingsButton />
           <Link href="/learn"   className="hover:text-slate-600 transition-colors">Education Hub</Link>
           <Link href="/brokers" className="hover:text-slate-600 transition-colors">Broker Compare</Link>
           <Link href="/glossary" className="hover:text-slate-600 transition-colors">Glossary</Link>

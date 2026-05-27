@@ -33,6 +33,7 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
     UserProfile,
+    UpdateProfileRequest,
 )
 from app.services.email import send_password_reset_email, send_verification_reminder_email
 
@@ -390,7 +391,8 @@ async def me(
     result = await db.execute(
         text("""
             SELECT id, email, name, plan, email_verified,
-                   subscription_status, subscription_ends_at, created_at
+                   subscription_status, subscription_ends_at, created_at,
+                   email_alerts_enabled, marketing_emails_enabled, push_alerts_enabled
             FROM users.users
             WHERE id = :id
         """),
@@ -411,4 +413,7 @@ async def me(
         email_verified=row.email_verified or False,
         created_at=row.created_at.isoformat() if row.created_at else None,
         is_admin=row.email.lower() in admin_list,
+        email_alerts_enabled=row.email_alerts_enabled if row.email_alerts_enabled is not None else True,
+        marketing_emails_enabled=row.marketing_emails_enabled if row.marketing_emails_enabled is not None else False,
+        push_alerts_enabled=row.push_alerts_enabled if row.push_alerts_enabled is not None else True,
     )

@@ -1,10 +1,11 @@
 'use client'
-import { useState, Suspense } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import {
   User, CreditCard, Bell, Shield, CheckCircle2, Loader2, LogIn,
-  AlertTriangle, Crown, Zap, Lock, ExternalLink,
+  AlertTriangle, Crown, Zap, Lock, ExternalLink, Mail, Trash2,
+  BellOff, Megaphone,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
@@ -97,6 +98,27 @@ function AccountPageInner() {
   const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null)
   const [portalLoading, setPortalLoading] = useState(false)
 
+  // Email preferences state
+  const [alertEmails,     setAlertEmails]     = useState(user?.email_alerts_enabled ?? true)
+  const [marketingEmails, setMarketingEmails] = useState(user?.marketing_emails_enabled ?? false)
+  const [pushAlerts,      setPushAlerts]      = useState(user?.push_alerts_enabled ?? true)
+  const [prefsSaving,     setPrefsSaving]     = useState(false)
+  const [prefsSaved,      setPrefsSaved]      = useState(false)
+
+  // Delete account state
+  const [deleteConfirm,   setDeleteConfirm]   = useState('')
+  const [deleteLoading,   setDeleteLoading]   = useState(false)
+  const [showDeletePanel, setShowDeletePanel] = useState(false)
+
+  // Sync preference toggles when user profile loads (user is null on first render)
+  useEffect(() => {
+    if (user) {
+      setAlertEmails(user.email_alerts_enabled ?? true)
+      setMarketingEmails(user.marketing_emails_enabled ?? false)
+      setPushAlerts(user.push_alerts_enabled ?? true)
+    }
+  }, [user])
+
   async function handleCheckout(planId: 'pro' | 'premium') {
     setCheckoutPlan(planId)
     try {
@@ -111,6 +133,38 @@ function AccountPageInner() {
       alert('Billing is not configured yet. Check back soon!')
     } finally {
       setCheckoutPlan(null)
+    }
+  }
+
+  async function savePreferences() {
+    setPrefsSaving(true)
+    setPrefsSaved(false)
+    try {
+      await api.patch('/api/v1/users/me', {
+        email_alerts_enabled:    alertEmails,
+        marketing_emails_enabled: marketingEmails,
+        push_alerts_enabled:     pushAlerts,
+      })
+      setPrefsSaved(true)
+      setTimeout(() => setPrefsSaved(false), 3000)
+    } catch {
+      alert('Failed to save preferences. Please try again.')
+    } finally {
+      setPrefsSaving(false)
+    }
+  }
+
+  async function handleDeleteAccount() {
+    if (deleteConfirm.toLowerCase() !== 'delete my account') return
+    setDeleteLoading(true)
+    try {
+      await api.delete('/api/v1/users/me')
+      // Clear auth and redirect
+      localStorage.clear()
+      window.location.href = '/?account=deleted'
+    } catch {
+      alert('Account deletion failed. Please contact asxscreener@gmail.com.')
+      setDeleteLoading(false)
     }
   }
 
@@ -443,6 +497,206 @@ function AccountPageInner() {
           Prices in AUD · Cancel anytime · Instant access after payment · Secure checkout via Stripe
         </p>
       </div>
+
+      {/* ── Email & Notification Preferences ─────────────────────────────── */}
+      <div className="bg-white border border-gray-200 rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-5">
+          <Bell className="w-4 h-4 text-gray-600" />
+          <h2 className="font-semibold text-gray-900">Email &amp; Notification Preferences</h2>
+        </div>
+
+        <div className="space-y-4">
+          {/* Price alert emails */}
+          <ToggleRow
+            icon={<BellOff className="w-4 h-4 text-blue-500" />}
+            label="Price alert emails"
+            description="Receive an email when your configured price alerts trigger."
+            checked={alertEmails}
+            onChange={setAlertEmails}
+          />
+
+          {/* Marketing emails */}
+          <ToggleRow
+            icon={<Megaphone className="w-4 h-4 text-purple-500" />}
+            label="Product updates &amp; news"
+            description="Occasional emails about new features, market insights, and platform news."
+            checked={marketingEmails}
+            onChange={setMarketingEmails}
+            badge="Optional"
+          />
+
+          {/* Push notifications */}
+          <ToggleRow
+            icon={<Bell className="w-4 h-4 text-green-500" />}
+            label="In-app push notifications"
+            description="Show browser push notifications when alerts trigger (requires browser permission)."
+            checked={pushAlerts}
+            onChange={setPushAlerts}
+          />
+        </div>
+
+        <div className="mt-5 flex items-center gap-3">
+          <button
+            onClick={savePreferences}
+            disabled={prefsSaving}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700
+                       disabled:bg-blue-400 text-white text-sm font-semibold rounded-lg
+                       transition-colors"
+          >
+            {prefsSaving ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Mail className="w-3.5 h-3.5" />
+            )}
+            Save preferences
+          </button>
+          {prefsSaved && (
+            <span className="flex items-center gap-1.5 text-sm text-green-600 font-medium">
+              <CheckCircle2 className="w-4 h-4" />
+              Saved
+            </span>
+          )}
+        </div>
+
+        <p className="mt-3 text-xs text-gray-400 leading-relaxed">
+          Transactional emails — password resets, subscription receipts, and account security
+          alerts — are always sent regardless of these settings.{' '}
+          You can also unsubscribe via the link at the bottom of any email we send you.
+        </p>
+      </div>
+
+      {/* ── Danger Zone ───────────────────────────────────────────────────── */}
+      <div className="border border-red-200 rounded-xl p-5">
+        <div className="flex items-center gap-2 mb-1">
+          <Trash2 className="w-4 h-4 text-red-500" />
+          <h2 className="font-semibold text-red-700">Danger Zone</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          Permanently delete your account and all associated data. This cannot be undone.
+        </p>
+
+        {!showDeletePanel ? (
+          <button
+            onClick={() => setShowDeletePanel(true)}
+            className="px-4 py-2 border border-red-200 text-red-600 text-sm font-semibold
+                       rounded-lg hover:bg-red-50 hover:border-red-300 transition-colors"
+          >
+            Delete account
+          </button>
+        ) : (
+          <div className="space-y-3 bg-red-50 border border-red-200 rounded-xl p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+              <div className="text-sm text-red-800 space-y-1">
+                <p className="font-semibold">This will permanently delete:</p>
+                <ul className="list-disc list-inside text-xs space-y-0.5 text-red-700">
+                  <li>Your account and profile</li>
+                  <li>All portfolios and transactions</li>
+                  <li>All watchlists and saved screens</li>
+                  <li>All price alerts</li>
+                </ul>
+                <p className="text-xs text-red-600 mt-2">
+                  Billing records are retained for 7 years as required by Australian tax law.
+                  Deletion is processed within 30 days as per our{' '}
+                  <Link href="/privacy#section-8" className="underline font-medium">Privacy Policy</Link>.
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-red-700 mb-1.5">
+                Type <strong>delete my account</strong> to confirm:
+              </label>
+              <input
+                type="text"
+                value={deleteConfirm}
+                onChange={e => setDeleteConfirm(e.target.value)}
+                placeholder="delete my account"
+                className="w-full px-3 py-2 text-sm border border-red-300 rounded-lg focus:outline-none
+                           focus:ring-2 focus:ring-red-400 bg-white placeholder:text-red-200"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDeleteAccount}
+                disabled={
+                  deleteConfirm.toLowerCase() !== 'delete my account' || deleteLoading
+                }
+                className="inline-flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700
+                           disabled:bg-red-300 disabled:cursor-not-allowed text-white text-sm
+                           font-semibold rounded-lg transition-colors"
+              >
+                {deleteLoading ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Trash2 className="w-3.5 h-3.5" />
+                )}
+                Permanently delete account
+              </button>
+              <button
+                onClick={() => { setShowDeletePanel(false); setDeleteConfirm('') }}
+                className="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-medium
+                           rounded-lg hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Toggle row component ──────────────────────────────────────────────────────
+
+function ToggleRow({
+  icon, label, description, checked, onChange, badge,
+}: {
+  icon:        React.ReactNode
+  label:       string
+  description: string
+  checked:     boolean
+  onChange:    (v: boolean) => void
+  badge?:      string
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3 border-b border-gray-100 last:border-0">
+      <div className="flex items-start gap-3 flex-1 min-w-0">
+        <div className="w-8 h-8 rounded-lg bg-gray-50 flex items-center justify-center shrink-0 mt-0.5">
+          {icon}
+        </div>
+        <div>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-gray-900">{label}</p>
+            {badge && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 font-medium">
+                {badge}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{description}</p>
+        </div>
+      </div>
+      {/* Toggle switch */}
+      <button
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        className={cn(
+          'relative shrink-0 w-10 h-6 rounded-full transition-colors focus:outline-none',
+          'focus:ring-2 focus:ring-blue-400 focus:ring-offset-1 mt-0.5',
+          checked ? 'bg-blue-600' : 'bg-gray-200',
+        )}
+      >
+        <span
+          className={cn(
+            'absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-sm transition-transform',
+            checked ? 'translate-x-4' : 'translate-x-0.5',
+          )}
+        />
+      </button>
     </div>
   )
 }

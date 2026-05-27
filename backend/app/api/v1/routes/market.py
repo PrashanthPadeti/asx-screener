@@ -880,7 +880,7 @@ async def market_heatmap(
                    MAX(CASE WHEN l.rn=3 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p3,
                    MAX(CASE WHEN l.rn=4 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p4,
                    MAX(CASE WHEN l.rn=5 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p5
-            FROM screener.universe u INNER JOIN lagged l ON u.asx_code = l.asx_code
+            FROM screener.universe u LEFT JOIN lagged l ON u.asx_code = l.asx_code
             WHERE u.status='active' AND u.price>0.05 AND u.market_cap>:min_cap {sector_clause_u}
             GROUP BY u.asx_code, u.company_name, u.sector, u.industry, u.price, u.market_cap
             ORDER BY u.market_cap DESC NULLS LAST
@@ -909,9 +909,9 @@ async def market_heatmap(
                    MAX(CASE WHEN l.rn=3 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p3,
                    MAX(CASE WHEN l.rn=4 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p4,
                    MAX(CASE WHEN l.rn=5 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p5
-            FROM screener.universe u INNER JOIN lagged l ON u.asx_code=l.asx_code
+            FROM screener.universe u LEFT JOIN lagged l ON u.asx_code=l.asx_code
             WHERE u.status='active' AND u.price>0.05 AND u.market_cap>:min_cap {sector_clause_u}
-              AND l.rn<=5
+              AND (l.rn<=5 OR l.rn IS NULL)
             GROUP BY u.asx_code, u.company_name, u.sector, u.industry, u.price, u.market_cap
             ORDER BY u.market_cap DESC NULLS LAST
         """)

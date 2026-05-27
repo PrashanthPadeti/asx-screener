@@ -154,7 +154,7 @@ DAYS_SQL = text("""
         MAX(CASE WHEN l.rn=5 AND l.prev_close>0
             THEN (l.close - l.prev_close) / l.prev_close END) AS p5
     FROM screener.universe u
-    INNER JOIN lagged l ON u.asx_code = l.asx_code
+    LEFT JOIN lagged l ON u.asx_code = l.asx_code
     WHERE u.status = 'active' AND u.price > 0.05 AND u.market_cap > 0
     GROUP BY u.asx_code, u.company_name, u.sector, u.industry,
              u.price, u.market_cap
@@ -201,9 +201,9 @@ WEEKS_SQL = text("""
         MAX(CASE WHEN l.rn=5 AND l.prev_close>0
             THEN (l.week_close - l.prev_close) / l.prev_close END) AS p5
     FROM screener.universe u
-    INNER JOIN lagged l ON u.asx_code = l.asx_code
+    LEFT JOIN lagged l ON u.asx_code = l.asx_code
     WHERE u.status = 'active' AND u.price > 0.05 AND u.market_cap > 0
-      AND l.rn <= 5
+      AND (l.rn <= 5 OR l.rn IS NULL)
     GROUP BY u.asx_code, u.company_name, u.sector, u.industry,
              u.price, u.market_cap
     ORDER BY u.market_cap DESC NULLS LAST

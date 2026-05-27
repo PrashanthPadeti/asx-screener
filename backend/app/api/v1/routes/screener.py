@@ -44,31 +44,31 @@ router = APIRouter()
 ALLOWED_FIELDS: dict[str, dict] = {
 
     # ── Identity ──────────────────────────────────────────────────────────────
-    "sector":          {"col": "u.sector",         "scale": 1,    "type": "text",    "label": "Sector",               "unit": "",     "cat": "Company"},
-    "industry":        {"col": "u.industry",        "scale": 1,    "type": "text",    "label": "Industry",             "unit": "",     "cat": "Company"},
-    "stock_type":      {"col": "u.stock_type",      "scale": 1,    "type": "text",    "label": "Stock Type",           "unit": "",     "cat": "Company"},
-    "is_reit":         {"col": "u.is_reit",         "scale": 1,    "type": "boolean", "label": "Is REIT",              "unit": "",     "cat": "Company"},
-    "is_miner":        {"col": "u.is_miner",        "scale": 1,    "type": "boolean", "label": "Is Miner",             "unit": "",     "cat": "Company"},
-    "is_asx20":        {"col": "u.is_asx20",        "scale": 1,    "type": "boolean", "label": "In ASX 20",            "unit": "",     "cat": "Company"},
-    "is_asx50":        {"col": "u.is_asx50",        "scale": 1,    "type": "boolean", "label": "In ASX 50",            "unit": "",     "cat": "Company"},
-    "is_asx100":       {"col": "u.is_asx100",       "scale": 1,    "type": "boolean", "label": "In ASX 100",           "unit": "",     "cat": "Company"},
-    "is_asx200":       {"col": "u.is_asx200",       "scale": 1,    "type": "boolean", "label": "In ASX 200",           "unit": "",     "cat": "Company"},
-    "is_asx300":       {"col": "u.is_asx300",       "scale": 1,    "type": "boolean", "label": "In ASX 300",           "unit": "",     "cat": "Company"},
+    "sector":          {"col": "u.sector",         "scale": 1,    "type": "text",    "label": "Sector",               "unit": "",     "cat": "Market Data"},
+    "industry":        {"col": "u.industry",        "scale": 1,    "type": "text",    "label": "Industry",             "unit": "",     "cat": "Market Data"},
+    "stock_type":      {"col": "u.stock_type",      "scale": 1,    "type": "text",    "label": "Stock Type",           "unit": "",     "cat": "Market Data"},
+    "is_reit":         {"col": "u.is_reit",         "scale": 1,    "type": "boolean", "label": "Is REIT",              "unit": "",     "cat": "Market Data"},
+    "is_miner":        {"col": "u.is_miner",        "scale": 1,    "type": "boolean", "label": "Is Miner",             "unit": "",     "cat": "Market Data"},
+    "is_asx20":        {"col": "u.is_asx20",        "scale": 1,    "type": "boolean", "label": "In ASX 20",            "unit": "",     "cat": "Market Data"},
+    "is_asx50":        {"col": "u.is_asx50",        "scale": 1,    "type": "boolean", "label": "In ASX 50",            "unit": "",     "cat": "Market Data"},
+    "is_asx100":       {"col": "u.is_asx100",       "scale": 1,    "type": "boolean", "label": "In ASX 100",           "unit": "",     "cat": "Market Data"},
+    "is_asx200":       {"col": "u.is_asx200",       "scale": 1,    "type": "boolean", "label": "In ASX 200",           "unit": "",     "cat": "Market Data"},
+    "is_asx300":       {"col": "u.is_asx300",       "scale": 1,    "type": "boolean", "label": "In ASX 300",           "unit": "",     "cat": "Market Data"},
 
     # ── Price & Market ────────────────────────────────────────────────────────
     "price":               {"col": "u.price",               "scale": 1,          "type": "number",  "label": "Price (AUD)",                    "unit": "AUD",   "cat": "Price"},
     "market_cap":          {"col": "u.market_cap",          "scale": 1_000_000,  "type": "number",  "label": "Market Cap (AUD M)",             "unit": "AUD M", "cat": "Price"},
     "enterprise_value":    {"col": "u.ev",                  "scale": 1_000_000,  "type": "number",  "label": "Enterprise Value (AUD M)",       "unit": "AUD M", "cat": "Price"},  # col=u.ev
-    "volume":              {"col": "u.volume",              "scale": 1,          "type": "number",  "label": "Volume",                         "unit": "",      "cat": "Price"},
-    "avg_volume_20d":      {"col": "u.avg_volume_20d",      "scale": 1,          "type": "number",  "label": "Avg Volume 20D",                 "unit": "",      "cat": "Price"},
+    "volume":              {"col": "u.volume",              "scale": 1,          "type": "number",  "label": "Volume",                         "unit": "",      "cat": "Market Data"},
+    "avg_volume_20d":      {"col": "u.avg_volume_20d",      "scale": 1,          "type": "number",  "label": "Avg Volume 20D",                 "unit": "",      "cat": "Market Data"},
     "dollar_volume_avg_20d":{"col": "u.dollar_volume_avg_20d","scale": 1_000_000,"type": "number",  "label": "Avg Dollar Volume 20D (AUD M)",  "unit": "AUD M", "cat": "Price"},  # TODO: fix daily_metrics computation
-    "shares_outstanding":  {"col": "u.shares_outstanding",  "scale": 1,          "type": "number",  "label": "Shares Outstanding",             "unit": "",      "cat": "Price"},
+    "shares_outstanding":  {"col": "u.shares_outstanding",  "scale": 1,          "type": "number",  "label": "Shares Outstanding",             "unit": "",      "cat": "Market Data"},
     "high_52w":            {"col": "u.high_52w",            "scale": 1,          "type": "number",  "label": "52W High",                       "unit": "AUD",   "cat": "Price"},
     "low_52w":             {"col": "u.low_52w",             "scale": 1,          "type": "number",  "label": "52W Low",                        "unit": "AUD",   "cat": "Price"},
     "pct_from_52w_high":   {"col": "((u.price - u.high_52w) / NULLIF(u.high_52w, 0) * 100)", "scale": 1, "type": "number", "label": "% from 52W High", "unit": "%", "cat": "Price"},
     "pct_from_52w_low":    {"col": "((u.price - u.low_52w)  / NULLIF(u.low_52w,  0) * 100)", "scale": 1, "type": "number", "label": "% from 52W Low",  "unit": "%", "cat": "Price"},
     "volume_ratio":        {"col": "(u.volume::float / NULLIF(u.avg_volume_20d, 0))",         "scale": 1, "type": "number", "label": "Volume Ratio (vs 20D Avg)", "unit": "x", "cat": "Price"},
-    "above_vwap":          {"col": "u.above_vwap",          "scale": 1,          "type": "boolean", "label": "Price Above VWAP",               "unit": "",      "cat": "Price"},
+    "above_vwap":          {"col": "u.above_vwap",          "scale": 1,          "type": "boolean", "label": "Price Above VWAP",               "unit": "",      "cat": "Market Data"},
 
     # ── Valuation ─────────────────────────────────────────────────────────────
     "pe_ratio":        {"col": "u.pe_ratio",        "scale": 1,    "type": "number",  "label": "P/E Ratio",            "unit": "x",    "cat": "Valuation"},
@@ -101,10 +101,10 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "roe":                      {"col": "u.roe",                      "scale": 0.01, "type": "number", "label": "ROE %",                     "unit": "%",   "cat": "Profitability"},
     "roa":                      {"col": "u.roa",                      "scale": 0.01, "type": "number", "label": "ROA %",                     "unit": "%",   "cat": "Profitability"},
     "roce":                     {"col": "u.roce",                     "scale": 0.01, "type": "number", "label": "ROCE %",                    "unit": "%",   "cat": "Profitability"},
-    "avg_roe_3y":               {"col": "u.avg_roe_3y",               "scale": 0.01, "type": "number", "label": "Avg ROE 3Y %",              "unit": "%",   "cat": "Profitability"},
-    "avg_roic_3y":              {"col": "u.avg_roic_3y",              "scale": 0.01, "type": "number", "label": "Avg ROIC 3Y %",             "unit": "%",   "cat": "Profitability"},
-    "avg_roic_5y":              {"col": "u.avg_roic_5y",              "scale": 0.01, "type": "number", "label": "Avg ROIC 5Y %",             "unit": "%",   "cat": "Profitability"},
-    "capital_efficiency_score": {"col": "u.capital_efficiency_score", "scale": 1,    "type": "number", "label": "Capital Efficiency Score",  "unit": "",    "cat": "Profitability"},
+    "avg_roe_3y":               {"col": "u.avg_roe_3y",               "scale": 0.01, "type": "number", "label": "Avg ROE 3Y %",              "unit": "%",   "cat": "Quality"},
+    "avg_roic_3y":              {"col": "u.avg_roic_3y",              "scale": 0.01, "type": "number", "label": "Avg ROIC 3Y %",             "unit": "%",   "cat": "Quality"},
+    "avg_roic_5y":              {"col": "u.avg_roic_5y",              "scale": 0.01, "type": "number", "label": "Avg ROIC 5Y %",             "unit": "%",   "cat": "Quality"},
+    "capital_efficiency_score": {"col": "u.capital_efficiency_score", "scale": 1,    "type": "number", "label": "Capital Efficiency Score",  "unit": "",    "cat": "Quality"},
     "roic":                     {"col": "u.roic",                     "scale": 0.01, "type": "number", "label": "ROIC %",                    "unit": "%",   "cat": "Profitability"},
     "asset_turnover":           {"col": "u.asset_turnover",           "scale": 1,    "type": "number", "label": "Asset Turnover",            "unit": "x",   "cat": "Profitability"},
     "ocf_margin":               {"col": "u.ocf_margin",               "scale": 0.01, "type": "number", "label": "OCF Margin %",              "unit": "%",   "cat": "Profitability"},
@@ -112,15 +112,15 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "capex_intensity":          {"col": "u.capex_intensity",          "scale": 0.01, "type": "number", "label": "Capex Intensity %",         "unit": "%",   "cat": "Profitability"},
     "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number", "label": "Inventory Turnover",        "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
 
-    # ── Per-Share ─────────────────────────────────────────────────────────────
-    "eps":                  {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Per Share"},   # col=u.eps_fy0; TODO: fix annual_pnl.eps
-    "eps_fy0":              {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Per Share"},   # TODO: fix annual_pnl.eps population
-    "eps_fy1":              {"col": "u.eps_fy1",          "scale": 1,    "type": "number", "label": "EPS FY1 Est (AUD)",         "unit": "AUD", "cat": "Per Share"},   # TODO: populate from analyst_ratings
-    "book_value_per_share": {"col": "u.book_value_per_share", "scale": 1, "type": "number", "label": "Book Value per Share (AUD)", "unit": "AUD", "cat": "Per Share"}, # TODO: fix annual_balance_sheet
+    # ── Per-Share (EPS → Profitability; BVPS → Financial Strength) ──────────────
+    "eps":                  {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},   # col=u.eps_fy0; TODO: fix annual_pnl.eps
+    "eps_fy0":              {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},   # TODO: fix annual_pnl.eps population
+    "eps_fy1":              {"col": "u.eps_fy1",          "scale": 1,    "type": "number", "label": "EPS FY1 Est (AUD)",         "unit": "AUD", "cat": "Profitability"},   # TODO: populate from analyst_ratings
+    "book_value_per_share": {"col": "u.book_value_per_share", "scale": 1, "type": "number", "label": "Book Value per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"}, # TODO: fix annual_balance_sheet
 
     # ── Growth ────────────────────────────────────────────────────────────────
-    "revenue":                  {"col": "u.revenue_ttm",          "scale": 1_000_000, "type": "number", "label": "Revenue TTM (AUD M)",      "unit": "AUD M", "cat": "Growth"},  # col=u.revenue_ttm
-    "net_income":               {"col": "u.net_profit_fy0",       "scale": 1_000_000, "type": "number", "label": "Net Income FY0 (AUD M)",   "unit": "AUD M", "cat": "Growth"},  # col=u.net_profit_fy0
+    "revenue":                  {"col": "u.revenue_ttm",          "scale": 1_000_000, "type": "number", "label": "Revenue TTM (AUD M)",      "unit": "AUD M", "cat": "Financial Strength"},  # col=u.revenue_ttm
+    "net_income":               {"col": "u.net_profit_fy0",       "scale": 1_000_000, "type": "number", "label": "Net Income FY0 (AUD M)",   "unit": "AUD M", "cat": "Financial Strength"},  # col=u.net_profit_fy0
     "revenue_growth_1y":        {"col": "u.revenue_growth_1y",        "scale": 0.01, "type": "number", "label": "Revenue Growth 1Y %",      "unit": "%",   "cat": "Growth"},
     "revenue_growth_3y_cagr":   {"col": "u.revenue_growth_3y_cagr",   "scale": 0.01, "type": "number", "label": "Revenue CAGR 3Y %",        "unit": "%",   "cat": "Growth"},
     "revenue_cagr_5y":          {"col": "u.revenue_cagr_5y",          "scale": 0.01, "type": "number", "label": "Revenue CAGR 5Y %",        "unit": "%",   "cat": "Growth"},
@@ -146,20 +146,20 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "fcf_cagr_5y":              {"col": "u.fcf_cagr_5y",              "scale": 0.01, "type": "number", "label": "FCF CAGR 5Y %",             "unit": "%",   "cat": "Growth"},
     "bvps_cagr_3y":             {"col": "u.bvps_cagr_3y",             "scale": 0.01, "type": "number", "label": "BVPS CAGR 3Y %",            "unit": "%",   "cat": "Growth"},
     "bvps_cagr_5y":             {"col": "u.bvps_cagr_5y",             "scale": 0.01, "type": "number", "label": "BVPS CAGR 5Y %",            "unit": "%",   "cat": "Growth"},
-    "momentum_3m":              {"col": "u.momentum_3m",              "scale": 0.01, "type": "number", "label": "Price Momentum 3M %",      "unit": "%",   "cat": "Growth"},
-    "momentum_6m":              {"col": "u.momentum_6m",              "scale": 0.01, "type": "number", "label": "Price Momentum 6M %",      "unit": "%",   "cat": "Growth"},
+    "momentum_3m":              {"col": "u.momentum_3m",              "scale": 0.01, "type": "number", "label": "Price Momentum 3M %",      "unit": "%",   "cat": "Technicals"},
+    "momentum_6m":              {"col": "u.momentum_6m",              "scale": 0.01, "type": "number", "label": "Price Momentum 6M %",      "unit": "%",   "cat": "Technicals"},
 
     # ── Financial Health ──────────────────────────────────────────────────────
-    "debt_to_equity":        {"col": "u.debt_to_equity",       "scale": 1,    "type": "number", "label": "Debt / Equity",               "unit": "x",    "cat": "Financial Health"},
-    "current_ratio":         {"col": "u.current_ratio",        "scale": 1,    "type": "number", "label": "Current Ratio",               "unit": "x",    "cat": "Financial Health"},
-    "quick_ratio":           {"col": "u.quick_ratio",          "scale": 1,    "type": "number", "label": "Quick Ratio",                 "unit": "x",    "cat": "Financial Health"},  # TODO: add to screener.universe schema
-    "interest_coverage":     {"col": "u.interest_coverage",    "scale": 1,    "type": "number", "label": "Interest Coverage",           "unit": "x",    "cat": "Financial Health"},
-    "debt_to_assets":        {"col": "u.debt_to_assets",       "scale": 1,    "type": "number", "label": "Debt / Assets",               "unit": "x",    "cat": "Financial Health"},
-    "lt_debt_to_capital":    {"col": "u.lt_debt_to_capital",   "scale": 1,    "type": "number", "label": "LT Debt / Capital",           "unit": "x",    "cat": "Financial Health"},
+    "debt_to_equity":        {"col": "u.debt_to_equity",       "scale": 1,    "type": "number", "label": "Debt / Equity",               "unit": "x",    "cat": "Financial Strength"},
+    "current_ratio":         {"col": "u.current_ratio",        "scale": 1,    "type": "number", "label": "Current Ratio",               "unit": "x",    "cat": "Financial Strength"},
+    "quick_ratio":           {"col": "u.quick_ratio",          "scale": 1,    "type": "number", "label": "Quick Ratio",                 "unit": "x",    "cat": "Financial Strength"},  # TODO: add to screener.universe schema
+    "interest_coverage":     {"col": "u.interest_coverage",    "scale": 1,    "type": "number", "label": "Interest Coverage",           "unit": "x",    "cat": "Financial Strength"},
+    "debt_to_assets":        {"col": "u.debt_to_assets",       "scale": 1,    "type": "number", "label": "Debt / Assets",               "unit": "x",    "cat": "Financial Strength"},
+    "lt_debt_to_capital":    {"col": "u.lt_debt_to_capital",   "scale": 1,    "type": "number", "label": "LT Debt / Capital",           "unit": "x",    "cat": "Financial Strength"},
     "net_debt":              {"col": "u.net_debt",             "scale": 1,    "type": "number", "label": "Net Debt (AUD M)",            "unit": "AUD M","cat": "Financial Health"},
     "total_debt":            {"col": "u.total_debt",           "scale": 1,    "type": "number", "label": "Total Debt (AUD M)",          "unit": "AUD M","cat": "Financial Health"},
-    "debt_to_ebitda":        {"col": "u.debt_to_ebitda",       "scale": 1,    "type": "number", "label": "Debt / EBITDA",               "unit": "x",    "cat": "Financial Health"},  # TODO: add to screener.universe schema
-    "net_debt_to_ebitda":    {"col": "u.net_debt_to_ebitda",   "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",           "unit": "x",    "cat": "Financial Health"},
+    "debt_to_ebitda":        {"col": "u.debt_to_ebitda",       "scale": 1,    "type": "number", "label": "Debt / EBITDA",               "unit": "x",    "cat": "Financial Strength"},  # TODO: add to screener.universe schema
+    "net_debt_to_ebitda":    {"col": "u.net_debt_to_ebitda",   "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",           "unit": "x",    "cat": "Financial Strength"},
     "cash_conversion_cycle": {"col": "u.cash_conversion_cycle","scale": 1,    "type": "number", "label": "Cash Conversion Cycle (days)","unit": "days", "cat": "Financial Health"},  # TODO: add to screener.universe schema
     "fcf_fy0":               {"col": "u.fcf_fy0",              "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)",      "unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":               {"col": "u.cfo_fy0",              "scale": 1,    "type": "number", "label": "Operating CF (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
@@ -258,12 +258,12 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "macd_bearish_cross":{"col": "u.macd_bearish_cross","scale": 1,    "type": "boolean","label": "MACD Bearish Cross",   "unit": "",    "cat": "Technicals"},
 
     # ── Tier 3: Inline calculations ───────────────────────────────────────────
-    "price_to_52w_high":  {"col": "u.price_to_52w_high",  "scale": 1, "type": "number", "label": "Price / 52W High",       "unit": "x",    "cat": "Price"},
-    "price_to_52w_low":   {"col": "u.price_to_52w_low",   "scale": 1, "type": "number", "label": "Price / 52W Low",        "unit": "x",    "cat": "Price"},
-    "fcf_per_share":      {"col": "u.fcf_per_share",      "scale": 1, "type": "number", "label": "FCF per Share (AUD)",    "unit": "AUD",  "cat": "Financials"},
-    "ocf_per_share":      {"col": "u.ocf_per_share",      "scale": 1, "type": "number", "label": "OCF per Share (AUD)",    "unit": "AUD",  "cat": "Financials"},
-    "revenue_per_share":  {"col": "u.revenue_per_share",  "scale": 1, "type": "number", "label": "Revenue per Share (AUD)","unit": "AUD",  "cat": "Financials"},
-    "working_capital":    {"col": "u.working_capital",    "scale": 1, "type": "number", "label": "Working Capital (AUD M)","unit": "AUD M","cat": "Financials"},
+    "price_to_52w_high":  {"col": "u.price_to_52w_high",  "scale": 1, "type": "number", "label": "Price / 52W High",       "unit": "x",    "cat": "Market Data"},
+    "price_to_52w_low":   {"col": "u.price_to_52w_low",   "scale": 1, "type": "number", "label": "Price / 52W Low",        "unit": "x",    "cat": "Market Data"},
+    "fcf_per_share":      {"col": "u.fcf_per_share",      "scale": 1, "type": "number", "label": "FCF per Share (AUD)",    "unit": "AUD",  "cat": "Financial Strength"},
+    "ocf_per_share":      {"col": "u.ocf_per_share",      "scale": 1, "type": "number", "label": "OCF per Share (AUD)",    "unit": "AUD",  "cat": "Financial Strength"},
+    "revenue_per_share":  {"col": "u.revenue_per_share",  "scale": 1, "type": "number", "label": "Revenue per Share (AUD)","unit": "AUD",  "cat": "Financial Strength"},
+    "working_capital":    {"col": "u.working_capital",    "scale": 1, "type": "number", "label": "Working Capital (AUD M)","unit": "AUD M","cat": "Financial Strength"},
 
     # ── ASX REIT-Specific ★ ───────────────────────────────────────────────────
     # (★ = ASX-unique field not common on US screeners)
@@ -276,6 +276,26 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
     "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
 }
+
+# ── Category display order ────────────────────────────────────────────────────
+# Controls the order in which category groups appear in the filter-builder
+# dropdown on the frontend.  Categories not listed here sort alphabetically
+# at the end.
+
+CATEGORY_ORDER: list[str] = [
+    "Market Data",        # Sector, index membership, price, market cap, volume
+    "Valuation",          # P/E, P/B, EV/EBITDA, FCF yield, …
+    "Profitability",      # Margins, ROE, ROA, ROCE, EPS
+    "Quality",            # Avg ROE/ROA/ROCE 3Y & 5Y, Piotroski, Altman, …
+    "Growth",             # Revenue / EPS / EBITDA growth rates (1Y, 3Y CAGR, …)
+    "Financial Strength", # Debt ratios, liquidity, cash flow, net income
+    "Dividends",          # Yield, grossed-up yield, franking, payout, CAGR
+    "Returns",            # Price returns over various time horizons
+    "Technicals",         # RSI, MACD, SMA, momentum, volatility, beta
+    "REIT",               # NTA, gearing, WALE, MER
+    "Mining",             # AISC
+]
+
 
 OPERATOR_MAP = {
     "gt":  ">",
@@ -989,20 +1009,32 @@ async def get_screener_fields():
     """
     Returns all filterable fields grouped by category.
     Drives the dynamic filter builder in the frontend.
+    Categories are returned in CATEGORY_ORDER order so the dropdown
+    shows a logical, user-friendly hierarchy.
     """
-    # Group fields by category
-    categories: dict[str, list] = {}
+    # Group fields by category (unordered first pass)
+    raw_cats: dict[str, list] = {}
     for key, info in ALLOWED_FIELDS.items():
         cat = info["cat"]
-        if cat not in categories:
-            categories[cat] = []
-        categories[cat].append({
+        if cat not in raw_cats:
+            raw_cats[cat] = []
+        raw_cats[cat].append({
             "key":   key,
             "label": info["label"],
             "type":  info["type"],
             "unit":  info.get("unit", ""),
             "scale": info.get("scale", 1.0),
         })
+
+    # Sort categories by CATEGORY_ORDER; unlisted ones go alphabetically at end
+    order_map = {cat: i for i, cat in enumerate(CATEGORY_ORDER)}
+    categories: dict[str, list] = {
+        cat: fields
+        for cat, fields in sorted(
+            raw_cats.items(),
+            key=lambda kv: (order_map.get(kv[0], len(CATEGORY_ORDER)), kv[0]),
+        )
+    }
 
     return {
         "categories": categories,

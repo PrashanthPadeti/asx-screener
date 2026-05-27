@@ -8,6 +8,7 @@ import {
 import { getMarketHeatmap, type HeatmapRow } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
+import { PlanGate } from '@/components/PlanGate'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -272,6 +273,7 @@ export default function HeatmapPage() {
   const modeLabel = mode === 'days' ? 'Daily Returns' : 'Weekly Returns'
 
   return (
+    <PlanGate required="premium" feature="Performance Heatmap">
     <div className="min-h-screen bg-gray-50">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="bg-white border-b border-gray-200">
@@ -535,5 +537,6 @@ export default function HeatmapPage() {
         </p>
       </div>
     </div>
+    </PlanGate>
   )
 }

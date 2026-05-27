@@ -14,7 +14,7 @@ const NAV_LINKS = [
 ]
 
 const MARKET_DATA_LINKS = [
-  { href: '/market/heatmap', label: 'Perf. Heatmap',  icon: LayoutGrid, desc: 'Rolling 5-day & 5-week price performance', premium: false },
+  { href: '/market/heatmap', label: 'Perf. Heatmap',  icon: LayoutGrid, desc: 'Rolling 5-day & 5-week price performance', premium: true },
   { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices',       premium: true },
   { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',               premium: true },
   { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',       premium: true },

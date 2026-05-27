@@ -42,6 +42,7 @@ const PLAN_FEATURES: Record<string, string[]> = {
     'Everything in Pro',
     'ASX Indices tracker',
     'ETF & Managed Funds',
+    'Performance Heatmap',
     'AI Deep Analysis per stock',
     'AI Portfolio Insights',
     '50 portfolios, 50 watchlists',

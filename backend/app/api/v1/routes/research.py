@@ -105,10 +105,6 @@ async def backtest(
     codes      = [c.upper().strip() for c in body.codes]
     years_held = (end_dt - start_dt).days / 365.25
 
-    # Use ISO strings for date parameters — most reliable across asyncpg versions
-    sd_str = start_dt.isoformat()
-    ed_str = end_dt.isoformat()
-
     results = []
 
     for code in codes:
@@ -124,34 +120,35 @@ async def backtest(
                 continue
 
             # ── Buy price: first close on/after start_date ────────────
+            # Pass Python date objects directly — asyncpg requires them (calls .toordinal())
             buy_r = await db.execute(text("""
                 SELECT time::date AS d, close
                 FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND time >= CAST(:sd AS date)
+                  AND time::date >= :sd
                 ORDER BY time ASC LIMIT 1
-            """), {"c": code, "sd": sd_str})
+            """), {"c": code, "sd": start_dt})
             buy_row = buy_r.fetchone()
             if not buy_row or not buy_row.close:
                 results.append({"code": code, "error": "No price data found for start date"})
                 continue
-            buy_price  = float(buy_row.close)
-            actual_buy_str = buy_row.d.isoformat()
+            buy_price      = float(buy_row.close)
+            actual_buy_dt  = buy_row.d   # Python date object returned by asyncpg
 
             # ── Sell price: last close on/before end_date ─────────────
             sell_r = await db.execute(text("""
                 SELECT time::date AS d, close
                 FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND time < CAST(:ed AS date) + interval '1 day'
+                  AND time::date <= :ed
                 ORDER BY time DESC LIMIT 1
-            """), {"c": code, "ed": ed_str})
+            """), {"c": code, "ed": end_dt})
             sell_row = sell_r.fetchone()
             if not sell_row or not sell_row.close:
                 results.append({"code": code, "error": "No price data found for end date"})
                 continue
             sell_price      = float(sell_row.close)
-            actual_sell_str = sell_row.d.isoformat()
+            actual_sell_dt  = sell_row.d  # Python date object
 
             shares          = body.amount / buy_price
             price_end_value = shares * sell_price
@@ -166,11 +163,11 @@ async def backtest(
                     SELECT ex_date, amount, franking_pct
                     FROM market.dividends
                     WHERE asx_code = :c
-                      AND ex_date >= CAST(:sd AS date)
-                      AND ex_date <= CAST(:ed AS date)
+                      AND ex_date >= :sd
+                      AND ex_date <= :ed
                       AND amount IS NOT NULL
                     ORDER BY ex_date
-                """), {"c": code, "sd": actual_buy_str, "ed": actual_sell_str})
+                """), {"c": code, "sd": actual_buy_dt, "ed": actual_sell_dt})
                 for dr in div_r.fetchall():
                     d_amt   = float(dr.amount or 0)
                     f_pct   = float(dr.franking_pct or 0) / 100.0
@@ -179,7 +176,7 @@ async def backtest(
                     div_total      += cash
                     franking_total += frank
                     div_events.append({
-                        "ex_date":      dr.ex_date.isoformat(),
+                        "ex_date":      dr.ex_date.isoformat(),   # str for chart comparison
                         "amount_ps":    round(d_amt, 6),
                         "franking_pct": round(f_pct * 100, 1),
                         "cash":         round(cash, 2),
@@ -196,13 +193,13 @@ async def backtest(
                     close
                 FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND time >= CAST(:sd AS date)
-                  AND time < CAST(:ed AS date) + interval '1 day'
+                  AND time::date >= :sd
+                  AND time::date <= :ed
                 ORDER BY date_trunc('month', time), time DESC
-            """), {"c": code, "sd": actual_buy_str, "ed": actual_sell_str})
+            """), {"c": code, "sd": actual_buy_dt, "ed": actual_sell_dt})
             chart_rows = chart_r.fetchall()
 
-            # Accumulate dividends per month point
+            # Accumulate dividends per month point (ISO string comparison — lexicographic = chronologic)
             chart         = []
             running_divs  = 0.0
             div_idx       = 0
@@ -227,8 +224,8 @@ async def backtest(
             "company_name":       name_row.company_name,
             "buy_price":          round(buy_price, 4),
             "sell_price":         round(sell_price, 4),
-            "actual_start_date":  actual_buy_str,
-            "actual_end_date":    actual_sell_str,
+            "actual_start_date":  actual_buy_dt.isoformat(),
+            "actual_end_date":    actual_sell_dt.isoformat(),
             "shares_purchased":   round(shares, 4),
             "invested":           body.amount,
             "price_end_value":    round(price_end_value, 2),

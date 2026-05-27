@@ -6,6 +6,7 @@ screener.universe is never queried here — snapshot tables own market-level dat
 """
 import logging
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -27,6 +28,8 @@ from app.schemas.market import (
     SectorHeatmapItem,
     ExDivStock,
     VolumeActivityResponse,
+    HeatmapRow,
+    HeatmapResponse,
 )
 
 router = APIRouter()
@@ -738,4 +741,376 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
         ],
         period="1w",
         universe_built_at=snap_date.isoformat() if snap_date else None,
+    )
+
+
+# ── Performance Heatmap ───────────────────────────────────────────────────────
+
+import datetime as _dt
+
+HEATMAP_TTL = 900  # 15 min — data only changes after nightly pipeline
+
+
+def _fmt_day_label(d) -> str:
+    """'Wed 21 May' from a date object."""
+    if d is None:
+        return ""
+    if isinstance(d, str):
+        d = _dt.date.fromisoformat(d)
+    return d.strftime("%a %-d %b") if hasattr(d, "strftime") else str(d)
+
+
+def _fmt_week_label(week_start) -> str:
+    """'W/E 23 May' — the Friday of the given ISO week-start (Monday)."""
+    if week_start is None:
+        return ""
+    if isinstance(week_start, str):
+        week_start = _dt.date.fromisoformat(week_start)
+    friday = week_start + _dt.timedelta(days=4)
+    return friday.strftime("W/E %-d %b") if hasattr(friday, "strftime") else str(friday)
+
+
+@router.get("/heatmap", response_model=HeatmapResponse)
+async def market_heatmap(
+    mode:    str           = Query("days",  pattern="^(days|weeks)$"),
+    sector:  str | None    = Query(None),
+    min_cap: float         = Query(0.0, ge=0, description="Min market cap AUD millions"),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Rolling 5-period performance heatmap for all ASX stocks.
+
+    mode=days  → last 5 trading days, each column = daily % change
+    mode=weeks → last 5 calendar weeks, each column = weekly % change
+                 (week close vs prior week close)
+
+    Returns rows sorted by market_cap DESC so large-caps appear first.
+    Cached for 15 minutes (HEATMAP_TTL).
+    """
+    _key = make_key("market", "heatmap", mode,
+                    sector or "all", str(int(min_cap)))
+    cached = await cache_get(_key)
+    if cached:
+        return HeatmapResponse(**cached)
+
+    min_cap_raw = min_cap * 1_000_000   # convert AUD M → AUD raw
+
+    # ── Build SQL ─────────────────────────────────────────────────────────────
+    sector_clause = "AND u.sector = :sector" if sector else ""
+
+    if mode == "days":
+        sql = text(f"""
+            WITH six_dates AS (
+                SELECT DISTINCT DATE(time) AS td
+                FROM market.daily_prices
+                ORDER BY td DESC
+                LIMIT 6
+            ),
+            prices AS (
+                SELECT dp.asx_code, DATE(dp.time) AS td, dp.close
+                FROM market.daily_prices dp
+                INNER JOIN six_dates s ON DATE(dp.time) = s.td
+                WHERE dp.close > 0
+            ),
+            lagged AS (
+                SELECT asx_code, td, close,
+                       LAG(close) OVER (PARTITION BY asx_code ORDER BY td) AS prev_close,
+                       ROW_NUMBER() OVER (PARTITION BY asx_code ORDER BY td DESC) AS rn
+                FROM prices
+            )
+            SELECT
+                u.asx_code, u.company_name, u.sector, u.industry,
+                u.price, u.market_cap,
+                MAX(CASE WHEN l.rn=1 AND l.prev_close>0
+                    THEN (l.close - l.prev_close) / l.prev_close END) AS p1,
+                MAX(CASE WHEN l.rn=2 AND l.prev_close>0
+                    THEN (l.close - l.prev_close) / l.prev_close END) AS p2,
+                MAX(CASE WHEN l.rn=3 AND l.prev_close>0
+                    THEN (l.close - l.prev_close) / l.prev_close END) AS p3,
+                MAX(CASE WHEN l.rn=4 AND l.prev_close>0
+                    THEN (l.close - l.prev_close) / l.prev_close END) AS p4,
+                MAX(CASE WHEN l.rn=5 AND l.prev_close>0
+                    THEN (l.close - l.prev_close) / l.prev_close END) AS p5
+            FROM screener.universe u
+            INNER JOIN lagged l ON u.asx_code = l.asx_code
+            WHERE u.status = 'active'
+              AND u.price > 0.05
+              AND u.market_cap > :min_cap
+              {sector_clause}
+            GROUP BY u.asx_code, u.company_name, u.sector, u.industry,
+                     u.price, u.market_cap
+            ORDER BY u.market_cap DESC NULLS LAST
+        """)
+
+        labels_sql = text("""
+            SELECT DISTINCT DATE(time) AS td
+            FROM market.daily_prices
+            ORDER BY td DESC
+            LIMIT 5
+        """)
+
+    else:  # weeks
+        sql = text(f"""
+            WITH weekly AS (
+                SELECT
+                    asx_code,
+                    DATE_TRUNC('week', time)::date AS week_start,
+                    (ARRAY_AGG(close ORDER BY time DESC))[1] AS week_close
+                FROM market.daily_prices
+                WHERE time >= NOW() - INTERVAL '9 weeks'
+                  AND close > 0
+                GROUP BY asx_code, DATE_TRUNC('week', time)
+            ),
+            lagged AS (
+                SELECT
+                    asx_code, week_start, week_close,
+                    LAG(week_close) OVER (PARTITION BY asx_code ORDER BY week_start)
+                        AS prev_close,
+                    ROW_NUMBER() OVER (PARTITION BY asx_code ORDER BY week_start DESC)
+                        AS rn
+                FROM weekly
+            )
+            SELECT
+                u.asx_code, u.company_name, u.sector, u.industry,
+                u.price, u.market_cap,
+                MAX(CASE WHEN l.rn=1 AND l.prev_close>0
+                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p1,
+                MAX(CASE WHEN l.rn=2 AND l.prev_close>0
+                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p2,
+                MAX(CASE WHEN l.rn=3 AND l.prev_close>0
+                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p3,
+                MAX(CASE WHEN l.rn=4 AND l.prev_close>0
+                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p4,
+                MAX(CASE WHEN l.rn=5 AND l.prev_close>0
+                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p5
+            FROM screener.universe u
+            INNER JOIN lagged l ON u.asx_code = l.asx_code
+            WHERE u.status = 'active'
+              AND u.price > 0.05
+              AND u.market_cap > :min_cap
+              {sector_clause}
+              AND l.rn <= 5
+            GROUP BY u.asx_code, u.company_name, u.sector, u.industry,
+                     u.price, u.market_cap
+            ORDER BY u.market_cap DESC NULLS LAST
+        """)
+
+        labels_sql = text("""
+            SELECT DISTINCT DATE_TRUNC('week', time)::date AS week_start
+            FROM market.daily_prices
+            ORDER BY week_start DESC
+            LIMIT 5
+        """)
+
+    # ── Execute ───────────────────────────────────────────────────────────────
+    params: dict = {"min_cap": min_cap_raw}
+    if sector:
+        params["sector"] = sector
+
+    rows_result  = (await db.execute(sql, params)).mappings().all()
+    label_result = (await db.execute(labels_sql)).mappings().all()
+
+    # ── Build labels ──────────────────────────────────────────────────────────
+    if mode == "days":
+        labels = [_fmt_day_label(r["td"]) for r in label_result]
+    else:
+        labels = [_fmt_week_label(r["week_start"]) for r in label_result]
+
+    # Pad to 5 if needed
+    while len(labels) < 5:
+        labels.append("")
+
+    # ── Build rows ────────────────────────────────────────────────────────────
+    rows = [
+        HeatmapRow(
+            asx_code=r["asx_code"],
+            company_name=r["company_name"],
+            sector=r["sector"],
+            industry=r["industry"],
+            price=float(r["price"]) if r["price"] is not None else None,
+            market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
+            p1=float(r["p1"]) if r["p1"] is not None else None,
+            p2=float(r["p2"]) if r["p2"] is not None else None,
+            p3=float(r["p3"]) if r["p3"] is not None else None,
+            p4=float(r["p4"]) if r["p4"] is not None else None,
+            p5=float(r["p5"]) if r["p5"] is not None else None,
+        )
+        for r in rows_result
+    ]
+
+    result = HeatmapResponse(rows=rows, labels=labels, mode=mode, total=len(rows))
+    await cache_set(_key, result.model_dump(), ttl=HEATMAP_TTL)
+    return result
+
+
+# ── Heatmap Excel Export ──────────────────────────────────────────────────────
+
+@router.get("/heatmap/export")
+async def market_heatmap_export(
+    mode:    str        = Query("days",  pattern="^(days|weeks)$"),
+    sector:  str | None = Query(None),
+    min_cap: float      = Query(0.0, ge=0),
+    db: AsyncSession    = Depends(get_db),
+):
+    """
+    Download the performance heatmap as a colour-coded Excel (.xlsx) file.
+    Same query as /heatmap but streams an openpyxl workbook.
+    """
+    import io
+    try:
+        import openpyxl
+        from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+        from openpyxl.styles.numbers import FORMAT_NUMBER_COMMA_SEP1
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        from fastapi import HTTPException
+        raise HTTPException(503, "openpyxl not installed — run: pip install openpyxl==3.1.5")
+
+    # Re-use the JSON endpoint to get data (hits cache if warm)
+    heatmap = await market_heatmap(mode=mode, sector=sector, min_cap=min_cap, db=db)
+
+    # ── Colour map (hex fills) ─────────────────────────────────────────────────
+    def _fill(hex_bg: str) -> PatternFill:
+        return PatternFill("solid", fgColor=hex_bg)
+
+    def _heat_fill(pct) -> PatternFill:
+        if pct is None:
+            return _fill("F3F4F6")   # gray-100
+        if pct >=  0.05: return _fill("047857")   # emerald-700
+        if pct >=  0.02: return _fill("10B981")   # emerald-500
+        if pct >=  0.005: return _fill("A7F3D0")  # emerald-200
+        if pct >= -0.005: return _fill("FDBA74")   # orange-300
+        if pct >= -0.02: return _fill("FECACA")   # red-200
+        if pct >= -0.05: return _fill("EF4444")   # red-500
+        return _fill("B91C1C")                     # red-700
+
+    def _heat_font(pct) -> Font:
+        if pct is None:
+            return Font(color="9CA3AF", size=9)
+        if abs(pct) < 0.005:  # flat — dark text on orange
+            return Font(color="7C2D12", size=9, bold=True)
+        dark_text = abs(pct) < 0.02
+        color = "065F46" if (pct >= 0.005 and dark_text) else \
+                "991B1B" if (pct < -0.005 and dark_text) else "FFFFFF"
+        return Font(color=color, size=9, bold=True)
+
+    def _pct_str(v) -> str:
+        if v is None:
+            return "—"
+        p = v * 100
+        return ("+" if p >= 0 else "") + f"{p:.1f}%"
+
+    def _cap_str(v) -> str:
+        if v is None:
+            return "—"
+        m = v / 1_000_000
+        if m >= 1000:
+            return f"${m/1000:.1f}B"
+        return f"${m:.0f}M"
+
+    # ── Build workbook ────────────────────────────────────────────────────────
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"ASX Heatmap ({mode.capitalize()})"
+
+    # Header row
+    period_type = "Day" if mode == "days" else "Week"
+    headers = [
+        "ASX Code", "Company Name", "Sector", "Industry",
+        "Price (AUD)", "Market Cap (AUD M)",
+        *[f"Current{period_type}-{i+1}" for i in range(5)],
+    ]
+
+    # Add actual date labels in row 1 as a sub-header if available
+    if any(heatmap.labels):
+        sub_headers = ["", "", "", "", "", "", *heatmap.labels]
+    else:
+        sub_headers = None
+
+    hdr_fill   = _fill("1E40AF")   # blue-800
+    hdr_font   = Font(color="FFFFFF", bold=True, size=10)
+    sub_fill   = _fill("3B82F6")   # blue-500
+    sub_font   = Font(color="FFFFFF", size=9)
+    center_al  = Alignment(horizontal="center", vertical="center", wrap_text=False)
+    thin       = Side(style="thin", color="D1D5DB")
+    border     = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    ws.append(headers)
+    for col_idx, hdr in enumerate(headers, start=1):
+        cell = ws.cell(row=1, column=col_idx)
+        cell.fill     = hdr_fill
+        cell.font     = hdr_font
+        cell.alignment = center_al
+        cell.border   = border
+
+    if sub_headers:
+        ws.append(sub_headers)
+        for col_idx, shdr in enumerate(sub_headers, start=1):
+            cell = ws.cell(row=2, column=col_idx)
+            cell.fill     = sub_fill
+            cell.font     = sub_font
+            cell.alignment = center_al
+            cell.border   = border
+        data_start_row = 3
+    else:
+        data_start_row = 2
+
+    # Data rows
+    for row in heatmap.rows:
+        data = [
+            row.asx_code,
+            row.company_name,
+            row.sector or "",
+            row.industry or "",
+            row.price,
+            row.market_cap / 1_000_000 if row.market_cap else None,
+            row.p1, row.p2, row.p3, row.p4, row.p5,
+        ]
+        ws.append(data)
+        r = ws.max_row
+
+        # Style meta columns (A–F)
+        for c in range(1, 7):
+            cell = ws.cell(row=r, column=c)
+            cell.alignment = Alignment(vertical="center")
+            cell.border    = border
+            if c == 6 and cell.value is not None:  # Market Cap
+                cell.number_format = '#,##0.0'
+
+        # Style heat columns (G–K)
+        for i, pct_val in enumerate([row.p1, row.p2, row.p3, row.p4, row.p5], start=7):
+            cell = ws.cell(row=r, column=i)
+            cell.value     = _pct_str(pct_val)
+            cell.fill      = _heat_fill(pct_val)
+            cell.font      = _heat_font(pct_val)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.border    = border
+
+    # ── Column widths ─────────────────────────────────────────────────────────
+    col_widths = [8, 38, 18, 22, 10, 16, 11, 11, 11, 11, 11]
+    for i, w in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    # Row heights
+    ws.row_dimensions[1].height = 18
+    if sub_headers:
+        ws.row_dimensions[2].height = 14
+    for r in range(data_start_row, ws.max_row + 1):
+        ws.row_dimensions[r].height = 16
+
+    # Freeze panes below headers, after ASX Code column
+    ws.freeze_panes = f"C{data_start_row}"
+
+    # ── Stream response ───────────────────────────────────────────────────────
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    today = _dt.date.today().isoformat()
+    filename = f"ASX_Heatmap_{mode}_{today}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

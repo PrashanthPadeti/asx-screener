@@ -1905,3 +1905,37 @@ export const getCapitalRaises = async (code: string): Promise<CapitalRaisesRespo
   return data
 }
 
+// ── Performance Heatmap ───────────────────────────────────────────────────────
+
+export interface HeatmapRow {
+  asx_code:     string
+  company_name: string
+  sector:       string | null
+  industry:     string | null
+  price:        number | null
+  market_cap:   number | null   // AUD raw
+  p1:           number | null   // most-recent period return (decimal)
+  p2:           number | null
+  p3:           number | null
+  p4:           number | null
+  p5:           number | null   // oldest period
+}
+
+export interface HeatmapResponse {
+  rows:   HeatmapRow[]
+  labels: string[]   // 5 period labels, newest first
+  mode:   string
+  total:  number
+}
+
+export const getMarketHeatmap = async (
+  mode:    'days' | 'weeks' = 'days',
+  sector?: string,
+  minCap   = 0,
+): Promise<HeatmapResponse> => {
+  const params: Record<string, string | number> = { mode, min_cap: minCap }
+  if (sector) params.sector = sector
+  const { data } = await api.get('/api/v1/market/heatmap', { params })
+  return data
+}
+

@@ -6,18 +6,19 @@ export const metadata = {
   description: 'How ASX Screener collects, uses, and protects your personal information under the Australian Privacy Act 1988.',
 }
 
-const UPDATED = 'May 2026'
+const UPDATED = 'May 2026 (Revised)'
 
 const SECTIONS = [
   'Overview',
   'Information We Collect',
   'How We Use Your Information',
-  'Information Sharing',
-  'Data Storage & Security',
+  'Information Sharing & Overseas Disclosure',
+  'Data Storage, Security & Breach Notification',
   'Cookies & Tracking',
+  '6A. Automated Decision-Making',
   'Your Privacy Rights',
   'Data Retention',
-  'Children\'s Privacy',
+  "Children's Privacy",
   'Changes to This Policy',
   'Contact Us',
 ]
@@ -34,6 +35,11 @@ export default function PrivacyPage() {
         </div>
         <h1 className="text-3xl font-bold text-slate-900 mb-2">Privacy Policy</h1>
         <p className="text-sm text-slate-400">Last updated: {UPDATED}</p>
+        <div className="mt-3 bg-blue-50 border border-blue-200 rounded-xl p-4 text-sm text-blue-800">
+          <strong>Updates in this revision:</strong> Added overseas data transfer disclosures (Section 4),
+          automated decision-making disclosure (Section 6A), data breach notification commitment
+          (Section 5), and enhanced cookie consent guidance (Section 6).
+        </div>
         <p className="mt-3 text-slate-600 leading-relaxed">
           ASX Screener (&quot;we&quot;, &quot;us&quot;, or &quot;our&quot;) is committed to protecting your personal
           information. This policy explains how we collect, use, and safeguard your data in
@@ -46,13 +52,17 @@ export default function PrivacyPage() {
       <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5">
         <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Contents</p>
         <ol className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
-          {SECTIONS.map((s, i) => (
-            <li key={s}>
-              <a href={`#section-${i + 1}`} className="text-sm text-blue-600 hover:underline">
-                {i + 1}. {s}
-              </a>
-            </li>
-          ))}
+          {SECTIONS.map((s, i) => {
+            const label = s.startsWith('6A.') ? s : `${i + 1}. ${s}`
+            const anchor = s.startsWith('6A.') ? 'section-6a' : `section-${i + 1}`
+            return (
+              <li key={s}>
+                <a href={`#${anchor}`} className="text-sm text-blue-600 hover:underline">
+                  {label}
+                </a>
+              </li>
+            )
+          })}
         </ol>
       </div>
 
@@ -117,9 +127,9 @@ export default function PrivacyPage() {
         </p>
       </section>
 
-      {/* 4 — Sharing */}
+      {/* 4 — Sharing & Overseas Disclosure */}
       <section id="section-4" className="space-y-3">
-        <h2 className="text-xl font-bold text-slate-900">4. Information Sharing</h2>
+        <h2 className="text-xl font-bold text-slate-900">4. Information Sharing & Overseas Disclosure</h2>
         <p className="text-slate-700 leading-relaxed">
           <strong>We do not sell your personal information.</strong> We share data only with the
           following trusted service providers, limited to what they need to perform their function:
@@ -131,34 +141,52 @@ export default function PrivacyPage() {
                 <th className="px-3 py-2 text-left font-semibold text-slate-700">Provider</th>
                 <th className="px-3 py-2 text-left font-semibold text-slate-700">Purpose</th>
                 <th className="px-3 py-2 text-left font-semibold text-slate-700">Data shared</th>
+                <th className="px-3 py-2 text-left font-semibold text-slate-700">Country</th>
               </tr>
             </thead>
             <tbody>
               {[
-                ['Stripe', 'Payment processing', 'Name, email, billing details'],
-                ['Resend', 'Transactional email delivery', 'Name, email address'],
-                ['DigitalOcean', 'Cloud infrastructure & storage', 'All user data (encrypted at rest)'],
-                ['EODHD / FMP', 'Market data provider', 'No user data — API calls only'],
-                ['Google Analytics', 'Aggregate usage analytics', 'Anonymised usage events'],
-              ].map(([p, pu, d]) => (
+                ['Stripe', 'Payment processing', 'Name, email, billing details', 'United States'],
+                ['Resend', 'Transactional email delivery', 'Name, email address', 'United States'],
+                ['DigitalOcean', 'Cloud infrastructure & storage', 'All user data (encrypted at rest)', 'Australia (Sydney)'],
+                ['EODHD / FMP', 'Market data provider', 'No user data — API calls only', 'N/A'],
+                ['Google Analytics', 'Aggregate usage analytics', 'Anonymised usage events', 'United States'],
+              ].map(([p, pu, d, c]) => (
                 <tr key={p} className="border border-slate-200">
                   <td className="px-3 py-2 font-medium text-slate-800">{p}</td>
                   <td className="px-3 py-2 text-slate-600">{pu}</td>
                   <td className="px-3 py-2 text-slate-600">{d}</td>
+                  <td className="px-3 py-2 text-slate-600">{c}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-2">
+          <p className="font-semibold text-slate-800">Overseas data transfers (APP 8)</p>
+          <p className="leading-relaxed">
+            Some of our service providers process personal information outside Australia, primarily in
+            the United States. Before disclosing your information to an overseas recipient, we take
+            reasonable steps to ensure that the overseas recipient does not breach the Australian
+            Privacy Principles in relation to the information. We do this by reviewing each
+            provider&apos;s privacy and security practices, entering into contractual arrangements
+            that require the provider to handle personal information in accordance with the APPs, and
+            conducting periodic reviews of their compliance. By using ASX Screener, you acknowledge
+            and consent to the transfer of your personal information to these overseas recipients for
+            the purposes described in this policy.
+          </p>
+        </div>
+
         <p className="text-slate-700 text-sm leading-relaxed">
           We may also disclose information if required by Australian law, court order, or to
           protect the rights, property, or safety of ASX Screener, our users, or the public.
         </p>
       </section>
 
-      {/* 5 — Storage & Security */}
+      {/* 5 — Storage, Security & Breach Notification */}
       <section id="section-5" className="space-y-3">
-        <h2 className="text-xl font-bold text-slate-900">5. Data Storage & Security</h2>
+        <h2 className="text-xl font-bold text-slate-900">5. Data Storage, Security & Breach Notification</h2>
         <p className="text-slate-700 leading-relaxed">
           Your data is stored on <strong>DigitalOcean infrastructure in the Sydney (SYD1) region</strong>,
           keeping your data in Australia. We implement industry-standard security measures:
@@ -177,6 +205,17 @@ export default function PrivacyPage() {
             asxscreener@gmail.com
           </a>.
         </p>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-2">
+          <p className="font-semibold text-slate-800">Data breach notification (NDB scheme)</p>
+          <p className="leading-relaxed">
+            In the event of an eligible data breach that is likely to result in serious harm to any
+            individual whose personal information is involved, we will notify the Office of the
+            Australian Information Commissioner (OAIC) and affected individuals as soon as
+            practicable, and in any case within the timeframes required under the{' '}
+            <em>Privacy Act 1988</em>. We maintain a documented data breach response plan that is
+            reviewed and tested annually.
+          </p>
+        </div>
       </section>
 
       {/* 6 — Cookies */}
@@ -203,6 +242,52 @@ export default function PrivacyPage() {
         </ul>
         <p className="text-slate-700 text-sm">
           We do not use advertising or cross-site tracking cookies.
+        </p>
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-sm text-slate-700 space-y-2">
+          <p className="font-semibold text-slate-800">Cookie consent</p>
+          <p className="leading-relaxed">
+            When you first visit ASX Screener, a cookie consent banner will allow you to accept or
+            reject non-essential cookies (including analytics cookies) before they are set. You can
+            change your cookie preferences at any time via the cookie settings link in the website
+            footer. Essential cookies required for the service to function cannot be disabled.
+          </p>
+        </div>
+      </section>
+
+      {/* 6A — Automated Decision-Making — NEW */}
+      <section id="section-6a" className="space-y-3">
+        <h2 className="text-xl font-bold text-slate-900">6A. Automated Decision-Making</h2>
+        <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2 text-xs text-blue-700 font-medium inline-block mb-1">
+          New section — added to comply with Privacy Act 2024 amendments (effective December 2026).
+        </div>
+        <p className="text-slate-700 leading-relaxed">
+          ASX Screener uses substantially automated processes in the following areas:
+        </p>
+        <ul className="list-disc list-inside space-y-2 text-slate-700 text-sm leading-relaxed">
+          <li>
+            <strong>AI-powered stock screener:</strong> Our natural language screener uses artificial
+            intelligence to interpret your search queries and apply corresponding financial and
+            technical filters to publicly available market data. The screener output is a mechanical
+            application of filters to data — it does not constitute a recommendation or financial advice.
+          </li>
+          <li>
+            <strong>Price alerts:</strong> Automated monitoring systems check market data against your
+            configured alert thresholds and send notifications when conditions are met.
+          </li>
+          <li>
+            <strong>Fraud and abuse detection:</strong> We use automated systems to detect unusual
+            account activity, including multiple failed login attempts and suspicious usage patterns.
+            These systems may result in temporary account restrictions.
+          </li>
+        </ul>
+        <p className="text-slate-700 text-sm leading-relaxed">
+          These automated processes apply rules and algorithms to data without human review of
+          individual outputs. If you believe an automated decision has adversely affected you, you
+          may contact us at{' '}
+          <a href="mailto:asxscreener@gmail.com" className="text-blue-600 hover:underline">
+            asxscreener@gmail.com
+          </a>{' '}
+          to request a review by a human.
         </p>
       </section>
 
@@ -295,10 +380,16 @@ export default function PrivacyPage() {
         </p>
       </section>
 
-      {/* Footer nav */}
+      {/* Footer disclaimer */}
       <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-700">
         <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
         <p>
+          The information provided on ASX Screener is for informational and educational purposes only.
+          It does not constitute financial advice, a recommendation to buy or sell any security, or an
+          offer of any kind. Past performance is not indicative of future results. All data is sourced
+          from publicly available information and may contain errors or omissions. You should seek
+          independent financial advice before making any investment decision. Always do your own
+          research (DYOR).{' '}
           This Privacy Policy was last updated {UPDATED}. Please also read our{' '}
           <Link href="/terms" className="font-semibold underline">Terms of Service</Link> and our{' '}
           <Link href="/contact" className="font-semibold underline">Contact Support</Link> page.

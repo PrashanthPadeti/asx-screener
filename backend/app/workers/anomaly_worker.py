@@ -20,7 +20,10 @@ async def run_anomaly_detect() -> None:
         "anomaly_detect",
         "Anomaly Detection",
         skip_if_pipeline_failed=True,   # gate: needs valid snapshot + universe
-    ):
+    ) as job:
+        if job.skipped:
+            return   # pipeline gate fired — nothing to do
+
         log.info("Anomaly detection starting...")
         from compute.engine.anomaly_detect import run as _run_anomaly
         await _run_anomaly(dry_run=False)

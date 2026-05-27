@@ -4,7 +4,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import { useState, useRef, useEffect } from 'react'
 import SearchBar from './SearchBar'
 import { cn } from '@/lib/utils'
-import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy, Trophy, LayoutDashboard, Users, Mail } from 'lucide-react'
+import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, LogOut, User, Bell, Globe, PieChart, Layers, Building2, Newspaper, Settings, BookOpen, DollarSign, Pickaxe, ScanLine, Zap, Shield, Activity, LifeBuoy, Trophy, LayoutDashboard, Users, Mail, LayoutGrid } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
@@ -14,11 +14,12 @@ const NAV_LINKS = [
 ]
 
 const MARKET_DATA_LINKS = [
-  { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices',     premium: true },
-  { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',             premium: true },
-  { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',     premium: true },
-  { href: '/commodities',    label: 'Commodities',    icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more',     premium: true },
-  { href: '/top5',           label: 'AlphaFive',       icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',  premium: true },
+  { href: '/market/heatmap', label: 'Perf. Heatmap',  icon: LayoutGrid, desc: 'Rolling 5-day & 5-week price performance', premium: false },
+  { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices',       premium: true },
+  { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',               premium: true },
+  { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',       premium: true },
+  { href: '/commodities',    label: 'Commodities',    icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more',       premium: true },
+  { href: '/top5',           label: 'AlphaFive',      icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',    premium: true },
 ]
 
 // Pro+ items — shown at top of Resources dropdown
@@ -59,7 +60,7 @@ const ADMIN_LINKS = [
 ]
 
 // Prefixes that activate the Premium Data dropdown as "active"
-const PREMIUM_DATA_PREFIXES = ['/indices', '/funds', '/global-markets', '/commodities', '/top5']
+const PREMIUM_DATA_PREFIXES = ['/market/heatmap', '/indices', '/funds', '/global-markets', '/commodities', '/top5']
 // Prefixes that activate the Resources dropdown as "active"
 const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/contact', '/pricing']
 

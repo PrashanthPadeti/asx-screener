@@ -22,7 +22,10 @@ async def run_market_snapshot() -> None:
         "market_snapshot",
         "Market Snapshot",
         skip_if_pipeline_failed=True,   # gate: skip if pipeline failed today
-    ):
+    ) as job:
+        if job.skipped:
+            return   # pipeline gate fired — heartbeat still written below
+
         from compute.engine.market_snapshot import run
         await run(snapshot_date=date.today())
         log.info("Market snapshot complete for %s", date.today())

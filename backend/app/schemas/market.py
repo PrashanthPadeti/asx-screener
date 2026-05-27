@@ -117,3 +117,27 @@ class VolumeActivityResponse(BaseModel):
     heavy_buying:  list[VolumePressureStock]
     heavy_selling: list[VolumePressureStock]
     cap_tier:      Optional[str] = None   # echoed back, None = 'all'
+
+
+# ── Performance Heatmap schemas ───────────────────────────────────────────────
+
+class HeatmapRow(BaseModel):
+    """One stock row in the rolling performance heatmap."""
+    asx_code:     str
+    company_name: str
+    sector:       Optional[str]   = None
+    industry:     Optional[str]   = None
+    price:        Optional[float] = None   # current price AUD
+    market_cap:   Optional[float] = None   # AUD (raw)
+    p1:           Optional[float] = None   # most-recent period return (decimal)
+    p2:           Optional[float] = None
+    p3:           Optional[float] = None
+    p4:           Optional[float] = None
+    p5:           Optional[float] = None   # oldest of the 5 periods
+
+
+class HeatmapResponse(BaseModel):
+    rows:   list[HeatmapRow]
+    labels: list[str]   # 5 human-readable period labels, newest first
+    mode:   str         # "days" | "weeks"
+    total:  int

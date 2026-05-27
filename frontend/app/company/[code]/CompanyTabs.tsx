@@ -297,9 +297,157 @@ function buildSignals(o: CompanyOverview): { pros: string[]; cons: string[] } {
   return { pros, cons }
 }
 
+// ── Anomaly Meta ──────────────────────────────────────────────
+// Maps flag_type → rich contextual explanation shown in Overview tab
+
+const ANOMALY_META: Record<string, {
+  title:  string
+  icon:   string
+  what:   string
+  why:    string
+  action: string
+}> = {
+  high_pe: {
+    title:  'Elevated P/E Ratio',
+    icon:   '📈',
+    what:   'The price-to-earnings ratio is significantly above the market or sector average.',
+    why:    'A very high P/E suggests the market is pricing in exceptional future growth. If that growth fails to materialise, the share price can correct sharply. This becomes an anomaly when the P/E diverges substantially from peers without a clear earnings catalyst.',
+    action: 'Compare against sector peers and check forward P/E. Investigate what growth assumptions justify the current multiple.',
+  },
+  low_pe: {
+    title:  'Unusually Low P/E Ratio',
+    icon:   '📉',
+    what:   'The price-to-earnings ratio is well below sector norms.',
+    why:    'A very low P/E can indicate a value opportunity — or it can signal the market expects earnings to deteriorate. It becomes an anomaly when the discount is unexplained by visible risks, often preceding earnings downgrades.',
+    action: 'Investigate whether the low P/E reflects genuine value or an anticipated earnings decline.',
+  },
+  revenue_decline: {
+    title:  'Revenue Declining',
+    icon:   '⬇️',
+    what:   'Year-on-year revenue has contracted meaningfully.',
+    why:    'Sustained revenue decline is one of the strongest leading indicators of future earnings pressure and potential capital raises. It becomes anomalous when paired with management guidance that appears optimistic, or when the decline accelerates.',
+    action: 'Review the last 2–3 earnings reports for trend direction and management commentary on root cause.',
+  },
+  high_debt: {
+    title:  'High Leverage',
+    icon:   '🏦',
+    what:   'The debt-to-equity ratio is significantly above sector norms.',
+    why:    'Elevated debt amplifies risk — particularly when interest rates rise or earnings disappoint. It is flagged as anomalous when debt levels exceed a threshold that could strain interest coverage or trigger covenant reviews.',
+    action: 'Check the interest coverage ratio and any upcoming debt maturity dates in the annual report.',
+  },
+  negative_fcf: {
+    title:  'Negative Free Cash Flow',
+    icon:   '🔴',
+    what:   'The company is consuming more cash than its operations generate.',
+    why:    'Persistent negative FCF forces companies to either raise capital (diluting shareholders) or take on more debt. This is anomalous when it occurs alongside reported accounting profits, which may suggest earnings quality issues.',
+    action: 'Look at the cash flow statement — distinguish between investment-heavy growth (capex) vs. operational losses.',
+  },
+  high_short_interest: {
+    title:  'Elevated Short Interest',
+    icon:   '🎯',
+    what:   'A significant proportion of the float is being shorted by institutional investors.',
+    why:    'High short interest signals that sophisticated investors are betting against the stock. While it can create a short squeeze opportunity, it more commonly reflects institutional research uncovering fundamental concerns not yet visible in public data.',
+    action: 'Check ASIC short-selling data for trend direction. Rising short interest over several weeks is a stronger warning signal than a one-off reading.',
+  },
+  insider_selling: {
+    title:  'Insider Selling Activity',
+    icon:   '👔',
+    what:   'Company directors or executives have recently sold material quantities of their shareholding.',
+    why:    'Insiders know more about the business than external investors. While selling can be benign (diversification, tax), a cluster of insider sales — particularly at the same time — often precedes negative news. It is flagged when the volume or timing is unusual.',
+    action: 'Cross-reference with ASX Appendix 3Y filings to see who sold and when relative to recent news or reporting dates.',
+  },
+  going_concern: {
+    title:  'Auditor Going Concern Note',
+    icon:   '⚠️',
+    what:   "The company's auditor has included a going concern qualification in its audit report.",
+    why:    'Auditors only include going concern notes when they have substantial doubt about whether a company can continue operating for the next 12 months. It indicates potential insolvency risk, likely capital raise requirements, or restructuring.',
+    action: 'Read the full auditor notes and any board commentary. Assess cash runway, upcoming liabilities, and whether a capital raise is likely.',
+  },
+  low_liquidity: {
+    title:  'Low Trading Liquidity',
+    icon:   '💧',
+    what:   'Average daily trading volume is very low relative to market capitalisation.',
+    why:    'Illiquid stocks carry hidden risks: large bid-ask spreads, inability to exit quickly, and susceptibility to price manipulation. They are flagged when volume falls below a threshold where institutional investors cannot build or exit positions at scale.',
+    action: 'Be aware that any position may be difficult to exit at the quoted price. Use limit orders rather than market orders.',
+  },
+  dilution_risk: {
+    title:  'Share Dilution Risk',
+    icon:   '📊',
+    what:   'The company has issued, or appears likely to issue, a significant number of new shares.',
+    why:    'Dilution directly reduces earnings per share and the value of existing holdings. It is flagged when capital raises are frequent, share count growth is high, or when cash burn suggests an imminent equity raise.',
+    action: 'Review recent placement history in the ASX announcements tab and check the cash position vs. quarterly burn rate.',
+  },
+  negative_equity: {
+    title:  'Negative Shareholder Equity',
+    icon:   '🚨',
+    what:   'Total liabilities exceed total assets — book value is negative.',
+    why:    'Negative equity signals the company has consumed all its contributed capital. This significantly increases solvency risk and limits access to debt financing. It may also breach banking covenants.',
+    action: 'Review the balance sheet for the source of negative equity — accumulated losses vs. intangible write-downs have different implications.',
+  },
+  price_spike: {
+    title:  'Unusual Price Movement',
+    icon:   '⚡',
+    what:   'The stock has made an abnormal short-term price move relative to its historical volatility.',
+    why:    'Sharp price spikes without a corresponding announcement can indicate information leakage, speculative activity, or thin liquidity being exploited. They sometimes precede material ASX announcements.',
+    action: "Check recent ASX announcements for any trading halt requests or 'aware' queries from ASX. Monitor for any pending corporate actions.",
+  },
+  volume_spike: {
+    title:  'Unusual Trading Volume',
+    icon:   '📶',
+    what:   'Trading volume has exceeded normal levels by a significant multiple.',
+    why:    'Abnormal volume without a matching announcement may indicate institutional accumulation, information leakage ahead of a news release, or a large holder exiting. It is anomalous when volume is 3× or more above the 20-day average.',
+    action: 'Review ASX announcements for the same period. Unusual volume + price movement together is a stronger signal than either alone.',
+  },
+  earnings_miss: {
+    title:  'Earnings Disappointment',
+    icon:   '📋',
+    what:   'Reported earnings came in meaningfully below consensus analyst estimates.',
+    why:    "Earnings misses often reflect structural issues rather than one-off events. When a company repeatedly misses, it erodes market confidence in management guidance and can trigger re-rating to a lower P/E multiple.",
+    action: "Compare the magnitude of the miss and management's explanation. Check if guidance for the next period has also been revised down.",
+  },
+  guidance_cut: {
+    title:  'Forward Guidance Reduced',
+    icon:   '✂️',
+    what:   'Management has materially downgraded their forward earnings or revenue guidance.',
+    why:    "Guidance cuts reveal management's own reduced confidence in the business outlook. Multiple guidance cuts — sometimes called 'profit warnings' — are strongly correlated with further downward earnings revisions.",
+    action: 'Assess whether this is the first guidance cut or part of a pattern. First cuts tend to be understated.',
+  },
+  low_coverage: {
+    title:  'Minimal Analyst Coverage',
+    icon:   '🔭',
+    what:   'The stock is covered by very few or no sell-side analysts.',
+    why:    'Low analyst coverage creates information asymmetry — pricing may be less efficient, news may be delayed reaching the market, and there are fewer external checks on management claims.',
+    action: 'Rely more heavily on primary research — reading annual reports, Appendix 4C/4D filings, and management briefings directly.',
+  },
+  cash_burn: {
+    title:  'High Cash Burn Rate',
+    icon:   '🔥',
+    what:   'The company is consuming cash at a rate that raises runway concerns.',
+    why:    'For pre-revenue or early-stage companies, cash runway is existential. It is flagged when Appendix 4C data indicates less than 6 months of cash remaining, as this typically requires a capital raise that will dilute shareholders.',
+    action: 'Review the most recent Appendix 4C filing for cash position and estimated quarterly expenditure. Calculate runway: cash ÷ quarterly cash used.',
+  },
+  high_book_discount: {
+    title:  'Significant Discount to Book Value',
+    icon:   '💰',
+    what:   'The stock is trading well below its reported net asset value (book value per share).',
+    why:    "A large book discount either represents genuine value or signals the market believes assets are overstated (e.g. goodwill that will be written down). It is anomalous when the discount persists across market cycles without a clear explanation.",
+    action: 'Scrutinise the balance sheet for asset quality — intangibles, goodwill, and deferred tax assets should be assessed critically.',
+  },
+}
+
+function getAnomalyMeta(flagType: string) {
+  return ANOMALY_META[flagType] ?? {
+    title:  flagType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+    icon:   '⚠️',
+    what:   'An unusual data pattern has been detected for this stock.',
+    why:    'Our screening system has identified a metric or pattern that falls outside normal parameters for this company or its peer group. This warrants further investigation before making an investment decision.',
+    action: 'Review recent announcements and financial reports to understand the context behind this flag.',
+  }
+}
+
 // ── Overview Tab ──────────────────────────────────────────────
 
-function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
+function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: string; anomalyFlags: CompanyAnomalyFlag[] }) {
   // Use DB-computed pros/cons when available; fall back to client-side engine
   const hasDatabaseSignals = (o.pros?.length ?? 0) > 0 || (o.cons?.length ?? 0) > 0
   const { pros, cons } = hasDatabaseSignals
@@ -311,6 +459,9 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError]   = useState<string | null>(null)
   const [aiLoaded, setAiLoaded] = useState(false)
+
+  // Anomaly expansion state
+  const [expandedAnomalyIdx, setExpandedAnomalyIdx] = useState<number | null>(null)
 
   // force=true bypasses the guard — needed on retry because setState is async
   const loadAI = (force = false) => {
@@ -770,6 +921,105 @@ function OverviewTab({ o, code }: { o: CompanyOverview; code: string }) {
               </ul>
             </Card>
           )}
+        </div>
+      )}
+
+      {/* ── Detected Anomalies ──────────────────────────────────── */}
+      {anomalyFlags.length > 0 && (
+        <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+          <div className="bg-gradient-to-r from-red-50 to-amber-50/40 px-4 py-2.5 border-b border-amber-100 flex items-center gap-2">
+            <span className="text-base">🔍</span>
+            <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest flex-1">
+              Data Anomalies Detected
+            </h3>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+              anomalyFlags.some(f => f.severity === 'high')
+                ? 'bg-red-100 text-red-700'
+                : anomalyFlags.some(f => f.severity === 'medium')
+                ? 'bg-amber-100 text-amber-700'
+                : 'bg-slate-100 text-slate-600'
+            }`}>
+              {anomalyFlags.length} flag{anomalyFlags.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          <div className="divide-y divide-gray-50">
+            {anomalyFlags.map((flag, idx) => {
+              const meta     = getAnomalyMeta(flag.flag_type)
+              const isOpen   = expandedAnomalyIdx === idx
+              const detected = flag.detected_at
+                ? new Date(flag.detected_at).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+                : null
+
+              const severityStyle =
+                flag.severity === 'high'   ? { badge: 'bg-red-100 text-red-700 border-red-200',   bar: 'bg-red-400',   bg: 'bg-red-50/30'   } :
+                flag.severity === 'medium' ? { badge: 'bg-amber-100 text-amber-700 border-amber-200', bar: 'bg-amber-400', bg: 'bg-amber-50/20' } :
+                                             { badge: 'bg-slate-100 text-slate-600 border-slate-200', bar: 'bg-slate-300', bg: 'bg-slate-50/20'  }
+
+              return (
+                <div key={idx} className={`transition-colors ${isOpen ? severityStyle.bg : 'hover:bg-gray-50/60'}`}>
+                  {/* Header row — always visible */}
+                  <button
+                    className="w-full flex items-start gap-3 px-4 py-3.5 text-left"
+                    onClick={() => setExpandedAnomalyIdx(isOpen ? null : idx)}
+                  >
+                    {/* Severity bar */}
+                    <div className={`w-1 self-stretch rounded-full shrink-0 ${severityStyle.bar}`} />
+
+                    {/* Icon + title */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-base leading-none">{meta.icon}</span>
+                        <span className="text-sm font-bold text-gray-800">{meta.title}</span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase tracking-wide ${severityStyle.badge}`}>
+                          {flag.severity}
+                        </span>
+                        {detected && (
+                          <span className="text-[10px] text-gray-400 ml-auto shrink-0">
+                            Detected {detected}
+                          </span>
+                        )}
+                      </div>
+                      {/* Short description always shown */}
+                      <p className="text-xs text-gray-500 mt-1 leading-relaxed">{flag.description}</p>
+                    </div>
+
+                    {/* Chevron */}
+                    <span className={`text-gray-400 text-sm shrink-0 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}>
+                      ▾
+                    </span>
+                  </button>
+
+                  {/* Expanded detail */}
+                  {isOpen && (
+                    <div className="px-4 pb-4 ml-4 space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="bg-white border border-gray-100 rounded-lg p-3 shadow-sm">
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">What It Is</p>
+                          <p className="text-xs text-gray-700 leading-relaxed">{meta.what}</p>
+                        </div>
+                        <div className={`border rounded-lg p-3 shadow-sm ${
+                          flag.severity === 'high'   ? 'bg-red-50 border-red-100' :
+                          flag.severity === 'medium' ? 'bg-amber-50 border-amber-100' :
+                                                       'bg-slate-50 border-slate-100'
+                        }`}>
+                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Why It&apos;s an Anomaly</p>
+                          <p className="text-xs text-gray-700 leading-relaxed">{meta.why}</p>
+                        </div>
+                        <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 shadow-sm">
+                          <p className="text-[10px] font-bold text-blue-400 uppercase tracking-widest mb-1.5">What To Check</p>
+                          <p className="text-xs text-gray-700 leading-relaxed">{meta.action}</p>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-gray-400 italic">
+                        ⚠️ This flag is generated by automated screening and does not constitute financial advice. Always conduct your own research.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
@@ -2786,24 +3036,6 @@ export default function CompanyTabs({ code }: { code: string }) {
         ))}
       </div>
 
-      {/* ── Anomaly Flags (Week 13) ──────────────────────────── */}
-      {anomalyFlags.length > 0 && (
-        <div className="border-b border-amber-100 bg-amber-50/50 px-5 py-3 space-y-1.5">
-          {anomalyFlags.map((f, i) => (
-            <div key={i} className="flex items-start gap-2 text-sm">
-              <span className={[
-                'shrink-0 text-xs font-bold px-1.5 py-0.5 rounded uppercase tracking-wide mt-0.5',
-                f.severity === 'high'   ? 'bg-red-100 text-red-700' :
-                f.severity === 'medium' ? 'bg-amber-100 text-amber-700' :
-                                          'bg-slate-100 text-slate-600',
-              ].join(' ')}>
-                {f.severity}
-              </span>
-              <span className="text-gray-700 leading-snug">{f.description}</span>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* ── Tab content ──────────────────────────────────────── */}
       <div className="p-5">
@@ -2818,7 +3050,7 @@ export default function CompanyTabs({ code }: { code: string }) {
           </div>
         ) : overview ? (
           <>
-            {activeTab === 'overview' && <OverviewTab o={overview} code={code} />}
+            {activeTab === 'overview' && <OverviewTab o={overview} code={code} anomalyFlags={anomalyFlags} />}
 
             {activeTab === 'financials' && (
               isLoading('financials')

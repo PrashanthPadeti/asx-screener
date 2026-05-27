@@ -128,7 +128,7 @@ async def backtest(
                 SELECT time::date AS d, close
                 FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND time >= :sd::date
+                  AND time >= CAST(:sd AS date)
                 ORDER BY time ASC LIMIT 1
             """), {"c": code, "sd": sd_str})
             buy_row = buy_r.fetchone()
@@ -143,7 +143,7 @@ async def backtest(
                 SELECT time::date AS d, close
                 FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND time < :ed::date + interval '1 day'
+                  AND time < CAST(:ed AS date) + interval '1 day'
                 ORDER BY time DESC LIMIT 1
             """), {"c": code, "ed": ed_str})
             sell_row = sell_r.fetchone()
@@ -166,8 +166,8 @@ async def backtest(
                     SELECT ex_date, amount, franking_pct
                     FROM market.dividends
                     WHERE asx_code = :c
-                      AND ex_date >= :sd::date
-                      AND ex_date <= :ed::date
+                      AND ex_date >= CAST(:sd AS date)
+                      AND ex_date <= CAST(:ed AS date)
                       AND amount IS NOT NULL
                     ORDER BY ex_date
                 """), {"c": code, "sd": actual_buy_str, "ed": actual_sell_str})
@@ -196,8 +196,8 @@ async def backtest(
                     close
                 FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND time >= :sd::date
-                  AND time < :ed::date + interval '1 day'
+                  AND time >= CAST(:sd AS date)
+                  AND time < CAST(:ed AS date) + interval '1 day'
                 ORDER BY date_trunc('month', time), time DESC
             """), {"c": code, "sd": actual_buy_str, "ed": actual_sell_str})
             chart_rows = chart_r.fetchall()

@@ -105,118 +105,130 @@ async def backtest(
     codes      = [c.upper().strip() for c in body.codes]
     years_held = (end_dt - start_dt).days / 365.25
 
+    # Use ISO strings for date parameters — most reliable across asyncpg versions
+    sd_str = start_dt.isoformat()
+    ed_str = end_dt.isoformat()
+
     results = []
 
     for code in codes:
-        # ── Company name ──────────────────────────────────────────
-        name_r = await db.execute(
-            text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
-            {"c": code},
-        )
-        name_row = name_r.fetchone()
-        if not name_row:
-            results.append({"code": code, "error": "Company not found"})
-            continue
+        try:
+            # ── Company name ──────────────────────────────────────────
+            name_r = await db.execute(
+                text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
+                {"c": code},
+            )
+            name_row = name_r.fetchone()
+            if not name_row:
+                results.append({"code": code, "error": "Company not found"})
+                continue
 
-        # ── Buy price: first close on/after start_date ────────────
-        buy_r = await db.execute(text("""
-            SELECT time::date AS d, close
-            FROM market.daily_prices
-            WHERE asx_code = :c AND time::date >= :sd
-            ORDER BY time ASC LIMIT 1
-        """), {"c": code, "sd": start_dt})
-        buy_row = buy_r.fetchone()
-        if not buy_row or not buy_row.close:
-            results.append({"code": code, "error": "No price data for start date"})
-            continue
-        buy_price  = float(buy_row.close)
-        actual_buy = buy_row.d
-
-        # ── Sell price: last close on/before end_date ─────────────
-        sell_r = await db.execute(text("""
-            SELECT time::date AS d, close
-            FROM market.daily_prices
-            WHERE asx_code = :c AND time::date <= :ed
-            ORDER BY time DESC LIMIT 1
-        """), {"c": code, "ed": end_dt})
-        sell_row = sell_r.fetchone()
-        if not sell_row or not sell_row.close:
-            results.append({"code": code, "error": "No price data for end date"})
-            continue
-        sell_price  = float(sell_row.close)
-        actual_sell = sell_row.d
-
-        shares          = body.amount / buy_price
-        price_end_value = shares * sell_price
-
-        # ── Dividends & franking credits ──────────────────────────
-        div_total      = 0.0
-        franking_total = 0.0
-        div_events     = []
-
-        if body.include_dividends:
-            div_r = await db.execute(text("""
-                SELECT ex_date, amount, franking_pct
-                FROM market.dividends
+            # ── Buy price: first close on/after start_date ────────────
+            buy_r = await db.execute(text("""
+                SELECT time::date AS d, close
+                FROM market.daily_prices
                 WHERE asx_code = :c
-                  AND ex_date >= :sd AND ex_date <= :ed
-                  AND amount IS NOT NULL
-                ORDER BY ex_date
-            """), {"c": code, "sd": actual_buy, "ed": actual_sell})
-            for dr in div_r.fetchall():
-                d_amt   = float(dr.amount or 0)
-                f_pct   = float(dr.franking_pct or 0) / 100.0
-                cash    = d_amt * shares
-                frank   = cash * f_pct * (_TAX_RATE / (1 - _TAX_RATE))
-                div_total      += cash
-                franking_total += frank
-                div_events.append({
-                    "ex_date":      dr.ex_date.isoformat(),
-                    "amount_ps":    round(d_amt, 6),
-                    "franking_pct": round(f_pct * 100, 1),
-                    "cash":         round(cash, 2),
+                  AND time >= :sd::date
+                ORDER BY time ASC LIMIT 1
+            """), {"c": code, "sd": sd_str})
+            buy_row = buy_r.fetchone()
+            if not buy_row or not buy_row.close:
+                results.append({"code": code, "error": "No price data found for start date"})
+                continue
+            buy_price  = float(buy_row.close)
+            actual_buy_str = buy_row.d.isoformat()
+
+            # ── Sell price: last close on/before end_date ─────────────
+            sell_r = await db.execute(text("""
+                SELECT time::date AS d, close
+                FROM market.daily_prices
+                WHERE asx_code = :c
+                  AND time < :ed::date + interval '1 day'
+                ORDER BY time DESC LIMIT 1
+            """), {"c": code, "ed": ed_str})
+            sell_row = sell_r.fetchone()
+            if not sell_row or not sell_row.close:
+                results.append({"code": code, "error": "No price data found for end date"})
+                continue
+            sell_price      = float(sell_row.close)
+            actual_sell_str = sell_row.d.isoformat()
+
+            shares          = body.amount / buy_price
+            price_end_value = shares * sell_price
+
+            # ── Dividends & franking credits ──────────────────────────
+            div_total      = 0.0
+            franking_total = 0.0
+            div_events     = []
+
+            if body.include_dividends:
+                div_r = await db.execute(text("""
+                    SELECT ex_date, amount, franking_pct
+                    FROM market.dividends
+                    WHERE asx_code = :c
+                      AND ex_date >= :sd::date
+                      AND ex_date <= :ed::date
+                      AND amount IS NOT NULL
+                    ORDER BY ex_date
+                """), {"c": code, "sd": actual_buy_str, "ed": actual_sell_str})
+                for dr in div_r.fetchall():
+                    d_amt   = float(dr.amount or 0)
+                    f_pct   = float(dr.franking_pct or 0) / 100.0
+                    cash    = d_amt * shares
+                    frank   = cash * f_pct * (_TAX_RATE / (1 - _TAX_RATE))
+                    div_total      += cash
+                    franking_total += frank
+                    div_events.append({
+                        "ex_date":      dr.ex_date.isoformat(),
+                        "amount_ps":    round(d_amt, 6),
+                        "franking_pct": round(f_pct * 100, 1),
+                        "cash":         round(cash, 2),
+                    })
+
+            total_end_value  = price_end_value + div_total
+            price_return_pct = (sell_price - buy_price) / buy_price * 100
+            total_return_pct = (total_end_value - body.amount) / body.amount * 100
+
+            # ── Monthly chart: last close per month (standard SQL, no TimescaleDB) ─
+            chart_r = await db.execute(text("""
+                SELECT DISTINCT ON (date_trunc('month', time))
+                    date_trunc('month', time)::date AS month,
+                    close
+                FROM market.daily_prices
+                WHERE asx_code = :c
+                  AND time >= :sd::date
+                  AND time < :ed::date + interval '1 day'
+                ORDER BY date_trunc('month', time), time DESC
+            """), {"c": code, "sd": actual_buy_str, "ed": actual_sell_str})
+            chart_rows = chart_r.fetchall()
+
+            # Accumulate dividends per month point
+            chart         = []
+            running_divs  = 0.0
+            div_idx       = 0
+            for crow in chart_rows:
+                month_str = crow.month.isoformat()
+                while div_idx < len(div_events) and div_events[div_idx]["ex_date"] <= month_str:
+                    running_divs += div_events[div_idx]["cash"]
+                    div_idx += 1
+                c_price = float(crow.close)
+                chart.append({
+                    "date":        month_str,
+                    "price_value": round(shares * c_price, 2),
+                    "total_value": round(shares * c_price + running_divs, 2),
                 })
 
-        total_end_value  = price_end_value + div_total
-        price_return_pct = (sell_price - buy_price) / buy_price * 100
-        total_return_pct = (total_end_value - body.amount) / body.amount * 100
-
-        # ── Monthly chart data (price-only + total-return curves) ─
-        chart_r = await db.execute(text("""
-            SELECT
-                time_bucket('1 month', time)::date AS month,
-                last(close, time)                  AS close
-            FROM market.daily_prices
-            WHERE asx_code = :c
-              AND time::date >= :sd
-              AND time::date <= :ed
-            GROUP BY month
-            ORDER BY month
-        """), {"c": code, "sd": actual_buy, "ed": actual_sell})
-        chart_rows = chart_r.fetchall()
-
-        # Accumulate dividends per month point
-        chart         = []
-        running_divs  = 0.0
-        div_idx       = 0
-        for crow in chart_rows:
-            while div_idx < len(div_events) and div_events[div_idx]["ex_date"] <= crow.month.isoformat():
-                running_divs += div_events[div_idx]["cash"]
-                div_idx += 1
-            c = float(crow.close)
-            chart.append({
-                "date":        crow.month.isoformat(),
-                "price_value": round(shares * c, 2),
-                "total_value": round(shares * c + running_divs, 2),
-            })
+        except Exception as exc:
+            log.error("Backtest error for %s: %s", code, exc, exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Error processing {code}: {exc}")
 
         results.append({
             "code":               code,
             "company_name":       name_row.company_name,
             "buy_price":          round(buy_price, 4),
             "sell_price":         round(sell_price, 4),
-            "actual_start_date":  actual_buy.isoformat(),
-            "actual_end_date":    actual_sell.isoformat(),
+            "actual_start_date":  actual_buy_str,
+            "actual_end_date":    actual_sell_str,
             "shares_purchased":   round(shares, 4),
             "invested":           body.amount,
             "price_end_value":    round(price_end_value, 2),

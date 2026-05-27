@@ -474,57 +474,8 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
       .finally(() => setAiLoading(false))
   }
 
-  const pos52w = o.high_52w != null && o.low_52w != null && o.price != null
-    ? ((o.price - o.low_52w) / (o.high_52w - o.low_52w)) * 100
-    : null
-
   return (
     <div className="space-y-4">
-
-      {/* Price summary — dark hero */}
-      <div className="relative bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-xl overflow-hidden border border-white/10">
-        <div className="absolute -top-16 -right-16 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-        <div className="relative p-5">
-          <div className="flex flex-wrap gap-6 mb-4">
-            <div>
-              <p className="text-xs text-slate-500 font-semibold uppercase tracking-widest mb-1">Last Price</p>
-              <span className="text-4xl font-black text-white tracking-tight">
-                {o.price != null ? `$${o.price.toFixed(3)}` : '—'}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-5 items-center">
-              {[
-                { label: 'Market Cap',   value: formatMarketCap(o.market_cap) },
-                { label: 'Volume',       value: formatVolume(o.volume) },
-                { label: 'Avg Vol (20D)',value: formatVolume(o.avg_volume_20d) },
-                ...(o.price_date ? [{ label: 'As at', value: o.price_date }] : []),
-              ].map(item => (
-                <div key={item.label} className="flex flex-col justify-center">
-                  <span className="text-xs text-slate-500 font-medium mb-0.5">{item.label}</span>
-                  <span className="font-bold text-slate-200 text-sm">{item.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* 52-week range */}
-          {o.high_52w != null && o.low_52w != null && (
-            <div>
-              <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-                <span>52W Low: ${o.low_52w.toFixed(2)}</span>
-                <span>52W High: ${o.high_52w.toFixed(2)}</span>
-              </div>
-              <div className="w-full bg-slate-700 rounded-full h-1.5 relative">
-                <div className="h-1.5 bg-gradient-to-r from-red-400 via-amber-400 to-emerald-400 rounded-full" />
-                <div
-                  className="absolute w-3 h-3 bg-white rounded-full -top-[3px] shadow-lg ring-2 ring-blue-400/50"
-                  style={{ left: `calc(${Math.max(1, Math.min(97, pos52w ?? 50))}% - 6px)` }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* Composite Score Meter */}
       {o.composite_score != null && <CompositeScoreMeter o={o} />}
@@ -3036,6 +2987,78 @@ export default function CompanyTabs({ code }: { code: string }) {
         ))}
       </div>
 
+
+      {/* ── Persistent Price & Stats Bar ─────────────────────── */}
+      {loading && (
+        <div className="bg-slate-800 border-b border-slate-700/60 px-5 py-3 animate-pulse">
+          <div className="flex items-center gap-6 flex-wrap">
+            <div className="h-8 w-28 bg-slate-700 rounded" />
+            <div className="h-4 w-20 bg-slate-700 rounded" />
+            <div className="h-4 w-20 bg-slate-700 rounded" />
+            <div className="h-4 w-24 bg-slate-700 rounded" />
+            <div className="h-4 w-24 bg-slate-700 rounded" />
+          </div>
+          <div className="mt-2.5 h-1.5 bg-slate-700 rounded-full" />
+        </div>
+      )}
+
+      {overview && (() => {
+        const pos52w = overview.high_52w != null && overview.low_52w != null && overview.price != null
+          ? ((overview.price - overview.low_52w) / (overview.high_52w - overview.low_52w)) * 100
+          : null
+
+        return (
+          <div className="bg-gradient-to-r from-slate-900 to-slate-800 border-b border-slate-700/60 px-5 py-3.5">
+            {/* Row 1: price + quick stats */}
+            <div className="flex items-center gap-x-7 gap-y-2 flex-wrap">
+
+              {/* Price — prominent */}
+              <div className="flex items-baseline gap-2 shrink-0">
+                <span className="text-2xl font-black text-white tracking-tight">
+                  {overview.price != null ? `$${overview.price.toFixed(3)}` : '—'}
+                </span>
+              </div>
+
+              {/* Separator */}
+              <div className="hidden sm:block w-px h-8 bg-slate-700 shrink-0" />
+
+              {/* Quick stats */}
+              <div className="flex items-center gap-x-6 gap-y-1 flex-wrap">
+                {[
+                  { label: 'Market Cap',   value: formatMarketCap(overview.market_cap)   },
+                  { label: 'Volume',       value: formatVolume(overview.volume)           },
+                  { label: 'Avg Vol (20D)',value: formatVolume(overview.avg_volume_20d)   },
+                  ...(overview.price_date ? [{ label: 'As at', value: overview.price_date }] : []),
+                  ...(overview.high_52w != null ? [{ label: '52W High', value: `$${overview.high_52w.toFixed(2)}` }] : []),
+                  ...(overview.low_52w  != null ? [{ label: '52W Low',  value: `$${overview.low_52w.toFixed(2)}`  }] : []),
+                ].map(item => (
+                  <div key={item.label} className="flex flex-col">
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest font-semibold">{item.label}</span>
+                    <span className="text-xs font-bold text-slate-200 mt-0.5">{item.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Row 2: 52W range bar */}
+            {pos52w != null && (
+              <div className="mt-2.5 flex items-center gap-3">
+                <span className="text-[9px] text-slate-600 font-semibold uppercase tracking-wide shrink-0">52W Range</span>
+                <div className="flex-1 bg-slate-700 rounded-full h-1 relative">
+                  <div className="h-1 bg-gradient-to-r from-red-400 via-amber-400 to-emerald-400 rounded-full" />
+                  <div
+                    className="absolute w-2.5 h-2.5 bg-white rounded-full -top-[3px] shadow-lg ring-1 ring-blue-400/60"
+                    style={{ left: `calc(${Math.max(1, Math.min(97, pos52w))}% - 5px)` }}
+                  />
+                </div>
+                <span className="text-[9px] text-slate-500 font-medium shrink-0">
+                  {pos52w.toFixed(0)}% of range
+                </span>
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── Tab content ──────────────────────────────────────── */}
       <div className="p-5">

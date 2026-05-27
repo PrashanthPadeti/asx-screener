@@ -129,6 +129,13 @@ def main():
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
     ])
 
+    # ── Step 6: Pre-compute performance heatmap ───────────────────────────────
+    # Writes market.heatmap_cache (days + weeks) so the API serves instant
+    # reads instead of running heavy window-function queries per request.
+    run("Step 6: Heatmap compute engine → market.heatmap_cache", [
+        PYTHON, "-m", "compute.engine.heatmap_compute",
+    ])
+
     log.info(f"Daily pipeline complete for {target_date}")
 
 

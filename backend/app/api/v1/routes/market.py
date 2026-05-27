@@ -780,31 +780,86 @@ async def market_heatmap(
     """
     Rolling 5-period performance heatmap for all ASX stocks.
 
+    Reads from market.heatmap_cache (pre-computed by heatmap_compute.py
+    after each nightly pipeline run) for instant sub-100ms reads.
+    Falls back to on-the-fly calculation if the cache table is empty or
+    hasn't been populated yet (e.g. first deploy).
+
     mode=days  → last 5 trading days, each column = daily % change
     mode=weeks → last 5 calendar weeks, each column = weekly % change
-                 (week close vs prior week close)
-
-    Returns rows sorted by market_cap DESC so large-caps appear first.
-    Cached for 15 minutes (HEATMAP_TTL).
     """
-    _key = make_key("market", "heatmap", mode,
-                    sector or "all", str(int(min_cap)))
+    _key = make_key("market", "heatmap", mode, sector or "all", str(int(min_cap)))
     cached = await cache_get(_key)
     if cached:
         return HeatmapResponse(**cached)
 
-    min_cap_raw = min_cap * 1_000_000   # convert AUD M → AUD raw
+    min_cap_raw = min_cap * 1_000_000   # AUD M → AUD raw
+    sector_clause = "AND sector = :sector" if sector else ""
 
-    # ── Build SQL ─────────────────────────────────────────────────────────────
-    sector_clause = "AND u.sector = :sector" if sector else ""
+    # ── Try pre-computed table first ──────────────────────────────────────────
+    try:
+        labels_row = (await db.execute(
+            text("SELECT label_1, label_2, label_3, label_4, label_5 "
+                 "FROM market.heatmap_labels WHERE mode = :mode"),
+            {"mode": mode},
+        )).mappings().one_or_none()
+
+        if labels_row:
+            rows_result = (await db.execute(
+                text(f"""
+                    SELECT asx_code, company_name, sector, industry,
+                           price, market_cap, p1, p2, p3, p4, p5
+                    FROM market.heatmap_cache
+                    WHERE mode = :mode
+                      AND (market_cap > :min_cap OR market_cap IS NULL)
+                      {sector_clause}
+                    ORDER BY market_cap DESC NULLS LAST
+                """),
+                {"mode": mode, "min_cap": min_cap_raw,
+                 **({"sector": sector} if sector else {})},
+            )).mappings().all()
+
+            labels = [
+                labels_row["label_1"] or "",
+                labels_row["label_2"] or "",
+                labels_row["label_3"] or "",
+                labels_row["label_4"] or "",
+                labels_row["label_5"] or "",
+            ]
+            rows = [
+                HeatmapRow(
+                    asx_code=r["asx_code"],
+                    company_name=r["company_name"],
+                    sector=r["sector"],
+                    industry=r["industry"],
+                    price=float(r["price"]) if r["price"] is not None else None,
+                    market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
+                    p1=float(r["p1"]) if r["p1"] is not None else None,
+                    p2=float(r["p2"]) if r["p2"] is not None else None,
+                    p3=float(r["p3"]) if r["p3"] is not None else None,
+                    p4=float(r["p4"]) if r["p4"] is not None else None,
+                    p5=float(r["p5"]) if r["p5"] is not None else None,
+                )
+                for r in rows_result
+            ]
+            result = HeatmapResponse(rows=rows, labels=labels, mode=mode, total=len(rows))
+            await cache_set(_key, result.model_dump(), ttl=HEATMAP_TTL)
+            return result
+
+    except Exception as exc:
+        log.warning(f"[heatmap] pre-computed table unavailable ({exc}) — falling back to on-the-fly")
+
+    # ── Fallback: on-the-fly calculation ─────────────────────────────────────
+    # Used on first deploy before heatmap_compute.py has run.
+    log.info(f"[heatmap] computing on-the-fly for mode={mode}")
+
+    sector_clause_u = "AND u.sector = :sector" if sector else ""
 
     if mode == "days":
         sql = text(f"""
             WITH six_dates AS (
                 SELECT DISTINCT DATE(time) AS td
-                FROM market.daily_prices
-                ORDER BY td DESC
-                LIMIT 6
+                FROM market.daily_prices ORDER BY td DESC LIMIT 6
             ),
             prices AS (
                 SELECT dp.asx_code, DATE(dp.time) AS td, dp.close
@@ -818,115 +873,65 @@ async def market_heatmap(
                        ROW_NUMBER() OVER (PARTITION BY asx_code ORDER BY td DESC) AS rn
                 FROM prices
             )
-            SELECT
-                u.asx_code, u.company_name, u.sector, u.industry,
-                u.price, u.market_cap,
-                MAX(CASE WHEN l.rn=1 AND l.prev_close>0
-                    THEN (l.close - l.prev_close) / l.prev_close END) AS p1,
-                MAX(CASE WHEN l.rn=2 AND l.prev_close>0
-                    THEN (l.close - l.prev_close) / l.prev_close END) AS p2,
-                MAX(CASE WHEN l.rn=3 AND l.prev_close>0
-                    THEN (l.close - l.prev_close) / l.prev_close END) AS p3,
-                MAX(CASE WHEN l.rn=4 AND l.prev_close>0
-                    THEN (l.close - l.prev_close) / l.prev_close END) AS p4,
-                MAX(CASE WHEN l.rn=5 AND l.prev_close>0
-                    THEN (l.close - l.prev_close) / l.prev_close END) AS p5
-            FROM screener.universe u
-            INNER JOIN lagged l ON u.asx_code = l.asx_code
-            WHERE u.status = 'active'
-              AND u.price > 0.05
-              AND u.market_cap > :min_cap
-              {sector_clause}
-            GROUP BY u.asx_code, u.company_name, u.sector, u.industry,
-                     u.price, u.market_cap
+            SELECT u.asx_code, u.company_name, u.sector, u.industry,
+                   u.price, u.market_cap,
+                   MAX(CASE WHEN l.rn=1 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p1,
+                   MAX(CASE WHEN l.rn=2 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p2,
+                   MAX(CASE WHEN l.rn=3 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p3,
+                   MAX(CASE WHEN l.rn=4 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p4,
+                   MAX(CASE WHEN l.rn=5 AND l.prev_close>0 THEN (l.close-l.prev_close)/l.prev_close END) AS p5
+            FROM screener.universe u INNER JOIN lagged l ON u.asx_code = l.asx_code
+            WHERE u.status='active' AND u.price>0.05 AND u.market_cap>:min_cap {sector_clause_u}
+            GROUP BY u.asx_code, u.company_name, u.sector, u.industry, u.price, u.market_cap
             ORDER BY u.market_cap DESC NULLS LAST
         """)
-
-        labels_sql = text("""
-            SELECT DISTINCT DATE(time) AS td
-            FROM market.daily_prices
-            ORDER BY td DESC
-            LIMIT 5
-        """)
-
-    else:  # weeks
+        labels_sql = text("SELECT DISTINCT DATE(time) AS td FROM market.daily_prices ORDER BY td DESC LIMIT 5")
+        label_fn   = lambda r: _fmt_day_label(r["td"])
+    else:
         sql = text(f"""
             WITH weekly AS (
-                SELECT
-                    asx_code,
-                    DATE_TRUNC('week', time)::date AS week_start,
-                    (ARRAY_AGG(close ORDER BY time DESC))[1] AS week_close
+                SELECT asx_code, DATE_TRUNC('week',time)::date AS week_start,
+                       (ARRAY_AGG(close ORDER BY time DESC))[1] AS week_close
                 FROM market.daily_prices
-                WHERE time >= NOW() - INTERVAL '9 weeks'
-                  AND close > 0
-                GROUP BY asx_code, DATE_TRUNC('week', time)
+                WHERE time >= NOW()-INTERVAL '9 weeks' AND close>0
+                GROUP BY asx_code, DATE_TRUNC('week',time)
             ),
             lagged AS (
-                SELECT
-                    asx_code, week_start, week_close,
-                    LAG(week_close) OVER (PARTITION BY asx_code ORDER BY week_start)
-                        AS prev_close,
-                    ROW_NUMBER() OVER (PARTITION BY asx_code ORDER BY week_start DESC)
-                        AS rn
+                SELECT asx_code, week_start, week_close,
+                       LAG(week_close) OVER (PARTITION BY asx_code ORDER BY week_start) AS prev_close,
+                       ROW_NUMBER() OVER (PARTITION BY asx_code ORDER BY week_start DESC) AS rn
                 FROM weekly
             )
-            SELECT
-                u.asx_code, u.company_name, u.sector, u.industry,
-                u.price, u.market_cap,
-                MAX(CASE WHEN l.rn=1 AND l.prev_close>0
-                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p1,
-                MAX(CASE WHEN l.rn=2 AND l.prev_close>0
-                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p2,
-                MAX(CASE WHEN l.rn=3 AND l.prev_close>0
-                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p3,
-                MAX(CASE WHEN l.rn=4 AND l.prev_close>0
-                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p4,
-                MAX(CASE WHEN l.rn=5 AND l.prev_close>0
-                    THEN (l.week_close - l.prev_close) / l.prev_close END) AS p5
-            FROM screener.universe u
-            INNER JOIN lagged l ON u.asx_code = l.asx_code
-            WHERE u.status = 'active'
-              AND u.price > 0.05
-              AND u.market_cap > :min_cap
-              {sector_clause}
-              AND l.rn <= 5
-            GROUP BY u.asx_code, u.company_name, u.sector, u.industry,
-                     u.price, u.market_cap
+            SELECT u.asx_code, u.company_name, u.sector, u.industry,
+                   u.price, u.market_cap,
+                   MAX(CASE WHEN l.rn=1 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p1,
+                   MAX(CASE WHEN l.rn=2 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p2,
+                   MAX(CASE WHEN l.rn=3 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p3,
+                   MAX(CASE WHEN l.rn=4 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p4,
+                   MAX(CASE WHEN l.rn=5 AND l.prev_close>0 THEN (l.week_close-l.prev_close)/l.prev_close END) AS p5
+            FROM screener.universe u INNER JOIN lagged l ON u.asx_code=l.asx_code
+            WHERE u.status='active' AND u.price>0.05 AND u.market_cap>:min_cap {sector_clause_u}
+              AND l.rn<=5
+            GROUP BY u.asx_code, u.company_name, u.sector, u.industry, u.price, u.market_cap
             ORDER BY u.market_cap DESC NULLS LAST
         """)
+        labels_sql = text("SELECT DISTINCT DATE_TRUNC('week',time)::date AS week_start FROM market.daily_prices ORDER BY week_start DESC LIMIT 5")
+        label_fn   = lambda r: _fmt_week_label(r["week_start"])
 
-        labels_sql = text("""
-            SELECT DISTINCT DATE_TRUNC('week', time)::date AS week_start
-            FROM market.daily_prices
-            ORDER BY week_start DESC
-            LIMIT 5
-        """)
-
-    # ── Execute ───────────────────────────────────────────────────────────────
     params: dict = {"min_cap": min_cap_raw}
     if sector:
         params["sector"] = sector
 
     rows_result  = (await db.execute(sql, params)).mappings().all()
     label_result = (await db.execute(labels_sql)).mappings().all()
-
-    # ── Build labels ──────────────────────────────────────────────────────────
-    if mode == "days":
-        labels = [_fmt_day_label(r["td"]) for r in label_result]
-    else:
-        labels = [_fmt_week_label(r["week_start"]) for r in label_result]
-
-    # Pad to 5 if needed
+    labels       = [label_fn(r) for r in label_result]
     while len(labels) < 5:
         labels.append("")
 
-    # ── Build rows ────────────────────────────────────────────────────────────
     rows = [
         HeatmapRow(
-            asx_code=r["asx_code"],
-            company_name=r["company_name"],
-            sector=r["sector"],
-            industry=r["industry"],
+            asx_code=r["asx_code"], company_name=r["company_name"],
+            sector=r["sector"], industry=r["industry"],
             price=float(r["price"]) if r["price"] is not None else None,
             market_cap=float(r["market_cap"]) if r["market_cap"] is not None else None,
             p1=float(r["p1"]) if r["p1"] is not None else None,
@@ -937,7 +942,6 @@ async def market_heatmap(
         )
         for r in rows_result
     ]
-
     result = HeatmapResponse(rows=rows, labels=labels, mode=mode, total=len(rows))
     await cache_set(_key, result.model_dump(), ttl=HEATMAP_TTL)
     return result

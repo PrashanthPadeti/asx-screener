@@ -275,6 +275,90 @@ async def prediction_dates(
         return []
 
 
+@router.get("/history/{code}")
+async def stock_prediction_history(
+    code:        str,
+    days:        int  = Query(30, ge=1, le=60, description="How many days back to retrieve"),
+    model:       str  = Query("ensemble", description="xgboost|rf|svm|lstm|ensemble"),
+    _admin       = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Historical predictions for one stock over the last N days (max 60).
+    Returns a time-series suitable for charting: one row per prediction_date,
+    columns for each horizon (5/10/20/30/50d predicted_change_pct).
+    Also returns the current_price on each date so you can overlay actuals later.
+    """
+    from datetime import date, timedelta
+
+    code = code.upper().strip()
+    since = date.today() - timedelta(days=days)
+
+    # Company name
+    name_r = await db.execute(
+        text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
+        {"c": code},
+    )
+    name_row = name_r.fetchone()
+    if not name_row:
+        raise HTTPException(status_code=404, detail=f"Company {code} not found")
+
+    try:
+        r = await db.execute(text("""
+            SELECT
+                prediction_date,
+                horizon_days,
+                current_price,
+                predicted_price,
+                predicted_change_pct,
+                direction,
+                confidence_score
+            FROM market.price_predictions
+            WHERE asx_code   = :c
+              AND model       = :m
+              AND prediction_date >= :since
+            ORDER BY prediction_date ASC, horizon_days ASC
+        """), {"c": code, "m": model, "since": since})
+        rows = r.fetchall()
+    except Exception:
+        await db.rollback()
+        return {
+            "asx_code": code, "company_name": name_row.company_name,
+            "model": model, "days": days, "series": [], "dates": [],
+        }
+
+    if not rows:
+        return {
+            "asx_code": code, "company_name": name_row.company_name,
+            "model": model, "days": days, "series": [], "dates": [],
+        }
+
+    # Build: {date_str: {horizon: pct, ...}}
+    by_date: dict = {}
+    for row in rows:
+        ds = str(row.prediction_date)
+        if ds not in by_date:
+            by_date[ds] = {"current_price": float(row.current_price) if row.current_price else None}
+        h = row.horizon_days
+        by_date[ds][f"h{h}"] = round(float(row.predicted_change_pct), 4) if row.predicted_change_pct is not None else None
+        by_date[ds][f"h{h}_dir"] = row.direction
+
+    # Flat list sorted by date
+    series = [
+        {"date": ds, **vals}
+        for ds, vals in sorted(by_date.items())
+    ]
+
+    return {
+        "asx_code":    code,
+        "company_name": name_row.company_name,
+        "model":       model,
+        "days":        days,
+        "horizons":    [5, 10, 20, 30, 50],
+        "series":      series,
+    }
+
+
 @router.get("/{code}")
 async def stock_predictions(
     code:        str,

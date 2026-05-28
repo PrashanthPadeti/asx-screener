@@ -71,10 +71,36 @@ async def trigger_predictions(
     force:  bool = Query(False, description="Re-run even if today's predictions exist"),
     top_n:  int  = Query(1000,  ge=10, le=2000, description="Number of stocks to predict"),
     _admin       = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
 ):
     """Start an ML prediction run as a background task."""
+    from datetime import date as _date
     if _job["running"]:
         raise HTTPException(status_code=409, detail="A prediction job is already running")
+
+    # Pre-check: block same-day re-run before the background task even starts
+    if not force:
+        try:
+            row = await db.execute(
+                text("SELECT COUNT(*) FROM market.price_predictions "
+                     "WHERE prediction_date = :d AND model = 'ensemble'"),
+                {"d": _date.today()},
+            )
+            count = row.scalar() or 0
+            if count > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Today's predictions already ran ({count} stocks). "
+                        "Pass force=true to overwrite."
+                    ),
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            await db.rollback()
+            # Table doesn't exist yet on first ever run — let the job create it
+
     background_tasks.add_task(_bg_run, force=force, top_n=top_n)
     return {
         "message":  f"Prediction job started for top {top_n} stocks",

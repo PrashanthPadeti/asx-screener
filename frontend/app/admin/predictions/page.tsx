@@ -367,6 +367,10 @@ export default function PredictionsPage() {
 
   const isRunning  = status?.running ?? false
   const hasResults = (data?.results?.length ?? 0) > 0
+
+  // True when today's predictions are already stored
+  const todayStr   = new Date().toISOString().slice(0, 10)   // YYYY-MM-DD
+  const alreadyRanToday = !!data?.prediction_date && data.prediction_date === todayStr
   const dirSum     = data?.direction_summary ?? {}
   const totalStks  = (dirSum.bullish ?? 0) + (dirSum.neutral ?? 0) + (dirSum.bearish ?? 0)
 
@@ -395,17 +399,28 @@ export default function PredictionsPage() {
             {/* Run button + status */}
             <div className="flex flex-col items-end gap-2">
               <button
-                onClick={() => triggerRun(false)}
+                onClick={() => alreadyRanToday ? triggerRun(true) : triggerRun(false)}
                 disabled={isRunning || triggering}
-                className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500
-                           disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm
-                           font-semibold rounded-xl transition-colors"
+                title={alreadyRanToday ? "Already ran today — click to force re-run" : undefined}
+                className={`flex items-center gap-2 px-4 py-2 text-white text-sm font-semibold
+                           rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed
+                           ${alreadyRanToday
+                             ? 'bg-slate-500 hover:bg-amber-600'
+                             : 'bg-indigo-600 hover:bg-indigo-500'}`}
               >
                 {isRunning || triggering
                   ? <RefreshCw className="w-4 h-4 animate-spin" />
                   : <Play className="w-4 h-4" />}
-                {isRunning ? 'Running…' : triggering ? 'Starting…' : 'Run Predictions'}
+                {isRunning ? 'Running…'
+                  : triggering ? 'Starting…'
+                  : alreadyRanToday ? '✓ Ran Today'
+                  : 'Run Predictions'}
               </button>
+              {alreadyRanToday && !isRunning && (
+                <p className="text-[11px] text-amber-300 text-right">
+                  Click again to force re-run &amp; overwrite today&apos;s data
+                </p>
+              )}
 
               {status && (
                 <div className="text-right text-[11px] text-slate-400">

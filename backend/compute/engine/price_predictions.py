@@ -532,8 +532,11 @@ async def run_predictions_async(
             {"d": today},
         )
         count = row.scalar() or 0
-        if count > 100:
-            return {"skipped": True, "message": f"Today's predictions already exist ({count} records)"}
+        if count > 0:
+            return {
+                "skipped": True,
+                "message": f"Today's predictions already exist ({count} records). Use force=true to overwrite.",
+            }
 
     # Top N stocks by market cap
     stocks_r = await db.execute(text("""

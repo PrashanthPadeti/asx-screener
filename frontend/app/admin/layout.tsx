@@ -6,16 +6,17 @@ import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, Activity, LifeBuoy,
-  ChevronRight, Shield, Menu, X, Mail, FlaskConical,
+  ChevronRight, Shield, Menu, X, Mail, FlaskConical, BrainCircuit,
 } from 'lucide-react'
 
 const NAV = [
-  { href: '/admin',            label: 'Dashboard',          icon: LayoutDashboard },
-  { href: '/admin/users',      label: 'User Management',    icon: Users },
-  { href: '/admin/pipeline',   label: 'Pipeline Monitor',   icon: Activity },
-  { href: '/admin/comms',      label: 'Communications',     icon: Mail },
-  { href: '/admin/support',    label: 'Support Tickets',    icon: LifeBuoy },
-  { href: '/admin/research',   label: 'Research Assistant', icon: FlaskConical },
+  { href: '/admin',             label: 'Dashboard',          icon: LayoutDashboard },
+  { href: '/admin/users',       label: 'User Management',    icon: Users },
+  { href: '/admin/pipeline',    label: 'Pipeline Monitor',   icon: Activity },
+  { href: '/admin/comms',       label: 'Communications',     icon: Mail },
+  { href: '/admin/support',     label: 'Support Tickets',    icon: LifeBuoy },
+  { href: '/admin/research',    label: 'Research Assistant', icon: FlaskConical },
+  { href: '/admin/predictions', label: 'Price Predictions',  icon: BrainCircuit },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

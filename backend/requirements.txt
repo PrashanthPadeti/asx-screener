@@ -67,6 +67,11 @@ prometheus-fastapi-instrumentator==7.0.0
 # Excel export
 openpyxl==3.1.5          # Heatmap Excel export with coloured cells
 
+# Machine Learning — Price Predictions
+scikit-learn>=1.4.0      # RandomForest, SVM, preprocessing
+xgboost>=2.0.0           # Gradient boosting regression
+torch>=2.2.0             # LSTM deep learning (install CPU build on server)
+
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0

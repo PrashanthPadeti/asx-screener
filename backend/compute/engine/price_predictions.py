@@ -448,11 +448,17 @@ CREATE TABLE IF NOT EXISTS market.price_predictions (
     data_points          SMALLINT,
     created_at           TIMESTAMPTZ     DEFAULT NOW(),
     UNIQUE (asx_code, prediction_date, model, horizon_days)
-);
+)
+"""
+
+_CREATE_IDX1_SQL = """
 CREATE INDEX IF NOT EXISTS idx_pp_date_model
-    ON market.price_predictions (prediction_date, model, horizon_days);
+    ON market.price_predictions (prediction_date, model, horizon_days)
+"""
+
+_CREATE_IDX2_SQL = """
 CREATE INDEX IF NOT EXISTS idx_pp_code_date
-    ON market.price_predictions (asx_code, prediction_date);
+    ON market.price_predictions (asx_code, prediction_date)
 """
 
 _UPSERT_SQL = """
@@ -493,8 +499,11 @@ async def run_predictions_async(
 
     today = date.today()
 
-    # Ensure table exists
+    # Ensure table + indexes exist (each as a separate statement — asyncpg
+    # rejects multi-statement strings in prepared-statement mode)
     await db.execute(text(_CREATE_TABLE_SQL))
+    await db.execute(text(_CREATE_IDX1_SQL))
+    await db.execute(text(_CREATE_IDX2_SQL))
     await db.commit()
 
     # Skip if today's predictions already exist (unless forced)

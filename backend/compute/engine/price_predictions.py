@@ -484,6 +484,17 @@ ON CONFLICT (asx_code, prediction_date, model, horizon_days) DO UPDATE SET
 """
 
 
+def _sanitise(v):
+    """Replace NaN / ±Inf with None so asyncpg won't reject NUMERIC inserts."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+        return None if not np.isfinite(f) else v
+    except (TypeError, ValueError):
+        return None
+
+
 async def run_predictions_async(
     db,
     top_n:    int  = 1000,
@@ -496,6 +507,14 @@ async def run_predictions_async(
     async event loop stays responsive.
     """
     from sqlalchemy import text
+
+    # Guard: surface a clear error if ML packages are missing
+    if not SKLEARN_OK:
+        raise RuntimeError(
+            "scikit-learn / xgboost are not installed in the active Python "
+            "environment. Install them with: "
+            "/opt/asx-screener/asx-venv/bin/pip install scikit-learn xgboost"
+        )
 
     today = date.today()
 
@@ -568,7 +587,16 @@ async def run_predictions_async(
 
             if preds:
                 for p in preds:
-                    await db.execute(text(_UPSERT_SQL), p)
+                    # Sanitise NaN/Inf → None before insert (asyncpg rejects
+                    # non-finite floats in NUMERIC columns)
+                    safe = {
+                        k: (_sanitise(v) if k in (
+                            "predicted_price", "lower_bound", "upper_bound",
+                            "predicted_change_pct", "confidence_score", "r2_score",
+                        ) else v)
+                        for k, v in p.items()
+                    }
+                    await db.execute(text(_UPSERT_SQL), safe)
                 await db.commit()
                 total_preds += len(preds)
                 done += 1

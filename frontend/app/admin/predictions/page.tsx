@@ -287,9 +287,11 @@ export default function PredictionsPage() {
       const r = await api.get('/predictions/latest', { params })
       setData(r.data)
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string }
-      const detail = err?.response?.data?.detail
-      if (detail && detail.includes('No predictions found')) {
+      const err = e as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail ?? ''
+      // 404 = no predictions table or no runs yet — show empty state, not error
+      if (status === 404 || detail.includes('No predictions found')) {
         setData(null)
         setError(null)
       } else {

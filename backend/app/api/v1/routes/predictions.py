@@ -114,11 +114,16 @@ async def latest_predictions(
 ):
     """Paginated predictions for the most recent run date."""
 
-    # Get latest prediction date
-    date_r = await db.execute(
-        text("SELECT MAX(prediction_date) FROM market.price_predictions")
-    )
-    latest_date = date_r.scalar()
+    # Get latest prediction date — table may not exist yet before first run
+    try:
+        date_r = await db.execute(
+            text("SELECT MAX(prediction_date) FROM market.price_predictions")
+        )
+        latest_date = date_r.scalar()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=404, detail="No predictions found — run a prediction job first")
+
     if not latest_date:
         raise HTTPException(status_code=404, detail="No predictions found — run a prediction job first")
 
@@ -224,15 +229,19 @@ async def prediction_dates(
     db: AsyncSession = Depends(get_db),
 ):
     """List all available prediction dates."""
-    r = await db.execute(text("""
-        SELECT prediction_date, COUNT(DISTINCT asx_code) AS stocks
-        FROM market.price_predictions
-        WHERE model = 'ensemble'
-        GROUP BY prediction_date
-        ORDER BY prediction_date DESC
-        LIMIT 30
-    """))
-    return [{"date": str(row.prediction_date), "stocks": row.stocks} for row in r.fetchall()]
+    try:
+        r = await db.execute(text("""
+            SELECT prediction_date, COUNT(DISTINCT asx_code) AS stocks
+            FROM market.price_predictions
+            WHERE model = 'ensemble'
+            GROUP BY prediction_date
+            ORDER BY prediction_date DESC
+            LIMIT 30
+        """))
+        return [{"date": str(row.prediction_date), "stocks": row.stocks} for row in r.fetchall()]
+    except Exception:
+        await db.rollback()
+        return []
 
 
 @router.get("/{code}")

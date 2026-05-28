@@ -153,7 +153,7 @@ function StockModal({ code, onClose }: { code: string; onClose: () => void }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    api.get(`/predictions/${code}`)
+    api.get(`/api/v1/predictions/${code}`)
       .then(r => setDetail(r.data))
       .catch(() => setDetail(null))
       .finally(() => setLoading(false))
@@ -284,7 +284,7 @@ export default function PredictionsPage() {
       if (sector)    params.sector    = sector
       if (search)    params.search    = search
 
-      const r = await api.get('/predictions/latest', { params })
+      const r = await api.get('/api/v1/predictions/latest', { params })
       setData(r.data)
     } catch (e: unknown) {
       const err = e as { response?: { status?: number; data?: { detail?: string } }; message?: string }
@@ -305,7 +305,7 @@ export default function PredictionsPage() {
   // ── Fetch status ───────────────────────────────────────────────────────────
   const fetchStatus = useCallback(async () => {
     try {
-      const r = await api.get('/predictions/status')
+      const r = await api.get('/api/v1/predictions/status')
       setStatus(r.data)
       // If job just completed, refresh predictions
       if (!r.data.running && r.data.last_summary) {
@@ -339,7 +339,7 @@ export default function PredictionsPage() {
     if (status?.running || triggering) return
     setTriggering(true)
     try {
-      await api.post('/predictions/trigger', null, { params: { force, top_n: 1000 } })
+      await api.post('/api/v1/predictions/trigger', null, { params: { force, top_n: 1000 } })
       await fetchStatus()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string }

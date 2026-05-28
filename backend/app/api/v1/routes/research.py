@@ -297,13 +297,17 @@ async def compare(
     """Side-by-side metric comparison for up to 6 ASX stocks."""
     codes = [c.upper().strip() for c in body.codes]
 
-    result = await db.execute(text(f"""
-        SELECT asx_code, company_name, sector,
-               {_COMPARE_COLS}
-        FROM market.screener_universe
-        WHERE asx_code = ANY(:codes)
-    """), {"codes": codes})
-    rows = result.fetchall()
+    try:
+        result = await db.execute(text(f"""
+            SELECT asx_code, company_name, sector,
+                   {_COMPARE_COLS}
+            FROM screener.universe
+            WHERE asx_code = ANY(:codes)
+        """), {"codes": codes})
+        rows = result.fetchall()
+    except Exception as exc:
+        log.error("Compare error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Compare query failed: {exc}")
 
     if not rows:
         raise HTTPException(status_code=404, detail="No data found for given codes")
@@ -398,7 +402,7 @@ async def ask(
                 revenue_growth_1y, earnings_growth_1y, eps_growth_1y,
                 return_1m, return_3m, return_6m, return_1y,
                 rsi_14, piotroski_f_score, high_52w, low_52w, short_pct
-            FROM market.screener_universe
+            FROM screener.universe
             WHERE asx_code = ANY(:codes)
         """), {"codes": mentioned})
         for row in ctx_r.fetchall():

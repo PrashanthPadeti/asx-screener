@@ -253,39 +253,36 @@ async def backtest(
 
 _COMPARE_METRICS = [
     # (column,               label,                  format,   section,      higher_better)
-    ("last_price",           "Last Price",           "price",  "Price",      None),
-    ("price_change_pct",     "Day Change %",         "pct",    "Price",      True),
-    ("market_cap",           "Market Cap (A$M)",     "number", "Price",      None),
-    ("week_52_high",         "52W High",             "price",  "Price",      None),
-    ("week_52_low",          "52W Low",              "price",  "Price",      None),
-    ("pe_ratio",             "P/E Ratio",            "x",      "Valuation",  False),
-    ("forward_pe",           "Forward P/E",          "x",      "Valuation",  False),
-    ("price_to_book",        "Price / Book",         "x",      "Valuation",  False),
-    ("price_to_sales",       "Price / Sales",        "x",      "Valuation",  False),
-    ("ev_to_ebitda",         "EV / EBITDA",          "x",      "Valuation",  False),
-    ("peg_ratio",            "PEG Ratio",            "x",      "Valuation",  False),
-    ("revenue_growth_1y",    "Revenue Growth 1Y",    "pct",    "Growth",     True),
-    ("earnings_growth_1y",   "Earnings Growth 1Y",   "pct",    "Growth",     True),
-    ("eps_fy0",              "EPS (FY0)",            "dollar", "Growth",     True),
-    ("eps_fy1",              "EPS (FY1 est.)",       "dollar", "Growth",     True),
-    ("roe",                  "ROE",                  "pct",    "Quality",    True),
-    ("roa",                  "ROA",                  "pct",    "Quality",    True),
-    ("net_margin",           "Net Margin",           "pct",    "Quality",    True),
-    ("gross_margin",         "Gross Margin",         "pct",    "Quality",    True),
-    ("debt_to_equity",       "D/E Ratio",            "x",      "Quality",    False),
-    ("current_ratio",        "Current Ratio",        "x",      "Quality",    True),
-    ("piotroski_f_score",    "Piotroski F-Score",    "number", "Quality",    True),
-    ("composite_score",      "Composite Score",      "number", "Quality",    True),
-    ("dividend_yield",       "Dividend Yield",       "pct",    "Dividends",  True),
-    ("grossed_up_yield",     "Grossed-Up Yield",     "pct",    "Dividends",  True),
-    ("franking_pct",         "Franking %",           "number", "Dividends",  True),
-    ("dps_ttm",              "DPS (TTM)",            "dollar", "Dividends",  True),
-    ("return_1m",            "Return 1M",            "pct",    "Returns",    True),
-    ("return_3m",            "Return 3M",            "pct",    "Returns",    True),
-    ("return_6m",            "Return 6M",            "pct",    "Returns",    True),
-    ("return_1y",            "Return 1Y",            "pct",    "Returns",    True),
-    ("rsi_14",               "RSI (14)",             "number", "Technical",  None),
-    ("short_pct",            "Short Interest %",     "pct",    "Technical",  False),
+    ("price",               "Last Price",           "price",  "Price",      None),
+    ("market_cap",          "Market Cap (A$M)",     "number", "Price",      None),
+    ("high_52w",            "52W High",             "price",  "Price",      None),
+    ("low_52w",             "52W Low",              "price",  "Price",      None),
+    ("pe_ratio",            "P/E Ratio",            "x",      "Valuation",  False),
+    ("forward_pe",          "Forward P/E",          "x",      "Valuation",  False),
+    ("price_to_book",       "Price / Book",         "x",      "Valuation",  False),
+    ("price_to_sales",      "Price / Sales",        "x",      "Valuation",  False),
+    ("ev_to_ebitda",        "EV / EBITDA",          "x",      "Valuation",  False),
+    ("peg_ratio",           "PEG Ratio",            "x",      "Valuation",  False),
+    ("revenue_growth_1y",   "Revenue Growth 1Y",    "pct",    "Growth",     True),
+    ("earnings_growth_1y",  "Earnings Growth 1Y",   "pct",    "Growth",     True),
+    ("eps_growth_1y",       "EPS Growth 1Y",        "pct",    "Growth",     True),
+    ("roe",                 "ROE",                  "pct",    "Quality",    True),
+    ("roa",                 "ROA",                  "pct",    "Quality",    True),
+    ("net_margin",          "Net Margin",           "pct",    "Quality",    True),
+    ("gross_margin",        "Gross Margin",         "pct",    "Quality",    True),
+    ("debt_to_equity",      "D/E Ratio",            "x",      "Quality",    False),
+    ("current_ratio",       "Current Ratio",        "x",      "Quality",    True),
+    ("piotroski_f_score",   "Piotroski F-Score",    "number", "Quality",    True),
+    ("dividend_yield",      "Dividend Yield",       "pct",    "Dividends",  True),
+    ("grossed_up_yield",    "Grossed-Up Yield",     "pct",    "Dividends",  True),
+    ("franking_pct",        "Franking %",           "number", "Dividends",  True),
+    ("dps_ttm",             "DPS (TTM)",            "dollar", "Dividends",  True),
+    ("return_1m",           "Return 1M",            "pct",    "Returns",    True),
+    ("return_3m",           "Return 3M",            "pct",    "Returns",    True),
+    ("return_6m",           "Return 6M",            "pct",    "Returns",    True),
+    ("return_1y",           "Return 1Y",            "pct",    "Returns",    True),
+    ("rsi_14",              "RSI (14)",             "number", "Technical",  None),
+    ("short_pct",           "Short Interest %",     "pct",    "Technical",  False),
 ]
 
 _COMPARE_COLS = ", ".join(m[0] for m in _COMPARE_METRICS)
@@ -395,13 +392,12 @@ async def ask(
         ctx_r = await db.execute(text("""
             SELECT
                 asx_code, company_name, sector,
-                last_price, market_cap, pe_ratio, forward_pe, price_to_book,
+                price, market_cap, pe_ratio, forward_pe, price_to_book,
                 dividend_yield, grossed_up_yield, franking_pct, dps_ttm,
                 roe, roa, net_margin, gross_margin, debt_to_equity, current_ratio,
-                revenue_growth_1y, earnings_growth_1y, eps_fy0, eps_fy1,
+                revenue_growth_1y, earnings_growth_1y, eps_growth_1y,
                 return_1m, return_3m, return_6m, return_1y,
-                rsi_14, composite_score, piotroski_f_score,
-                week_52_high, week_52_low, short_pct
+                rsi_14, piotroski_f_score, high_52w, low_52w, short_pct
             FROM market.screener_universe
             WHERE asx_code = ANY(:codes)
         """), {"codes": mentioned})
@@ -410,13 +406,13 @@ async def ask(
             def _v(k): return d.get(k)
             context_parts.append(
                 f"**{d['asx_code']} — {d['company_name']}** | {d['sector']}\n"
-                f"  Price: ${_v('last_price')}  |  Market Cap: ${_v('market_cap')}M  |  52W: ${_v('week_52_low')}–${_v('week_52_high')}\n"
+                f"  Price: ${_v('price')}  |  Market Cap: ${_v('market_cap')}M  |  52W: ${_v('low_52w')}–${_v('high_52w')}\n"
                 f"  P/E: {_v('pe_ratio')}x  |  Fwd P/E: {_v('forward_pe')}x  |  P/B: {_v('price_to_book')}x  |  ROE: {_v('roe')}%  |  Net Margin: {_v('net_margin')}%\n"
                 f"  Div Yield: {_v('dividend_yield')}%  |  Grossed-Up: {_v('grossed_up_yield')}%  |  Franking: {_v('franking_pct')}%  |  DPS TTM: ${_v('dps_ttm')}\n"
-                f"  D/E: {_v('debt_to_equity')}x  |  Current Ratio: {_v('current_ratio')}x  |  EPS FY0: ${_v('eps_fy0')}  |  EPS FY1: ${_v('eps_fy1')}\n"
+                f"  D/E: {_v('debt_to_equity')}x  |  Current Ratio: {_v('current_ratio')}x  |  EPS Growth 1Y: {_v('eps_growth_1y')}%\n"
                 f"  Rev Growth 1Y: {_v('revenue_growth_1y')}%  |  Earnings Growth 1Y: {_v('earnings_growth_1y')}%\n"
                 f"  Return 1M: {_v('return_1m')}%  |  3M: {_v('return_3m')}%  |  6M: {_v('return_6m')}%  |  1Y: {_v('return_1y')}%\n"
-                f"  RSI(14): {_v('rsi_14')}  |  Composite Score: {_v('composite_score')}  |  Piotroski F: {_v('piotroski_f_score')}  |  Short%: {_v('short_pct')}%"
+                f"  RSI(14): {_v('rsi_14')}  |  Piotroski F: {_v('piotroski_f_score')}  |  Short%: {_v('short_pct')}%"
             )
 
     context = "\n\n".join(context_parts) if context_parts else "No specific company data matched. Answer using general knowledge about ASX markets."

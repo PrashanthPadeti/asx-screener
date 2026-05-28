@@ -114,6 +114,11 @@ async def latest_predictions(
 ):
     """Paginated predictions for the most recent run date."""
 
+    _empty = {
+        "prediction_date": None, "model": model, "horizon_days": horizon,
+        "total": 0, "direction_summary": {}, "results": [],
+    }
+
     # Get latest prediction date — table may not exist yet before first run
     try:
         date_r = await db.execute(
@@ -122,10 +127,10 @@ async def latest_predictions(
         latest_date = date_r.scalar()
     except Exception:
         await db.rollback()
-        raise HTTPException(status_code=404, detail="No predictions found — run a prediction job first")
+        return _empty   # table doesn't exist yet — return empty, not error
 
     if not latest_date:
-        raise HTTPException(status_code=404, detail="No predictions found — run a prediction job first")
+        return _empty   # no runs yet
 
     # Direction, sector, search filters
     extra = ""

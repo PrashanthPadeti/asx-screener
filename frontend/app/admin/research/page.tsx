@@ -37,6 +37,12 @@ function fmtVal(val: number | null | undefined, fmt: string): string {
     case 'pct':     return `${Number(val).toFixed(2)}%`
     case 'x':       return `${Number(val).toFixed(2)}x`
     case 'number':  return Number(val).toFixed(1)
+    case 'mcap': {
+      const m = Number(val) / 1_000_000
+      return m >= 1000
+        ? `$${(m / 1000).toFixed(1)}B`
+        : `$${m.toFixed(0)}M`
+    }
     default:        return String(val)
   }
 }

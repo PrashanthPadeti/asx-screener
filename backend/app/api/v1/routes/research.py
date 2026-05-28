@@ -254,7 +254,7 @@ async def backtest(
 _COMPARE_METRICS = [
     # (column,               label,                  format,   section,      higher_better)
     ("price",               "Last Price",           "price",  "Price",      None),
-    ("market_cap",          "Market Cap (A$M)",     "number", "Price",      None),
+    ("market_cap",          "Market Cap",           "mcap",   "Price",      None),
     ("high_52w",            "52W High",             "price",  "Price",      None),
     ("low_52w",             "52W Low",              "price",  "Price",      None),
     ("pe_ratio",            "P/E Ratio",            "x",      "Valuation",  False),

@@ -359,6 +359,170 @@ async def stock_prediction_history(
     }
 
 
+@router.get("/features/{code}")
+async def stock_features(
+    code: str,
+    _admin       = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return the latest feature vector used to generate predictions for a stock.
+    Includes 13–15 technical indicators plus model/training metadata.
+    """
+    import numpy as np
+    from compute.engine.price_predictions import compute_features
+
+    code = code.upper().strip()
+
+    # Company info
+    name_r = await db.execute(
+        text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
+        {"c": code},
+    )
+    name_row = name_r.fetchone()
+    if not name_row:
+        raise HTTPException(status_code=404, detail=f"Company {code} not found")
+
+    # Fetch last 100 days of OHLCV
+    try:
+        pr = await db.execute(text("""
+            SELECT close, high, low, volume, time
+            FROM market.daily_prices
+            WHERE asx_code = :c
+            ORDER BY time DESC LIMIT 100
+        """), {"c": code})
+        rows = list(reversed(pr.fetchall()))
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to fetch price data")
+
+    if len(rows) < 60:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Insufficient price history for {code} ({len(rows)} days; need 60+)"
+        )
+
+    closes  = np.array([float(r.close  or 0) for r in rows])
+    highs   = np.array([float(r.high   or 0) for r in rows])
+    lows    = np.array([float(r.low    or 0) for r in rows])
+    volumes = np.array([float(r.volume or 0) for r in rows])
+
+    feat = compute_features(closes, highs, lows, volumes)   # (N, F)
+
+    # Last row with no NaNs = the inference row
+    valid = ~np.any(np.isnan(feat), axis=1)
+    if not valid.any():
+        raise HTTPException(
+            status_code=404, detail=f"Could not compute valid features for {code}"
+        )
+    last_i = int(np.where(valid)[0][-1])
+    f = feat[last_i]
+    n_feats = feat.shape[1]
+
+    # Feature key list (matches compute_features column order)
+    keys = ["ret_1d", "ret_5d", "ret_10d", "ret_20d", "ret_60d",
+            "sma_r10", "sma_r20", "sma_r50",
+            "rsi_14", "vol_20d", "bb_pct", "range_20d"]
+    if n_feats >= 13:
+        keys.append("atr_r14")
+    if n_feats >= 14:
+        keys.append("vol_ratio")
+
+    _META = {
+        "ret_1d":    {"label": "1d Return",           "group": "Momentum",    "unit": "%",  "fmt": "pct",   "desc": "Yesterday's close-to-close % change"},
+        "ret_5d":    {"label": "5d Return",            "group": "Momentum",    "unit": "%",  "fmt": "pct",   "desc": "5 trading-day cumulative return"},
+        "ret_10d":   {"label": "10d Return",           "group": "Momentum",    "unit": "%",  "fmt": "pct",   "desc": "10 trading-day cumulative return"},
+        "ret_20d":   {"label": "20d Return",           "group": "Momentum",    "unit": "%",  "fmt": "pct",   "desc": "20 trading-day cumulative return"},
+        "ret_60d":   {"label": "60d Return",           "group": "Momentum",    "unit": "%",  "fmt": "pct",   "desc": "60 trading-day cumulative return (~3 months)"},
+        "sma_r10":   {"label": "Price vs SMA-10",      "group": "Trend",       "unit": "%",  "fmt": "pct",   "desc": "How far price is above/below 10-day moving average"},
+        "sma_r20":   {"label": "Price vs SMA-20",      "group": "Trend",       "unit": "%",  "fmt": "pct",   "desc": "How far price is above/below 20-day moving average"},
+        "sma_r50":   {"label": "Price vs SMA-50",      "group": "Trend",       "unit": "%",  "fmt": "pct",   "desc": "How far price is above/below 50-day moving average"},
+        "rsi_14":    {"label": "RSI (14)",              "group": "Oscillator",  "unit": "",   "fmt": "0-1",   "desc": "Relative Strength Index normalised 0–1 (>0.7 overbought, <0.3 oversold)"},
+        "vol_20d":   {"label": "20d Volatility",        "group": "Risk",        "unit": "",   "fmt": "float", "desc": "Rolling 20-day std deviation of daily returns"},
+        "bb_pct":    {"label": "Bollinger %B",          "group": "Oscillator",  "unit": "",   "fmt": "0-1",   "desc": "Position within Bollinger Bands (0=lower band, 1=upper band)"},
+        "range_20d": {"label": "20d Range Position",    "group": "Oscillator",  "unit": "",   "fmt": "0-1",   "desc": "Where current price sits in the 20-day high-low range"},
+        "atr_r14":   {"label": "ATR/Price Ratio",       "group": "Risk",        "unit": "%",  "fmt": "pct",   "desc": "14-day Average True Range as % of price (proxy for intraday volatility)"},
+        "vol_ratio": {"label": "Volume Ratio",          "group": "Volume",      "unit": "×",  "fmt": "float", "desc": "Today's volume divided by 20-day average volume"},
+    }
+
+    features = []
+    for i, key in enumerate(keys):
+        if i >= len(f):
+            break
+        raw = float(f[i])
+        meta = _META.get(key, {"label": key, "group": "Other", "unit": "", "fmt": "float", "desc": ""})
+        # Convert to human-readable units
+        if meta["fmt"] == "pct":
+            display = round(raw * 100, 3)   # ratio → %
+        elif meta["fmt"] == "0-1":
+            display = round(raw, 4)
+        else:
+            display = round(raw, 4)
+        features.append({
+            "key":    key,
+            "label":  meta["label"],
+            "group":  meta["group"],
+            "unit":   meta["unit"],
+            "fmt":    meta["fmt"],
+            "value":  display,
+            "desc":   meta["desc"],
+        })
+
+    # Safe date extraction
+    try:
+        as_of_row = rows[last_i]
+        as_of = str(as_of_row.time)[:10]
+    except Exception:
+        as_of = "unknown"
+
+    return {
+        "asx_code":      code,
+        "company_name":  name_row.company_name,
+        "current_price": round(float(closes[-1]), 4),
+        "as_of_date":    as_of,
+        "n_features":    n_feats,
+        "data_points":   len(rows),
+        "features":      features,
+        "model_info": {
+            "training_window": "260 trading days (~1 year of history)",
+            "min_rows":        100,
+            "horizons":        [5, 10, 20, 30, 50],
+            "models": [
+                {
+                    "key":   "xgboost",
+                    "label": "XGBoost",
+                    "color": "orange",
+                    "desc":  "Gradient boosting regressor — 150 trees, max depth 4, learning rate 0.05",
+                },
+                {
+                    "key":   "rf",
+                    "label": "Random Forest",
+                    "color": "emerald",
+                    "desc":  "100 decision trees, each trained on a random feature subset",
+                },
+                {
+                    "key":   "svm",
+                    "label": "SVM",
+                    "color": "purple",
+                    "desc":  "Support Vector Classifier predicting direction (bullish / neutral / bearish)",
+                },
+                {
+                    "key":   "lstm",
+                    "label": "LSTM",
+                    "color": "blue",
+                    "desc":  "PyTorch LSTM with 32 hidden units, 20-day sequence, Monte-Carlo dropout — top 200 stocks only",
+                },
+                {
+                    "key":   "ensemble",
+                    "label": "Ensemble",
+                    "color": "indigo",
+                    "desc":  "Confidence-weighted average of XGBoost + RF + SVM (+ LSTM where available)",
+                },
+            ],
+        },
+    }
+
+
 @router.get("/{code}")
 async def stock_predictions(
     code:        str,

@@ -13,6 +13,7 @@ import { api } from '@/lib/api'
 import {
   BrainCircuit, Play, RefreshCw, AlertTriangle, TrendingUp,
   TrendingDown, Minus, ChevronDown, ChevronUp, X, Search, Info,
+  Cpu, BarChart2, BookOpen,
 } from 'lucide-react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -67,6 +68,32 @@ type StockDetail = {
     r2_score:             number | null
   }>>
   current_price: number | null
+}
+
+type FeatureItem = {
+  key:   string
+  label: string
+  group: string
+  unit:  string
+  fmt:   string
+  value: number
+  desc:  string
+}
+
+type FeaturesResp = {
+  asx_code:      string
+  company_name:  string
+  current_price: number
+  as_of_date:    string
+  n_features:    number
+  data_points:   number
+  features:      FeatureItem[]
+  model_info: {
+    training_window: string
+    min_rows:        number
+    horizons:        number[]
+    models: { key: string; label: string; color: string; desc: string }[]
+  }
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -146,101 +173,273 @@ function ConfBar({ v }: { v: number | null }) {
   )
 }
 
+// ── Feature value formatter ───────────────────────────────────────────────────
+
+function fmtFeatureVal(item: FeatureItem): string {
+  const v = item.value
+  if (v == null || isNaN(v)) return '—'
+  if (item.fmt === 'pct')   return `${v > 0 ? '+' : ''}${v.toFixed(2)}%`
+  if (item.fmt === '0-1')   return v.toFixed(3)
+  if (item.unit === '×')    return `${v.toFixed(2)}×`
+  return v.toFixed(4)
+}
+
+function featureColor(item: FeatureItem): string {
+  const v = item.value
+  if (v == null) return 'text-slate-400'
+  if (item.fmt === 'pct') {
+    if (v >  2) return 'text-emerald-600 font-semibold'
+    if (v < -2) return 'text-red-600 font-semibold'
+  }
+  if (item.key === 'rsi_14') {
+    if (v > 0.7) return 'text-red-500 font-semibold'
+    if (v < 0.3) return 'text-emerald-600 font-semibold'
+  }
+  if (item.key === 'bb_pct' || item.key === 'range_20d') {
+    if (v > 0.8) return 'text-red-500'
+    if (v < 0.2) return 'text-emerald-600'
+  }
+  if (item.key === 'vol_ratio') {
+    if (v > 2) return 'text-amber-600 font-semibold'
+  }
+  return 'text-slate-700'
+}
+
+const GROUP_ORDER = ['Momentum', 'Trend', 'Oscillator', 'Risk', 'Volume']
+
 // ── Stock Detail Modal ────────────────────────────────────────────────────────
 
 function StockModal({ code, onClose }: { code: string; onClose: () => void }) {
-  const [detail, setDetail] = useState<StockDetail | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [activeTab,  setActiveTab]  = useState<'predictions' | 'features'>('predictions')
+  const [detail,     setDetail]     = useState<StockDetail | null>(null)
+  const [features,   setFeatures]   = useState<FeaturesResp | null>(null)
+  const [loadPred,   setLoadPred]   = useState(true)
+  const [loadFeat,   setLoadFeat]   = useState(false)
+  const [featLoaded, setFeatLoaded] = useState(false)
+  const [featErr,    setFeatErr]    = useState<string | null>(null)
 
   useEffect(() => {
     api.get(`/api/v1/predictions/${code}`)
       .then(r => setDetail(r.data))
       .catch(() => setDetail(null))
-      .finally(() => setLoading(false))
+      .finally(() => setLoadPred(false))
   }, [code])
+
+  function loadFeatures() {
+    if (featLoaded || loadFeat) return
+    setLoadFeat(true)
+    setFeatErr(null)
+    api.get(`/api/v1/predictions/features/${code}`)
+      .then(r => { setFeatures(r.data); setFeatLoaded(true) })
+      .catch(e => {
+        const msg = e?.response?.data?.detail ?? e?.message ?? 'Failed to load features'
+        setFeatErr(msg)
+      })
+      .finally(() => setLoadFeat(false))
+  }
+
+  function handleTab(tab: 'predictions' | 'features') {
+    setActiveTab(tab)
+    if (tab === 'features') loadFeatures()
+  }
 
   const allModels = detail ? Object.keys(detail.by_model) : []
   const horizons  = detail?.horizons ?? HORIZONS
 
+  // Group features for display
+  const grouped: Record<string, FeatureItem[]> = {}
+  if (features) {
+    for (const f of features.features) {
+      if (!grouped[f.group]) grouped[f.group] = []
+      grouped[f.group].push(f)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-auto">
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 sticky top-0 bg-white z-10">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 shrink-0">
           <div>
             <h3 className="font-bold text-slate-900 text-lg">{code}</h3>
-            <p className="text-xs text-slate-500">{detail?.company_name}</p>
+            <p className="text-xs text-slate-500">
+              {detail?.company_name ?? features?.company_name}
+              {detail?.current_price != null && (
+                <span className="ml-2 font-mono text-slate-700">${detail.current_price.toFixed(3)}</span>
+              )}
+              {detail?.prediction_date && (
+                <span className="ml-2">· {detail.prediction_date}</span>
+              )}
+            </p>
           </div>
           <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100">
             <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 
-        {loading && (
-          <div className="flex justify-center py-12">
-            <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          </div>
-        )}
+        {/* Tabs */}
+        <div className="flex border-b border-gray-100 px-6 shrink-0">
+          <button
+            onClick={() => handleTab('predictions')}
+            className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'predictions'
+                ? 'border-indigo-500 text-indigo-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+            All Models
+          </button>
+          <button
+            onClick={() => handleTab('features')}
+            className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'features'
+                ? 'border-indigo-500 text-indigo-700'
+                : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Cpu className="w-3.5 h-3.5" />
+            Feature Inputs
+          </button>
+        </div>
 
-        {detail && (
-          <div className="p-6">
-            <p className="text-xs text-slate-500 mb-4">
-              Current price: <strong>${detail.current_price?.toFixed(3)}</strong>
-              &nbsp;·&nbsp;Prediction date: {detail.prediction_date}
-            </p>
+        {/* Scrollable body */}
+        <div className="overflow-y-auto flex-1">
 
-            {/* Model × Horizon grid */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-slate-50">
-                    <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs">Model</th>
-                    {horizons.map(h => (
-                      <th key={h} className="text-center px-3 py-2 font-semibold text-slate-600 text-xs">
-                        {h}d
-                        <div className={`text-[10px] font-normal ${HORIZON_RELIABILITY[h]?.color}`}>
-                          {HORIZON_RELIABILITY[h]?.label}
-                        </div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {allModels.map(model => (
-                    <tr key={model} className="border-t border-gray-100 hover:bg-slate-50/50">
-                      <td className="px-3 py-2.5">
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${MODEL_COLORS[model] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {MODELS.find(m => m.key === model)?.label ?? model}
-                        </span>
-                      </td>
-                      {horizons.map(h => {
-                        const p = detail.by_model[model]?.[h]
-                        if (!p) return <td key={h} className="text-center px-3 py-2.5 text-gray-300">—</td>
-                        return (
-                          <td key={h} className="text-center px-3 py-2.5">
-                            <div className={`font-semibold ${pctColor(p.predicted_change_pct)}`}>
-                              {fmtPct(p.predicted_change_pct)}
+          {/* ── TAB: Predictions ── */}
+          {activeTab === 'predictions' && (
+            <div className="p-6">
+              {loadPred && (
+                <div className="flex justify-center py-12">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+              {detail && (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-slate-50">
+                          <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs">Model</th>
+                          {horizons.map(h => (
+                            <th key={h} className="text-center px-3 py-2 font-semibold text-slate-600 text-xs">
+                              {h}d
+                              <div className={`text-[10px] font-normal ${HORIZON_RELIABILITY[h]?.color}`}>
+                                {HORIZON_RELIABILITY[h]?.label}
+                              </div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allModels.map(model => (
+                          <tr key={model} className="border-t border-gray-100 hover:bg-slate-50/50">
+                            <td className="px-3 py-2.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${MODEL_COLORS[model] ?? 'bg-gray-100 text-gray-600'}`}>
+                                {MODELS.find(m => m.key === model)?.label ?? model}
+                              </span>
+                            </td>
+                            {horizons.map(h => {
+                              const p = detail.by_model[model]?.[h]
+                              if (!p) return <td key={h} className="text-center px-3 py-2.5 text-gray-300">—</td>
+                              return (
+                                <td key={h} className="text-center px-3 py-2.5">
+                                  <div className={`font-semibold ${pctColor(p.predicted_change_pct)}`}>
+                                    {fmtPct(p.predicted_change_pct)}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400">
+                                    ${p.predicted_price?.toFixed(3) ?? '—'}
+                                  </div>
+                                  <div className="mt-0.5">{dirBadge(p.direction)}</div>
+                                </td>
+                              )
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+                    <strong>Statistical models only.</strong> Past performance is not indicative of future returns.
+                    These predictions are for analysis only and are not investment recommendations.
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── TAB: Feature Inputs ── */}
+          {activeTab === 'features' && (
+            <div className="p-6">
+              {loadFeat && (
+                <div className="flex justify-center py-12">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              )}
+              {featErr && (
+                <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-700">
+                  {featErr}
+                </div>
+              )}
+              {features && !loadFeat && (
+                <>
+                  {/* Meta row */}
+                  <div className="flex flex-wrap gap-3 mb-4 text-[11px] text-slate-500">
+                    <span className="bg-slate-100 px-2 py-1 rounded">
+                      As of <strong className="text-slate-700">{features.as_of_date}</strong>
+                    </span>
+                    <span className="bg-slate-100 px-2 py-1 rounded">
+                      <strong className="text-slate-700">{features.data_points}</strong> days of history
+                    </span>
+                    <span className="bg-slate-100 px-2 py-1 rounded">
+                      <strong className="text-slate-700">{features.n_features}</strong> features used
+                    </span>
+                    <span className="bg-slate-100 px-2 py-1 rounded">
+                      Training window: <strong className="text-slate-700">{features.model_info.training_window}</strong>
+                    </span>
+                  </div>
+
+                  {/* Feature groups */}
+                  {GROUP_ORDER.filter(g => grouped[g]?.length).map(group => (
+                    <div key={group} className="mb-4">
+                      <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 px-1">
+                        {group}
+                      </div>
+                      <div className="bg-slate-50 rounded-xl overflow-hidden border border-slate-200">
+                        {grouped[group].map((feat, idx) => (
+                          <div
+                            key={feat.key}
+                            className={`flex items-center gap-3 px-4 py-2.5 ${
+                              idx > 0 ? 'border-t border-slate-100' : ''
+                            }`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm font-medium text-slate-700">{feat.label}</span>
+                              <span className="ml-2 text-[11px] text-slate-400">{feat.desc}</span>
                             </div>
-                            <div className="text-[11px] text-slate-400">
-                              ${p.predicted_price?.toFixed(3) ?? '—'}
+                            <div className={`text-sm font-mono tabular-nums shrink-0 ${featureColor(feat)}`}>
+                              {fmtFeatureVal(feat)}
                             </div>
-                            <div className="mt-0.5">{dirBadge(p.direction)}</div>
-                          </td>
-                        )
-                      })}
-                    </tr>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
 
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
-              <strong>Statistical models only.</strong> Past performance is not indicative of future returns.
-              These predictions are for analysis only and are not investment recommendations.
+                  {/* RSI / BB interpretation hints */}
+                  <div className="mt-2 p-3 bg-blue-50 border border-blue-100 rounded-lg text-[11px] text-blue-700 space-y-1">
+                    <div><strong>RSI interpretation:</strong> &lt;0.30 = oversold (potential buy signal) · &gt;0.70 = overbought (potential sell signal)</div>
+                    <div><strong>Bollinger %B:</strong> &lt;0 = below lower band · 0–1 = within bands · &gt;1 = above upper band</div>
+                    <div><strong>Volume Ratio:</strong> &gt;2× = unusually high volume (possible breakout/news)</div>
+                  </div>
+                </>
+              )}
             </div>
-          </div>
-        )}
+          )}
+
+        </div>
       </div>
     </div>
   )
@@ -386,6 +585,8 @@ export default function PredictionsPage() {
   const totalStks  = (dirSum.bullish ?? 0) + (dirSum.neutral ?? 0) + (dirSum.bearish ?? 0)
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  const [showHowItWorks, setShowHowItWorks] = useState(false)
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* ── Header ────────────────────────────────────────────────────────── */}
@@ -475,6 +676,78 @@ export default function PredictionsPage() {
             indicative of future results. Prediction accuracy decreases significantly at longer
             horizons. Always consult a licensed financial adviser (AFSL holder) before trading.
           </span>
+        </div>
+
+        {/* How Predictions Work — collapsible */}
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <button
+            onClick={() => setShowHowItWorks(v => !v)}
+            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-sm font-semibold text-slate-700">
+              <BookOpen className="w-4 h-4 text-indigo-500" />
+              How Predictions Work
+            </div>
+            {showHowItWorks
+              ? <ChevronUp className="w-4 h-4 text-slate-400" />
+              : <ChevronDown className="w-4 h-4 text-slate-400" />}
+          </button>
+
+          {showHowItWorks && (
+            <div className="px-5 pb-5 pt-1 border-t border-slate-100 grid md:grid-cols-2 gap-5">
+
+              {/* Features */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Input Features (13–15 technical indicators)
+                </h4>
+                <div className="space-y-1">
+                  {[
+                    { group: 'Momentum',   items: ['1d / 5d / 10d / 20d / 60d returns'] },
+                    { group: 'Trend',      items: ['Price vs SMA-10, SMA-20, SMA-50'] },
+                    { group: 'Oscillator', items: ['RSI-14 (0–1)', 'Bollinger %B', '20-day Range Position'] },
+                    { group: 'Risk',       items: ['20-day Volatility', 'ATR/Price Ratio (if OHLC available)'] },
+                    { group: 'Volume',     items: ['Volume Ratio vs 20-day avg (if available)'] },
+                  ].map(({ group, items }) => (
+                    <div key={group} className="flex gap-2 text-xs text-slate-600">
+                      <span className="font-semibold text-indigo-600 w-20 shrink-0">{group}</span>
+                      <span>{items.join(', ')}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 text-[11px] text-slate-400">
+                  Training window: <strong>260 trading days (~1 year)</strong> of daily OHLCV data per stock.
+                  Minimum 100 days required for a prediction to be generated.
+                </div>
+              </div>
+
+              {/* Models */}
+              <div>
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                  Models
+                </h4>
+                <div className="space-y-2">
+                  {[
+                    { color: 'bg-orange-100 text-orange-700',  label: 'XGBoost',       desc: '150-tree gradient boosting regressor — predicts % return at each horizon' },
+                    { color: 'bg-emerald-100 text-emerald-700', label: 'Random Forest', desc: '100-tree ensemble regressor — averages decision trees over random feature subsets' },
+                    { color: 'bg-purple-100 text-purple-700',  label: 'SVM',           desc: 'Support Vector Classifier — predicts direction: bullish / neutral / bearish' },
+                    { color: 'bg-blue-100 text-blue-700',      label: 'LSTM',          desc: 'PyTorch deep learning, 20-day lookback window — top 200 stocks by market cap only' },
+                    { color: 'bg-indigo-100 text-indigo-700',  label: 'Ensemble',      desc: 'Confidence-weighted average of all available models (default view)' },
+                  ].map(m => (
+                    <div key={m.label} className="flex gap-2 items-start text-xs">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold shrink-0 ${m.color}`}>{m.label}</span>
+                      <span className="text-slate-600">{m.desc}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 text-[11px] text-slate-400">
+                  Click any stock row → <strong>Feature Inputs</strong> tab to see the exact indicator values
+                  that drove that stock&apos;s prediction.
+                </div>
+              </div>
+
+            </div>
+          )}
         </div>
 
         {/* Error */}

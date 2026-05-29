@@ -266,9 +266,11 @@ export default function PredictionsPage() {
   const [search,    setSearch]    = useState('')
 
   // UI
-  const [modalCode, setModalCode] = useState<string | null>(null)
-  const [sortCol,   setSortCol]   = useState<'pct' | 'conf' | 'price'>('pct')
-  const [sortAsc,   setSortAsc]   = useState(false)
+  const [modalCode,     setModalCode]     = useState<string | null>(null)
+  const [sortCol,       setSortCol]       = useState<'pct' | 'conf' | 'price'>('pct')
+  const [sortAsc,       setSortAsc]       = useState(false)
+  const [hideExtreme,   setHideExtreme]   = useState(false)
+  const [extremeLimit,  setExtremeLimit]  = useState(50)   // ±% threshold
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -349,8 +351,17 @@ export default function PredictionsPage() {
     }
   }
 
-  // ── Sort predictions ───────────────────────────────────────────────────────
-  const sorted = (data?.results ?? []).slice().sort((a, b) => {
+  // ── Filter + sort predictions ──────────────────────────────────────────────
+  const extremeFiltered = hideExtreme
+    ? (data?.results ?? []).filter(r =>
+        r.predicted_change_pct == null ||
+        Math.abs(r.predicted_change_pct) <= extremeLimit
+      )
+    : (data?.results ?? [])
+
+  const extremeCount = (data?.results?.length ?? 0) - extremeFiltered.length
+
+  const sorted = extremeFiltered.slice().sort((a, b) => {
     const av = sortCol === 'pct'  ? (a.predicted_change_pct ?? -999)
              : sortCol === 'conf' ? (a.confidence_score ?? 0)
              : (a.current_price ?? 0)
@@ -636,11 +647,47 @@ export default function PredictionsPage() {
                 </button>
               </div>
 
-              {/* Horizon reliability note */}
-              <div className={`mt-2 text-[11px] flex items-center gap-1 ${HORIZON_RELIABILITY[horizon]?.color}`}>
-                <Info className="w-3 h-3" />
-                {horizon}d horizon — {HORIZON_RELIABILITY[horizon]?.label}.
-                {horizon >= 30 && ' Treat with caution — longer horizons have significantly lower accuracy.'}
+              {/* Horizon reliability note + extreme filter */}
+              <div className="mt-2 flex items-center justify-between flex-wrap gap-2">
+                <div className={`text-[11px] flex items-center gap-1 ${HORIZON_RELIABILITY[horizon]?.color}`}>
+                  <Info className="w-3 h-3" />
+                  {horizon}d horizon — {HORIZON_RELIABILITY[horizon]?.label}.
+                  {horizon >= 30 && ' Treat with caution — longer horizons have significantly lower accuracy.'}
+                </div>
+
+                {/* Extreme prediction filter */}
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={hideExtreme}
+                      onChange={e => setHideExtreme(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-amber-500"
+                    />
+                    <span className="text-[11px] text-slate-600 font-medium">
+                      Hide extreme predictions
+                    </span>
+                  </label>
+                  {hideExtreme && (
+                    <>
+                      <span className="text-[11px] text-slate-400">±</span>
+                      <select
+                        value={extremeLimit}
+                        onChange={e => setExtremeLimit(Number(e.target.value))}
+                        className="text-[11px] border border-amber-200 bg-amber-50 rounded px-1.5 py-0.5 text-amber-700 font-semibold"
+                      >
+                        {[20, 30, 50, 75, 100].map(v => (
+                          <option key={v} value={v}>{v}%</option>
+                        ))}
+                      </select>
+                      {extremeCount > 0 && (
+                        <span className="text-[11px] text-amber-600 font-semibold">
+                          ({extremeCount} hidden)
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             </div>
 

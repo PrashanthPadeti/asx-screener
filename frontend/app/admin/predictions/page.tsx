@@ -551,14 +551,19 @@ export default function PredictionsPage() {
   }
 
   // ── Filter + sort predictions ──────────────────────────────────────────────
+  // Deduplicate results by asx_code (screener.universe join can produce doubles)
+  const deduped = Array.from(
+    new Map((data?.results ?? []).map(r => [r.asx_code, r])).values()
+  )
+
   const extremeFiltered = hideExtreme
-    ? (data?.results ?? []).filter(r =>
+    ? deduped.filter(r =>
         r.predicted_change_pct == null ||
         Math.abs(r.predicted_change_pct) <= extremeLimit
       )
-    : (data?.results ?? [])
+    : deduped
 
-  const extremeCount = (data?.results?.length ?? 0) - extremeFiltered.length
+  const extremeCount = deduped.length - extremeFiltered.length
 
   const sorted = extremeFiltered.slice().sort((a, b) => {
     const av = sortCol === 'pct'  ? (a.predicted_change_pct ?? -999)
@@ -1002,7 +1007,7 @@ export default function PredictionsPage() {
                   <tbody>
                     {sorted.map((row, i) => (
                       <tr
-                        key={row.asx_code}
+                        key={`${row.asx_code}-${i}`}
                         className="border-t border-slate-100 hover:bg-slate-50/60 transition-colors cursor-pointer"
                         onClick={() => setModalCode(row.asx_code)}
                       >
@@ -1063,7 +1068,7 @@ export default function PredictionsPage() {
               )}
 
               <div className="px-4 py-2.5 border-t border-slate-100 bg-slate-50 text-[11px] text-slate-400 flex items-center justify-between">
-                <span>Showing {sorted.length} of {data?.total ?? 0} stocks</span>
+                <span>Showing {sorted.length} of {deduped.length} stocks</span>
                 {data?.prediction_date && (
                   <span>Predictions from {data.prediction_date}</span>
                 )}

@@ -174,6 +174,8 @@ async def latest_predictions(
         extra += " AND (p.asx_code ILIKE :q OR c.company_name ILIKE :q)"
         params["q"] = f"%{search}%"
 
+    # Use LATERAL LIMIT 1 to avoid row-multiplication from screener.universe
+    # having multiple entries per asx_code (e.g. from multiple ingestion runs).
     sql = f"""
         SELECT
             p.asx_code,
@@ -192,7 +194,11 @@ async def latest_predictions(
             p.data_points
         FROM market.price_predictions p
         JOIN market.companies c ON c.asx_code = p.asx_code
-        LEFT JOIN screener.universe u ON u.asx_code = p.asx_code
+        LEFT JOIN LATERAL (
+            SELECT sector FROM screener.universe
+            WHERE asx_code = p.asx_code
+            LIMIT 1
+        ) u ON TRUE
         WHERE p.prediction_date = :dt
           AND p.model            = :model
           AND p.horizon_days     = :horizon
@@ -205,7 +211,11 @@ async def latest_predictions(
         SELECT COUNT(*)
         FROM market.price_predictions p
         JOIN market.companies c ON c.asx_code = p.asx_code
-        LEFT JOIN screener.universe u ON u.asx_code = p.asx_code
+        LEFT JOIN LATERAL (
+            SELECT sector FROM screener.universe
+            WHERE asx_code = p.asx_code
+            LIMIT 1
+        ) u ON TRUE
         WHERE p.prediction_date = :dt
           AND p.model            = :model
           AND p.horizon_days     = :horizon

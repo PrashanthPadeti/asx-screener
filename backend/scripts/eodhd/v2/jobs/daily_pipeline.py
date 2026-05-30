@@ -1,30 +1,38 @@
 """
 Daily Pipeline — ASX Screener
 ==============================
-Runs after ASX market close each weekday (~18:30 AEST).
+Runs after ASX market close each weekday (08:30 UTC = 18:30 AEST).
 
 Steps:
-  1. Download today's bulk EOD prices       → Raw Zone (.json.gz)
-  2. Load prices to staging_au.eod_prices      → DELETE today + INSERT
-  3. Transform to market.daily_prices       → upsert --from-date TODAY
-  4. Run daily compute engine               → market.computed_metrics
-  4b. Run technical compute engine          → market.daily_metrics (latest date)
-  4c. Run half-yearly compute engine        → market.halfyearly_metrics
-  4d. Run period metrics compute engine     → market.period_metrics (H/L/AvgVol all periods)
-  5. Build screener.universe                → Golden Record
+  1.  Download today's EOD prices (per-stock, from yesterday) → Raw Zone
+  2.  Download ASIC short positions                           → Raw Zone
+  3.  Load prices → staging_au.eod_prices                    (today's files, UPSERT)
+  4.  Load short positions → staging_au.short_positions
+  5.  Transform prices → market.daily_prices                  (from yesterday)
+  6.  Transform short positions → market.short_positions
+  7.  Daily compute engine → market.computed_metrics
+  8.  Technical compute engine → market.daily_metrics
+  9.  Half-yearly compute engine → market.halfyearly_metrics
+  10. Period metrics compute engine → market.period_metrics
+  11. ASX index prices → market.index_prices                  (Yahoo Finance)
+  12. ETF & fund prices → market.fund_prices                  (Yahoo Finance)
+  13. Build screener.universe → Golden Record
+  14. Market snapshots → index/sector/mover/exdiv snapshots
 
 Usage:
     python scripts/eodhd/v2/jobs/daily_pipeline.py
-    python scripts/eodhd/v2/jobs/daily_pipeline.py --date 2026-04-29
     python scripts/eodhd/v2/jobs/daily_pipeline.py --skip-download
+
+Crontab (08:30 UTC Mon-Fri — ~2.5 hours after ASX close):
+    30 8 * * 1-5 cd /opt/asx-screener && /opt/asx-screener/asx-venv/bin/python scripts/eodhd/v2/jobs/daily_pipeline.py >> /opt/asx-screener/logs/daily_pipeline.log 2>&1
 """
 
 import argparse
 import logging
-import os
 import subprocess
 import sys
-from datetime import date
+import time
+from datetime import date, timedelta
 from pathlib import Path
 
 logging.basicConfig(
@@ -34,109 +42,340 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parents[4]   # /opt/asx-screener
-SCRIPTS  = BASE_DIR / "scripts" / "eodhd" / "v2"
-COMPUTE  = BASE_DIR / "compute" / "engine"
-PYTHON   = sys.executable
+BASE_DIR  = Path(__file__).resolve().parents[4]   # /opt/asx-screener
+SCRIPTS   = BASE_DIR / "scripts" / "eodhd" / "v2"
+ASIC      = BASE_DIR / "scripts" / "asic"
+# Prefer backend/compute/engine (canonical source); fall back to root-level compute/engine
+# if the server uses a symlink or flat deployment without the backend/ prefix.
+_compute_canonical = BASE_DIR / "backend" / "compute" / "engine"
+_compute_fallback  = BASE_DIR / "compute" / "engine"
+COMPUTE   = _compute_canonical if _compute_canonical.exists() else _compute_fallback
+PYTHON    = sys.executable
+TODAY     = date.today().isoformat()
+YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
 
-# Shared alert utility — path: backend/scripts/utils/alert.py
-sys.path.insert(0, str(BASE_DIR / "scripts"))
-from utils.alert import send_failure_alert  # noqa: E402
 
-_target_date = "unknown"  # set in main() so run() can reference it for alerts
+# ── Pipeline Tracker ──────────────────────────────────────────────────────────
+
+class PipelineTracker:
+    """
+    Records pipeline and step-level run status to market.pipeline_runs /
+    market.pipeline_step_runs for admin monitoring and APScheduler dependency checks.
+
+    All methods are best-effort — DB failures are logged but never propagate
+    to the pipeline itself, so monitoring can never break data processing.
+    """
+
+    def __init__(self):
+        self.run_id: int | None = None
+        self._conn = None
+
+    def connect(self) -> None:
+        """Open a sync psycopg2 connection using DATABASE_URL_SYNC (or DATABASE_URL)."""
+        try:
+            import os
+            import psycopg2
+            # Load .env if present (same multi-path search as market_snapshot.py)
+            try:
+                from dotenv import load_dotenv
+                _here = Path(__file__).resolve()
+                for _candidate in [
+                    _here.parents[3] / ".env",
+                    _here.parents[3] / "backend" / ".env",
+                    _here.parents[4] / ".env",
+                ]:
+                    if _candidate.exists():
+                        load_dotenv(_candidate)
+                        break
+            except ImportError:
+                pass
+
+            db_url = os.environ.get("DATABASE_URL_SYNC", "")
+            if not db_url:
+                # Fall back: strip asyncpg prefix from DATABASE_URL
+                async_url = os.environ.get("DATABASE_URL", "")
+                db_url = async_url.replace("postgresql+asyncpg://", "postgresql://")
+            if not db_url:
+                log.warning("PipelineTracker: no DATABASE_URL — run tracking disabled")
+                return
+            self._conn = psycopg2.connect(db_url)
+            self._conn.autocommit = True
+            log.info("PipelineTracker: DB connected")
+        except Exception as exc:
+            log.warning(f"PipelineTracker: connect failed — {exc}")
+
+    def _exec(self, sql: str, params=()):
+        """Execute SQL; return cursor on success, None on failure."""
+        if not self._conn:
+            return None
+        try:
+            cur = self._conn.cursor()
+            cur.execute(sql, params)
+            return cur
+        except Exception as exc:
+            log.warning(f"PipelineTracker: SQL error — {exc}")
+            return None
+
+    def start_pipeline(self, run_date: str, total_steps: int = 14) -> None:
+        cur = self._exec("""
+            INSERT INTO market.pipeline_runs
+                (run_date, pipeline_name, started_at, status, total_steps, steps_completed)
+            VALUES (%s, 'daily', NOW(), 'running', %s, 0)
+            ON CONFLICT (run_date, pipeline_name) DO UPDATE
+              SET started_at    = NOW(),
+                  status        = 'running',
+                  steps_completed = 0,
+                  failed_step   = NULL,
+                  failed_step_name = NULL,
+                  error_message = NULL,
+                  completed_at  = NULL,
+                  duration_seconds = NULL
+            RETURNING id
+        """, (run_date, total_steps))
+        if cur:
+            row = cur.fetchone()
+            if row:
+                self.run_id = row[0]
+                log.info(f"PipelineTracker: pipeline_run id={self.run_id}")
+
+    def start_step(self, step_number: int, step_name: str) -> None:
+        if not self.run_id:
+            return
+        self._exec("""
+            INSERT INTO market.pipeline_step_runs
+                (run_id, run_date, step_number, step_name, started_at, status)
+            VALUES (%s, CURRENT_DATE, %s, %s, NOW(), 'running')
+            ON CONFLICT (run_id, step_number) DO UPDATE
+              SET started_at = NOW(), status = 'running',
+                  completed_at = NULL, error_message = NULL, duration_seconds = NULL
+        """, (self.run_id, step_number, step_name))
+
+    def finish_step(self, step_number: int, success: bool = True,
+                    error_msg: str = None) -> None:
+        if not self.run_id:
+            return
+        status = "success" if success else "failed"
+        self._exec("""
+            UPDATE market.pipeline_step_runs
+               SET completed_at     = NOW(),
+                   status           = %s,
+                   duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::numeric(10,2),
+                   error_message    = %s
+             WHERE run_id = %s AND step_number = %s
+        """, (status, error_msg, self.run_id, step_number))
+        if success:
+            self._exec("""
+                UPDATE market.pipeline_runs
+                   SET steps_completed = steps_completed + 1
+                 WHERE id = %s
+            """, (self.run_id,))
+
+    def skip_step(self, step_number: int, step_name: str) -> None:
+        if not self.run_id:
+            return
+        self._exec("""
+            INSERT INTO market.pipeline_step_runs
+                (run_id, run_date, step_number, step_name,
+                 started_at, completed_at, status, duration_seconds)
+            VALUES (%s, CURRENT_DATE, %s, %s, NOW(), NOW(), 'skipped', 0)
+            ON CONFLICT (run_id, step_number) DO NOTHING
+        """, (self.run_id, step_number, step_name))
+        # Skipped steps still count toward completed (they were intentionally bypassed)
+        self._exec("""
+            UPDATE market.pipeline_runs
+               SET steps_completed = steps_completed + 1
+             WHERE id = %s
+        """, (self.run_id,))
+
+    def finish_pipeline(self, success: bool, failed_step: int = None,
+                        failed_step_name: str = None, error_msg: str = None) -> None:
+        if not self.run_id:
+            return
+        status = "success" if success else "failed"
+        self._exec("""
+            UPDATE market.pipeline_runs
+               SET completed_at     = NOW(),
+                   status           = %s,
+                   failed_step      = %s,
+                   failed_step_name = %s,
+                   error_message    = %s,
+                   duration_seconds = EXTRACT(EPOCH FROM (NOW() - started_at))::integer
+             WHERE id = %s
+        """, (status, failed_step, failed_step_name, error_msg, self.run_id))
+
+    def close(self) -> None:
+        if self._conn:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
 
 
-def run(label: str, cmd: list[str]) -> None:
-    """Run a subprocess step; send failure alert and exit on non-zero return code."""
+# ── Step runners ──────────────────────────────────────────────────────────────
+
+def run(label: str, cmd: list[str],
+        tracker: PipelineTracker = None, step: int = None) -> None:
+    """Run a required step. Exits the pipeline on failure."""
+    if tracker and step:
+        tracker.start_step(step, label)
     log.info(f"▶  {label}")
+    t0 = time.time()
     result = subprocess.run(cmd, cwd=BASE_DIR)
+    elapsed = time.time() - t0
     if result.returncode != 0:
-        log.error(f"✗  {label} failed (exit {result.returncode})")
-        send_failure_alert(
-            pipeline="daily",
-            step=label,
-            target_date=_target_date,
-            exit_code=result.returncode,
-        )
+        log.error(f"✗  {label} failed (exit {result.returncode}) after {elapsed:.1f}s")
+        if tracker and step:
+            tracker.finish_step(step, success=False,
+                                error_msg=f"exit code {result.returncode}")
+            tracker.finish_pipeline(
+                success=False,
+                failed_step=step,
+                failed_step_name=label,
+                error_msg=f"Step {step} '{label}' failed with exit code {result.returncode}",
+            )
+            tracker.close()
         sys.exit(result.returncode)
-    log.info(f"✓  {label} done")
+    log.info(f"✓  {label} done in {elapsed:.1f}s")
+    if tracker and step:
+        tracker.finish_step(step, success=True)
 
+
+def run_optional(label: str, cmd: list[str],
+                 tracker: PipelineTracker = None, step: int = None) -> None:
+    """Run an optional step. Logs a warning on failure but continues."""
+    if tracker and step:
+        tracker.start_step(step, label)
+    log.info(f"▶  {label}")
+    t0 = time.time()
+    result = subprocess.run(cmd, cwd=BASE_DIR)
+    elapsed = time.time() - t0
+    if result.returncode != 0:
+        log.warning(f"⚠  {label} failed (exit {result.returncode}) after {elapsed:.1f}s — continuing")
+        if tracker and step:
+            tracker.finish_step(step, success=False,
+                                error_msg=f"exit code {result.returncode} (optional — pipeline continues)")
+    else:
+        log.info(f"✓  {label} done in {elapsed:.1f}s")
+        if tracker and step:
+            tracker.finish_step(step, success=True)
+
+
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--date",          help="Target date YYYY-MM-DD (default: today)")
     parser.add_argument("--skip-download", action="store_true",
-                        help="Skip step 1 (raw download) — use existing file")
+                        help="Skip steps 1-2 (raw downloads) — use existing files")
     args = parser.parse_args()
 
-    global _target_date
-    target_date = args.date or date.today().isoformat()
-    _target_date = target_date
-    log.info(f"Daily pipeline starting — target date: {target_date}")
+    DIVIDER = "─" * 60
+    log.info(DIVIDER)
+    log.info(f"ASX Screener — Daily Pipeline — {TODAY}")
+    log.info(DIVIDER)
+    t_start = time.time()
 
-    # ── Step 1: Download bulk EOD prices ──────────────────────────────────────
+    # ── Initialise pipeline tracker ───────────────────────────────────────────
+    tracker = PipelineTracker()
+    tracker.connect()
+    tracker.start_pipeline(TODAY, total_steps=14)
+
+    # ── Step 1: Download EOD prices (per-stock from yesterday) ────────────────
+    # Uses historical per-stock endpoint — bulk endpoint not available on this tier.
+    # --from-date yesterday covers Mon (gets Fri+Mon) and all weekdays correctly.
     if not args.skip_download:
-        run("Step 1: Download bulk EOD prices", [
+        run("Step 1: Download EOD prices", [
             PYTHON, str(SCRIPTS / "download_eod_prices.py"),
-            "--mode", "incremental",
-            "--date", target_date,
-        ])
+            "--mode", "historical",
+            "--from-date", YESTERDAY,
+        ], tracker=tracker, step=1)
     else:
         log.info("Step 1: Skipped (--skip-download)")
+        tracker.skip_step(1, "Step 1: Download EOD prices")
 
-    # ── Step 2: Load staging prices ───────────────────────────────────────────
-    run("Step 2: Load staging prices", [
+    # ── Step 2: Download ASIC short positions (non-fatal — page is JS-rendered) ─
+    # ASIC publishes with ~2-3 business day lag; idempotent if already cached.
+    # Step is optional: a scraping failure must not block prices/compute/universe.
+    if not args.skip_download:
+        run_optional("Step 2: Download ASIC short positions", [
+            PYTHON, str(ASIC / "download_short_positions.py"),
+        ], tracker=tracker, step=2)
+    else:
+        log.info("Step 2: Skipped (--skip-download)")
+        tracker.skip_step(2, "Step 2: Download ASIC short positions")
+
+    # ── Step 3: Load today's price files → staging_au (UPSERT, no truncate) ──
+    run("Step 3: Load prices → staging_au", [
         PYTHON, str(SCRIPTS / "load_to_staging_prices.py"),
-        "--mode", "incremental",
-        "--date", target_date,
-    ])
+        "--mode", "historical",
+        "--run-date", TODAY,
+    ], tracker=tracker, step=3)
 
-    # ── Step 3: Transform to market.daily_prices ──────────────────────────────
-    run("Step 3: Transform market.daily_prices", [
+    # ── Step 4: Load + transform short positions (non-fatal) ─────────────────
+    run_optional("Step 4: Load short positions → staging_au", [
+        PYTHON, str(ASIC / "load_to_staging_short.py"),
+    ], tracker=tracker, step=4)
+
+    # ── Step 5: Transform prices → market.daily_prices ───────────────────────
+    run("Step 5: Transform prices → market.daily_prices", [
         PYTHON, str(SCRIPTS / "transforms" / "transform_prices.py"),
-        "--from-date", target_date,
-    ])
+        "--from-date", YESTERDAY,
+    ], tracker=tracker, step=5)
 
-    # ── Step 4: Daily compute engine ──────────────────────────────────────────
-    run("Step 4: Daily compute engine → market.computed_metrics", [
+    # ── Step 6: Transform short positions (non-fatal) ────────────────────────
+    run_optional("Step 6: Transform short positions → market.short_positions", [
+        PYTHON, str(ASIC / "transforms" / "transform_short.py"),
+    ], tracker=tracker, step=6)
+
+    # ── Step 7: Daily compute engine ──────────────────────────────────────────
+    run("Step 7: Daily compute → market.computed_metrics", [
         PYTHON, str(COMPUTE / "daily_compute.py"),
-    ])
+    ], tracker=tracker, step=7)
 
-    # ── Step 4b: Technical compute engine ─────────────────────────────────────
-    # Writes latest-date indicators to market.daily_metrics for all stocks.
-    # Fetches full OHLCV history per stock for warm-up accuracy; writes only
-    # the latest row (~2-3 min for all stocks).
-    run("Step 4b: Technical compute engine → market.daily_metrics", [
+    # ── Step 8: Technical compute engine ──────────────────────────────────────
+    run("Step 8: Technical compute → market.daily_metrics", [
         PYTHON, str(COMPUTE / "technical_compute.py"),
-    ])
+    ], tracker=tracker, step=8)
 
-    # ── Step 4c: Half-yearly compute engine ───────────────────────────────────
-    # Aggregates quarterly → half-yearly, computes margins + HoH/YoY growth.
-    # Fast (~30s) — runs weekly on Sunday but also daily to catch new quarters.
-    run("Step 4c: Half-yearly compute engine → market.halfyearly_metrics", [
+    # ── Step 9: Half-yearly compute ───────────────────────────────────────────
+    run("Step 9: Half-yearly compute → market.halfyearly_metrics", [
         PYTHON, str(COMPUTE / "halfyearly_compute.py"),
-    ])
+    ], tracker=tracker, step=9)
 
-    # ── Step 4d: Period metrics compute engine ────────────────────────────────
-    # Upserts H/L/AvgVol for 1D/1W/1M/3M/6M/1Y/52W into market.period_metrics.
-    # Used by the Market Signals API for accurate period-aware highs/lows.
-    run("Step 4d: Period metrics compute engine → market.period_metrics", [
+    # ── Step 10: Period metrics ────────────────────────────────────────────────
+    run("Step 10: Period metrics → market.period_metrics", [
         PYTHON, str(COMPUTE / "period_metrics_compute.py"),
-    ])
+    ], tracker=tracker, step=10)
 
-    # ── Step 5: Build screener.universe ───────────────────────────────────────
-    run("Step 5: Build screener.universe", [
+    # ── Step 11: ASX index prices (Yahoo Finance) ─────────────────────────────
+    run("Step 11: ASX index prices → market.index_prices", [
+        PYTHON, str(COMPUTE / "index_prices.py"),
+        "--days", "2",
+    ], tracker=tracker, step=11)
+
+    # ── Step 12: ETF & fund prices (Yahoo Finance) ────────────────────────────
+    run("Step 12: ETF & fund prices → market.fund_prices", [
+        PYTHON, str(COMPUTE / "fund_prices.py"),
+        "--days", "2",
+    ], tracker=tracker, step=12)
+
+    # ── Step 13: Build screener.universe ──────────────────────────────────────
+    run("Step 13: Build screener.universe", [
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
-    ])
+    ], tracker=tracker, step=13)
 
-    # ── Step 6: Pre-compute performance heatmap ───────────────────────────────
-    # Writes market.heatmap_cache (days + weeks) so the API serves instant
-    # reads instead of running heavy window-function queries per request.
-    run("Step 6: Heatmap compute engine → market.heatmap_cache", [
-        PYTHON, "-m", "compute.engine.heatmap_compute",
-    ])
+    # ── Step 14: Market snapshots (runs after universe rebuild) ───────────────
+    run("Step 14: Market snapshots → index/sector/mover/exdiv", [
+        PYTHON, str(COMPUTE / "market_snapshot.py"),
+    ], tracker=tracker, step=14)
 
-    log.info(f"Daily pipeline complete for {target_date}")
+    # ── Mark pipeline as successful ───────────────────────────────────────────
+    tracker.finish_pipeline(success=True)
+    tracker.close()
+
+    elapsed = time.time() - t_start
+    log.info(DIVIDER)
+    log.info(f"Daily pipeline complete in {elapsed / 60:.1f} min")
+    log.info(DIVIDER)
 
 
 if __name__ == "__main__":

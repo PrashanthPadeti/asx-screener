@@ -241,6 +241,24 @@ async def pipeline_status(
         "description": "Price/pct-change alerts → email + SMS",
     })
 
+    jobs.append({
+        "job": "ML Price Predictions",
+        "schedule": "Weekdays 9:00pm AEST",
+        "type": "cron",
+        "job_id": "price_predictions",
+        "last_run": await _scalar(db, """
+            SELECT MAX(created_at) FROM market.price_predictions
+            WHERE model = 'ensemble'
+        """),
+        "row_count": await _scalar(db, """
+            SELECT COUNT(DISTINCT asx_code) FROM market.price_predictions
+            WHERE prediction_date = (SELECT MAX(prediction_date) FROM market.price_predictions)
+              AND model = 'ensemble'
+        """),
+        "table": "market.price_predictions",
+        "description": "XGBoost · RF · SVM · LSTM ensemble ML forecasts for top 1,000 ASX stocks",
+    })
+
     for j in jobs:
         if j.get("last_run") and hasattr(j["last_run"], "isoformat"):
             j["last_run"] = j["last_run"].isoformat()

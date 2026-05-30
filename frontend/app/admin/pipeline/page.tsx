@@ -79,7 +79,8 @@ const RUN_ORDER: Record<string, number> = {
   eod_price_download: 1, daily_metrics: 2, universe_build: 3,
   index_prices: 4, fund_prices: 5, global_markets: 6, commodities: 7,
   asx_index_flags: 8, short_positions: 9, market_snapshot: 10,
-  anomaly_detection: 11, asx_announcements: 12, price_alerts: 13, weekly_fundamentals: 14,
+  anomaly_detection: 11, asx_announcements: 12, price_alerts: 13,
+  weekly_fundamentals: 14, price_predictions: 15,
 }
 
 const TYPE_COLORS: Record<string, string> = {

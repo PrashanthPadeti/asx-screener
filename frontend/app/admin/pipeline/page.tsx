@@ -93,10 +93,21 @@ const TYPE_COLORS: Record<string, string> = {
 
 function staleness(lastRun: string | null, scheduleType: string): 'ok' | 'warn' | 'stale' | 'never' {
   if (!lastRun) return 'never'
-  const diff = Date.now() - new Date(lastRun).getTime()
+  const diff  = Date.now() - new Date(lastRun).getTime()
   const hours = diff / 3600000
+
   if (scheduleType === 'interval') return hours < 1 ? 'ok' : hours < 4 ? 'warn' : 'stale'
-  return hours < 26 ? 'ok' : hours < 50 ? 'warn' : 'stale'
+
+  // Cron / apscheduler jobs only run on weekdays (ASX Mon-Fri).
+  // Add a grace window on weekends so Friday's successful run doesn't
+  // appear stale/overdue through Saturday and Sunday.
+  const day = new Date().getDay()          // 0=Sun, 1=Mon … 6=Sat
+  const weekendGrace = day === 0 ? 48      // Sunday  → +48 h grace
+                     : day === 6 ? 24      // Saturday → +24 h grace
+                     : 0
+  const adjusted = Math.max(0, hours - weekendGrace)
+
+  return adjusted < 26 ? 'ok' : adjusted < 50 ? 'warn' : 'stale'
 }
 
 function fmtDate(iso: string | null): string {

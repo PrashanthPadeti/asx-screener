@@ -72,13 +72,22 @@ async def pipeline_status(
     jobs = []
 
     # ── Core daily pipeline (cron) ────────────────────────────────────────────
+    # Use market.pipeline_runs for last_run so the status reflects when the
+    # pipeline actually *ran*, not the max date of the data it wrote.
+    # This avoids false "Overdue" alerts on weekends when data naturally
+    # hasn't changed (no trading on Sat/Sun) but the pipeline ran fine on Friday.
+
+    _pipeline_last_success = await _scalar(db, """
+        SELECT MAX(completed_at) FROM market.pipeline_runs
+        WHERE pipeline_name = 'daily' AND status = 'success'
+    """)
 
     jobs.append({
         "job": "EOD Price Download",
         "schedule": "Weekdays 6:30pm AEST",
         "type": "cron",
         "job_id": "eod_price_download",
-        "last_run": await _scalar(db, "SELECT MAX(time)::date FROM market.daily_prices"),
+        "last_run": _pipeline_last_success,
         "row_count": await _scalar(db, """
             SELECT COUNT(*) FROM market.daily_prices
             WHERE time::date = (SELECT MAX(time)::date FROM market.daily_prices)
@@ -92,7 +101,7 @@ async def pipeline_status(
         "schedule": "Weekdays ~6:40pm AEST",
         "type": "cron",
         "job_id": "daily_metrics",
-        "last_run": await _scalar(db, "SELECT MAX(computed_at) FROM market.computed_metrics"),
+        "last_run": _pipeline_last_success,
         "row_count": await _scalar(db, """
             SELECT COUNT(*) FROM market.computed_metrics
             WHERE computed_at = (SELECT MAX(computed_at) FROM market.computed_metrics)
@@ -106,7 +115,7 @@ async def pipeline_status(
         "schedule": "Weekdays ~6:50pm AEST",
         "type": "cron",
         "job_id": "universe_build",
-        "last_run": await _scalar(db, "SELECT MAX(universe_built_at) FROM screener.universe"),
+        "last_run": _pipeline_last_success,
         "row_count": await _scalar(db, "SELECT COUNT(*) FROM screener.universe WHERE status = 'active'"),
         "table": "screener.universe",
         "description": "Golden Record rebuild — merges all metrics into screener.universe",

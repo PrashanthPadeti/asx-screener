@@ -53,6 +53,25 @@ pull_code() {
     log "Code updated ✓"
 }
 
+# ── Backend Python dependencies ───────────────────────────────────────────────
+install_backend_deps() {
+    log "Installing/syncing Python dependencies..."
+    VENV_PIP="/opt/asx-venv/bin/pip"
+    REQUIREMENTS="$REPO_DIR/backend/requirements.txt"
+
+    if [ ! -f "$VENV_PIP" ]; then
+        err "Python venv not found at /opt/asx-venv — run setup first"
+    fi
+    if [ ! -f "$REQUIREMENTS" ]; then
+        warn "requirements.txt not found — skipping pip install"
+        return
+    fi
+
+    # --quiet suppresses per-package output; only shows errors + summary
+    "$VENV_PIP" install -q -r "$REQUIREMENTS"
+    log "Python dependencies up to date ✓"
+}
+
 # ── Backend ───────────────────────────────────────────────────────────────────
 restart_backend() {
     log "Restarting backend (systemd)..."
@@ -107,6 +126,7 @@ restart_frontend() {
 case "${1:-}" in
     --backend)
         pull_code
+        install_backend_deps
         restart_backend
         ;;
     --frontend)
@@ -119,6 +139,7 @@ case "${1:-}" in
         ;;
     "")
         pull_code
+        install_backend_deps
         restart_backend
         build_frontend
         restart_frontend

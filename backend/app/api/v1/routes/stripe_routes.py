@@ -204,15 +204,25 @@ async def create_checkout(
         )
         await db.commit()
 
-    session = _stripe.checkout.Session.create(
-        customer=customer_id,
-        payment_method_types=["card"],
-        line_items=[{"price": price_id, "quantity": 1}],
-        mode="subscription",
-        success_url=f"{base_url}/account?upgrade=success",
-        cancel_url=f"{base_url}/pricing?upgrade=cancelled",
-        metadata={"user_id": str(current_user["id"]), "seats": str(body.seats)},
-    )
+    try:
+        session = _stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=f"{base_url}/account?upgrade=success",
+            cancel_url=f"{base_url}/pricing?upgrade=cancelled",
+            metadata={"user_id": str(current_user["id"]), "seats": str(body.seats)},
+        )
+    except _stripe.error.AuthenticationError:
+        log.error("Stripe AuthenticationError — check STRIPE_SECRET_KEY")
+        raise HTTPException(status_code=503, detail="Payment provider authentication failed — contact support")
+    except _stripe.error.InvalidRequestError as e:
+        log.error(f"Stripe InvalidRequestError: {e}")
+        raise HTTPException(status_code=400, detail=f"Payment configuration error: {e.user_message or str(e)}")
+    except _stripe.error.StripeError as e:
+        log.error(f"Stripe error during checkout: {e}")
+        raise HTTPException(status_code=502, detail=f"Payment provider error: {e.user_message or 'Please try again shortly'}")
     return {"url": session.url}
 
 

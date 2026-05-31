@@ -55,9 +55,9 @@ pull_code() {
 
 # ── Backend Python dependencies ───────────────────────────────────────────────
 install_backend_deps() {
-    log "Installing/syncing Python dependencies..."
     VENV_PIP="/opt/asx-venv/bin/pip"
     REQUIREMENTS="$REPO_DIR/backend/requirements.txt"
+    HASH_FILE="$REPO_DIR/.requirements_hash"
 
     if [ ! -f "$VENV_PIP" ]; then
         err "Python venv not found at /opt/asx-venv — run setup first"
@@ -67,9 +67,18 @@ install_backend_deps() {
         return
     fi
 
-    # --quiet suppresses per-package output; only shows errors + summary
+    CURRENT_HASH=$(md5sum "$REQUIREMENTS" | cut -d' ' -f1)
+    STORED_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
+
+    if [ "$CURRENT_HASH" = "$STORED_HASH" ]; then
+        log "Python dependencies unchanged — skipping install ✓"
+        return
+    fi
+
+    log "requirements.txt changed — installing dependencies..."
     "$VENV_PIP" install -q -r "$REQUIREMENTS"
-    log "Python dependencies up to date ✓"
+    echo "$CURRENT_HASH" > "$HASH_FILE"
+    log "Python dependencies updated ✓"
 }
 
 # ── Backend ───────────────────────────────────────────────────────────────────

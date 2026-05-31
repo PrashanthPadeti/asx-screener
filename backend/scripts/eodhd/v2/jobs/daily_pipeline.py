@@ -80,9 +80,10 @@ class PipelineTracker:
                 from dotenv import load_dotenv
                 _here = Path(__file__).resolve()
                 for _candidate in [
-                    _here.parents[3] / ".env",
+                    _here.parents[4] / "backend" / ".env",   # /opt/asx-screener/backend/.env ← primary
                     _here.parents[3] / "backend" / ".env",
                     _here.parents[4] / ".env",
+                    _here.parents[3] / ".env",
                 ]:
                     if _candidate.exists():
                         load_dotenv(_candidate)

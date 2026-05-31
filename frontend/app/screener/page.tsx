@@ -612,11 +612,12 @@ export default function ScreenerPage() {
       const updated = { ...r, [key]: val }
       // Auto-reset operator + value when field type changes
       if (key === 'field') {
-        const meta = allFields.find(x => x.key === val)
-        const ops  = OPERATORS[meta?.type || 'number']
+        const meta  = allFields.find(x => x.key === val)
+        const ftype = meta?.type || 'text'   // default text → eq, not number → gte
+        const ops   = OPERATORS[ftype] ?? OPERATORS.text
         updated.operator = ops[0].value
         // Boolean fields must default to 'true' so buildApiFilters doesn't skip them
-        updated.value    = meta?.type === 'boolean' ? 'true' : ''
+        updated.value    = ftype === 'boolean' ? 'true' : ''
       }
       return updated
     }))
@@ -1337,10 +1338,14 @@ export default function ScreenerPage() {
         )}
 
         {filters.map(f => {
-          const meta = allFields.find(x => x.key === f.field)
-          const ops  = OPERATORS[meta?.type || 'number'] || OPERATORS.number
-          const isBool = meta?.type === 'boolean'
-          const isText = meta?.type === 'text'
+          const meta   = allFields.find(x => x.key === f.field)
+          const ftype  = meta?.type || 'text'
+          const ops    = OPERATORS[ftype] ?? OPERATORS.text
+          // If the stored operator isn't valid for this field type, auto-correct to first valid op
+          const validOp = ops.find(o => o.value === f.operator) ? f.operator : ops[0].value
+          if (validOp !== f.operator) updateFilter(f.id, 'operator', validOp)
+          const isBool = ftype === 'boolean'
+          const isText = ftype === 'text'
 
           return (
             <div key={f.id} className="flex items-center gap-2 flex-wrap">
@@ -1360,7 +1365,7 @@ export default function ScreenerPage() {
               </select>
 
               {/* Operator */}
-              <select value={f.operator}
+              <select value={validOp}
                 onChange={e => updateFilter(f.id, 'operator', e.target.value)}
                 className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white
                            focus:outline-none focus:ring-2 focus:ring-blue-500 w-16">

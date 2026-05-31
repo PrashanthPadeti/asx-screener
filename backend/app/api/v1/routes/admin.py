@@ -77,10 +77,20 @@ async def pipeline_status(
     # This avoids false "Overdue" alerts on weekends when data naturally
     # hasn't changed (no trading on Sat/Sun) but the pipeline ran fine on Friday.
 
-    _pipeline_last_success = await _scalar(db, """
-        SELECT MAX(completed_at) FROM market.pipeline_runs
-        WHERE pipeline_name = 'daily' AND status = 'success'
-    """)
+    # Use market.pipeline_runs when available (records when the pipeline actually ran).
+    # Falls back to data-table max dates if the table is empty or doesn't exist yet.
+    try:
+        _pipeline_last_success = await _scalar(db, """
+            SELECT MAX(completed_at) FROM market.pipeline_runs
+            WHERE pipeline_name = 'daily' AND status = 'success'
+        """)
+    except Exception:
+        await db.rollback()
+        _pipeline_last_success = None
+
+    # Fallback: use max computed_at from metrics table when pipeline_runs has no data
+    if _pipeline_last_success is None:
+        _pipeline_last_success = await _scalar(db, "SELECT MAX(computed_at) FROM market.computed_metrics")
 
     jobs.append({
         "job": "EOD Price Download",

@@ -12,7 +12,7 @@ import {
   formatRatio, formatRatioChange, formatPctRaw, cn, SECTOR_COLORS, SECTORS,
 } from '@/lib/utils'
 import {
-  Plus, Trash2, Play, ChevronUp, ChevronDown,
+  Plus, Trash2, Play, ChevronUp, ChevronDown, RefreshCw,
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
   Sparkles, Search, Lock, Bookmark, Globe, Eye, EyeOff, Pencil,
 } from 'lucide-react'
@@ -445,6 +445,7 @@ export default function ScreenerPage() {
   const [totalPages, setTotalPages] = useState(0)
   const [loading, setLoading]       = useState(false)
   const [ran, setRan]               = useState(false)
+  const [resultsStale, setResultsStale] = useState(false)
   const [exporting, setExporting]       = useState(false)
   const [nlExporting, setNlExporting]   = useState(false)
   const [isCapped, setIsCapped]     = useState(false)
@@ -596,11 +597,13 @@ export default function ScreenerPage() {
     const firstValue = firstType === 'boolean' ? 'true' : ''
     setFilters(f => [...f, { id: nextId++, field: firstField, operator: firstOp, value: firstValue }])
     setActivePreset(null)
+    if (ran) setResultsStale(true)
   }
 
   const removeFilter = (id: number) => {
     setFilters(f => f.filter(r => r.id !== id))
     setActivePreset(null)
+    if (ran) setResultsStale(true)
   }
 
   const updateFilter = (id: number, key: keyof FilterRow, val: string) => {
@@ -618,6 +621,7 @@ export default function ScreenerPage() {
       return updated
     }))
     setActivePreset(null)
+    if (ran) setResultsStale(true)
   }
 
   const applyPresetDirect = (preset: ScreenerPreset) => {
@@ -759,6 +763,7 @@ export default function ScreenerPage() {
   ) => {
     setLoading(true)
     setRan(true)
+    setResultsStale(false)
     try {
       const res = await runScreener(apiFilters, { sort_by: by, sort_dir: dir, page: p, page_size: 50 })
       setResults(res.data)
@@ -1499,6 +1504,12 @@ export default function ScreenerPage() {
           )}
 
           {/* Table header bar */}
+          {resultsStale && (
+            <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700 font-medium">
+              <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+              Filters changed — click <button onClick={() => runScreen(1)} className="underline font-semibold hover:text-amber-900">Run Screen</button> to apply them.
+            </div>
+          )}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
             <span className="text-sm font-semibold text-gray-700">
               {total.toLocaleString()} results

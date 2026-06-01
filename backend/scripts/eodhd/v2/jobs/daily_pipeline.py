@@ -14,10 +14,10 @@ Steps:
   8.  Technical compute engine → market.daily_metrics
   9.  Half-yearly compute engine → market.halfyearly_metrics
   10. Period metrics compute engine → market.period_metrics
-  11. ASX index prices → market.index_prices                  (Yahoo Finance)
-  12. ETF & fund prices → market.fund_prices                  (Yahoo Finance)
+  11. [SKIPPED] ASX index prices → market.index_prices        (APScheduler handles at 5:30 PM)
+  12. [SKIPPED] ETF & fund prices → market.fund_prices        (APScheduler handles at 5:35 PM)
   13. Build screener.universe → Golden Record
-  14. Market snapshots → index/sector/mover/exdiv snapshots
+  14. [SKIPPED] Market snapshots → snapshots                  (APScheduler handles at 6:45 PM)
 
 Usage:
     python scripts/eodhd/v2/jobs/daily_pipeline.py
@@ -25,6 +25,9 @@ Usage:
 
 Crontab (08:30 UTC Mon-Fri — ~2.5 hours after ASX close):
     30 8 * * 1-5 cd /opt/asx-screener && /opt/asx-screener/asx-venv/bin/python scripts/eodhd/v2/jobs/daily_pipeline.py >> /opt/asx-screener/logs/daily_pipeline.log 2>&1
+
+Note: Steps 11-12-14 are skipped; APScheduler handles those (index prices, ETF prices, snapshots)
+      at 5:30-6:45 PM. This pipeline focuses on core screener.universe data (Steps 1-10, 13).
 """
 
 import argparse
@@ -348,16 +351,14 @@ def main():
     ], tracker=tracker, step=10)
 
     # ── Step 11: ASX index prices (Yahoo Finance) ─────────────────────────────
-    run("Step 11: ASX index prices → market.index_prices", [
-        PYTHON, str(COMPUTE / "index_prices.py"),
-        "--days", "2",
-    ], tracker=tracker, step=11)
+    # Skipped — APScheduler handles this at 5:30 PM (non-core screener data)
+    log.info("Step 11: Skipped (handled by APScheduler at 5:30 PM)")
+    tracker.skip_step(11, "Step 11: ASX index prices")
 
     # ── Step 12: ETF & fund prices (Yahoo Finance) ────────────────────────────
-    run("Step 12: ETF & fund prices → market.fund_prices", [
-        PYTHON, str(COMPUTE / "fund_prices.py"),
-        "--days", "2",
-    ], tracker=tracker, step=12)
+    # Skipped — APScheduler handles this at 5:35 PM (non-core screener data)
+    log.info("Step 12: Skipped (handled by APScheduler at 5:35 PM)")
+    tracker.skip_step(12, "Step 12: ETF & fund prices")
 
     # ── Step 13: Build screener.universe ──────────────────────────────────────
     run("Step 13: Build screener.universe", [
@@ -365,9 +366,9 @@ def main():
     ], tracker=tracker, step=13)
 
     # ── Step 14: Market snapshots (runs after universe rebuild) ───────────────
-    run("Step 14: Market snapshots → index/sector/mover/exdiv", [
-        PYTHON, str(COMPUTE / "market_snapshot.py"),
-    ], tracker=tracker, step=14)
+    # Skipped — APScheduler handles this at 6:45 PM (admin dashboard only, non-core)
+    log.info("Step 14: Skipped (handled by APScheduler at 6:45 PM)")
+    tracker.skip_step(14, "Step 14: Market snapshots")
 
     # ── Mark pipeline as successful ───────────────────────────────────────────
     tracker.finish_pipeline(success=True)

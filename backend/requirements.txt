@@ -61,6 +61,9 @@ boto3==1.35.84
 # Scheduling
 apscheduler==3.10.4
 
+# System monitoring
+psutil==6.1.0
+
 # Monitoring
 prometheus-fastapi-instrumentator==7.0.0
 

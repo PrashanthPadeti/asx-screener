@@ -77,7 +77,10 @@
       "Bash(python scripts/office/validate.py 'C:\\\\Users\\\\Dell\\\\My Claude\\\\Code\\\\ASX Screener\\\\Design\\\\Word Docs\\\\11 API Design.docx')",
       "Bash(pip install *)",
       "Bash(psql --version)",
-      "Bash(psql postgresql://asx_user:changeme@localhost:5432/asx_screener -c \"SELECT version\\(\\);\")"
+      "Bash(psql postgresql://asx_user:changeme@localhost:5432/asx_screener -c \"SELECT version\\(\\);\")",
+      "Bash(python scripts/build_pdfs.py)",
+      "Bash(ssh-keyscan -H 146.190.17.224)",
+      "Bash(python -c \"from app.api.v1.routes.predictions import router; print\\('OK — routes:', [r.path for r in router.routes]\\)\")"
     ]
   }
 }

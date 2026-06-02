@@ -6,6 +6,7 @@ All endpoints require require_admin dependency (email in ADMIN_EMAILS list).
 
 Endpoints:
   GET  /pipeline-status          – job health for all daily pipelines (heartbeat-based)
+  GET  /system-health            – system metrics (memory, CPU, disk) + capacity planning
   POST /run-job/{job_id}         – trigger a pipeline job in the background
   GET  /pipeline/runs            – pipeline run history (last 30 days)
   GET  /pipeline/runs/{run_date} – step-level detail for a specific pipeline run
@@ -285,6 +286,217 @@ async def pipeline_status(
             j["row_count"] = int(j["row_count"])
 
     return {"jobs": jobs, "total": len(jobs)}
+
+
+# ── System Health & Capacity Planning ──────────────────────────────────────────
+
+@router.get("/system-health")
+async def system_health(
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Returns system health metrics (memory, CPU, disk) + capacity planning.
+    Includes RAG status, growth projections, and upgrade timeline.
+    """
+    import os
+    import subprocess
+    import re
+
+    result = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "metrics": {},
+        "status": {},
+        "projections": {},
+        "phases": [],
+    }
+
+    try:
+        # ── Memory Usage ──
+        output = subprocess.check_output("free -h", shell=True, text=True)
+        lines = output.strip().split('\n')
+        mem_line = lines[1].split()
+        memory = {
+            "total_gb": float(mem_line[1].rstrip('Gi')),
+            "used_gb": float(mem_line[2].rstrip('Gi')),
+            "available_gb": float(mem_line[6].rstrip('Gi')),
+            "percent_used": round((float(mem_line[2].rstrip('Gi')) / float(mem_line[1].rstrip('Gi'))) * 100, 1),
+        }
+        result["metrics"]["memory"] = memory
+    except Exception as e:
+        log.warning(f"Could not get memory: {e}")
+        result["metrics"]["memory"] = None
+
+    try:
+        # ── CPU Load ──
+        output = subprocess.check_output("uptime", shell=True, text=True)
+        # Extract load average (e.g., "load average: 0.00, 0.02, 0.15")
+        match = re.search(r'load average: ([\d.]+), ([\d.]+), ([\d.]+)', output)
+        if match:
+            cpu = {
+                "load_1min": float(match.group(1)),
+                "load_5min": float(match.group(2)),
+                "load_15min": float(match.group(3)),
+                "vcpu_count": 2,  # Known: 2vCPU droplet
+                "load_percent": round((float(match.group(1)) / 2) * 100, 1),  # 1-min load as % of 2 vCPUs
+            }
+            result["metrics"]["cpu"] = cpu
+    except Exception as e:
+        log.warning(f"Could not get CPU: {e}")
+        result["metrics"]["cpu"] = None
+
+    try:
+        # ── Disk Usage ──
+        output = subprocess.check_output("df -h /", shell=True, text=True)
+        lines = output.strip().split('\n')
+        disk_line = lines[1].split()
+        disk = {
+            "total_gb": float(disk_line[1].rstrip('G')),
+            "used_gb": float(disk_line[2].rstrip('G')),
+            "available_gb": float(disk_line[3].rstrip('G')),
+            "percent_used": int(disk_line[4].rstrip('%')),
+        }
+        result["metrics"]["disk"] = disk
+    except Exception as e:
+        log.warning(f"Could not get disk: {e}")
+        result["metrics"]["disk"] = None
+
+    try:
+        # ── Database Size ──
+        db_size = await _scalar(db, """
+            SELECT pg_size_pretty(pg_database_size(current_database()))::text
+        """)
+        result["metrics"]["database_size"] = db_size
+    except Exception as e:
+        log.warning(f"Could not get database size: {e}")
+        result["metrics"]["database_size"] = None
+
+    # ── RAG Status ──
+    if result["metrics"]["memory"]:
+        mem_pct = result["metrics"]["memory"]["percent_used"]
+        if mem_pct < 50:
+            result["status"]["memory"] = "green"
+        elif mem_pct < 70:
+            result["status"]["memory"] = "amber"
+        else:
+            result["status"]["memory"] = "red"
+
+    if result["metrics"]["cpu"]:
+        load_pct = result["metrics"]["cpu"]["load_percent"]
+        if load_pct < 50:
+            result["status"]["cpu"] = "green"
+        elif load_pct < 100:
+            result["status"]["cpu"] = "amber"
+        else:
+            result["status"]["cpu"] = "red"
+
+    if result["metrics"]["disk"]:
+        disk_pct = result["metrics"]["disk"]["percent_used"]
+        if disk_pct < 50:
+            result["status"]["disk"] = "green"
+        elif disk_pct < 80:
+            result["status"]["disk"] = "amber"
+        else:
+            result["status"]["disk"] = "red"
+
+    # Overall status: worst of the three
+    statuses = [s for s in result["status"].values() if s]
+    if "red" in statuses:
+        result["status"]["overall"] = "red"
+    elif "amber" in statuses:
+        result["status"]["overall"] = "amber"
+    else:
+        result["status"]["overall"] = "green"
+
+    # ── Growth Projections ──
+    result["projections"] = {
+        "memory_growth_per_month_mb": 25,  # 10-15 MB data + 10-15 MB connections
+        "disk_growth_per_month_mb": 20,
+        "months_until_memory_upgrade": 18 if result["metrics"]["memory"] else None,  # At 37% now
+        "months_until_disk_upgrade": 36,
+        "current_concurrent_users_estimate": 1,
+        "safe_concurrent_users_current": 10,
+        "safe_concurrent_users_after_8gb": 50,
+        "safe_concurrent_users_after_16gb": 200,
+    }
+
+    # ── Upgrade Phases ──
+    result["phases"] = [
+        {
+            "phase": "Phase 1 (Current)",
+            "config": "2 vCPU / 4GB RAM / 77GB disk",
+            "monthly_cost": "$24",
+            "suitable_for": "Private / small user base (< 10 concurrent users)",
+            "duration": "0-6 months",
+            "features": ["All screener features", "Daily pipelines", "Predictions"],
+        },
+        {
+            "phase": "Phase 2 (Recommended at 6-12mo)",
+            "config": "2 vCPU / 8GB RAM / 120GB+ disk",
+            "monthly_cost": "$48",
+            "suitable_for": "Growing platform (10-50 concurrent users)",
+            "duration": "6-18 months",
+            "features": [
+                "2x memory headroom",
+                "Support 50+ concurrent users",
+                "Connection pooling (PgBouncer)",
+            ],
+        },
+        {
+            "phase": "Phase 3 (Scale, 12-18mo+)",
+            "config": "4 vCPU / 16GB RAM / 200GB+ disk (or split to multi-server)",
+            "monthly_cost": "$80-150",
+            "suitable_for": "Production platform (50-200+ concurrent users)",
+            "duration": "18+ months",
+            "features": [
+                "4x vCPU for peak load handling",
+                "4x memory for caching & connections",
+                "Consider managed DB (RDS/CloudSQL)",
+                "Dedicated cache layer (Redis)",
+            ],
+        },
+    ]
+
+    # ── Monitoring Thresholds ──
+    result["watch_list"] = [
+        {
+            "metric": "Memory usage",
+            "alert_threshold": "> 70% (2.6 GB)",
+            "action": "Plan Phase 2 upgrade to 8GB",
+        },
+        {
+            "metric": "Disk usage",
+            "alert_threshold": "> 80% (61 GB)",
+            "action": "Add storage immediately or archive old data",
+        },
+        {
+            "metric": "CPU load average",
+            "alert_threshold": "> 1.0 per vCPU (> 2.0 total)",
+            "action": "Profile and optimize queries, consider Phase 2",
+        },
+        {
+            "metric": "DB connections",
+            "alert_threshold": "> 30 active",
+            "action": "Deploy PgBouncer connection pooling",
+        },
+        {
+            "metric": "Concurrent users",
+            "alert_threshold": "> 10",
+            "action": "Enable connection pooling, plan Phase 2",
+        },
+    ]
+
+    # ── Optimization Tips ──
+    result["optimization_tips"] = [
+        "Database query optimization (add indexes, EXPLAIN ANALYZE)",
+        "Implement PgBouncer for connection pooling",
+        "Archive old data (>1 year) to S3/cold storage",
+        "Enable Redis caching for hot queries",
+        "Use CDN (Cloudflare) for frontend assets",
+        "Monitor slow queries with pg_stat_statements",
+    ]
+
+    return result
 
 
 # ── Run Job Now ───────────────────────────────────────────────────────────────

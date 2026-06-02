@@ -73,11 +73,24 @@ export default function SystemHealthPage() {
     setError(null)
     try {
       const response = await api.get('/admin/system-health')
-      setData(response.data)
+      console.log('System health response:', response.data)
+
+      // Ensure all required fields exist with defaults
+      const safeData = {
+        timestamp: response.data?.timestamp || new Date().toISOString(),
+        metrics: response.data?.metrics || {},
+        status: response.data?.status || { overall: 'green' },
+        projections: response.data?.projections || {},
+        phases: response.data?.phases || [],
+        watch_list: response.data?.watch_list || [],
+        optimization_tips: response.data?.optimization_tips || [],
+      }
+
+      setData(safeData as SystemHealthData)
       setLastRefresh(new Date().toLocaleTimeString())
     } catch (err) {
-      setError('Failed to load system health data')
-      console.error(err)
+      setError(`Failed to load system health data: ${err instanceof Error ? err.message : 'Unknown error'}`)
+      console.error('System health error:', err)
     } finally {
       setLoading(false)
     }
@@ -153,38 +166,40 @@ export default function SystemHealthPage() {
           <>
             {/* Overall Status & Last Updated */}
             <div className="mb-8">
-              <div className={`border rounded-lg p-6 ${getStatusBg(data.status.overall)}`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    {data.status.overall === 'green' && (
-                      <CheckCircle size={32} className="text-green-600" />
-                    )}
-                    {data.status.overall === 'amber' && (
-                      <AlertTriangle size={32} className="text-amber-600" />
-                    )}
-                    {data.status.overall === 'red' && (
-                      <AlertCircle size={32} className="text-red-600" />
-                    )}
-                    <div>
-                      <h2 className="text-xl font-bold capitalize">
-                        Overall Status: {data.status.overall}
-                      </h2>
-                      <p className="text-sm text-gray-600 mt-1">
-                        Last updated: {lastRefresh || 'Now'}
-                      </p>
+              {data?.status ? (
+                <div className={`border rounded-lg p-6 ${getStatusBg(data.status?.overall)}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      {(data.status?.overall || 'green') === 'green' && (
+                        <CheckCircle size={32} className="text-green-600" />
+                      )}
+                      {(data.status?.overall || 'green') === 'amber' && (
+                        <AlertTriangle size={32} className="text-amber-600" />
+                      )}
+                      {(data.status?.overall || 'green') === 'red' && (
+                        <AlertCircle size={32} className="text-red-600" />
+                      )}
+                      <div>
+                        <h2 className="text-xl font-bold capitalize">
+                          Overall Status: {data.status?.overall || 'green'}
+                        </h2>
+                        <p className="text-sm text-gray-600 mt-1">
+                          Last updated: {lastRefresh || 'Now'}
+                        </p>
+                      </div>
                     </div>
+                    {(data.status?.overall || 'green') === 'green' && (
+                      <p className="text-sm font-semibold text-green-700">All systems healthy ✓</p>
+                    )}
+                    {(data.status?.overall || 'green') === 'amber' && (
+                      <p className="text-sm font-semibold text-amber-700">Monitor closely</p>
+                    )}
+                    {(data.status?.overall || 'green') === 'red' && (
+                      <p className="text-sm font-semibold text-red-700">Action required</p>
+                    )}
                   </div>
-                  {data.status.overall === 'green' && (
-                    <p className="text-sm font-semibold text-green-700">All systems healthy ✓</p>
-                  )}
-                  {data.status.overall === 'amber' && (
-                    <p className="text-sm font-semibold text-amber-700">Monitor closely</p>
-                  )}
-                  {data.status.overall === 'red' && (
-                    <p className="text-sm font-semibold text-red-700">Action required</p>
-                  )}
                 </div>
-              </div>
+              ) : null}
             </div>
 
             {/* Current Metrics Grid */}

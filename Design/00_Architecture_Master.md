@@ -1,9 +1,28 @@
 # ASX Screener — Master Architecture & Design Document
 
-**Version:** 5.0  
-**Date:** 2026-05-24 (originally 2026-04-27)  
-**Status:** Living document — updated for V5 commercial launch  
-**Server:** 209.38.84.102 (DigitalOcean, 2vCPU / 4GB RAM, Ubuntu)
+**Version:** 5.1  
+**Date:** 2026-06-04 (updated from V5.0 of 2026-05-24)  
+**Status:** Living document — updated for June 2026 feature sprint  
+**Server:** Digital Ocean ubuntu-s-2vcpu-4gb-syd1 (Sydney, 2vCPU / 4GB RAM)  
+**Production:** https://asxscreener.com.au ✅ Live
+
+> 📄 **Full Current State Document:** See `ASX_Screener_Current_State_June2026.md` for complete June 2026 snapshot including all screens catalog, data flow, and deployment details.
+
+---
+
+### V5.1 Architecture Change Log (June 2026)
+| Component | Change |
+|-----------|--------|
+| `screener/page.tsx` | FinTech revamp: gradient title, Live badge, tagline, dark Alpha Screens quick-access banner |
+| `screener/page.tsx` | Empty state example cards: Value Income, Quality Growth, Deep Value |
+| `screener/components/BrowseSectors.tsx` | NEW: Sticky sector sidebar (desktop ≥1024px), live stock counts |
+| `scans/page.tsx` | Complete redesign: 4 sections (Premium, Pro, Quick, Community) + Sector Screens |
+| `scans/page.tsx` | 10 new institutional screens added (5 Pro + 5 Premium) → total 31 screens |
+| `scans/page.tsx` | Color-coded cards by investment theme; PRO vs PREMIUM badge fix |
+| `scans/page.tsx` | Anchor link navigation with scroll-to-section useEffect |
+| `Navbar.tsx` | "Scans" renamed to "Alpha Screens" |
+| `screener.py` (backend) | 5 new Pro presets: Cash Flow Champion, Dividend Growth Machine, Earnings Momentum Surge, ROIC Compounder, Gross Margin Fortress |
+| `screener.py` (backend) | 5 new Premium presets: ASX Dividend Aristocrats, Quality Elite Compounder, Altman Z-Score Safety, Low Beta Income Shield, Small Cap Hidden Gems |
 
 ### V5 Architecture Change Log (May 2026)
 | Component | Change |

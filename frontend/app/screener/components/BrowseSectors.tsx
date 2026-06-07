@@ -51,36 +51,65 @@ export default function BrowseSectors({ onSectorSelect, selectedSector }: Browse
     )
   }
 
+  // Create a map of sector -> stats for quick lookup
   const sectorMap = new Map(sectors.map(s => [s.sector, s]))
 
   return (
     <div className="w-64 bg-white border-l border-gray-200 sticky top-0 h-screen overflow-y-auto">
       <div className="p-4">
+        {/* Header */}
         <div className="flex items-center gap-2 mb-4">
           <BarChart3 size={20} className="text-blue-600" />
           <h2 className="font-bold text-gray-900">Browse Sectors</h2>
         </div>
+
+        {/* Sectors Grid */}
         <div className="space-y-2">
           {SECTORS.map((sector) => {
             const stats = sectorMap.get(sector)
             const count = stats?.stock_count || 0
             const isSelected = selectedSector === sector
             const bgColor = SECTOR_COLORS[sector as keyof typeof SECTOR_COLORS] || 'bg-gray-100'
+
             return (
-              <button key={sector} onClick={() => onSectorSelect(sector)} className={`w-full text-left p-3 rounded-lg transition-all ${isSelected ? 'ring-2 ring-blue-500 bg-blue-50 border border-blue-200' : 'bg-gray-50 hover:bv-gray-100 border border-gray-200'}`}>
+              <button
+                key={sector}
+                onClick={() => onSectorSelect(sector)}
+                className={`w-full text-left p-3 rounded-lg transition-all ${
+                  isSelected
+                    ? 'ring-2 ring-blue-500 bg-blue-50 border border-blue-200'
+                    : 'bg-gray-50 hover:bg-gray-100 border border-gray-200'
+                }`}
+              >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-semibold ${isSelected ? 'text-blue-900' : 'text-gray-900'}`}>{sector}</p>
-                    <p className="text-xs text-gray-600 mt-0.5">{count.toLocaleString()} stock{count !== 1 ? 's' : ''}</p>
+                    <p className={`text-sm font-semibold ${isSelected ? 'text-blue-900' : 'text-gray-900'}`}>
+                      {sector}
+                    </p>
+                    <p className="text-xs text-gray-600 mt-0.5">
+                      {count.toLocaleString()} stock{count !== 1 ? 's' : ''}
+                    </p>
                   </div>
-                  {isSelected && <div className={`${bgColor} w-2 h-2 rounded-full flex-shrink-0 mt-1.5`} />}
+                  {isSelected && (
+                    <div className={`${bgColor} w-2 h-2 rounded-full flex-shrink-0 mt-1.5`} />
+                  )}
                 </div>
-                {stats?.total_market_cap_bn !== undefined && stats.total_market_cap_bn !== null && stats.total_market_cap_bn > 0 && <p className="text-xs text-gray-500 mt-1">AUD ${stats.total_market_cap_bn.toFixed(0)}B</p>}
+
+                {/* Optional: Show market cap if available */}
+                {stats?.total_market_cap_bn !== undefined && stats.total_market_cap_bn !== null && stats.total_market_cap_bn > 0 && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    AUD ${stats.total_market_cap_bn.toFixed(0)}B
+                  </p>
+                )}
               </button>
             )
           })}
         </div>
-        <div className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">Click a sector to filter the screener</div>
+
+        {/* Info Footer */}
+        <div className="mt-6 pt-4 border-t border-gray-200 text-xs text-gray-500">
+          Click a sector to filter the screener
+        </div>
       </div>
     </div>
   )

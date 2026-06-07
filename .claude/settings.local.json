@@ -80,7 +80,14 @@
       "Bash(psql postgresql://asx_user:changeme@localhost:5432/asx_screener -c \"SELECT version\\(\\);\")",
       "Bash(python scripts/build_pdfs.py)",
       "Bash(ssh-keyscan -H 146.190.17.224)",
-      "Bash(python -c \"from app.api.v1.routes.predictions import router; print\\('OK — routes:', [r.path for r in router.routes]\\)\")"
+      "Bash(python -c \"from app.api.v1.routes.predictions import router; print\\('OK — routes:', [r.path for r in router.routes]\\)\")",
+      "Bash(curl -s http://localhost:3000/screener)",
+      "Bash(npm run *)",
+      "Bash(cd \"/root/ubuntu/ASXScreener/frontend\" && npm run build 2>&1 | tail -50)",
+      "mcp__Claude_in_Chrome__navigate",
+      "Bash(grep -n \"Quick Screens\\\\|Pro Screens\\\\|Premium Screens\\\\|presetTier\\\\|free\\\\|pro\\\\|premium\\\\|CATEGORIES\\\\|ScanCard\" /opt/asx-screener/frontend/app/scans/page.tsx 2>/dev/null | head -30 || echo \"Cannot access server directly\")",
+      "Bash(find /opt/asx-screener/backend -name \"*.py\" | xargs grep -l \"preset\\\\|PRESET\" 2>/dev/null | head -10)",
+      "PowerShell(pandoc --version 2>$null)"
     ]
   }
 }

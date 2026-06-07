@@ -13,7 +13,7 @@ import {
 } from '@/lib/utils'
 import {
   Plus, Trash2, Play, ChevronUp, ChevronDown, RefreshCw,
-  ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download, TrendingUp, Users, Award,
+  ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
   Sparkles, Search, Lock, Bookmark, Globe, Eye, EyeOff, Pencil,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -26,6 +26,7 @@ import {
   getCommunityScreens, incrementScreenUse,
   type SavedScreen,
 } from '@/lib/api'
+import BrowseSectors from '@/app/screener/components/BrowseSectors'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -456,6 +457,9 @@ export default function ScreenerPage() {
   // Screener mode
   const [screenerMode, setScreenerMode] = useState<'manual' | 'ai'>('manual')
 
+  // Browse Sectors
+  const [selectedSector, setSelectedSector] = useState<string | undefined>(undefined)
+
   // NL screener state
   const [nlQuery, setNlQuery]               = useState('')
   const [nlLoading, setNlLoading]           = useState(false)
@@ -684,6 +688,18 @@ export default function ScreenerPage() {
     setRan(false)
   }
 
+  // Handle sector selection from BrowseSectors component
+  const handleSectorSelect = (sector: string) => {
+    // Clear existing filters and set sector filter
+    setFilters([{ id: nextId++, field: 'sector', operator: 'eq', value: sector }])
+    setActivePreset(null)
+    setSelectedSector(sector)
+    // Immediately run the screener with the sector filter
+    setTimeout(() => fetchResults(1, 'market_cap', 'desc', [
+      { field: 'sector', operator: 'eq', value: sector },
+    ]), 50)
+  }
+
   // Load my screens when panel opens
   const loadMyScreens = async () => {
     if (!user) return
@@ -854,20 +870,10 @@ export default function ScreenerPage() {
   }
 
   return (
-    <div className="space-y-4">
-
-      {/* Header + Mode Tabs */}
+    <>
+      {/* Header + Mode Tabs — always full width */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <div className="flex items-center gap-2 mb-0.5">
-            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Stock Screener</h1>
-            <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
-              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse inline-block" />
-              Live
-            </span>
-          </div>
-          <p className="text-xs text-gray-500">Filter 1,300+ ASX stocks with institutional-grade metrics</p>
-        </div>
+        <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>
         <div className="flex items-center gap-2">
           <HelpDrawer sections={SCREENER_SECTIONS} title="Screener Guide" subtitle="Filters, AI query, presets, and columns explained" />
           <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
@@ -903,72 +909,12 @@ export default function ScreenerPage() {
         </div>
       </div>
 
-      {/* ── Alpha Screens Quick Access Banner ── */}
-      {screenerMode === 'manual' && (
-        <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 rounded-2xl p-5 text-white shadow-xl border border-white/10">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-xs font-semibold text-blue-300 uppercase tracking-wider mb-1">Alpha Screens</p>
-              <h2 className="text-sm font-bold text-white">Jump to Pre-Built Strategies</h2>
-              <p className="text-slate-400 text-xs mt-0.5">31 institutional-grade screens · 12 sector views · community picks</p>
-            </div>
-            <a href="/scans" className="flex-shrink-0 flex items-center gap-1 text-xs text-blue-300 hover:text-white font-medium transition-colors border border-blue-500/30 hover:border-blue-400 px-3 py-1.5 rounded-lg">
-              View All <ChevronRight className="w-3.5 h-3.5" />
-            </a>
-          </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-            <a href="/scans#premium-screens" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/35 border border-purple-500/30 transition-all hover:-translate-y-0.5">
-              <div className="w-6 h-6 bg-purple-500/30 rounded-md flex items-center justify-center flex-shrink-0">
-                <Award className="w-3 h-3 text-purple-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white leading-tight truncate">Premium</p>
-                <p className="text-[10px] text-purple-300">11 screens</p>
-              </div>
-            </a>
-            <a href="/scans#pro-strategies" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/35 border border-blue-500/30 transition-all hover:-translate-y-0.5">
-              <div className="w-6 h-6 bg-blue-500/30 rounded-md flex items-center justify-center flex-shrink-0">
-                <TrendingUp className="w-3 h-3 text-blue-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white leading-tight truncate">Pro Strategies</p>
-                <p className="text-[10px] text-blue-300">15 screens</p>
-              </div>
-            </a>
-            <a href="/scans#quick-screens" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/35 border border-yellow-500/30 transition-all hover:-translate-y-0.5">
-              <div className="w-6 h-6 bg-yellow-500/30 rounded-md flex items-center justify-center flex-shrink-0">
-                <Zap className="w-3 h-3 text-yellow-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white leading-tight truncate">Quick Screens</p>
-                <p className="text-[10px] text-yellow-300">4 free</p>
-              </div>
-            </a>
-            <a href="/scans#sector-screens" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-500/20 hover:bg-teal-500/35 border border-teal-500/30 transition-all hover:-translate-y-0.5">
-              <div className="w-6 h-6 bg-teal-500/30 rounded-md flex items-center justify-center flex-shrink-0">
-                <Globe className="w-3 h-3 text-teal-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white leading-tight truncate">Sector Screens</p>
-                <p className="text-[10px] text-teal-300">12 sectors</p>
-              </div>
-            </a>
-            <a href="/scans#community-picks" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/20 hover:bg-green-500/35 border border-green-500/30 transition-all hover:-translate-y-0.5">
-              <div className="w-6 h-6 bg-green-500/30 rounded-md flex items-center justify-center flex-shrink-0">
-                <Users className="w-3 h-3 text-green-300" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-white leading-tight truncate">Community</p>
-                <p className="text-[10px] text-green-300">User picks</p>
-              </div>
-            </a>
-          </div>
-        </div>
-      )}
+      {/* Main content area — flex layout with sidebar */}
+      <div className="flex flex-col lg:flex-row gap-4">
 
       {/* ── AI Query Mode ────────────────────────────────────────── */}
       {screenerMode === 'ai' && (
-        <>
+        <div className="w-full space-y-4">
           {isPremium ? (
             <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 rounded-2xl border border-white/10 overflow-hidden">
               {/* Search area */}
@@ -1159,133 +1105,19 @@ export default function ScreenerPage() {
               </Link>
             </div>
           )}
-        </>
-      )}
-
-      {/* ── Manual Filter Mode ───────────────────────────────────── */}
-
-      {/* Upgrade modal — Pro */}
-      {upgradeForTier === 'pro' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
-            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-6 h-6 text-blue-600" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900 mb-2">Pro Screen</h2>
-            <p className="text-sm text-slate-500 mb-5">
-              This is a <span className="font-semibold text-blue-600">Pro screen</span>.
-              Upgrade to Pro or Premium to unlock it, plus CSV export and more advanced screens.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setUpgradeForTier(null)}
-                className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
-                Maybe later
-              </button>
-              <Link href="/pricing" onClick={() => setUpgradeForTier(null)}
-                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold">
-                Upgrade to Pro
-              </Link>
-            </div>
-          </div>
         </div>
       )}
 
-      {/* Upgrade modal — Premium */}
-      {upgradeForTier === 'premium' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
-            <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <Lock className="w-6 h-6 text-purple-600" />
-            </div>
-            <h2 className="text-lg font-bold text-slate-900 mb-2">Premium Screen</h2>
-            <p className="text-sm text-slate-500 mb-5">
-              This is a <span className="font-semibold text-purple-600">Premium screen</span>.
-              Upgrade to Premium to unlock advanced ASX insights — AI Ranked screens, Mining Value, A-REIT Income, Franking Optimiser and more.
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setUpgradeForTier(null)}
-                className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
-                Maybe later
-              </button>
-              <Link href="/pricing" onClick={() => setUpgradeForTier(null)}
-                className="flex-1 px-4 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold">
-                Upgrade to Premium
-              </Link>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Manual Filter Mode (Left Column) ────────────────────── */}
+      <div className={screenerMode === 'manual' ? 'space-y-4 flex-1' : 'hidden'}>
 
-      {/* Save Screen modal */}
-      {showSaveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-900">Save Screen</h2>
-              <button onClick={() => setShowSaveModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
-                <input
-                  value={saveName}
-                  onChange={e => setSaveName(e.target.value)}
-                  placeholder="e.g. High Yield Franked Miners"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
-                <textarea
-                  value={saveDesc}
-                  onChange={e => setSaveDesc(e.target.value)}
-                  placeholder="What does this screen look for?"
-                  rows={2}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-                />
-              </div>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => setSavePublic(v => !v)}
-                  className={cn(
-                    'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
-                    savePublic
-                      ? 'bg-green-50 border-green-300 text-green-700'
-                      : 'bg-gray-50 border-gray-300 text-gray-600'
-                  )}>
-                  {savePublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                  {savePublic ? 'Public — visible to all' : 'Private — only you'}
-                </button>
-              </div>
-              <p className="text-xs text-gray-400">
-                {filters.filter(f => f.value !== '').length} filter{filters.filter(f => f.value !== '').length !== 1 ? 's' : ''} will be saved
-              </p>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowSaveModal(false)}
-                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveScreen}
-                disabled={saving || !saveName.trim()}
-                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white
-                           rounded-lg font-semibold disabled:opacity-60">
-                {saving ? 'Saving…' : 'Save Screen'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Filter builder — manual mode only */}
-      {screenerMode === 'manual' && <div className="bg-white border-2 border-blue-200 rounded-xl p-4 space-y-3 shadow-sm">
-        <div className="flex items-center justify-between px-3 py-2 -mx-4 -mt-4 mb-3 bg-blue-50 border-l-4 border-blue-500 rounded-t-lg">
-          <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-blue-600" />Filters</h2>
+      {/* Filter builder — manual mode only [MOVED TO TOP] */}
+      {screenerMode === 'manual' && <div className="bg-white border-2 border-blue-200 rounded-xl p-4 space-y-3 shadow-sm hover:shadow-md transition-shadow">
+        <div className="flex items-center justify-between px-3 py-2 -mx-4 -mt-4 mb-2 bg-blue-50 border-l-4 border-blue-500 rounded-t-lg">
+          <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+            Filters
+          </h2>
           <div className="flex items-center gap-3">
             {filters.length > 0 && (
               <button onClick={clearAll}
@@ -1318,44 +1150,9 @@ export default function ScreenerPage() {
         </div>
 
         {filters.length === 0 && (
-          <div className="py-2">
-            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-blue-400" />
-              Not sure where to start? Click an example below or use &quot;Add Filter&quot;
-            </p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {[
-                {
-                  name: 'Value Income', icon: 'dollar', color: 'border-amber-200 bg-amber-50 hover:border-amber-300', hc: 'text-amber-700', cc: 'bg-amber-100 text-amber-700',
-                  chips: ['PE ≤ 15', 'Franking 100%', 'Yield ≥ 3%'],
-                  filters: [{field:'pe_ratio',operator:'lte',value:'15'},{field:'franking_pct',operator:'eq',value:'100'},{field:'dividend_yield',operator:'gte',value:'3'},{field:'net_margin',operator:'gt',value:'0'}]
-                },
-                {
-                  name: 'Quality Growth', icon: 'trending', color: 'border-blue-200 bg-blue-50 hover:border-blue-300', hc: 'text-blue-700', cc: 'bg-blue-100 text-blue-700',
-                  chips: ['ROE ≥ 15%', 'Rev Growth ≥ 20%', 'Margin ≥ 8%'],
-                  filters: [{field:'roe',operator:'gte',value:'15'},{field:'revenue_growth_1y',operator:'gte',value:'20'},{field:'net_margin',operator:'gte',value:'8'},{field:'market_cap',operator:'gte',value:'200'}]
-                },
-                {
-                  name: 'Deep Value', icon: 'search', color: 'border-green-200 bg-green-50 hover:border-green-300', hc: 'text-green-700', cc: 'bg-green-100 text-green-700',
-                  chips: ['PE ≤ 10', 'EPS Growth ≥ 5%', 'Cap ≥ 50M'],
-                  filters: [{field:'pe_ratio',operator:'lte',value:'10'},{field:'pe_ratio',operator:'gt',value:'0'},{field:'earnings_growth_1y',operator:'gte',value:'5'},{field:'market_cap',operator:'gte',value:'50'}]
-                }
-              ].map((ex, idx) => (
-                <button key={idx} onClick={() => { let id = Date.now(); setFilters(ex.filters.map((f,i) => ({id: id+i, ...f}))); }}
-                  className={"text-left w-full px-3 py-2 rounded-lg border-2 transition-all cursor-pointer " + ex.color}>
-                  <p className={"text-xs font-bold mb-1 " + ex.hc}>{ex.name}</p>
-                  <div className="flex flex-wrap gap-1 mb-1">
-                    {ex.chips.map((chip,i) => (
-                      <span key={i} className={"text-[10px] px-2 py-0.5 rounded-full font-medium " + ex.cc}>{chip}</span>
-                    ))}
-                  </div>
-                  <p className={"text-xs font-semibold flex items-center gap-1 " + ex.hc}>
-                    Try this screen <ChevronRight className="w-3 h-3" />
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
+          <p className="text-sm text-gray-400 py-2">
+            No filters — click "Add Filter" to start or select a Quick Screen below
+          </p>
         )}
 
         {filters.map(f => {
@@ -1510,6 +1307,125 @@ export default function ScreenerPage() {
         )}
       </div>}
 
+
+      {/* Upgrade modal — Pro */}
+      {upgradeForTier === 'pro' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-6 h-6 text-blue-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Pro Screen</h2>
+            <p className="text-sm text-slate-500 mb-5">
+              This is a <span className="font-semibold text-blue-600">Pro screen</span>.
+              Upgrade to Pro or Premium to unlock it, plus CSV export and more advanced screens.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                Maybe later
+              </button>
+              <Link href="/pricing" onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold">
+                Upgrade to Pro
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Upgrade modal — Premium */}
+      {upgradeForTier === 'premium' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 text-center">
+            <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-6 h-6 text-purple-600" />
+            </div>
+            <h2 className="text-lg font-bold text-slate-900 mb-2">Premium Screen</h2>
+            <p className="text-sm text-slate-500 mb-5">
+              This is a <span className="font-semibold text-purple-600">Premium screen</span>.
+              Upgrade to Premium to unlock advanced ASX insights — AI Ranked screens, Mining Value, A-REIT Income, Franking Optimiser and more.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                Maybe later
+              </button>
+              <Link href="/pricing" onClick={() => setUpgradeForTier(null)}
+                className="flex-1 px-4 py-2 text-sm bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-semibold">
+                Upgrade to Premium
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Screen modal */}
+      {showSaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-900">Save Screen</h2>
+              <button onClick={() => setShowSaveModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
+                <input
+                  value={saveName}
+                  onChange={e => setSaveName(e.target.value)}
+                  placeholder="e.g. High Yield Franked Miners"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
+                <textarea
+                  value={saveDesc}
+                  onChange={e => setSaveDesc(e.target.value)}
+                  placeholder="What does this screen look for?"
+                  rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setSavePublic(v => !v)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
+                    savePublic
+                      ? 'bg-green-50 border-green-300 text-green-700'
+                      : 'bg-gray-50 border-gray-300 text-gray-600'
+                  )}>
+                  {savePublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  {savePublic ? 'Public — visible to all' : 'Private — only you'}
+                </button>
+              </div>
+              <p className="text-xs text-gray-400">
+                {filters.filter(f => f.value !== '').length} filter{filters.filter(f => f.value !== '').length !== 1 ? 's' : ''} will be saved
+              </p>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowSaveModal(false)}
+                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveScreen}
+                disabled={saving || !saveName.trim()}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white
+                           rounded-lg font-semibold disabled:opacity-60">
+                {saving ? 'Saving…' : 'Save Screen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Results table — manual mode */}
       {screenerMode === 'manual' && results.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
@@ -1631,6 +1547,15 @@ export default function ScreenerPage() {
           <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
         </div>
       )}
-    </div>
+      </div>
+
+      {/* Browse Sectors Sidebar — Manual Mode Only */}
+      {screenerMode === 'manual' && (
+        <div className="hidden lg:block lg:w-64 flex-shrink-0">
+          <BrowseSectors onSectorSelect={handleSectorSelect} selectedSector={selectedSector} />
+        </div>
+      )}
+      </div>
+    </>
   )
 }

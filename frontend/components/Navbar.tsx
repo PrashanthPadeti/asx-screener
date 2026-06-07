@@ -10,7 +10,7 @@ import { useAuth } from '@/lib/auth'
 const NAV_LINKS = [
   { href: '/screener', label: 'Screener', icon: BarChart2 },
   { href: '/market',   label: 'Market',   icon: Globe },
-  { href: '/scans',    label: 'Scans',    icon: ScanLine },
+  { href: '/scans',    label: 'Alpha Screens',    icon: ScanLine },
 ]
 
 const MARKET_DATA_LINKS = [

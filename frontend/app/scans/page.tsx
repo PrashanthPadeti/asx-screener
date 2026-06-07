@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import {
   Shield, Zap, Award, RotateCcw, DollarSign, Search,
@@ -7,7 +7,7 @@ import {
   Star, Activity, Flame, Lock,
   Globe, Users, Play,
 } from 'lucide-react'
-import { getScreenerPresets, getCommunityScreens, incrementScreenUse, type ScreenerPreset, type SavedScreen } from '@/lib/api'
+import { getScreenerPresets, getCommunityScreens, incrementScreenUse, getMarketSectors, type ScreenerPreset, type SavedScreen } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import { HelpDrawer } from '@/components/HelpDrawer'
@@ -30,6 +30,13 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   'star':          Star,
   'activity':      Activity,
   'flame':         Flame,
+}
+
+function presetTier(p: ScreenerPreset): 'free' | 'pro' | 'premium' {
+  if (!p.premium) return 'free'
+  const premiumIds = ['ai_top5','mining_value','areit_income','franking_optimiser','short_interest_risk','multi_factor_qm','asx_dividend_aristocrats','quality_elite_compounder','altman_safety_screen','low_beta_income_shield','small_cap_hidden_gems']
+  if (premiumIds.includes(p.id)) return 'premium'
+  return 'pro'
 }
 
 // ── Category config ───────────────────────────────────────────────────────────
@@ -61,11 +68,79 @@ const CATEGORIES: { key: string; label: string; description: string; ids: string
   },
 ]
 
+
+
+// ── Sector color themes ───────────────────────────────────────────────────────
+const SECTOR_THEME: Record<string, { bg: string; accent: string; badge: string; dot: string }> = {
+  'Communication Services': { bg: 'bg-blue-50',   accent: 'border-blue-400',   badge: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-500' },
+  'Consumer Discretionary': { bg: 'bg-orange-50', accent: 'border-orange-400', badge: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
+  'Consumer Staples':       { bg: 'bg-green-50',  accent: 'border-green-400',  badge: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
+  'Energy':                 { bg: 'bg-yellow-50', accent: 'border-yellow-400', badge: 'bg-yellow-100 text-yellow-700', dot: 'bg-yellow-500' },
+  'Financials':             { bg: 'bg-indigo-50', accent: 'border-indigo-400', badge: 'bg-indigo-100 text-indigo-700', dot: 'bg-indigo-500' },
+  'Health Care':            { bg: 'bg-rose-50',   accent: 'border-rose-400',   badge: 'bg-rose-100 text-rose-700',   dot: 'bg-rose-500' },
+  'Industrials':            { bg: 'bg-slate-50',  accent: 'border-slate-400',  badge: 'bg-slate-100 text-slate-600',  dot: 'bg-slate-500' },
+  'Information Technology': { bg: 'bg-sky-50',    accent: 'border-sky-400',    badge: 'bg-sky-100 text-sky-700',     dot: 'bg-sky-500' },
+  'Materials':              { bg: 'bg-amber-50',  accent: 'border-amber-400',  badge: 'bg-amber-100 text-amber-700', dot: 'bg-amber-500' },
+  'Real Estate':            { bg: 'bg-purple-50', accent: 'border-purple-400', badge: 'bg-purple-100 text-purple-700', dot: 'bg-purple-500' },
+  'Utilities':              { bg: 'bg-teal-50',   accent: 'border-teal-400',   badge: 'bg-teal-100 text-teal-700',   dot: 'bg-teal-500' },
+}
+const DEFAULT_SECTOR_THEME = { bg: 'bg-gray-50', accent: 'border-gray-400', badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' }
+
+// ── Card color themes by screen type ─────────────────────────────────────────
+const CARD_THEME: Record<string, { bg: string; border: string; iconBg: string; iconColor: string }> = {
+  // Dividend / Income  →  Amber
+  value_franked:             { bg: 'bg-amber-50',   border: 'border-amber-200',   iconBg: 'bg-amber-100',   iconColor: 'text-amber-600' },
+  dividend_income:           { bg: 'bg-amber-50',   border: 'border-amber-200',   iconBg: 'bg-amber-100',   iconColor: 'text-amber-600' },
+  dividend_growth_machine:   { bg: 'bg-amber-50',   border: 'border-amber-200',   iconBg: 'bg-amber-100',   iconColor: 'text-amber-600' },
+  franking_optimiser:        { bg: 'bg-yellow-50',  border: 'border-yellow-200',  iconBg: 'bg-yellow-100',  iconColor: 'text-yellow-600' },
+  asx_dividend_aristocrats:  { bg: 'bg-yellow-50',  border: 'border-yellow-200',  iconBg: 'bg-yellow-100',  iconColor: 'text-yellow-600' },
+  low_beta_income_shield:    { bg: 'bg-amber-50',   border: 'border-amber-200',   iconBg: 'bg-amber-100',   iconColor: 'text-amber-600' },
+  areit_income:              { bg: 'bg-teal-50',    border: 'border-teal-200',    iconBg: 'bg-teal-100',    iconColor: 'text-teal-600' },
+
+  // Value / Quality  →  Green / Emerald
+  quality_undervalued:       { bg: 'bg-green-50',   border: 'border-green-200',   iconBg: 'bg-green-100',   iconColor: 'text-green-600' },
+  piotroski_strong:          { bg: 'bg-green-50',   border: 'border-green-200',   iconBg: 'bg-green-100',   iconColor: 'text-green-600' },
+  deep_value_growth:         { bg: 'bg-green-50',   border: 'border-green-200',   iconBg: 'bg-green-100',   iconColor: 'text-green-600' },
+  quality_elite_compounder:  { bg: 'bg-emerald-50', border: 'border-emerald-200', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+  altman_safety_screen:      { bg: 'bg-teal-50',    border: 'border-teal-200',    iconBg: 'bg-teal-100',    iconColor: 'text-teal-600' },
+  small_cap_hidden_gems:     { bg: 'bg-indigo-50',  border: 'border-indigo-200',  iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600' },
+
+  // Growth / Momentum  →  Blue
+  momentum:                  { bg: 'bg-blue-50',    border: 'border-blue-200',    iconBg: 'bg-blue-100',    iconColor: 'text-blue-600' },
+  high_growth:               { bg: 'bg-blue-50',    border: 'border-blue-200',    iconBg: 'bg-blue-100',    iconColor: 'text-blue-600' },
+  halfyearly_acceleration:   { bg: 'bg-blue-50',    border: 'border-blue-200',    iconBg: 'bg-blue-100',    iconColor: 'text-blue-600' },
+  earnings_momentum_surge:   { bg: 'bg-blue-50',    border: 'border-blue-200',    iconBg: 'bg-blue-100',    iconColor: 'text-blue-600' },
+
+  // Technical / Trading  →  Orange
+  ma_crossover:              { bg: 'bg-orange-50',  border: 'border-orange-200',  iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
+  new_52w_highs:             { bg: 'bg-orange-50',  border: 'border-orange-200',  iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
+  new_52w_lows:              { bg: 'bg-orange-50',  border: 'border-orange-200',  iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
+  volume_breakout:           { bg: 'bg-orange-50',  border: 'border-orange-200',  iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
+  rsi_oversold:              { bg: 'bg-red-50',     border: 'border-red-200',     iconBg: 'bg-red-100',     iconColor: 'text-red-500' },
+  rsi_overbought:            { bg: 'bg-red-50',     border: 'border-red-200',     iconBg: 'bg-red-100',     iconColor: 'text-red-500' },
+  turnaround:                { bg: 'bg-orange-50',  border: 'border-orange-200',  iconBg: 'bg-orange-100',  iconColor: 'text-orange-600' },
+  short_interest_risk:       { bg: 'bg-red-50',     border: 'border-red-200',     iconBg: 'bg-red-100',     iconColor: 'text-red-500' },
+
+  // AI / Multi-Factor  →  Purple / Indigo
+  ai_top5:                   { bg: 'bg-purple-50',  border: 'border-purple-200',  iconBg: 'bg-purple-100',  iconColor: 'text-purple-600' },
+  multi_factor_qm:           { bg: 'bg-indigo-50',  border: 'border-indigo-200',  iconBg: 'bg-indigo-100',  iconColor: 'text-indigo-600' },
+
+  // Mining  →  Amber/Brown
+  mining_value:              { bg: 'bg-amber-50',   border: 'border-amber-200',   iconBg: 'bg-amber-100',   iconColor: 'text-amber-700' },
+
+  // Cash Flow / ROIC  →  Emerald
+  cash_flow_champion:        { bg: 'bg-emerald-50', border: 'border-emerald-200', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+  roic_compounder:           { bg: 'bg-emerald-50', border: 'border-emerald-200', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+  gross_margin_fortress:     { bg: 'bg-emerald-50', border: 'border-emerald-200', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600' },
+}
+const DEFAULT_THEME = { bg: 'bg-white', border: 'border-gray-200', iconBg: 'bg-blue-50', iconColor: 'text-blue-600' }
+
 // ── Scan card ─────────────────────────────────────────────────────────────────
 
-function ScanCard({ preset, isPro }: { preset: ScreenerPreset; isPro: boolean }) {
+function ScanCard({ preset, isPro, tier }: { preset: ScreenerPreset; isPro: boolean; tier?: 'free' | 'pro' | 'premium' }) {
   const Icon = ICON_MAP[preset.icon] ?? Zap
   const locked = preset.premium && !isPro
+  const theme = CARD_THEME[preset.id] ?? DEFAULT_THEME
 
   return (
     <Link
@@ -74,19 +149,27 @@ function ScanCard({ preset, isPro }: { preset: ScreenerPreset; isPro: boolean })
         'group relative flex flex-col gap-3 p-5 rounded-xl border transition-all duration-150',
         locked
           ? 'bg-gray-50 border-gray-200 cursor-pointer hover:border-gray-300'
-          : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5',
+          : theme.bg + ' ' + theme.border + ' hover:shadow-md hover:-translate-y-0.5 hover:brightness-95',
       )}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className={cn(
           'w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0',
-          locked ? 'bg-gray-100' : 'bg-blue-50 group-hover:bg-blue-100 transition-colors',
+          locked ? 'bg-gray-100' : theme.iconBg + ' transition-colors',
         )}>
-          <Icon className={cn('w-5 h-5', locked ? 'text-gray-400' : 'text-blue-600')} />
+          <Icon className={cn('w-5 h-5', locked ? 'text-gray-400' : theme.iconColor)} />
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
-          {preset.premium ? (
+          {tier === 'premium' ? (
+            <span className={cn(
+              'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide',
+              locked ? 'bg-amber-100 text-amber-700' : 'bg-purple-100 text-purple-700',
+            )}>
+              {locked && <Lock className="w-2.5 h-2.5" />}
+              Premium
+            </span>
+          ) : tier === 'pro' ? (
             <span className={cn(
               'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide',
               locked ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700',
@@ -148,9 +231,11 @@ function ScanCard({ preset, isPro }: { preset: ScreenerPreset; isPro: boolean })
 export default function ScansPage() {
   const { user } = useAuth()
   const isPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(user?.plan ?? 'free')
+  const isPremium = ['premium', 'enterprise_premium'].includes(user?.plan ?? 'free')
   const [presets, setPresets] = useState<ScreenerPreset[]>([])
   const [loading, setLoading] = useState(true)
   const [community, setCommunity] = useState<SavedScreen[]>([])
+  const [sectors, setSectors] = useState<{sector: string; stock_count: number}[]>([])
 
   useEffect(() => {
     getScreenerPresets()
@@ -159,7 +244,27 @@ export default function ScansPage() {
     getCommunityScreens()
       .then(d => setCommunity(d.screens))
       .catch(() => {})
+    getMarketSectors()
+      .then(d => setSectors(d.sectors))
+      .catch(() => {})
   }, [])
+
+  // Scroll to anchor section after page loads
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const hash = window.location.hash
+    if (!hash) return
+    const scrollToHash = () => {
+      const el = document.querySelector(hash)
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    }
+    // Wait for content to render
+    const t1 = setTimeout(scrollToHash, 400)
+    const t2 = setTimeout(scrollToHash, 900)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [loading])
 
   const presetMap = Object.fromEntries(presets.map(p => [p.id, p]))
 
@@ -170,10 +275,10 @@ export default function ScansPage() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-1">Market Scans</h1>
+              <h1 className="text-2xl font-bold text-gray-900 mb-1">Alpha Screens</h1>
               <p className="text-gray-500 text-sm">
-                Pre-built screens to surface stocks matching proven investment strategies.
-                Click any scan to run it in the full screener.
+                Institutional-grade screens built on proven quant strategies.
+                Click any screen to run it instantly in the full screener.
               </p>
             </div>
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -191,17 +296,17 @@ export default function ScansPage() {
           <div className="flex items-center gap-6 mt-5">
             <div className="text-center">
               <p className="text-2xl font-bold text-gray-900">{presets.length}</p>
-              <p className="text-xs text-gray-500">Total Scans</p>
+              <p className="text-xs text-gray-500">Total Screens</p>
             </div>
             <div className="w-px h-8 bg-gray-200" />
             <div className="text-center">
               <p className="text-2xl font-bold text-gray-900">{presets.filter(p => !p.premium).length}</p>
-              <p className="text-xs text-gray-500">Free Scans</p>
+              <p className="text-xs text-gray-500">Free</p>
             </div>
             <div className="w-px h-8 bg-gray-200" />
             <div className="text-center">
               <p className="text-2xl font-bold text-gray-900">{presets.filter(p => p.premium).length}</p>
-              <p className="text-xs text-gray-500">Pro Scans</p>
+              <p className="text-xs text-gray-500">Pro + Premium</p>
             </div>
           </div>
         </div>
@@ -215,30 +320,124 @@ export default function ScansPage() {
           </div>
         ) : (
           <>
-            {CATEGORIES.map(cat => {
-              const catPresets = cat.ids.map(id => presetMap[id]).filter(Boolean)
-              if (!catPresets.length) return null
-              return (
-                <section key={cat.key}>
-                  <div className="mb-4">
-                    <h2 className="text-base font-bold text-gray-900">{cat.label}</h2>
-                    <p className="text-xs text-gray-500 mt-0.5">{cat.description}</p>
+            {/* ── 1. Premium Screens ── */}
+            <section id="premium-screens">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-purple-100 rounded-xl flex items-center justify-center">
+                    <Award className="w-5 h-5 text-purple-600" />
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {catPresets.map(p => (
-                      <ScanCard key={p.id} preset={p} isPro={isPro} />
-                    ))}
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Premium Screens</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Exclusive AI-powered &amp; specialist strategies for elite investors</p>
                   </div>
-                </section>
-              )
-            })}
+                </div>
+                {!isPremium && (
+                  <Link href="/pricing" className="flex-shrink-0 flex items-center gap-1.5 text-xs bg-purple-600 text-white px-3 py-1.5 rounded-full font-semibold hover:bg-purple-700 transition-colors">
+                    <Lock className="w-3 h-3" /> Unlock Premium
+                  </Link>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {presets.filter(p => presetTier(p) === 'premium').map(p => (
+                  <ScanCard key={p.id} preset={p} isPro={isPremium} tier="premium" />
+                ))}
+              </div>
+            </section>
 
-            {/* Community Screens */}
-            <section>
-              <div className="mb-4 flex items-center gap-2">
-                <Users className="w-4 h-4 text-blue-500" />
+            {/* ── 2. Pro Strategies ── */}
+            <section id="pro-strategies">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-blue-100 rounded-xl flex items-center justify-center">
+                    <TrendingUp className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Pro Strategies</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Advanced quantitative screens for serious investors</p>
+                  </div>
+                </div>
+                {!isPro && (
+                  <Link href="/pricing" className="flex-shrink-0 flex items-center gap-1.5 text-xs bg-blue-600 text-white px-3 py-1.5 rounded-full font-semibold hover:bg-blue-700 transition-colors">
+                    <Lock className="w-3 h-3" /> Unlock Pro
+                  </Link>
+                )}
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {presets.filter(p => presetTier(p) === 'pro').map(p => (
+                  <ScanCard key={p.id} preset={p} isPro={isPro} tier="pro" />
+                ))}
+              </div>
+            </section>
+
+            {/* ── 3. Quick Screens ── */}
+            <section id="quick-screens">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-yellow-100 rounded-xl flex items-center justify-center">
+                    <Zap className="w-5 h-5 text-yellow-500" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-gray-900">Quick Screens</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">Essential free screens to discover ASX opportunities instantly</p>
+                  </div>
+                </div>
+                <span className="flex-shrink-0 text-xs bg-emerald-100 text-emerald-700 px-3 py-1.5 rounded-full font-semibold">Free</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {presets.filter(p => presetTier(p) === 'free').map(p => (
+                  <ScanCard key={p.id} preset={p} isPro={true} tier="free" />
+                ))}
+              </div>
+            </section>
+
+            
+            {/* ── Sector Screens ── */}
+            {sectors.length > 0 && (
+              <section id="sector-screens">
+                <div className="mb-5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center">
+                      <Globe className="w-5 h-5 text-slate-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-gray-900">Sector Screens</h2>
+                      <p className="text-xs text-gray-500 mt-0.5">Browse all ASX stocks by GICS sector — live stock counts</p>
+                    </div>
+                  </div>
+                  <span className="flex-shrink-0 text-xs bg-slate-100 text-slate-600 px-3 py-1.5 rounded-full font-semibold">Free</span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {sectors.map(s => {
+                    const t = SECTOR_THEME[s.sector] ?? DEFAULT_SECTOR_THEME
+                    return (
+                      <Link
+                        key={s.sector}
+                        href={"/screener?sector=" + encodeURIComponent(s.sector)}
+                        className={"group flex items-center gap-3 p-4 rounded-xl border-2 " + t.bg + " " + t.accent + " hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"}
+                      >
+                        <div className={"w-2.5 h-2.5 rounded-full flex-shrink-0 " + t.dot} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-gray-900 truncate leading-tight">{s.sector}</p>
+                          <span className={"text-[11px] font-bold px-1.5 py-0.5 rounded-full mt-1 inline-block " + t.badge}>
+                            {s.stock_count} stocks
+                          </span>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+
+{/* ── 4. Community Picks ── */}
+            <section id="community-picks">
+              <div className="mb-5 flex items-center gap-3">
+                <div className="w-9 h-9 bg-green-100 rounded-xl flex items-center justify-center">
+                  <Users className="w-5 h-5 text-green-600" />
+                </div>
                 <div>
-                  <h2 className="text-base font-bold text-gray-900">Community Screens</h2>
+                  <h2 className="text-base font-bold text-gray-900">Community Picks</h2>
                   <p className="text-xs text-gray-500 mt-0.5">Screens created and shared by ASX Screener users</p>
                 </div>
               </div>
@@ -251,20 +450,13 @@ export default function ScansPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {community.map(s => (
-                    <Link
-                      key={s.id}
-                      href={`/screener?screen=${s.id}`}
-                      onClick={() => incrementScreenUse(s.id)}
-                      className="group relative flex flex-col gap-3 p-5 rounded-xl border border-gray-200 bg-white
-                                 hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150"
-                    >
+                    <Link key={s.id} href={"/screener?screen=" + s.id} onClick={() => incrementScreenUse(s.id)}
+                      className="group relative flex flex-col gap-3 p-5 rounded-xl border border-gray-200 bg-white hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150">
                       <div className="flex items-start justify-between gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center shrink-0 transition-colors">
-                          <Globe className="w-5 h-5 text-blue-600" />
+                        <div className="w-10 h-10 rounded-xl bg-green-50 group-hover:bg-green-100 flex items-center justify-center shrink-0 transition-colors">
+                          <Globe className="w-5 h-5 text-green-600" />
                         </div>
-                        <span className="text-xs text-gray-400 shrink-0">
-                          {s.use_count > 0 && `${s.use_count} run${s.use_count !== 1 ? 's' : ''}`}
-                        </span>
+                        <span className="text-xs text-gray-400 shrink-0">{s.use_count > 0 ? s.use_count + " runs" : ""}</span>
                       </div>
                       <div>
                         <h3 className="font-semibold text-sm text-gray-900 mb-0.5">{s.name}</h3>
@@ -273,15 +465,9 @@ export default function ScansPage() {
                       </div>
                       <div className="flex flex-wrap gap-1 mt-auto pt-1">
                         {s.filters.slice(0, 3).map((f, i) => (
-                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                            {(f.field as string).replace(/_/g, ' ')}
-                          </span>
+                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{(f.field as string).replace(/_/g, " ")}</span>
                         ))}
-                        {s.filters.length > 3 && (
-                          <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                            +{s.filters.length - 3} more
-                          </span>
-                        )}
+                        {s.filters.length > 3 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">+{s.filters.length - 3} more</span>}
                       </div>
                       <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
                         <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center">
@@ -293,7 +479,7 @@ export default function ScansPage() {
                 </div>
               )}
             </section>
-          </>
+            </>
         )}
       </div>
     </div>

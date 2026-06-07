@@ -13,7 +13,7 @@ import {
 } from '@/lib/utils'
 import {
   Plus, Trash2, Play, ChevronUp, ChevronDown, RefreshCw,
-  ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
+  ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download, TrendingUp, Users, Award,
   Sparkles, Search, Lock, Bookmark, Globe, Eye, EyeOff, Pencil,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -858,7 +858,16 @@ export default function ScreenerPage() {
 
       {/* Header + Mode Tabs */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>
+        <div>
+          <div className="flex items-center gap-2 mb-0.5">
+            <h1 className="text-xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">Stock Screener</h1>
+            <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse inline-block" />
+              Live
+            </span>
+          </div>
+          <p className="text-xs text-gray-500">Filter 1,300+ ASX stocks with institutional-grade metrics</p>
+        </div>
         <div className="flex items-center gap-2">
           <HelpDrawer sections={SCREENER_SECTIONS} title="Screener Guide" subtitle="Filters, AI query, presets, and columns explained" />
           <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
@@ -893,6 +902,69 @@ export default function ScreenerPage() {
         </div>
         </div>
       </div>
+
+      {/* ── Alpha Screens Quick Access Banner ── */}
+      {screenerMode === 'manual' && (
+        <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-900 rounded-2xl p-5 text-white shadow-xl border border-white/10">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <p className="text-xs font-semibold text-blue-300 uppercase tracking-wider mb-1">Alpha Screens</p>
+              <h2 className="text-sm font-bold text-white">Jump to Pre-Built Strategies</h2>
+              <p className="text-slate-400 text-xs mt-0.5">31 institutional-grade screens · 12 sector views · community picks</p>
+            </div>
+            <a href="/scans" className="flex-shrink-0 flex items-center gap-1 text-xs text-blue-300 hover:text-white font-medium transition-colors border border-blue-500/30 hover:border-blue-400 px-3 py-1.5 rounded-lg">
+              View All <ChevronRight className="w-3.5 h-3.5" />
+            </a>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <a href="/scans#premium-screens" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/35 border border-purple-500/30 transition-all hover:-translate-y-0.5">
+              <div className="w-6 h-6 bg-purple-500/30 rounded-md flex items-center justify-center flex-shrink-0">
+                <Award className="w-3 h-3 text-purple-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white leading-tight truncate">Premium</p>
+                <p className="text-[10px] text-purple-300">11 screens</p>
+              </div>
+            </a>
+            <a href="/scans#pro-strategies" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-500/20 hover:bg-blue-500/35 border border-blue-500/30 transition-all hover:-translate-y-0.5">
+              <div className="w-6 h-6 bg-blue-500/30 rounded-md flex items-center justify-center flex-shrink-0">
+                <TrendingUp className="w-3 h-3 text-blue-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white leading-tight truncate">Pro Strategies</p>
+                <p className="text-[10px] text-blue-300">15 screens</p>
+              </div>
+            </a>
+            <a href="/scans#quick-screens" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/35 border border-yellow-500/30 transition-all hover:-translate-y-0.5">
+              <div className="w-6 h-6 bg-yellow-500/30 rounded-md flex items-center justify-center flex-shrink-0">
+                <Zap className="w-3 h-3 text-yellow-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white leading-tight truncate">Quick Screens</p>
+                <p className="text-[10px] text-yellow-300">4 free</p>
+              </div>
+            </a>
+            <a href="/scans#sector-screens" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-teal-500/20 hover:bg-teal-500/35 border border-teal-500/30 transition-all hover:-translate-y-0.5">
+              <div className="w-6 h-6 bg-teal-500/30 rounded-md flex items-center justify-center flex-shrink-0">
+                <Globe className="w-3 h-3 text-teal-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white leading-tight truncate">Sector Screens</p>
+                <p className="text-[10px] text-teal-300">12 sectors</p>
+              </div>
+            </a>
+            <a href="/scans#community-picks" className="flex items-center gap-2 px-3 py-2 rounded-lg bg-green-500/20 hover:bg-green-500/35 border border-green-500/30 transition-all hover:-translate-y-0.5">
+              <div className="w-6 h-6 bg-green-500/30 rounded-md flex items-center justify-center flex-shrink-0">
+                <Users className="w-3 h-3 text-green-300" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-white leading-tight truncate">Community</p>
+                <p className="text-[10px] text-green-300">User picks</p>
+              </div>
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* ── AI Query Mode ────────────────────────────────────────── */}
       {screenerMode === 'ai' && (
@@ -1091,92 +1163,6 @@ export default function ScreenerPage() {
       )}
 
       {/* ── Manual Filter Mode ───────────────────────────────────── */}
-      {screenerMode === 'manual' && presets.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
-
-          {/* ── Free Screens ── */}
-          <div>
-            <div className="flex items-center gap-2 mb-2">
-              <Zap className="w-4 h-4 text-yellow-500" />
-              <span className="text-sm font-semibold text-gray-700">Quick Screens</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {presets.filter(p => presetTier(p) === 'free').map(p => (
-                <button key={p.id} onClick={() => applyPreset(p)} title={p.description}
-                  className={cn(
-                    'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors',
-                    activePreset === p.id
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : 'bg-white text-gray-700 border-gray-300 hover:border-blue-400 hover:text-blue-600'
-                  )}>
-                  {p.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Pro Screens ── */}
-          <div className="border-t border-slate-100 pt-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Pro Screens</span>
-              {!isPro && <Lock className="w-3 h-3 text-blue-500" />}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {presets.filter(p => presetTier(p) === 'pro').map(p => (
-                <button key={p.id} onClick={() => applyPreset(p)} title={p.description}
-                  className={cn(
-                    'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors flex items-center gap-1.5',
-                    activePreset === p.id
-                      ? 'bg-blue-600 text-white border-blue-600'
-                      : isPro
-                        ? 'bg-white text-gray-700 border-blue-200 hover:border-blue-400 hover:text-blue-700'
-                        : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 cursor-pointer'
-                  )}>
-                  {!isPro && <Lock className="w-3 h-3 flex-shrink-0" />}
-                  {p.name}
-                  <span className={cn(
-                    'text-[10px] rounded px-1 py-0.5 font-bold leading-none',
-                    activePreset === p.id
-                      ? 'bg-white/30 text-white'
-                      : 'bg-blue-600 text-white'
-                  )}>PRO</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* ── Premium Screens ── */}
-          <div className="border-t border-slate-100 pt-3">
-            <div className="flex items-center gap-1.5 mb-2">
-              <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">Premium Screens</span>
-              {!isPremium && <Lock className="w-3 h-3 text-purple-500" />}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {presets.filter(p => presetTier(p) === 'premium').map(p => (
-                <button key={p.id} onClick={() => applyPreset(p)} title={p.description}
-                  className={cn(
-                    'px-3 py-1.5 text-sm rounded-lg border font-medium transition-colors flex items-center gap-1.5',
-                    activePreset === p.id
-                      ? 'bg-purple-600 text-white border-purple-600'
-                      : isPremium
-                        ? 'bg-white text-gray-700 border-purple-200 hover:border-purple-400 hover:text-purple-700'
-                        : 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100 cursor-pointer'
-                  )}>
-                  {!isPremium && <Lock className="w-3 h-3 flex-shrink-0" />}
-                  {p.name}
-                  <span className={cn(
-                    'text-[10px] rounded px-1 py-0.5 font-bold leading-none',
-                    activePreset === p.id
-                      ? 'bg-white/30 text-white'
-                      : 'bg-purple-600 text-white'
-                  )}>PREMIUM</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-        </div>
-      )}
 
       {/* Upgrade modal — Pro */}
       {upgradeForTier === 'pro' && (
@@ -1297,9 +1283,9 @@ export default function ScreenerPage() {
       )}
 
       {/* Filter builder — manual mode only */}
-      {screenerMode === 'manual' && <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-gray-800 text-sm">Filters</h2>
+      {screenerMode === 'manual' && <div className="bg-white border-2 border-blue-200 rounded-xl p-4 space-y-3 shadow-sm">
+        <div className="flex items-center justify-between px-3 py-2 -mx-4 -mt-4 mb-3 bg-blue-50 border-l-4 border-blue-500 rounded-t-lg">
+          <h2 className="font-semibold text-gray-800 text-sm flex items-center gap-2"><SlidersHorizontal className="w-4 h-4 text-blue-600" />Filters</h2>
           <div className="flex items-center gap-3">
             {filters.length > 0 && (
               <button onClick={clearAll}
@@ -1332,9 +1318,44 @@ export default function ScreenerPage() {
         </div>
 
         {filters.length === 0 && (
-          <p className="text-sm text-gray-400 py-2">
-            No filters — click a Quick Screen above or &quot;Add Filter&quot; to start
-          </p>
+          <div className="py-2">
+            <p className="text-xs text-gray-400 mb-3 flex items-center gap-1.5">
+              <Zap className="w-3.5 h-3.5 text-blue-400" />
+              Not sure where to start? Click an example below or use &quot;Add Filter&quot;
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {[
+                {
+                  name: 'Value Income', icon: 'dollar', color: 'border-amber-200 bg-amber-50 hover:border-amber-300', hc: 'text-amber-700', cc: 'bg-amber-100 text-amber-700',
+                  chips: ['PE ≤ 15', 'Franking 100%', 'Yield ≥ 3%'],
+                  filters: [{field:'pe_ratio',operator:'lte',value:'15'},{field:'franking_pct',operator:'eq',value:'100'},{field:'dividend_yield',operator:'gte',value:'3'},{field:'net_margin',operator:'gt',value:'0'}]
+                },
+                {
+                  name: 'Quality Growth', icon: 'trending', color: 'border-blue-200 bg-blue-50 hover:border-blue-300', hc: 'text-blue-700', cc: 'bg-blue-100 text-blue-700',
+                  chips: ['ROE ≥ 15%', 'Rev Growth ≥ 20%', 'Margin ≥ 8%'],
+                  filters: [{field:'roe',operator:'gte',value:'15'},{field:'revenue_growth_1y',operator:'gte',value:'20'},{field:'net_margin',operator:'gte',value:'8'},{field:'market_cap',operator:'gte',value:'200'}]
+                },
+                {
+                  name: 'Deep Value', icon: 'search', color: 'border-green-200 bg-green-50 hover:border-green-300', hc: 'text-green-700', cc: 'bg-green-100 text-green-700',
+                  chips: ['PE ≤ 10', 'EPS Growth ≥ 5%', 'Cap ≥ 50M'],
+                  filters: [{field:'pe_ratio',operator:'lte',value:'10'},{field:'pe_ratio',operator:'gt',value:'0'},{field:'earnings_growth_1y',operator:'gte',value:'5'},{field:'market_cap',operator:'gte',value:'50'}]
+                }
+              ].map((ex, idx) => (
+                <button key={idx} onClick={() => { let id = Date.now(); setFilters(ex.filters.map((f,i) => ({id: id+i, ...f}))); }}
+                  className={"text-left w-full px-3 py-2 rounded-lg border-2 transition-all cursor-pointer " + ex.color}>
+                  <p className={"text-xs font-bold mb-1 " + ex.hc}>{ex.name}</p>
+                  <div className="flex flex-wrap gap-1 mb-1">
+                    {ex.chips.map((chip,i) => (
+                      <span key={i} className={"text-[10px] px-2 py-0.5 rounded-full font-medium " + ex.cc}>{chip}</span>
+                    ))}
+                  </div>
+                  <p className={"text-xs font-semibold flex items-center gap-1 " + ex.hc}>
+                    Try this screen <ChevronRight className="w-3 h-3" />
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {filters.map(f => {

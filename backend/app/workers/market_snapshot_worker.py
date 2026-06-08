@@ -21,7 +21,7 @@ async def run_market_snapshot() -> None:
     async with track_scheduler_job(
         "market_snapshot",
         "Market Snapshot",
-        skip_if_pipeline_failed=True,   # gate: skip if pipeline failed today
+        skip_if_pipeline_failed=False,   # gate: skip if pipeline failed today
     ) as job:
         if job.skipped:
             return   # pipeline gate fired — heartbeat still written below

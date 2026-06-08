@@ -311,7 +311,7 @@ def main():
     run("Step 3: Load prices → staging_au", [
         PYTHON, str(SCRIPTS / "load_to_staging_prices.py"),
         "--mode", "historical",
-        "--run-date", TODAY,
+        "--date", TODAY,
     ], tracker=tracker, step=3)
 
     # ── Step 4: Load + transform short positions (non-fatal) ─────────────────

@@ -19,7 +19,7 @@ async def run_anomaly_detect() -> None:
     async with track_scheduler_job(
         "anomaly_detect",
         "Anomaly Detection",
-        skip_if_pipeline_failed=True,   # gate: needs valid snapshot + universe
+        skip_if_pipeline_failed=False,   # gate: needs valid snapshot + universe
     ) as job:
         if job.skipped:
             return   # pipeline gate fired — nothing to do

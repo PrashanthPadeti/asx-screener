@@ -30,6 +30,7 @@ class SaveScreenRequest(BaseModel):
     sort_by:     str         = "market_cap"
     sort_dir:    str         = "desc"
     is_public:   bool        = False
+    query_text:  Optional[str] = None
 
 
 class UpdateScreenRequest(BaseModel):
@@ -39,6 +40,7 @@ class UpdateScreenRequest(BaseModel):
     sort_by:     Optional[str]  = None
     sort_dir:    Optional[str]  = None
     is_public:   Optional[bool] = None
+    query_text:  Optional[str]  = None
 
 
 def _row_to_dict(row) -> dict:
@@ -53,6 +55,7 @@ def _row_to_dict(row) -> dict:
         "sort_dir":    row.sort_dir,
         "is_public":   row.is_public,
         "use_count":   row.use_count,
+        "query_text":  row.query_text if hasattr(row, "query_text") else None,
         "created_at":  row.created_at.isoformat() if row.created_at else None,
         "updated_at":  row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -65,7 +68,7 @@ async def community_screens(db: AsyncSession = Depends(get_db)):
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.created_at, s.updated_at
+               s.query_text, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.is_public = TRUE
@@ -85,7 +88,7 @@ async def my_screens(
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.created_at, s.updated_at
+               s.query_text, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.user_id = :uid
@@ -104,18 +107,19 @@ async def create_screen(
 ):
     result = await db.execute(text("""
         INSERT INTO screener.saved_screens
-            (user_id, name, description, filters, sort_by, sort_dir, is_public)
-        VALUES (:uid, :name, :desc, CAST(:filters AS jsonb), :sort_by, :sort_dir, :is_public)
+            (user_id, name, description, filters, sort_by, sort_dir, is_public, query_text)
+        VALUES (:uid, :name, :desc, CAST(:filters AS jsonb), :sort_by, :sort_dir, :is_public, :query_text)
         RETURNING id, user_id, name, description, filters, sort_by, sort_dir,
-                  is_public, use_count, created_at, updated_at
+                  is_public, use_count, query_text, created_at, updated_at
     """), {
-        "uid":       current_user["id"],
-        "name":      body.name,
-        "desc":      body.description,
-        "filters":   json.dumps(body.filters),
-        "sort_by":   body.sort_by,
-        "sort_dir":  body.sort_dir,
-        "is_public": body.is_public,
+        "uid":        current_user["id"],
+        "name":       body.name,
+        "desc":       body.description,
+        "filters":    json.dumps(body.filters),
+        "sort_by":    body.sort_by,
+        "sort_dir":   body.sort_dir,
+        "is_public":  body.is_public,
+        "query_text": body.query_text,
     })
     await db.commit()
     row = result.fetchone()
@@ -123,7 +127,7 @@ async def create_screen(
     result2 = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.created_at, s.updated_at
+               s.query_text, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.id = :id
@@ -157,6 +161,7 @@ async def update_screen(
     if body.sort_by     is not None: updates["sort_by"]     = body.sort_by
     if body.sort_dir    is not None: updates["sort_dir"]    = body.sort_dir
     if body.is_public   is not None: updates["is_public"]   = body.is_public
+    if body.query_text  is not None: updates["query_text"]  = body.query_text
 
     if not updates:
         raise HTTPException(status_code=400, detail="Nothing to update")
@@ -175,7 +180,7 @@ async def update_screen(
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.created_at, s.updated_at
+               s.query_text, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.id = :id

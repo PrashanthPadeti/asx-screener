@@ -1749,6 +1749,7 @@ export interface SavedScreen {
   sort_dir:    string
   is_public:   boolean
   use_count:   number
+  query_text:  string | null
   created_at:  string | null
   updated_at:  string | null
 }
@@ -1770,6 +1771,7 @@ export const saveScreen = async (payload: {
   sort_by: string
   sort_dir: string
   is_public: boolean
+  query_text?: string
 }): Promise<SavedScreen> => {
   const { data } = await api.post('/api/v1/screens', payload)
   return data

@@ -470,6 +470,11 @@ export default function ScreenerPage() {
   const [queryFields, setQueryFields]                 = useState<QueryFieldRef[]>([])
   const [queryFieldSearch, setQueryFieldSearch]       = useState('')
   const [queryFieldsLoaded, setQueryFieldsLoaded]     = useState(false)
+  const [showQuerySaveModal, setShowQuerySaveModal]   = useState(false)
+  const [querySaveName, setQuerySaveName]             = useState('')
+  const [querySaveDesc, setQuerySaveDesc]             = useState('')
+  const [querySaving, setQuerySaving]                 = useState(false)
+  const [showQueryMyScreens, setShowQueryMyScreens]   = useState(false)
 
   // NL screener state
   const [nlQuery, setNlQuery]               = useState('')
@@ -987,6 +992,38 @@ export default function ScreenerPage() {
     URL.revokeObjectURL(url)
   }
 
+  const handleSaveQuery = async () => {
+    if (!querySaveName.trim() || !queryText.trim()) return
+    setQuerySaving(true)
+    try {
+      const screen = await saveScreen({
+        name:       querySaveName.trim(),
+        description: querySaveDesc.trim() || undefined,
+        filters:    [],
+        sort_by:    sortBy,
+        sort_dir:   sortDir,
+        is_public:  false,
+        query_text: queryText.trim(),
+      })
+      setMyScreens(s => [screen, ...s])
+      setShowQuerySaveModal(false)
+      setQuerySaveName('')
+      setQuerySaveDesc('')
+    } catch { /* ignore */ } finally {
+      setQuerySaving(false)
+    }
+  }
+
+  const loadSavedQuery = (screen: SavedScreen) => {
+    if (!screen.query_text) return
+    setQueryText(screen.query_text)
+    setShowQueryMyScreens(false)
+    setQueryError(null)
+    setResults([])
+    setTotal(0)
+    setRan(false)
+  }
+
   return (
     <>
       {/* Header + Mode Tabs — always full width */}
@@ -1278,7 +1315,7 @@ export default function ScreenerPage() {
               />
 
               {/* Actions row */}
-              <div className="flex items-center gap-3 mt-3">
+              <div className="flex items-center gap-2 mt-3 flex-wrap">
                 <button
                   onClick={() => runQueryScreen(1)}
                   disabled={queryLoading || !queryText.trim()}
@@ -1300,12 +1337,65 @@ export default function ScreenerPage() {
                   <X className="w-3.5 h-3.5" />
                   Clear
                 </button>
+                {user && queryText.trim() && (
+                  <button
+                    onClick={() => setShowQuerySaveModal(true)}
+                    className="flex items-center gap-1.5 px-3 py-2 text-sm text-orange-600 hover:text-orange-700
+                               border border-orange-200 hover:border-orange-400 bg-orange-50 rounded-lg transition-colors font-medium"
+                  >
+                    <Bookmark className="w-3.5 h-3.5" />
+                    Save Query
+                  </button>
+                )}
+                {user && (
+                  <button
+                    onClick={() => { setShowQueryMyScreens(v => !v); if (!showQueryMyScreens) loadMyScreens() }}
+                    className={cn(
+                      'flex items-center gap-1.5 px-3 py-2 text-sm border rounded-lg font-medium transition-colors',
+                      showQueryMyScreens
+                        ? 'bg-orange-50 border-orange-300 text-orange-700'
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    )}
+                  >
+                    <Eye className="w-3.5 h-3.5" /> My Queries
+                  </button>
+                )}
                 {ran && !queryLoading && total > 0 && (
                   <span className="ml-auto text-xs text-gray-500">
                     {total.toLocaleString()} result{total !== 1 ? 's' : ''}
                   </span>
                 )}
               </div>
+
+              {/* My Queries panel */}
+              {showQueryMyScreens && user && (
+                <div className="border-t border-orange-100 pt-3 mt-3">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Saved Queries</p>
+                  {myScreens.filter(s => s.query_text).length === 0 ? (
+                    <p className="text-sm text-gray-400">No saved queries yet. Write a query and click &quot;Save Query&quot;.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {myScreens.filter(s => s.query_text).map(s => (
+                        <div key={s.id} className="flex items-center gap-2 group">
+                          <button
+                            onClick={() => loadSavedQuery(s)}
+                            className="flex-1 text-left px-3 py-2 rounded-lg border border-gray-200
+                                       hover:border-orange-300 hover:bg-orange-50 transition-colors">
+                            <span className="text-sm font-medium text-gray-800">{s.name}</span>
+                            {s.description && <p className="text-xs text-gray-400 mt-0.5">{s.description}</p>}
+                          </button>
+                          <button
+                            onClick={() => handleDeleteScreen(s.id)}
+                            title="Delete"
+                            className="p-1.5 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Error banner */}
               {queryError && (
@@ -1735,6 +1825,65 @@ export default function ScreenerPage() {
                 className="flex-1 px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white
                            rounded-lg font-semibold disabled:opacity-60">
                 {saving ? 'Saving…' : 'Save Screen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Query modal */}
+      {showQuerySaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-5 h-5 text-orange-500" />
+                <h2 className="text-lg font-bold text-gray-900">Save Query</h2>
+              </div>
+              <button onClick={() => setShowQuerySaveModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
+                <input
+                  value={querySaveName}
+                  onChange={e => setQuerySaveName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveQuery() }}
+                  placeholder="e.g. High Quality Compounders"
+                  autoFocus
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-orange-400"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
+                <textarea
+                  value={querySaveDesc}
+                  onChange={e => setQuerySaveDesc(e.target.value)}
+                  placeholder="What does this query look for?"
+                  rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+                />
+              </div>
+              <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                <p className="text-xs font-mono text-orange-700 truncate">{queryText.trim().split('\n')[0]}{queryText.trim().split('\n').length > 1 ? ' …' : ''}</p>
+                <p className="text-[10px] text-orange-400 mt-0.5">{queryText.trim().split('\n').length} line{queryText.trim().split('\n').length !== 1 ? 's' : ''} · query mode</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowQuerySaveModal(false)}
+                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveQuery}
+                disabled={querySaving || !querySaveName.trim()}
+                className="flex-1 px-4 py-2 text-sm bg-orange-500 hover:bg-orange-600 text-white
+                           rounded-lg font-semibold disabled:opacity-60">
+                {querySaving ? 'Saving…' : 'Save Query'}
               </button>
             </div>
           </div>

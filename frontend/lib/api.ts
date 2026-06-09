@@ -914,6 +914,35 @@ export const nlScreener = async (query: string, page = 1): Promise<NLScreenerRes
   return data
 }
 
+// ── SQL-Like Query Screener ───────────────────────────────────
+
+export interface QueryFieldRef {
+  key:      string
+  label:    string
+  unit:     string
+  category: string
+  type:     'number' | 'boolean' | 'text'
+  aliases:  string[]
+}
+
+export interface QueryScreenerRequest {
+  query:      string
+  sort_by?:   string
+  sort_dir?:  'asc' | 'desc'
+  page?:      number
+  page_size?: number
+}
+
+export const queryScreener = async (req: QueryScreenerRequest): Promise<ScreenerResponse> => {
+  const { data } = await api.post('/api/v1/screener/query', req)
+  return data
+}
+
+export const getQueryFields = async (): Promise<QueryFieldRef[]> => {
+  const { data } = await api.get('/api/v1/screener/query/fields')
+  return data.fields ?? []
+}
+
 // ── Anomaly Flags ─────────────────────────────────────────────
 
 // Anomaly flag for a single company (company detail page)

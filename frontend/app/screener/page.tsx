@@ -3,9 +3,9 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   runScreener, getScreenerFields, getScreenerPresets, exportScreener,
-  nlScreener,
+  nlScreener, queryScreener, getQueryFields,
   type ScreenerFilter, type ScreenerRow, type ScreenerFieldMeta,
-  type ScreenerPreset, type NLScreenerResponse,
+  type ScreenerPreset, type NLScreenerResponse, type QueryFieldRef,
 } from '@/lib/api'
 import {
   formatPrice, formatVolume, formatMarketCap,
@@ -15,6 +15,7 @@ import {
   Plus, Trash2, Play, ChevronUp, ChevronDown, RefreshCw,
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
   Sparkles, Search, Lock, Bookmark, Globe, Eye, EyeOff, Pencil,
+  Code2, AlertCircle, FileText,
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
@@ -419,6 +420,7 @@ export default function ScreenerPage() {
   const isFree    = !['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
   const isPro     = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
   const isPremium = ['premium', 'enterprise_premium'].includes(userPlan)
+  const isAdmin   = user?.is_admin ?? false
   const searchParams = useSearchParams()
 
   // null = closed; 'pro' or 'premium' = show relevant upgrade modal
@@ -455,10 +457,19 @@ export default function ScreenerPage() {
   const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
 
   // Screener mode
-  const [screenerMode, setScreenerMode] = useState<'manual' | 'ai'>('manual')
+  const [screenerMode, setScreenerMode] = useState<'manual' | 'ai' | 'query'>('manual')
 
   // Browse Sectors
   const [selectedSector, setSelectedSector] = useState<string | undefined>(undefined)
+
+  // Query Mode state
+  const queryTextareaRef                              = useRef<HTMLTextAreaElement>(null)
+  const [queryText, setQueryText]                     = useState('')
+  const [queryLoading, setQueryLoading]               = useState(false)
+  const [queryError, setQueryError]                   = useState<string | null>(null)
+  const [queryFields, setQueryFields]                 = useState<QueryFieldRef[]>([])
+  const [queryFieldSearch, setQueryFieldSearch]       = useState('')
+  const [queryFieldsLoaded, setQueryFieldsLoaded]     = useState(false)
 
   // NL screener state
   const [nlQuery, setNlQuery]               = useState('')
@@ -869,6 +880,113 @@ export default function ScreenerPage() {
     }
   }
 
+  // ── Query Mode — run SQL-like query ───────────────────────────────────────
+  const runQueryScreen = async (page = 1) => {
+    if (!queryText.trim()) return
+    setQueryLoading(true)
+    setQueryError(null)
+    setRan(true)
+    try {
+      const res = await queryScreener({
+        query:     queryText.trim(),
+        sort_by:   sortBy,
+        sort_dir:  sortDir,
+        page,
+        page_size: 50,
+      })
+      setResults(res.data)
+      setTotal(res.total)
+      setPage(res.page)
+      setTotalPages(res.total_pages)
+      setIsCapped(res.is_capped ?? false)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        || (e as Error).message
+        || 'Query failed'
+      setQueryError(msg)
+    } finally {
+      setQueryLoading(false)
+    }
+  }
+
+  // Load field reference when Query Mode is first entered
+  const loadQueryFields = async () => {
+    if (queryFieldsLoaded) return
+    try {
+      const fields = await getQueryFields()
+      setQueryFields(fields)
+      setQueryFieldsLoaded(true)
+    } catch {
+      // Silently fail — field reference is optional UI enhancement
+    }
+  }
+
+  // Insert field key at current cursor position in the query textarea
+  const insertFieldAtCursor = (fieldKey: string) => {
+    const ta = queryTextareaRef.current
+    if (!ta) {
+      setQueryText(prev => prev + (prev ? ' ' : '') + fieldKey)
+      return
+    }
+    const start = ta.selectionStart
+    const end   = ta.selectionEnd
+    const before = queryText.slice(0, start)
+    const after  = queryText.slice(end)
+    const sep    = before && !before.endsWith(' ') && !before.endsWith('\n') ? ' ' : ''
+    const newText = before + sep + fieldKey + after
+    setQueryText(newText)
+    // Restore cursor after the inserted text
+    setTimeout(() => {
+      ta.focus()
+      const newPos = start + sep.length + fieldKey.length
+      ta.setSelectionRange(newPos, newPos)
+    }, 0)
+  }
+
+  // Smart textarea: auto-insert newline after AND/OR keywords for readability
+  const handleQueryKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      runQueryScreen(1)
+      return
+    }
+  }
+
+  const handleQueryChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value
+    setQueryText(val)
+    setQueryError(null)
+
+    // Auto-newline: if user just typed " AND " or " OR ", replace the trailing
+    // space with a newline so each condition goes on its own line.
+    const upper = val.toUpperCase()
+    if (upper.endsWith(' AND ') || upper.endsWith(' OR ')) {
+      const keyword = upper.endsWith(' AND ') ? ' AND ' : ' OR '
+      const base    = val.slice(0, val.length - keyword.length)
+      const kw      = val.slice(val.length - keyword.length).trimEnd()
+      setQueryText(base + kw + '\n')
+    }
+  }
+
+  // CSV download for field reference
+  const downloadFieldRefCSV = () => {
+    if (!queryFields.length) return
+    const header = 'Field Key,Label,Unit,Category,Type,Aliases'
+    const rows   = queryFields.map(f =>
+      [f.key, f.label, f.unit, f.category, f.type, f.aliases.join(' | ')]
+        .map(v => `"${String(v).replace(/"/g, '""')}"`)
+        .join(',')
+    )
+    const csv  = [header, ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = 'asx_screener_query_fields.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <>
       {/* Header + Mode Tabs — always full width */}
@@ -905,6 +1023,21 @@ export default function ScreenerPage() {
               : <span className="text-[10px] bg-amber-500 text-white rounded px-1.5 py-0.5 font-bold">UPGRADE</span>
             }
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => { setScreenerMode('query'); loadQueryFields() }}
+              className={cn(
+                'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
+                screenerMode === 'query'
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              )}
+            >
+              <Code2 className="w-3.5 h-3.5 text-orange-500" />
+              Query Mode
+              <span className="text-[10px] bg-orange-100 text-orange-700 rounded px-1.5 py-0.5 font-bold">ADMIN</span>
+            </button>
+          )}
         </div>
         </div>
       </div>
@@ -1105,6 +1238,189 @@ export default function ScreenerPage() {
               </Link>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Query Mode ───────────────────────────────────────────── */}
+      {screenerMode === 'query' && isAdmin && (
+        <div className="w-full space-y-4">
+
+          {/* Query input card */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 py-3 bg-orange-50 border-b border-orange-100">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-4 h-4 text-orange-600" />
+                <span className="font-semibold text-gray-800 text-sm">Query Mode</span>
+                <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 rounded px-1.5 py-0.5 font-bold">ADMIN</span>
+              </div>
+              <span className="text-xs text-gray-500">
+                Use field names + operators · AND / OR · ( ) grouping · Ctrl+Enter to run
+              </span>
+            </div>
+
+            {/* Textarea */}
+            <div className="p-4">
+              <textarea
+                ref={queryTextareaRef}
+                value={queryText}
+                onChange={handleQueryChange}
+                onKeyDown={handleQueryKeyDown}
+                placeholder={`roe > 10 AND\n(roce > 10 OR\n  roic > 10)`}
+                rows={6}
+                className="w-full font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg p-3
+                           text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2
+                           focus:ring-orange-300 focus:border-orange-400 resize-y leading-relaxed"
+                spellCheck={false}
+                autoCapitalize="off"
+                autoCorrect="off"
+              />
+
+              {/* Actions row */}
+              <div className="flex items-center gap-3 mt-3">
+                <button
+                  onClick={() => runQueryScreen(1)}
+                  disabled={queryLoading || !queryText.trim()}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600
+                             disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm
+                             font-semibold rounded-lg transition-colors"
+                >
+                  {queryLoading
+                    ? <RefreshCw className="w-4 h-4 animate-spin" />
+                    : <Play className="w-4 h-4" />
+                  }
+                  {queryLoading ? 'Running…' : 'Run Query'}
+                </button>
+                <button
+                  onClick={() => { setQueryText(''); setQueryError(null); setResults([]); setTotal(0); setRan(false) }}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700
+                             border border-gray-200 rounded-lg transition-colors"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Clear
+                </button>
+                {ran && !queryLoading && total > 0 && (
+                  <span className="ml-auto text-xs text-gray-500">
+                    {total.toLocaleString()} result{total !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+
+              {/* Error banner */}
+              {queryError && (
+                <div className="flex items-start gap-2 mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-700">Parse Error</p>
+                    <p className="text-sm text-red-600 mt-0.5">{queryError}</p>
+                    <p className="text-xs text-red-400 mt-1">
+                      Check the Field Reference below for valid field names.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Field Reference panel */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-gray-500" />
+                <span className="font-semibold text-gray-700 text-sm">Field Reference</span>
+                {queryFields.length > 0 && (
+                  <span className="text-xs text-gray-400">{queryFields.length} fields</span>
+                )}
+              </div>
+              <button
+                onClick={downloadFieldRefCSV}
+                disabled={queryFields.length === 0}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700
+                           disabled:opacity-40 border border-gray-200 rounded px-2 py-1 transition-colors"
+              >
+                <Download className="w-3 h-3" />
+                CSV
+              </button>
+            </div>
+
+            {/* Search */}
+            <div className="px-4 py-2 border-b border-gray-100">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <input
+                  type="text"
+                  value={queryFieldSearch}
+                  onChange={e => setQueryFieldSearch(e.target.value)}
+                  placeholder="Search fields by name or alias…"
+                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg
+                             focus:outline-none focus:ring-2 focus:ring-orange-200"
+                />
+              </div>
+            </div>
+
+            {/* Fields list */}
+            <div className="max-h-64 overflow-y-auto">
+              {queryFields.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-gray-400">
+                  Loading field reference…
+                </div>
+              ) : (() => {
+                const search = queryFieldSearch.toLowerCase()
+                const filtered = queryFields.filter(f =>
+                  !search ||
+                  f.key.includes(search) ||
+                  f.label.toLowerCase().includes(search) ||
+                  f.category.toLowerCase().includes(search) ||
+                  f.aliases.some(a => a.includes(search))
+                )
+                // Group by category
+                const byCategory: Record<string, QueryFieldRef[]> = {}
+                filtered.forEach(f => {
+                  ;(byCategory[f.category] = byCategory[f.category] || []).push(f)
+                })
+
+                return Object.entries(byCategory).map(([cat, fields]) => (
+                  <div key={cat}>
+                    <div className="px-4 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider
+                                    bg-gray-50 border-b border-gray-100 sticky top-0">
+                      {cat}
+                    </div>
+                    {fields.map(f => (
+                      <div
+                        key={f.key}
+                        className="flex items-start justify-between px-4 py-2 hover:bg-orange-50
+                                   border-b border-gray-50 group"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <code className="text-xs font-mono font-semibold text-orange-700 bg-orange-50
+                                             px-1.5 py-0.5 rounded border border-orange-100">{f.key}</code>
+                            {f.unit && (
+                              <span className="text-[10px] text-gray-400">{f.unit}</span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-600 mt-0.5 truncate">{f.label}</p>
+                          {f.aliases.length > 0 && (
+                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">
+                              aliases: {f.aliases.slice(0, 3).join(', ')}{f.aliases.length > 3 ? '…' : ''}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => insertFieldAtCursor(f.key)}
+                          className="ml-3 flex-shrink-0 opacity-0 group-hover:opacity-100 text-[10px]
+                                     text-orange-600 hover:text-orange-700 border border-orange-200
+                                     hover:border-orange-400 rounded px-1.5 py-0.5 transition-all font-medium"
+                        >
+                          + Insert
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              })()}
+            </div>
+          </div>
         </div>
       )}
 
@@ -1426,8 +1742,8 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* Results table — manual mode */}
-      {screenerMode === 'manual' && results.length > 0 && (
+      {/* Results table — manual mode + query mode */}
+      {(screenerMode === 'manual' || screenerMode === 'query') && results.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
 
           {/* Free-tier cap banner */}
@@ -1526,12 +1842,16 @@ export default function ScreenerPage() {
               Page {page} of {totalPages}
             </span>
             <div className="flex gap-2">
-              <button onClick={() => runScreen(page - 1)} disabled={page <= 1 || loading}
+              <button
+                onClick={() => screenerMode === 'query' ? runQueryScreen(page - 1) : runScreen(page - 1)}
+                disabled={page <= 1 || loading || queryLoading}
                 className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300
                            disabled:opacity-40 hover:bg-white font-medium text-gray-600">
                 <ChevronLeft className="w-4 h-4" /> Prev
               </button>
-              <button onClick={() => runScreen(page + 1)} disabled={page >= totalPages || loading}
+              <button
+                onClick={() => screenerMode === 'query' ? runQueryScreen(page + 1) : runScreen(page + 1)}
+                disabled={page >= totalPages || loading || queryLoading}
                 className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300
                            disabled:opacity-40 hover:bg-white font-medium text-gray-600">
                 Next <ChevronRight className="w-4 h-4" />
@@ -1541,9 +1861,9 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {screenerMode === 'manual' && ran && !loading && results.length === 0 && (
+      {(screenerMode === 'manual' || screenerMode === 'query') && ran && !loading && !queryLoading && results.length === 0 && !queryError && (
         <div className="text-center py-12 bg-white border border-gray-200 rounded-xl">
-          <p className="text-gray-500 font-medium">No stocks match your filters.</p>
+          <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>
           <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
         </div>
       )}

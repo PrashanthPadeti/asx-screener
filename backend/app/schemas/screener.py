@@ -2,7 +2,7 @@
 Pydantic schemas for the Screener API
 """
 from pydantic import BaseModel, Field
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 from datetime import date, datetime
 from enum import Enum
 
@@ -40,6 +40,28 @@ class ScreenerRequest(BaseModel):
                     {"field": "franking_pct",    "operator": "eq",  "value": 100},
                 ],
                 "sort_by":   "grossed_up_yield",
+                "sort_dir":  "desc",
+                "page":      1,
+                "page_size": 50,
+            }
+        }
+    }
+
+
+class QueryScreenerRequest(BaseModel):
+    """Request body for the SQL-like query mode endpoint."""
+    query:     str  = Field(..., min_length=1, max_length=4000,
+                            description="SQL-like WHERE expression, e.g. 'roe > 10 AND (roce > 10 OR roic > 10)'")
+    sort_by:   str  = Field(default="market_cap", description="Column to sort results by")
+    sort_dir:  Literal["asc", "desc"] = Field(default="desc", description="Sort direction")
+    page:      int  = Field(default=1, ge=1)
+    page_size: int  = Field(default=50, ge=1, le=200)
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "query":     "roe > 15 AND roce > 15 AND (revenue_cagr_5y > 10 OR earnings_growth_1y > 10)",
+                "sort_by":   "market_cap",
                 "sort_dir":  "desc",
                 "page":      1,
                 "page_size": 50,

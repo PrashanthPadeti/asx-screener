@@ -23,9 +23,10 @@ from datetime import date as date_type
 from typing import Any, Optional
 
 from app.db.session import get_db
-from app.schemas.screener import ScreenerRequest, ScreenerResponse, ScreenerRow
+from app.schemas.screener import ScreenerRequest, ScreenerResponse, ScreenerRow, QueryScreenerRequest
 from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
-from app.core.deps import get_optional_user, get_current_user
+from app.core.deps import get_optional_user, get_current_user, require_admin
+from app.core.query_parser import parse_query, get_field_reference, QueryParseError
 
 FREE_STOCK_LIMIT = 500   # max rows visible to free / unauthenticated users
 
@@ -1552,3 +1553,121 @@ async def get_screener_presets():
 
         ]
     }
+
+
+# ── GET /screener/query/fields ────────────────────────────────────────────────
+
+@router.get("/query/fields")
+async def get_query_fields(
+    _user: dict = Depends(require_admin),
+):
+    """
+    Returns all filterable fields with their keys, labels, units, categories,
+    and human-readable aliases for use in the Query Mode field reference panel.
+
+    Admin-only endpoint (same access control as the query runner).
+    """
+    return {"fields": get_field_reference(ALLOWED_FIELDS)}
+
+
+# ── POST /screener/query ──────────────────────────────────────────────────────
+
+@router.post("/query", response_model=ScreenerResponse)
+async def query_screener(
+    req: QueryScreenerRequest,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_admin),
+):
+    """
+    Run a stock screen using a SQL-like WHERE expression against screener.universe.
+
+    Supports AND / OR logic and parenthesised grouping — unlike the standard
+    filter endpoint which only supports AND.
+
+    Admin-only for now; planned for Pro / Premium once the feature matures.
+
+    Example queries:
+        roe > 10 AND roce > 10 AND roic > 10
+        roe > 10 AND (roce > 10 OR roic > 10)
+        sales growth 5years > 10 AND average return on equity 3years > 15
+
+    Field names are case-insensitive. The field reference endpoint
+    (GET /api/v1/screener/query/fields) lists all available fields and aliases.
+
+    Percentage fields: enter the human-readable % value (e.g. "roe > 10" means ROE > 10%).
+    """
+    # Parse the text query into a parameterized SQL WHERE fragment
+    try:
+        custom_where, params = parse_query(req.query, ALLOWED_FIELDS)
+    except QueryParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    # Baseline WHERE clauses (same as the standard screener)
+    base_where = "u.price IS NOT NULL AND u.status = 'active'"
+    where      = f"{base_where} AND ({custom_where})"
+
+    # Sort column — whitelist only (same logic as build_screener_sql)
+    sort_key  = req.sort_by.lower()
+    sort_expr = SORTABLE_COLS.get(sort_key, "u.market_cap")
+    sort_dir  = "DESC" if req.sort_dir.lower() == "desc" else "ASC"
+
+    count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
+
+    data_sql = f"""
+        SELECT
+            u.asx_code, u.company_name, u.sector, u.industry, u.stock_type, u.status,
+            u.is_reit, u.is_miner, u.is_asx200, u.is_asx300,
+            u.price, u.high_52w, u.low_52w, u.volume, u.avg_volume_20d, u.market_cap,
+            u.pe_ratio, u.forward_pe, u.price_to_book, u.price_to_sales,
+            u.ev_to_ebitda, u.peg_ratio, u.price_to_fcf, u.fcf_yield,
+            u.dividend_yield, u.grossed_up_yield, u.franking_pct,
+            u.dps_ttm, u.payout_ratio, u.dividend_consecutive_yrs, u.dividend_cagr_3y,
+            u.gross_margin, u.ebitda_margin, u.net_margin, u.operating_margin,
+            u.roe, u.roa, u.roce, u.avg_roe_3y,
+            u.revenue_growth_1y, u.revenue_growth_3y_cagr, u.revenue_cagr_5y,
+            u.earnings_growth_1y, u.eps_growth_3y_cagr,
+            u.revenue_growth_yoy_q, u.eps_growth_yoy_q,
+            u.revenue_growth_hoh, u.net_income_growth_hoh, u.eps_growth_hoh,
+            u.debt_to_equity, u.current_ratio, u.net_debt, u.total_debt,
+            u.book_value_per_share, u.total_assets, u.total_equity,
+            u.fcf_fy0, u.cfo_fy0,
+            u.piotroski_f_score, u.altman_z_score,
+            u.percent_insiders, u.percent_institutions, u.short_pct,
+            u.rsi_14, u.adx_14, u.macd, u.macd_signal,
+            u.sma_20, u.sma_50, u.sma_200, u.ema_20,
+            u.bb_upper, u.bb_lower, u.atr_14, u.obv,
+            u.volatility_20d, u.volatility_60d, u.beta_1y, u.sharpe_1y,
+            u.return_1w, u.return_1m, u.return_3m, u.return_6m,
+            u.return_1y, u.return_ytd, u.return_3y, u.return_5y,
+            u.drawdown_from_ath,
+            u.price_date, u.universe_built_at
+        FROM screener.universe u
+        WHERE {where}
+        ORDER BY {sort_expr} {sort_dir} NULLS LAST
+        LIMIT :_limit OFFSET :_offset
+    """
+
+    # Execute count
+    count_result = await db.execute(text(count_sql), params)
+    total = count_result.scalar() or 0
+
+    offset = (req.page - 1) * req.page_size
+    params["_limit"]  = req.page_size
+    params["_offset"] = offset
+
+    if req.page_size > 0:
+        data_result = await db.execute(text(data_sql), params)
+        rows = data_result.mappings().all()
+    else:
+        rows = []
+
+    return ScreenerResponse(
+        data=[ScreenerRow(**dict(r)) for r in rows],
+        total=total,
+        page=req.page,
+        page_size=req.page_size,
+        total_pages=math.ceil(total / req.page_size) if total else 0,
+        filters_applied=1,   # 1 = the custom query counts as one expression
+        is_capped=False,
+        free_limit=None,
+    )

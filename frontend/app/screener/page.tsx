@@ -1742,7 +1742,17 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* Results table — manual mode + query mode */}
+      </div>
+
+      {/* Browse Sectors Sidebar — Manual Mode Only */}
+      {screenerMode === 'manual' && (
+        <div className="hidden lg:block lg:w-64 flex-shrink-0">
+          <BrowseSectors onSectorSelect={handleSectorSelect} selectedSector={selectedSector} />
+        </div>
+      )}
+      </div>
+
+      {/* ── Results table — shown for BOTH manual and query modes ─────────── */}
       {(screenerMode === 'manual' || screenerMode === 'query') && results.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
 
@@ -1761,17 +1771,17 @@ export default function ScreenerPage() {
             </div>
           )}
 
-          {/* Table header bar */}
-          {resultsStale && (
+          {resultsStale && screenerMode === 'manual' && (
             <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 border-b border-amber-200 text-xs text-amber-700 font-medium">
               <RefreshCw className="w-3.5 h-3.5 shrink-0" />
               Filters changed — click <button onClick={() => runScreen(1)} className="underline font-semibold hover:text-amber-900">Run Screen</button> to apply them.
             </div>
           )}
+
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
             <span className="text-sm font-semibold text-gray-700">
               {total.toLocaleString()} results
-              {filters.length > 0 && (
+              {screenerMode === 'manual' && filters.length > 0 && (
                 <span className="text-gray-400 font-normal"> · {filters.length} filter{filters.length > 1 ? 's' : ''}</span>
               )}
             </span>
@@ -1861,21 +1871,13 @@ export default function ScreenerPage() {
         </div>
       )}
 
+      {/* Empty state */}
       {(screenerMode === 'manual' || screenerMode === 'query') && ran && !loading && !queryLoading && results.length === 0 && !queryError && (
         <div className="text-center py-12 bg-white border border-gray-200 rounded-xl">
           <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>
           <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
         </div>
       )}
-      </div>
-
-      {/* Browse Sectors Sidebar — Manual Mode Only */}
-      {screenerMode === 'manual' && (
-        <div className="hidden lg:block lg:w-64 flex-shrink-0">
-          <BrowseSectors onSectorSelect={handleSectorSelect} selectedSector={selectedSector} />
-        </div>
-      )}
-      </div>
     </>
   )
 }

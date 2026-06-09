@@ -1241,9 +1241,9 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* ── Query Mode ───────────────────────────────────────────── */}
+      {/* ── Query Mode — left panel (textarea) ──────────────────── */}
       {screenerMode === 'query' && isAdmin && (
-        <div className="w-full space-y-4">
+        <div className="flex-1 min-w-0">
 
           {/* Query input card */}
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -1254,8 +1254,8 @@ export default function ScreenerPage() {
                 <span className="font-semibold text-gray-800 text-sm">Query Mode</span>
                 <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 rounded px-1.5 py-0.5 font-bold">ADMIN</span>
               </div>
-              <span className="text-xs text-gray-500">
-                Use field names + operators · AND / OR · ( ) grouping · Ctrl+Enter to run
+              <span className="text-xs text-gray-500 hidden sm:block">
+                Field names + operators · AND / OR · ( ) grouping · Ctrl+Enter to run
               </span>
             </div>
 
@@ -1267,7 +1267,7 @@ export default function ScreenerPage() {
                 onChange={handleQueryChange}
                 onKeyDown={handleQueryKeyDown}
                 placeholder={`roe > 10 AND\n(roce > 10 OR\n  roic > 10)`}
-                rows={6}
+                rows={8}
                 className="w-full font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg p-3
                            text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2
                            focus:ring-orange-300 focus:border-orange-400 resize-y leading-relaxed"
@@ -1314,16 +1314,21 @@ export default function ScreenerPage() {
                     <p className="text-sm font-semibold text-red-700">Parse Error</p>
                     <p className="text-sm text-red-600 mt-0.5">{queryError}</p>
                     <p className="text-xs text-red-400 mt-1">
-                      Check the Field Reference below for valid field names.
+                      Check the Field Reference panel on the right for valid field names.
                     </p>
                   </div>
                 </div>
               )}
             </div>
           </div>
+        </div>
+      )}
 
-          {/* Field Reference panel */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      {/* ── Query Mode — right sidebar (Field Reference) ─────────── */}
+      {screenerMode === 'query' && isAdmin && (
+        <div className="hidden lg:flex lg:w-72 flex-shrink-0 flex-col">
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+            {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
               <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4 text-gray-500" />
@@ -1344,22 +1349,22 @@ export default function ScreenerPage() {
             </div>
 
             {/* Search */}
-            <div className="px-4 py-2 border-b border-gray-100">
+            <div className="px-3 py-2 border-b border-gray-100">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                 <input
                   type="text"
                   value={queryFieldSearch}
                   onChange={e => setQueryFieldSearch(e.target.value)}
-                  placeholder="Search fields by name or alias…"
-                  className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg
+                  placeholder="Search fields…"
+                  className="w-full pl-7 pr-3 py-1.5 text-xs border border-gray-200 rounded-lg
                              focus:outline-none focus:ring-2 focus:ring-orange-200"
                 />
               </div>
             </div>
 
-            {/* Fields list */}
-            <div className="max-h-64 overflow-y-auto">
+            {/* Fields list — fills remaining height, scrollable */}
+            <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
               {queryFields.length === 0 ? (
                 <div className="px-4 py-6 text-center text-sm text-gray-400">
                   Loading field reference…
@@ -1381,39 +1386,32 @@ export default function ScreenerPage() {
 
                 return Object.entries(byCategory).map(([cat, fields]) => (
                   <div key={cat}>
-                    <div className="px-4 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider
+                    <div className="px-3 py-1.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider
                                     bg-gray-50 border-b border-gray-100 sticky top-0">
                       {cat}
                     </div>
                     {fields.map(f => (
                       <div
                         key={f.key}
-                        className="flex items-start justify-between px-4 py-2 hover:bg-orange-50
-                                   border-b border-gray-50 group"
+                        className="flex items-start justify-between px-3 py-2 hover:bg-orange-50
+                                   border-b border-gray-50 group cursor-pointer"
+                        onClick={() => insertFieldAtCursor(f.key)}
+                        title={`Click to insert "${f.key}" into query`}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <code className="text-xs font-mono font-semibold text-orange-700 bg-orange-50
-                                             px-1.5 py-0.5 rounded border border-orange-100">{f.key}</code>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <code className="text-[11px] font-mono font-semibold text-orange-700 bg-orange-50
+                                             px-1 py-0.5 rounded border border-orange-100">{f.key}</code>
                             {f.unit && (
                               <span className="text-[10px] text-gray-400">{f.unit}</span>
                             )}
                           </div>
-                          <p className="text-xs text-gray-600 mt-0.5 truncate">{f.label}</p>
-                          {f.aliases.length > 0 && (
-                            <p className="text-[10px] text-gray-400 mt-0.5 truncate">
-                              aliases: {f.aliases.slice(0, 3).join(', ')}{f.aliases.length > 3 ? '…' : ''}
-                            </p>
-                          )}
+                          <p className="text-[11px] text-gray-600 mt-0.5 truncate">{f.label}</p>
                         </div>
-                        <button
-                          onClick={() => insertFieldAtCursor(f.key)}
-                          className="ml-3 flex-shrink-0 opacity-0 group-hover:opacity-100 text-[10px]
-                                     text-orange-600 hover:text-orange-700 border border-orange-200
-                                     hover:border-orange-400 rounded px-1.5 py-0.5 transition-all font-medium"
-                        >
-                          + Insert
-                        </button>
+                        <span className="ml-2 flex-shrink-0 opacity-0 group-hover:opacity-100 text-[10px]
+                                         text-orange-600 font-medium transition-opacity">
+                          +
+                        </span>
                       </div>
                     ))}
                   </div>

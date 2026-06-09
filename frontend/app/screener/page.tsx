@@ -1243,11 +1243,11 @@ export default function ScreenerPage() {
 
       {/* ── Query Mode — two-column row (textarea + sidebar) ──────── */}
       {screenerMode === 'query' && isAdmin && (
-      <div className="w-full flex flex-col lg:flex-row gap-4 items-start">
-        <div className="flex-1 min-w-0">
+      <div className="w-full flex flex-col lg:flex-row gap-4">
+        <div className="flex-1 min-w-0 flex flex-col">
 
-          {/* Query input card */}
-          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+          {/* Query input card — stretches to match sidebar height */}
+          <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col flex-1">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 bg-orange-50 border-b border-orange-100">
               <div className="flex items-center gap-2">
@@ -1261,7 +1261,7 @@ export default function ScreenerPage() {
             </div>
 
             {/* Textarea */}
-            <div className="p-4">
+            <div className="p-4 flex flex-col flex-1">
               <textarea
                 ref={queryTextareaRef}
                 value={queryText}
@@ -1269,9 +1269,9 @@ export default function ScreenerPage() {
                 onKeyDown={handleQueryKeyDown}
                 placeholder={`roe > 10 AND\n(roce > 10 OR\n  roic > 10)`}
                 rows={8}
-                className="w-full font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg p-3
+                className="w-full flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg p-3
                            text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2
-                           focus:ring-orange-300 focus:border-orange-400 resize-y leading-relaxed"
+                           focus:ring-orange-300 focus:border-orange-400 resize-none leading-relaxed"
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -1323,93 +1323,6 @@ export default function ScreenerPage() {
             </div>
           </div>
 
-          {/* ── Query results — rendered inline below textarea, no gap ── */}
-          {results.length > 0 && (
-            <div className="mt-4 bg-white border border-gray-200 rounded-xl overflow-hidden">
-              {isCapped && (
-                <div className="flex items-center justify-between px-4 py-2.5 bg-amber-50 border-b border-amber-200">
-                  <span className="text-sm text-amber-800">
-                    <span className="font-semibold">Free plan:</span> showing first 500 stocks.
-                    Upgrade to <span className="font-semibold">Pro or Premium</span> to see all results.
-                  </span>
-                  <Link href="/pricing" className="flex-shrink-0 ml-4 px-3 py-1 text-xs font-semibold rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors">
-                    Upgrade →
-                  </Link>
-                </div>
-              )}
-              <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
-                <span className="text-sm font-semibold text-gray-700">{total.toLocaleString()} results</span>
-                <div className="flex items-center gap-2">
-                  {isPro ? (
-                    <button onClick={handleExport} disabled={exporting} title="Download CSV (max 5,000 rows)"
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-300
-                                 text-gray-600 hover:border-blue-400 hover:text-blue-600 disabled:opacity-50 transition-colors font-medium bg-white">
-                      <Download className="w-3.5 h-3.5" />
-                      {exporting ? 'Exporting…' : 'Export CSV'}
-                    </button>
-                  ) : (
-                    <button disabled title="Export CSV — Pro or Premium plan required"
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border border-gray-200
-                                 text-gray-400 cursor-not-allowed opacity-60 font-medium bg-gray-50">
-                      <Download className="w-3.5 h-3.5" />Export CSV<Lock className="w-3 h-3" />
-                    </button>
-                  )}
-                  <ColumnPicker visibleKeys={visibleKeys} onChange={setVisibleKeys} />
-                </div>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 border-b border-gray-200">
-                    <tr>
-                      {visibleCols.map(col => (
-                        <th key={col.key as string}
-                          onClick={() => { if (col.sortKey) handleSortAndRun(col) }}
-                          className={cn('px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap',
-                            col.align === 'right' ? 'text-right' : 'text-left',
-                            col.sortKey && 'cursor-pointer hover:text-gray-800',
-                            sortBy === col.sortKey && 'text-blue-600')}>
-                          {col.label} <SortIcon col={col} />
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {results.map(r => (
-                      <tr key={r.asx_code} className="hover:bg-blue-50 transition-colors">
-                        {visibleCols.map(col => (
-                          <td key={col.key as string}
-                            className={cn('px-3 py-2.5', col.align === 'right' ? 'text-right' : 'text-left')}>
-                            {col.render(r)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
-                <span className="text-sm text-gray-500">Page {page} of {totalPages}</span>
-                <div className="flex gap-2">
-                  <button onClick={() => runQueryScreen(page - 1)} disabled={page <= 1 || queryLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300 disabled:opacity-40 hover:bg-white font-medium text-gray-600">
-                    <ChevronLeft className="w-4 h-4" /> Prev
-                  </button>
-                  <button onClick={() => runQueryScreen(page + 1)} disabled={page >= totalPages || queryLoading}
-                    className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300 disabled:opacity-40 hover:bg-white font-medium text-gray-600">
-                    Next <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Empty state for query mode */}
-          {ran && !queryLoading && results.length === 0 && !queryError && (
-            <div className="mt-4 text-center py-12 bg-white border border-gray-200 rounded-xl">
-              <p className="text-gray-500 font-medium">No stocks match your query.</p>
-              <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
-            </div>
-          )}
         </div>
 
         {/* ── Field Reference sidebar ── */}
@@ -1838,8 +1751,8 @@ export default function ScreenerPage() {
       )}
       </div>
 
-      {/* ── Results table — manual mode only (query mode renders inline above) ── */}
-      {screenerMode === 'manual' && results.length > 0 && (
+      {/* ── Results table — manual + query modes ── */}
+      {(screenerMode === 'manual' || screenerMode === 'query') && results.length > 0 && (
         <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
 
           {/* Free-tier cap banner */}
@@ -1957,10 +1870,10 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* Empty state — manual mode only */}
-      {screenerMode === 'manual' && ran && !loading && results.length === 0 && (
+      {/* Empty state — manual + query modes */}
+      {(screenerMode === 'manual' || screenerMode === 'query') && ran && !loading && !queryLoading && results.length === 0 && !queryError && (
         <div className="text-center py-12 bg-white border border-gray-200 rounded-xl">
-          <p className="text-gray-500 font-medium">No stocks match your filters.</p>
+          <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>
           <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
         </div>
       )}

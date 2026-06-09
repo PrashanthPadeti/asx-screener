@@ -1241,8 +1241,9 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* ── Query Mode — left panel (textarea) ──────────────────── */}
+      {/* ── Query Mode — two-column row (textarea + sidebar) ──────── */}
       {screenerMode === 'query' && isAdmin && (
+      <div className="w-full flex flex-col lg:flex-row gap-4 items-start">
         <div className="flex-1 min-w-0">
 
           {/* Query input card */}
@@ -1322,10 +1323,8 @@ export default function ScreenerPage() {
             </div>
           </div>
         </div>
-      )}
 
-      {/* ── Query Mode — right sidebar (Field Reference) ─────────── */}
-      {screenerMode === 'query' && isAdmin && (
+        {/* ── Field Reference sidebar ── */}
         <div className="hidden lg:flex lg:w-72 flex-shrink-0 flex-col">
           <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
             {/* Header */}
@@ -1420,6 +1419,7 @@ export default function ScreenerPage() {
             </div>
           </div>
         </div>
+      </div>
       )}
 
       {/* ── Manual Filter Mode (Left Column) ────────────────────── */}

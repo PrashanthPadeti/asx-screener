@@ -1047,14 +1047,24 @@ export default function ScreenerPage() {
     <>
       {/* Upgrade notice — shown when a free user tries to open a Query Mode community screen */}
       {upgradeNotice && (
-        <div className="flex items-center justify-between gap-3 p-3 bg-orange-50 border border-orange-200 rounded-xl text-sm">
-          <div className="flex items-center gap-2">
-            <Lock className="w-4 h-4 text-orange-500 flex-shrink-0" />
-            <span className="text-orange-800">{upgradeNotice}</span>
+        <div className="flex items-start sm:items-center justify-between gap-3 p-4 bg-orange-50 border border-orange-200 rounded-xl">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 rounded-lg bg-orange-100 flex items-center justify-center flex-shrink-0">
+              <Lock className="w-4 h-4 text-orange-600" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-orange-900">Query Mode — Pro &amp; Premium Feature</p>
+              <p className="text-sm text-orange-700 mt-0.5">This community screen was built with Query Mode, which lets Pro and Premium users write SQL-like filters. Upgrade to unlock it.</p>
+            </div>
           </div>
-          <button onClick={() => setUpgradeNotice(null)} className="text-orange-400 hover:text-orange-600 flex-shrink-0">
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <Link href="/pricing" className="text-xs bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors">
+              Upgrade
+            </Link>
+            <button onClick={() => setUpgradeNotice(null)} className="text-orange-400 hover:text-orange-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 

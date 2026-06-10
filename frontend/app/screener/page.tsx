@@ -1104,24 +1104,28 @@ export default function ScreenerPage() {
               : <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'ai' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700')}>UPGRADE</span>
             }
           </button>
-          {/* ── Query Mode — Pro/Premium/Admin ── */}
-          {(isAdmin || isPro) && (
-            <button
-              onClick={() => { setScreenerMode('query'); loadQueryFields() }}
-              className={cn(
-                'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all border',
-                screenerMode === 'query'
-                  ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300 hover:text-orange-600'
-              )}
-            >
-              <Code2 className={cn('w-3.5 h-3.5', screenerMode === 'query' ? 'text-white' : 'text-orange-500')} />
-              Query Mode
-              <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>
-                {isPremium ? 'PREMIUM' : isPro ? 'PRO' : 'ADMIN'}
-              </span>
-            </button>
-          )}
+          {/* ── Query Mode — always visible; gated for free users ── */}
+          <button
+            onClick={() => {
+              if (isAdmin || isPro) { setScreenerMode('query'); loadQueryFields() }
+              else setUpgradeNotice('Query Mode lets you write SQL-like filters to find stocks. Upgrade to Pro or Premium to unlock it.')
+            }}
+            className={cn(
+              'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all border',
+              screenerMode === 'query'
+                ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300 hover:text-orange-600'
+            )}
+          >
+            <Code2 className={cn('w-3.5 h-3.5', screenerMode === 'query' ? 'text-white' : 'text-orange-500')} />
+            Query Mode
+            {(isAdmin || isPro)
+              ? <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>
+                  {isPremium ? 'PREMIUM' : isPro ? 'PRO' : 'ADMIN'}
+                </span>
+              : <span className="text-[10px] rounded px-1.5 py-0.5 font-bold bg-amber-100 text-amber-700">UPGRADE</span>
+            }
+          </button>
         </div>
         </div>
       </div>

@@ -300,21 +300,42 @@ export default function ScansPage() {
           </div>
 
           {/* Stats */}
-          <div className="flex items-center gap-6 mt-5">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-5">
             <div className="text-center">
-              <p className="text-2xl font-bold text-gray-900">{presets.length}</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {presets.length + sectors.length + (communityLocked ? 0 : community.length)}
+              </p>
               <p className="text-xs text-gray-500">Total Screens</p>
             </div>
             <div className="w-px h-8 bg-gray-200" />
             <div className="text-center">
-              <p className="text-2xl font-bold text-gray-900">{presets.filter(p => !p.premium).length}</p>
+              <p className="text-2xl font-bold text-purple-600">{presets.filter(p => presetTier(p) === 'premium').length}</p>
+              <p className="text-xs text-gray-500">Premium</p>
+            </div>
+            <div className="w-px h-8 bg-gray-200" />
+            <div className="text-center">
+              <p className="text-2xl font-bold text-blue-600">{presets.filter(p => presetTier(p) === 'pro').length}</p>
+              <p className="text-xs text-gray-500">Pro</p>
+            </div>
+            <div className="w-px h-8 bg-gray-200" />
+            <div className="text-center">
+              <p className="text-2xl font-bold text-gray-900">{presets.filter(p => presetTier(p) === 'free').length}</p>
               <p className="text-xs text-gray-500">Free</p>
             </div>
             <div className="w-px h-8 bg-gray-200" />
             <div className="text-center">
-              <p className="text-2xl font-bold text-gray-900">{presets.filter(p => p.premium).length}</p>
-              <p className="text-xs text-gray-500">Pro + Premium</p>
+              <p className="text-2xl font-bold text-gray-900">{sectors.length}</p>
+              <p className="text-xs text-gray-500">Sector</p>
             </div>
+            {!communityLocked && community.length > 0 && (
+              <>
+                <div className="w-px h-8 bg-gray-200" />
+                <div className="text-center">
+                  <p className="text-2xl font-bold text-green-600">{community.length}</p>
+                  <p className="text-xs text-gray-500">Community</p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>

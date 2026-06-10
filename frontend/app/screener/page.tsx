@@ -471,6 +471,7 @@ export default function ScreenerPage() {
   const [queryFields, setQueryFields]                 = useState<QueryFieldRef[]>([])
   const [queryFieldSearch, setQueryFieldSearch]       = useState('')
   const [queryFieldsLoaded, setQueryFieldsLoaded]     = useState(false)
+  const [queryFieldsError, setQueryFieldsError]       = useState(false)
   const [showQuerySaveModal, setShowQuerySaveModal]   = useState(false)
   const [querySaveName, setQuerySaveName]             = useState('')
   const [querySaveDesc, setQuerySaveDesc]             = useState('')
@@ -932,15 +933,22 @@ export default function ScreenerPage() {
     }
   }
 
-  // Load field reference when Query Mode is first entered
-  const loadQueryFields = async () => {
-    if (queryFieldsLoaded) return
+  // Auto-load field reference whenever Query Mode becomes active
+  useEffect(() => {
+    if (screenerMode === 'query' && (isAdmin || isPro)) loadQueryFields()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screenerMode])
+
+  // Load field reference when Query Mode is entered
+  const loadQueryFields = async (force = false) => {
+    if (queryFieldsLoaded && !force) return
+    setQueryFieldsError(false)
     try {
       const fields = await getQueryFields()
       setQueryFields(fields)
       setQueryFieldsLoaded(true)
     } catch {
-      // Silently fail — field reference is optional UI enhancement
+      setQueryFieldsError(true)
     }
   }
 
@@ -1537,7 +1545,19 @@ export default function ScreenerPage() {
             <div className="overflow-y-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
               {queryFields.length === 0 ? (
                 <div className="px-4 py-6 text-center text-sm text-gray-400">
-                  Loading field reference…
+                  {queryFieldsError ? (
+                    <div className="space-y-2">
+                      <p className="text-red-500">Failed to load fields.</p>
+                      <button
+                        onClick={() => loadQueryFields(true)}
+                        className="text-xs text-orange-600 hover:underline"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : (
+                    'Loading field reference…'
+                  )}
                 </div>
               ) : (() => {
                 const search = queryFieldSearch.toLowerCase()

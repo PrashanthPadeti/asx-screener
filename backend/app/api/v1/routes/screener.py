@@ -25,7 +25,7 @@ from typing import Any, Optional
 from app.db.session import get_db
 from app.schemas.screener import ScreenerRequest, ScreenerResponse, ScreenerRow, QueryScreenerRequest
 from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
-from app.core.deps import get_optional_user, get_current_user, require_admin
+from app.core.deps import get_optional_user, get_current_user, require_admin, require_query_access
 from app.core.query_parser import parse_query, get_field_reference, QueryParseError
 
 FREE_STOCK_LIMIT = 500   # max rows visible to free / unauthenticated users
@@ -1559,7 +1559,7 @@ async def get_screener_presets():
 
 @router.get("/query/fields")
 async def get_query_fields(
-    _user: dict = Depends(require_admin),
+    _user: dict = Depends(require_query_access),
 ):
     """
     Returns all filterable fields with their keys, labels, units, categories,
@@ -1576,7 +1576,7 @@ async def get_query_fields(
 async def query_screener(
     req: QueryScreenerRequest,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_admin),
+    _user: dict = Depends(require_query_access),
 ):
     """
     Run a stock screen using a SQL-like WHERE expression against screener.universe.
@@ -1679,7 +1679,7 @@ async def query_screener(
 async def export_query_screener(
     req: QueryScreenerRequest,
     db: AsyncSession = Depends(get_db),
-    user: dict = Depends(require_admin),
+    user: dict = Depends(require_query_access),
 ):
     """CSV export for Query Mode — same as /query but streams a CSV file."""
     if user.get("plan", "free") == "free":

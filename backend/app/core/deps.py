@@ -92,6 +92,30 @@ async def require_admin(
     return user
 
 
+async def require_query_access(
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Allow admin emails OR users on Pro/Premium plans."""
+    admin_list = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
+    if user["email"].lower() in admin_list:
+        return user
+    user_rank = _PLAN_RANK.get(user["plan"], 0)
+    pro_rank  = _PLAN_RANK.get("pro", 0)
+    if user_rank < pro_rank:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Query Mode requires a Pro or Premium plan.",
+        )
+    sub_status = user.get("subscription_status", "inactive")
+    if sub_status == "past_due":
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Your subscription payment is overdue.")
+    if sub_status not in ("active", "trialing"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your subscription is inactive.")
+    return user
+
+
 def require_plan(minimum: str):
     """
     Dependency factory: raise HTTP 403 if the authenticated user's plan

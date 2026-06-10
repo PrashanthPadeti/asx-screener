@@ -166,9 +166,14 @@ export const SCREENER_SECTIONS: SectionDef[] = [
   {
     id: 'screener-modes',
     icon: '🔀', iconBg: 'bg-slate-50', iconText: 'text-slate-600',
-    title: 'Two Modes',
-    summary: 'The screener has two entry points: Filter Screen (manual dropdowns) and AI Query (natural language). Both search the same live ASX database.',
-    howToUse: 'Use Filter Screen when you know exactly what criteria you want (e.g. P/E < 15 AND yield > 4%). Use AI Query when you have a concept in mind (e.g. "cheap mining stocks with growing revenue").',
+    title: 'Three Modes',
+    summary: 'The screener has three entry points: Filter Screen (visual dropdowns), AI Query (natural language), and Query Mode (SQL-like expressions). All three search the same live ASX universe.',
+    howToUse: 'Filter Screen: know exactly what you want — P/E < 15 AND yield > 4%. AI Query: describe a concept — "cheap miners with growing revenue". Query Mode: write precise multi-condition logic with AND/OR/parentheses, e.g. roe > 15 AND (roce > 12 OR roic > 12).',
+    filters: [
+      { name: 'Filter Screen', desc: 'Visual dropdowns — best for simple AND-only filters. Available to all users.' },
+      { name: 'AI Query',      desc: 'Natural language powered by Claude AI. Premium plan required.' },
+      { name: 'Query Mode',    desc: 'SQL-like WHERE expressions with AND/OR/parentheses. Pro or Premium plan required.' },
+    ],
     columns: [],
   },
   {
@@ -225,6 +230,28 @@ export const SCREENER_SECTIONS: SectionDef[] = [
       { name: 'Interpreted as', desc: 'How the AI understood your query in plain English.' },
       { name: 'Filter chips',   desc: 'The actual field/operator/value filters the AI generated.' },
       { name: 'Results table',  desc: 'Same columns as the manual screener — fully sortable.' },
+    ],
+  },
+  {
+    id: 'query-mode',
+    icon: '💻', iconBg: 'bg-orange-50', iconText: 'text-orange-600',
+    title: 'Query Mode',
+    badge: 'Pro · Premium',
+    summary: 'Write SQL-like WHERE conditions directly against the ASX database. Supports AND, OR, and parenthesised grouping — letting you express complex logic that the visual filter builder cannot.',
+    howToUse: 'Type field names, an operator (>, <, >=, <=, =, !=), and a value. Use AND/OR to chain conditions. Wrap groups in parentheses. Ctrl+Enter runs the query. Use the Field Reference panel on the right to browse and insert field names.',
+    filters: [
+      { name: 'roe > 15',                            desc: 'Single condition — Return on Equity above 15%.' },
+      { name: 'roe > 15 AND roce > 12',              desc: 'AND logic — both conditions must be true.' },
+      { name: 'roe > 15 AND (roce > 12 OR roic > 12)', desc: 'Parenthesised OR — ROE must be > 15, plus either ROCE or ROIC > 12.' },
+      { name: 'market_cap > 1000 AND pe_ratio < 15', desc: 'Market cap above $1B AUD AND P/E ratio below 15.' },
+    ],
+    columns: [
+      { name: 'Field Reference',  desc: 'Right sidebar listing all 195 available fields. Click any field to insert it at your cursor.' },
+      { name: 'Search fields',    desc: 'Filter the field list by name, label, or alias.' },
+      { name: 'CSV download',     desc: 'Download the full field reference as a CSV.' },
+      { name: 'Save Query',       desc: 'Save your query with a name — reload it any time from My Queries.' },
+      { name: 'Export CSV',       desc: 'Download the filtered results (up to 5,000 rows) as a CSV file.' },
+      { name: '% fields',         desc: 'Enter human-readable % values — e.g. "roe > 15" means ROE > 15%, not 0.15.' },
     ],
   },
   {

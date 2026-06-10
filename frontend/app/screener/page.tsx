@@ -1034,49 +1034,55 @@ export default function ScreenerPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>
         <div className="flex items-center gap-2">
-          <HelpDrawer sections={SCREENER_SECTIONS} title="Screener Guide" subtitle="Filters, AI query, presets, and columns explained" />
-          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+          <HelpDrawer sections={SCREENER_SECTIONS} title="Screener Guide" subtitle="Filter Screen · AI Query · SQL Query Mode explained" />
+          <div className="flex items-center gap-1.5">
+          {/* ── Filter Screen ── */}
           <button
             onClick={() => setScreenerMode('manual')}
             className={cn(
-              'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
+              'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all border',
               screenerMode === 'manual'
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-blue-300 hover:text-blue-600'
             )}
           >
             <SlidersHorizontal className="w-3.5 h-3.5" />
             Filter Screen
           </button>
+          {/* ── AI Query ── */}
           <button
             onClick={() => setScreenerMode('ai')}
             className={cn(
-              'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
+              'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all border',
               screenerMode === 'ai'
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'
+                ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+                : 'bg-white text-gray-600 border-gray-200 hover:border-purple-300 hover:text-purple-600'
             )}
           >
-            <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+            <Sparkles className={cn('w-3.5 h-3.5', screenerMode === 'ai' ? 'text-white' : 'text-purple-500')} />
             AI Query
             {isPremium
-              ? <span className="text-[10px] bg-purple-600 text-white rounded px-1.5 py-0.5 font-bold">PREMIUM</span>
-              : <span className="text-[10px] bg-amber-500 text-white rounded px-1.5 py-0.5 font-bold">UPGRADE</span>
+              ? <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'ai' ? 'bg-white/20 text-white' : 'bg-purple-100 text-purple-700')}>PREMIUM</span>
+              : <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'ai' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700')}>UPGRADE</span>
             }
           </button>
-          {isAdmin && (
+          {/* ── Query Mode — Pro/Premium/Admin ── */}
+          {(isAdmin || isPro || isPremium) && (
             <button
               onClick={() => { setScreenerMode('query'); loadQueryFields() }}
               className={cn(
-                'flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold transition-colors',
+                'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all border',
                 screenerMode === 'query'
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-500 hover:text-gray-700'
+                  ? 'bg-orange-500 text-white border-orange-500 shadow-sm'
+                  : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300 hover:text-orange-600'
               )}
             >
-              <Code2 className="w-3.5 h-3.5 text-orange-500" />
+              <Code2 className={cn('w-3.5 h-3.5', screenerMode === 'query' ? 'text-white' : 'text-orange-500')} />
               Query Mode
-              <span className="text-[10px] bg-orange-100 text-orange-700 rounded px-1.5 py-0.5 font-bold">ADMIN</span>
+              {isAdmin
+                ? <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>ADMIN</span>
+                : <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>PRO</span>
+              }
             </button>
           )}
         </div>
@@ -1283,7 +1289,7 @@ export default function ScreenerPage() {
       )}
 
       {/* ── Query Mode — two-column row (textarea + sidebar) ──────── */}
-      {screenerMode === 'query' && isAdmin && (
+      {screenerMode === 'query' && (isAdmin || isPro || isPremium) && (
       <div className="w-full flex flex-col lg:flex-row gap-4">
         <div className="flex-1 min-w-0 flex flex-col">
 
@@ -1294,7 +1300,9 @@ export default function ScreenerPage() {
               <div className="flex items-center gap-2">
                 <Code2 className="w-4 h-4 text-orange-600" />
                 <span className="font-semibold text-gray-800 text-sm">Query Mode</span>
-                <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 rounded px-1.5 py-0.5 font-bold">ADMIN</span>
+                <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 rounded px-1.5 py-0.5 font-bold">
+                  {isAdmin ? 'ADMIN' : 'PRO'}
+                </span>
               </div>
               <span className="text-xs text-gray-500 hidden sm:block">
                 Field names + operators · AND / OR · ( ) grouping · Ctrl+Enter to run

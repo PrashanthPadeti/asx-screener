@@ -1107,8 +1107,8 @@ export default function ScreenerPage() {
           {/* ── Query Mode — always visible; gated for free users ── */}
           <button
             onClick={() => {
-              if (isAdmin || isPro) { setScreenerMode('query'); loadQueryFields() }
-              else setUpgradeNotice('Query Mode lets you write SQL-like filters to find stocks. Upgrade to Pro or Premium to unlock it.')
+              setScreenerMode('query')
+              if (isAdmin || isPro) loadQueryFields()
             }}
             className={cn(
               'flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all border',
@@ -1326,6 +1326,33 @@ export default function ScreenerPage() {
               </Link>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Query Mode upgrade panel for free users ── */}
+      {screenerMode === 'query' && !isAdmin && !isPro && (
+        <div className="bg-gradient-to-br from-slate-900 via-orange-950 to-amber-950 rounded-2xl p-8 border border-white/10 text-center">
+          <Code2 className="w-10 h-10 text-orange-400 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-white mb-2">SQL-Like Query Mode</h2>
+          <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
+            Write powerful filters in plain SQL syntax — <span className="text-white">&quot;roe &gt; 15 AND roce &gt; 15 AND market_cap &gt; 500&quot;</span> — with full AND/OR/parentheses support across 200+ fields.
+          </p>
+          <div className="flex flex-wrap justify-center gap-1.5 mb-6">
+            {['roe > 15 AND roce > 15', 'dividend_yield > 5 AND franking_pct = 100', 'pe_ratio < 10 AND earnings_growth_1y > 10', 'market_cap > 1000 AND debt_to_equity < 0.5'].map(q => (
+              <span key={q} className="text-xs px-3 py-1.5 rounded-full bg-white/10 text-slate-400 border border-white/10 font-mono">{q}</span>
+            ))}
+          </div>
+          <span className="inline-block mb-3 text-xs font-semibold px-3 py-1 rounded-full bg-orange-700/40 text-orange-300 border border-orange-500/30">
+            Pro &amp; Premium Feature
+          </span>
+          <br />
+          <Link
+            href="/pricing"
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-orange-500 hover:bg-orange-400
+                       text-white text-sm font-semibold rounded-xl transition-colors mt-2"
+          >
+            <Zap className="w-4 h-4" /> Upgrade to Pro
+          </Link>
         </div>
       )}
 

@@ -842,7 +842,7 @@ export default function ScreenerPage() {
     } finally {
       setExporting(false)
     }
-  }, [buildApiFilters, sortBy, sortDir])
+  }, [buildApiFilters, sortBy, sortDir, screenerMode, queryText])
 
   // Export AI query results as CSV — reuses the same filters Claude generated
   const handleNlExport = useCallback(async () => {

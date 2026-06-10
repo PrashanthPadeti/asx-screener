@@ -360,38 +360,6 @@ export default function NotificationsPage() {
         </p>
       </Section>
 
-      {/* Weekly report timing */}
-      <Section title="Weekly Report Timing" icon={<Mail className="w-4 h-4 text-gray-500" />}>
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Day</label>
-            <select
-              value={prefs.weekly_report_day}
-              onChange={e => update({ weekly_report_day: parseInt(e.target.value) })}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map((d, i) => (
-                <option key={i} value={i + 1}>{d}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Hour (AEST)</label>
-            <select
-              value={prefs.weekly_report_hour}
-              onChange={e => update({ weekly_report_hour: parseInt(e.target.value) })}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              {Array.from({ length: 24 }, (_, i) => (
-                <option key={i} value={i}>
-                  {i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </Section>
-
       {/* Notification history */}
       <Section title={`Notification History (${histTotal})`} icon={<History className="w-4 h-4 text-gray-500" />}>
         {history.length === 0 ? (

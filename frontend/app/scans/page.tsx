@@ -237,6 +237,7 @@ export default function ScansPage() {
   const [presets, setPresets] = useState<ScreenerPreset[]>([])
   const [loading, setLoading] = useState(true)
   const [community, setCommunity] = useState<SavedScreen[]>([])
+  const [communityLocked, setCommunityLocked] = useState(false)
   const [sectors, setSectors] = useState<{sector: string; stock_count: number}[]>([])
 
   useEffect(() => {
@@ -245,7 +246,11 @@ export default function ScansPage() {
       .finally(() => setLoading(false))
     getCommunityScreens()
       .then(d => setCommunity(d.screens))
-      .catch(() => {})
+      .catch((err) => {
+        if (err?.response?.status === 403 || err?.response?.status === 401) {
+          setCommunityLocked(true)
+        }
+      })
     getMarketSectors()
       .then(d => setSectors(d.sectors))
       .catch(() => {})
@@ -443,7 +448,18 @@ export default function ScansPage() {
                   <p className="text-xs text-gray-500 mt-0.5">Screens created and shared by ASX Screener users</p>
                 </div>
               </div>
-              {community.length === 0 ? (
+              {communityLocked ? (
+                <div className="bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-8 text-center">
+                  <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <Lock className="w-6 h-6 text-orange-500" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-1">Pro &amp; Premium Feature</h3>
+                  <p className="text-sm text-gray-600 mb-4">Community Picks are shared screens created by Pro and Premium subscribers. Upgrade to discover and use them.</p>
+                  <Link href="/pricing" className="inline-flex items-center gap-1.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+                    <Lock className="w-3.5 h-3.5" /> Upgrade to Pro
+                  </Link>
+                </div>
+              ) : community.length === 0 ? (
                 <div className="bg-white border border-gray-200 rounded-xl p-8 text-center">
                   <Globe className="w-8 h-8 text-gray-300 mx-auto mb-2" />
                   <p className="text-sm text-gray-500">No community screens yet.</p>

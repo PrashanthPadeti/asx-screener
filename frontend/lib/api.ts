@@ -1764,9 +1764,10 @@ export interface SavedScreen {
   sort_dir:    string
   is_public:   boolean
   use_count:   number
-  query_text:  string | null
-  created_at:  string | null
-  updated_at:  string | null
+  query_text:   string | null
+  creator_plan: string
+  created_at:   string | null
+  updated_at:   string | null
 }
 
 export const getCommunityScreens = async (): Promise<{ screens: SavedScreen[] }> => {

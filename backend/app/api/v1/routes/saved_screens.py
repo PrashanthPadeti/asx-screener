@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 from app.core.deps import get_current_user
+from app.core.config import settings
+from app.core.plans import PLAN_RANK as _PLAN_RANK
 from app.db.session import get_db
 
 router = APIRouter()
@@ -45,36 +47,75 @@ class UpdateScreenRequest(BaseModel):
 
 def _row_to_dict(row) -> dict:
     return {
-        "id":          str(row.id),
-        "user_id":     str(row.user_id),
-        "user_name":   row.user_name or "Anonymous",
-        "name":        row.name,
-        "description": row.description,
-        "filters":     row.filters if isinstance(row.filters, list) else json.loads(row.filters or "[]"),
-        "sort_by":     row.sort_by,
-        "sort_dir":    row.sort_dir,
-        "is_public":   row.is_public,
-        "use_count":   row.use_count,
-        "query_text":  row.query_text if hasattr(row, "query_text") else None,
-        "created_at":  row.created_at.isoformat() if row.created_at else None,
-        "updated_at":  row.updated_at.isoformat() if row.updated_at else None,
+        "id":           str(row.id),
+        "user_id":      str(row.user_id),
+        "user_name":    row.user_name or "Anonymous",
+        "name":         row.name,
+        "description":  row.description,
+        "filters":      row.filters if isinstance(row.filters, list) else json.loads(row.filters or "[]"),
+        "sort_by":      row.sort_by,
+        "sort_dir":     row.sort_dir,
+        "is_public":    row.is_public,
+        "use_count":    row.use_count,
+        "query_text":   row.query_text if hasattr(row, "query_text") else None,
+        "creator_plan": row.creator_plan if hasattr(row, "creator_plan") else "free",
+        "created_at":   row.created_at.isoformat() if row.created_at else None,
+        "updated_at":   row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+def _is_admin(email: str) -> bool:
+    admin_list = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
+    return email.lower() in admin_list
 
 
 # ── Community screens ─────────────────────────────────────────────────────────
 
 @router.get("/community")
-async def community_screens(db: AsyncSession = Depends(get_db)):
+async def community_screens(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Return public screens the requesting user is allowed to see:
+    - Admin: all public screens
+    - Premium (rank 2+): all public screens
+    - Pro (rank 1): screens created by free or pro users only
+    - Free (rank 0): 403
+    """
+    user_rank = _PLAN_RANK.get(current_user["plan"], 0)
+
+    if not _is_admin(current_user["email"]) and user_rank < 1:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Community screens are available to Pro and Premium subscribers.",
+        )
+
+    # Admins and Premium users (rank >= 2) see everything.
+    # Pro users (rank 1) see screens where creator_plan rank <= 1 (free/pro).
+    if _is_admin(current_user["email"]) or user_rank >= 2:
+        rank_filter = 999  # no upper cap
+    else:
+        rank_filter = 1  # pro cap: exclude premium-created screens
+
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.query_text, s.created_at, s.updated_at
+               s.query_text, s.creator_plan, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.is_public = TRUE
+          AND CASE s.creator_plan
+                WHEN 'free'               THEN 0
+                WHEN 'pro'                THEN 1
+                WHEN 'enterprise_pro'     THEN 1
+                WHEN 'premium'            THEN 2
+                WHEN 'enterprise_premium' THEN 2
+                ELSE 0
+              END <= :rank_filter
         ORDER BY s.use_count DESC, s.created_at DESC
         LIMIT 100
-    """))
+    """), {"rank_filter": rank_filter})
     return {"screens": [_row_to_dict(r) for r in result.fetchall()]}
 
 
@@ -88,7 +129,7 @@ async def my_screens(
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.query_text, s.created_at, s.updated_at
+               s.query_text, s.creator_plan, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.user_id = :uid
@@ -107,19 +148,20 @@ async def create_screen(
 ):
     result = await db.execute(text("""
         INSERT INTO screener.saved_screens
-            (user_id, name, description, filters, sort_by, sort_dir, is_public, query_text)
-        VALUES (:uid, :name, :desc, CAST(:filters AS jsonb), :sort_by, :sort_dir, :is_public, :query_text)
+            (user_id, name, description, filters, sort_by, sort_dir, is_public, query_text, creator_plan)
+        VALUES (:uid, :name, :desc, CAST(:filters AS jsonb), :sort_by, :sort_dir, :is_public, :query_text, :creator_plan)
         RETURNING id, user_id, name, description, filters, sort_by, sort_dir,
-                  is_public, use_count, query_text, created_at, updated_at
+                  is_public, use_count, query_text, creator_plan, created_at, updated_at
     """), {
-        "uid":        current_user["id"],
-        "name":       body.name,
-        "desc":       body.description,
-        "filters":    json.dumps(body.filters),
-        "sort_by":    body.sort_by,
-        "sort_dir":   body.sort_dir,
-        "is_public":  body.is_public,
-        "query_text": body.query_text,
+        "uid":          current_user["id"],
+        "name":         body.name,
+        "desc":         body.description,
+        "filters":      json.dumps(body.filters),
+        "sort_by":      body.sort_by,
+        "sort_dir":     body.sort_dir,
+        "is_public":    body.is_public,
+        "query_text":   body.query_text,
+        "creator_plan": current_user["plan"],
     })
     await db.commit()
     row = result.fetchone()
@@ -127,7 +169,7 @@ async def create_screen(
     result2 = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.query_text, s.created_at, s.updated_at
+               s.query_text, s.creator_plan, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.id = :id
@@ -180,7 +222,7 @@ async def update_screen(
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,
                s.filters, s.sort_by, s.sort_dir, s.is_public, s.use_count,
-               s.query_text, s.created_at, s.updated_at
+               s.query_text, s.creator_plan, s.created_at, s.updated_at
         FROM screener.saved_screens s
         JOIN users.users u ON u.id = s.user_id
         WHERE s.id = :id

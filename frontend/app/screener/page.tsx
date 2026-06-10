@@ -3,7 +3,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useSearchParams } from 'next/navigation'
 import {
   runScreener, getScreenerFields, getScreenerPresets, exportScreener,
-  nlScreener, queryScreener, getQueryFields,
+  nlScreener, queryScreener, getQueryFields, exportQueryScreener,
   type ScreenerFilter, type ScreenerRow, type ScreenerFieldMeta,
   type ScreenerPreset, type NLScreenerResponse, type QueryFieldRef,
 } from '@/lib/api'
@@ -832,7 +832,11 @@ export default function ScreenerPage() {
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      await exportScreener(buildApiFilters(), { sort_by: sortBy, sort_dir: sortDir })
+      if (screenerMode === 'query' && queryText.trim()) {
+        await exportQueryScreener({ query: queryText.trim(), sort_by: sortBy, sort_dir: sortDir })
+      } else {
+        await exportScreener(buildApiFilters(), { sort_by: sortBy, sort_dir: sortDir })
+      }
     } catch (e) {
       console.error('Export failed', e)
     } finally {
@@ -1831,64 +1835,6 @@ export default function ScreenerPage() {
         </div>
       )}
 
-      {/* Save Query modal */}
-      {showQuerySaveModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Code2 className="w-5 h-5 text-orange-500" />
-                <h2 className="text-lg font-bold text-gray-900">Save Query</h2>
-              </div>
-              <button onClick={() => setShowQuerySaveModal(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
-                <input
-                  value={querySaveName}
-                  onChange={e => setQuerySaveName(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') handleSaveQuery() }}
-                  placeholder="e.g. High Quality Compounders"
-                  autoFocus
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-orange-400"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
-                <textarea
-                  value={querySaveDesc}
-                  onChange={e => setQuerySaveDesc(e.target.value)}
-                  placeholder="What does this query look for?"
-                  rows={2}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
-                             focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
-                />
-              </div>
-              <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
-                <p className="text-xs font-mono text-orange-700 truncate">{queryText.trim().split('\n')[0]}{queryText.trim().split('\n').length > 1 ? ' …' : ''}</p>
-                <p className="text-[10px] text-orange-400 mt-0.5">{queryText.trim().split('\n').length} line{queryText.trim().split('\n').length !== 1 ? 's' : ''} · query mode</p>
-              </div>
-            </div>
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => setShowQuerySaveModal(false)}
-                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveQuery}
-                disabled={querySaving || !querySaveName.trim()}
-                className="flex-1 px-4 py-2 text-sm bg-orange-500 hover:bg-orange-600 text-white
-                           rounded-lg font-semibold disabled:opacity-60">
-                {querySaving ? 'Saving…' : 'Save Query'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       </div>
 
@@ -2024,6 +1970,65 @@ export default function ScreenerPage() {
         <div className="text-center py-12 bg-white border border-gray-200 rounded-xl">
           <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>
           <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
+        </div>
+      )}
+
+      {/* Save Query modal — outside all hidden divs so it renders in query mode */}
+      {showQuerySaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Code2 className="w-5 h-5 text-orange-500" />
+                <h2 className="text-lg font-bold text-gray-900">Save Query</h2>
+              </div>
+              <button onClick={() => setShowQuerySaveModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
+                <input
+                  value={querySaveName}
+                  onChange={e => setQuerySaveName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveQuery() }}
+                  placeholder="e.g. High Quality Compounders"
+                  autoFocus
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-orange-400"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
+                <textarea
+                  value={querySaveDesc}
+                  onChange={e => setQuerySaveDesc(e.target.value)}
+                  placeholder="What does this query look for?"
+                  rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
+                />
+              </div>
+              <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
+                <p className="text-xs font-mono text-orange-700 truncate">{queryText.trim().split('\n')[0]}{queryText.trim().split('\n').length > 1 ? ' …' : ''}</p>
+                <p className="text-[10px] text-orange-400 mt-0.5">{queryText.trim().split('\n').length} line{queryText.trim().split('\n').length !== 1 ? 's' : ''} · query mode</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowQuerySaveModal(false)}
+                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveQuery}
+                disabled={querySaving || !querySaveName.trim()}
+                className="flex-1 px-4 py-2 text-sm bg-orange-500 hover:bg-orange-600 text-white
+                           rounded-lg font-semibold disabled:opacity-60">
+                {querySaving ? 'Saving…' : 'Save Query'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>

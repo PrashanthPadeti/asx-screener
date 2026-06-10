@@ -1671,3 +1671,58 @@ async def query_screener(
         is_capped=False,
         free_limit=None,
     )
+
+
+# ── POST /screener/query/export ───────────────────────────────────────────────
+
+@router.post("/query/export")
+async def export_query_screener(
+    req: QueryScreenerRequest,
+    db: AsyncSession = Depends(get_db),
+    user: dict = Depends(require_admin),
+):
+    """CSV export for Query Mode — same as /query but streams a CSV file."""
+    if user.get("plan", "free") == "free":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="CSV export is available on Pro and Premium plans.",
+        )
+
+    try:
+        custom_where, params = parse_query(req.query, ALLOWED_FIELDS)
+    except QueryParseError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    base_where = "u.price IS NOT NULL AND u.status = 'active'"
+    where      = f"{base_where} AND ({custom_where})"
+    sort_key   = req.sort_by.lower()
+    sort_expr  = SORTABLE_COLS.get(sort_key, "u.market_cap")
+    sort_dir   = "DESC" if req.sort_dir.lower() == "desc" else "ASC"
+
+    export_sql = f"""
+        SELECT {', '.join(f'u.{c}' for c in _EXPORT_COLS)}
+        FROM screener.universe u
+        WHERE {where}
+        ORDER BY {sort_expr} {sort_dir} NULLS LAST
+        LIMIT {_EXPORT_MAX_ROWS}
+    """
+    result = await db.execute(text(export_sql), params)
+    rows = result.mappings().all()
+
+    def generate() -> Any:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([_HEADER_LABELS.get(c, c) for c in _EXPORT_COLS])
+        yield buf.getvalue()
+        for row in rows:
+            buf.truncate(0)
+            buf.seek(0)
+            writer.writerow([_fmt_val(col, row.get(col)) for col in _EXPORT_COLS])
+            yield buf.getvalue()
+
+    filename = f"asx_query_export_{date_type.today().isoformat()}.csv"
+    return StreamingResponse(
+        generate(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

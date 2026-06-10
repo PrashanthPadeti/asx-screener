@@ -943,6 +943,21 @@ export const getQueryFields = async (): Promise<QueryFieldRef[]> => {
   return data.fields ?? []
 }
 
+export const exportQueryScreener = async (req: QueryScreenerRequest): Promise<void> => {
+  const response = await api.post('/api/v1/screener/query/export', req, { responseType: 'blob' })
+  const blob  = new Blob([response.data], { type: 'text/csv' })
+  const url   = URL.createObjectURL(blob)
+  const a     = document.createElement('a')
+  const cd    = (response.headers['content-disposition'] as string) || ''
+  const match = cd.match(/filename="([^"]+)"/)
+  a.href     = url
+  a.download = match ? match[1] : 'asx_query_export.csv'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // ── Anomaly Flags ─────────────────────────────────────────────
 
 // Anomaly flag for a single company (company detail page)

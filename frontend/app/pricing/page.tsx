@@ -180,67 +180,42 @@ export default function PricingPage() {
         </div>
       </div>
 
-      {/* Founding Members banner */}
-      {founding?.enabled && (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
-          <div className={cn(
-            'rounded-2xl px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center gap-3',
-            founding.available
-              ? 'bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200'
-              : 'bg-gray-50 border border-gray-200'
-          )}>
-            <div className={cn(
-              'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
-              founding.available ? 'bg-amber-100' : 'bg-gray-200'
-            )}>
-              <Users className={cn('w-5 h-5', founding.available ? 'text-amber-600' : 'text-gray-400')} />
-            </div>
-            <div className="flex-1 min-w-0">
-              {founding.available ? (
-                <>
-                  <p className="font-bold text-amber-900 text-sm">
-                    🎉 Founding Members — {founding.remaining} of {founding.limit} spots remaining
-                  </p>
-                  <p className="text-amber-700 text-xs mt-0.5 leading-relaxed">
-                    Be one of our first {founding.limit} paying subscribers and get extended access:
-                    {' '}<strong>monthly plan → 6 months</strong>,{' '}
-                    <strong>annual plan → 3 years</strong>. No extra charge.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <p className="font-bold text-gray-600 text-sm">Founding Members — All {founding.limit} spots have been claimed</p>
-                  <p className="text-gray-500 text-xs mt-0.5">Standard pricing applies. Thank you to our founding members!</p>
-                </>
-              )}
-            </div>
-            {founding.available && (
-              <div className="shrink-0 flex items-center gap-2">
-                <div className="text-right">
-                  <div className="text-2xl font-black text-amber-700 leading-none">{founding.remaining}</div>
-                  <div className="text-[10px] text-amber-600 font-medium uppercase tracking-wide">left</div>
+      {/* Main layout: plan cards + sticky sidebar */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10">
+        <div className="flex flex-col lg:flex-row gap-8 items-start">
+
+          {/* ── Left: all plan content ── */}
+          <div className="flex-1 min-w-0">
+
+            {/* Mobile founding banner (hidden on lg where sidebar shows) */}
+            {founding?.enabled && (
+              <div className={cn(
+                'lg:hidden rounded-2xl px-5 py-4 flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-6',
+                founding.available
+                  ? 'bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200'
+                  : 'bg-gray-50 border border-gray-200'
+              )}>
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0', founding.available ? 'bg-amber-100' : 'bg-gray-200')}>
+                  <Users className={cn('w-5 h-5', founding.available ? 'text-amber-600' : 'text-gray-400')} />
                 </div>
-                {/* Progress bar */}
-                <div className="w-20 h-2 bg-amber-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-amber-500 rounded-full transition-all"
-                    style={{ width: `${Math.round((founding.claimed / founding.limit) * 100)}%` }}
-                  />
+                <div className="flex-1 min-w-0">
+                  {founding.available ? (
+                    <>
+                      <p className="font-bold text-amber-900 text-sm">Founding Members — {founding.remaining} of {founding.limit} spots remaining</p>
+                      <p className="text-amber-700 text-xs mt-0.5">Monthly → 6 months &nbsp;·&nbsp; Annual → 3 years. No extra charge.</p>
+                    </>
+                  ) : (
+                    <p className="font-bold text-gray-600 text-sm">Founding Members — all {founding.limit} spots claimed. Standard pricing applies.</p>
+                  )}
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
 
-      {/* Plan cards */}
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
-
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
-            {error}
-          </div>
-        )}
+            {error && (
+              <div className="mb-6 bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-4 py-3">
+                {error}
+              </div>
+            )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {PLANS.map(plan => {
@@ -433,6 +408,80 @@ export default function PricingPage() {
           </FaqItem>
         </div>
 
+          </div>{/* end left column */}
+
+          {/* ── Right: Option C sticky founding widget (desktop only) ── */}
+          {founding?.enabled && (
+            <div className="hidden lg:block w-56 flex-shrink-0 sticky top-24 self-start">
+              <div className="bg-[#0f172a] rounded-2xl p-4 border border-amber-500/30">
+
+                {/* Header */}
+                <div className="flex items-center gap-2 mb-4">
+                  <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+                  <span className="text-amber-400 text-xs font-semibold">Founding Member Offer</span>
+                </div>
+
+                {/* Deals */}
+                <div className="space-y-2 mb-4">
+                  <div className="flex items-start gap-2 py-2 border-b border-white/[0.07]">
+                    <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="text-slate-200 text-xs">Monthly</span>
+                      <span className="text-slate-400 text-xs"> — pay 1, get </span>
+                      <span className="text-amber-400 text-xs font-semibold">6 months</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-2 py-2">
+                    <Check className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <span className="text-slate-200 text-xs">Annual</span>
+                      <span className="text-slate-400 text-xs"> — pay 1yr, get </span>
+                      <span className="text-amber-400 text-xs font-semibold">3 years</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Scarcity bar */}
+                <div className="mb-4">
+                  <div className="flex justify-between text-[10px] mb-1.5">
+                    <span className="text-slate-500">Spots claimed</span>
+                    <span className="text-amber-400 font-semibold">{founding.claimed} / {founding.limit}</span>
+                  </div>
+                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-amber-400 rounded-full transition-all"
+                      style={{ width: `${Math.round((founding.claimed / founding.limit) * 100)}%` }}
+                    />
+                  </div>
+                  {founding.available ? (
+                    <p className="text-[10px] text-slate-500 mt-1">{founding.remaining} spots left</p>
+                  ) : (
+                    <p className="text-[10px] text-slate-500 mt-1">All spots claimed</p>
+                  )}
+                </div>
+
+                {/* CTA */}
+                {founding.available ? (
+                  <Link
+                    href="/auth/register"
+                    className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2.5 rounded-lg transition-colors"
+                  >
+                    Claim my spot
+                  </Link>
+                ) : (
+                  <div className="text-center text-[10px] text-slate-500 py-2">
+                    Standard pricing applies
+                  </div>
+                )}
+
+                <p className="text-[10px] text-slate-600 text-center mt-3 leading-relaxed">
+                  First {founding.limit} paying subscribers only. No extra charge.
+                </p>
+              </div>
+            </div>
+          )}
+
+        </div>{/* end flex row */}
       </div>
     </div>
   )

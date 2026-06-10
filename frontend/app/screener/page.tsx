@@ -1080,7 +1080,7 @@ export default function ScreenerPage() {
               <Code2 className={cn('w-3.5 h-3.5', screenerMode === 'query' ? 'text-white' : 'text-orange-500')} />
               Query Mode
               <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>
-                {isAdmin ? 'ADMIN' : isPremium ? 'PREMIUM' : 'PRO'}
+                {isPremium ? 'PREMIUM' : isPro ? 'PRO' : 'ADMIN'}
               </span>
             </button>
           )}
@@ -1300,7 +1300,7 @@ export default function ScreenerPage() {
                 <Code2 className="w-4 h-4 text-orange-600" />
                 <span className="font-semibold text-gray-800 text-sm">Query Mode</span>
                 <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 rounded px-1.5 py-0.5 font-bold">
-                  {isAdmin ? 'ADMIN' : isPremium ? 'PREMIUM' : 'PRO'}
+                  {isPremium ? 'PREMIUM' : isPro ? 'PRO' : 'ADMIN'}
                 </span>
               </div>
               <span className="text-xs text-gray-500 hidden sm:block">

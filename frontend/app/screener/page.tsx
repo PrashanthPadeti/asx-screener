@@ -474,6 +474,7 @@ export default function ScreenerPage() {
   const [querySaveName, setQuerySaveName]             = useState('')
   const [querySaveDesc, setQuerySaveDesc]             = useState('')
   const [querySaving, setQuerySaving]                 = useState(false)
+  const [queryPublic, setQueryPublic]                 = useState(false)
   const [showQueryMyScreens, setShowQueryMyScreens]   = useState(false)
 
   // NL screener state
@@ -1006,13 +1007,14 @@ export default function ScreenerPage() {
         filters:    [],
         sort_by:    sortBy,
         sort_dir:   sortDir,
-        is_public:  false,
+        is_public:  queryPublic,
         query_text: queryText.trim(),
       })
       setMyScreens(s => [screen, ...s])
       setShowQuerySaveModal(false)
       setQuerySaveName('')
       setQuerySaveDesc('')
+      setQueryPublic(false)
     } catch { /* ignore */ } finally {
       setQuerySaving(false)
     }
@@ -2016,6 +2018,19 @@ export default function ScreenerPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
                              focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none"
                 />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setQueryPublic(v => !v)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
+                    queryPublic
+                      ? 'bg-green-50 border-green-300 text-green-700'
+                      : 'bg-gray-50 border-gray-300 text-gray-600'
+                  )}>
+                  {queryPublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  {queryPublic ? 'Public — visible to all' : 'Private — only you'}
+                </button>
               </div>
               <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">
                 <p className="text-xs font-mono text-orange-700 truncate">{queryText.trim().split('\n')[0]}{queryText.trim().split('\n').length > 1 ? ' …' : ''}</p>

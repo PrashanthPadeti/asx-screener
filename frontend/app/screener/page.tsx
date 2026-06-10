@@ -763,6 +763,13 @@ export default function ScreenerPage() {
   }
 
   const loadSavedScreen = (screen: SavedScreen) => {
+    if (screen.query_text) {
+      setQueryText(screen.query_text)
+      setSortBy(screen.sort_by)
+      setSortDir(screen.sort_dir as 'asc' | 'desc')
+      setScreenerMode('query')
+      return
+    }
     const rows: FilterRow[] = screen.filters.map(f => ({
       id:       nextId++,
       field:    f.field,
@@ -773,6 +780,7 @@ export default function ScreenerPage() {
     setSortBy(screen.sort_by)
     setSortDir(screen.sort_dir as 'asc' | 'desc')
     setActivePreset(null)
+    setScreenerMode('manual')
   }
 
   // Build API filters from current filter rows

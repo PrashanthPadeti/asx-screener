@@ -215,71 +215,121 @@ export default async function HomePage() {
     <div className="space-y-10">
 
       {/* ── Hero ──────────────────────────────────────────────── */}
-      <section className="text-center py-10 px-4">
+      <section className="py-10 px-4">
+        <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_220px] gap-6 items-center">
 
-        {/* Live badge */}
-        <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full mb-4">
-          <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-          {summary.total_stocks > 0
-            ? `${summary.total_stocks.toLocaleString()} active stocks · ASX end-of-day data`
-            : '2,100+ active stocks · ASX end-of-day data'
-          }
+          {/* ── Left: Monthly founding deal ── */}
+          <div className="hidden lg:flex flex-col gap-3 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/20 self-stretch justify-center">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">FOUNDING MEMBER</span>
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs mb-1">Monthly plan</p>
+              <p className="text-white text-sm font-semibold leading-snug">Pay <span className="text-amber-400">1 month</span></p>
+              <p className="text-slate-300 text-xs mt-0.5">→ get <span className="text-amber-400 font-semibold">6 months</span> access</p>
+            </div>
+            <div className="bg-white/5 rounded-lg px-3 py-1.5 text-center">
+              <span className="text-emerald-400 text-xs font-semibold">5× value</span>
+              <span className="text-slate-500 text-xs"> · save 83%</span>
+            </div>
+            <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg transition-colors">
+              Claim deal →
+            </Link>
+          </div>
+
+          {/* ── Centre: existing hero content (unchanged) ── */}
+          <div className="text-center">
+            <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full mb-4">
+              <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              {summary.total_stocks > 0
+                ? `${summary.total_stocks.toLocaleString()} active stocks · ASX end-of-day data`
+                : '2,100+ active stocks · ASX end-of-day data'
+              }
+            </div>
+
+            <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              ASX Stock Screener
+            </h1>
+            <p className="text-lg text-gray-600 max-w-2xl mx-auto mb-8">
+              The most comprehensive ASX screener — franking credits, mining metrics,
+              A-REIT depth, and AI insights. Built for Australian investors.
+            </p>
+
+            <div className="flex flex-wrap gap-3 justify-center mb-8">
+              <Link href="/screener" className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
+                Open Screener
+              </Link>
+              <Link href="/screener?preset=asx200" className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg border-2 border-blue-200 hover:bg-blue-50 transition-colors">
+                Explore ASX 200
+              </Link>
+              <Link href="/company/BHP" className="px-6 py-3 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors">
+                View BHP Example →
+              </Link>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-gray-500">
+              <span className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5 text-blue-400" />ASX end-of-day data</span>
+              <span className="hidden sm:block text-gray-200">|</span>
+              <span className="flex items-center gap-1.5"><Calculator className="w-3.5 h-3.5 text-blue-400" />Franking credit calculations</span>
+              <span className="hidden sm:block text-gray-200">|</span>
+              <span className="flex items-center gap-1.5"><Building2 className="w-3.5 h-3.5 text-blue-400" />Mining &amp; A-REIT metrics</span>
+              <span className="hidden sm:block text-gray-200">|</span>
+              <span className="flex items-center gap-1.5"><Brain className="w-3.5 h-3.5 text-blue-400" />AI stock insights</span>
+            </div>
+          </div>
+
+          {/* ── Right: Annual founding deal + scarcity ── */}
+          <div className="hidden lg:flex flex-col gap-3 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/30 self-stretch justify-center">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">BEST VALUE</span>
+              <span className="text-[10px] text-slate-500">100 spots only</span>
+            </div>
+            <div>
+              <p className="text-slate-400 text-xs mb-1">Annual plan</p>
+              <p className="text-white text-sm font-semibold leading-snug">Pay <span className="text-amber-400">1 year</span></p>
+              <p className="text-slate-300 text-xs mt-0.5">→ get <span className="text-amber-400 font-semibold">3 years</span> access</p>
+            </div>
+            <div className="bg-white/5 rounded-lg px-3 py-1.5 text-center">
+              <span className="text-emerald-400 text-xs font-semibold">3× value</span>
+              <span className="text-slate-500 text-xs"> · save 67%</span>
+            </div>
+            {/* Scarcity bar */}
+            <div>
+              <div className="flex justify-between text-[10px] mb-1">
+                <span className="text-slate-500">Spots claimed</span>
+                <span className="text-amber-400 font-semibold">68 / 100</span>
+              </div>
+              <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full w-[68%] bg-amber-400 rounded-full" />
+              </div>
+            </div>
+            <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg transition-colors">
+              Claim deal →
+            </Link>
+          </div>
+
         </div>
 
-        <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-          ASX Stock Screener
-        </h1>
-        <p className="text-lg text-gray-600 max-w-2xl mx-auto mb-8">
-          The most comprehensive ASX screener — franking credits, mining metrics,
-          A-REIT depth, and AI insights. Built for Australian investors.
-        </p>
-
-        {/* CTA buttons — 3 buttons */}
-        <div className="flex flex-wrap gap-3 justify-center mb-8">
-          <Link
-            href="/screener"
-            className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg
-                       hover:bg-blue-700 transition-colors shadow-sm"
-          >
-            Open Screener
+        {/* Mobile banner — shown instead of side cards on small screens */}
+        <div className="lg:hidden mt-6 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/20">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">FOUNDING MEMBER · 100 spots only</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <div className="bg-white/5 rounded-xl p-3">
+              <p className="text-slate-400 text-xs mb-1">Monthly</p>
+              <p className="text-white text-sm font-semibold">Pay 1 month</p>
+              <p className="text-amber-400 text-xs mt-0.5">→ get 6 months</p>
+            </div>
+            <div className="bg-white/5 rounded-xl p-3 border border-amber-500/20">
+              <p className="text-slate-400 text-xs mb-1">Annual</p>
+              <p className="text-white text-sm font-semibold">Pay 1 year</p>
+              <p className="text-amber-400 text-xs mt-0.5">→ get 3 years</p>
+            </div>
+          </div>
+          <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-semibold py-2.5 rounded-lg transition-colors">
+            Claim founding member deal →
           </Link>
-          <Link
-            href="/screener?preset=asx200"
-            className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg
-                       border-2 border-blue-200 hover:bg-blue-50 transition-colors"
-          >
-            Explore ASX 200
-          </Link>
-          <Link
-            href="/company/BHP"
-            className="px-6 py-3 bg-white text-gray-700 font-semibold rounded-lg
-                       border border-gray-300 hover:bg-gray-50 transition-colors"
-          >
-            View BHP Example →
-          </Link>
-        </div>
-
-        {/* Trust row */}
-        <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-gray-500">
-          <span className="flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 text-blue-400" />
-            ASX end-of-day data
-          </span>
-          <span className="hidden sm:block text-gray-200">|</span>
-          <span className="flex items-center gap-1.5">
-            <Calculator className="w-3.5 h-3.5 text-blue-400" />
-            Franking credit calculations
-          </span>
-          <span className="hidden sm:block text-gray-200">|</span>
-          <span className="flex items-center gap-1.5">
-            <Building2 className="w-3.5 h-3.5 text-blue-400" />
-            Mining &amp; A-REIT metrics
-          </span>
-          <span className="hidden sm:block text-gray-200">|</span>
-          <span className="flex items-center gap-1.5">
-            <Brain className="w-3.5 h-3.5 text-blue-400" />
-            AI stock insights
-          </span>
         </div>
       </section>
 

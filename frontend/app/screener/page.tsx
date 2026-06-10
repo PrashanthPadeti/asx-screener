@@ -1067,7 +1067,7 @@ export default function ScreenerPage() {
             }
           </button>
           {/* ── Query Mode — Pro/Premium/Admin ── */}
-          {(isAdmin || isPro || isPremium) && (
+          {(isAdmin || isPro) && (
             <button
               onClick={() => { setScreenerMode('query'); loadQueryFields() }}
               className={cn(
@@ -1079,10 +1079,9 @@ export default function ScreenerPage() {
             >
               <Code2 className={cn('w-3.5 h-3.5', screenerMode === 'query' ? 'text-white' : 'text-orange-500')} />
               Query Mode
-              {isAdmin
-                ? <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>ADMIN</span>
-                : <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>PRO</span>
-              }
+              <span className={cn('text-[10px] rounded px-1.5 py-0.5 font-bold', screenerMode === 'query' ? 'bg-white/20 text-white' : 'bg-orange-100 text-orange-700')}>
+                {isAdmin ? 'ADMIN' : isPremium ? 'PREMIUM' : 'PRO'}
+              </span>
             </button>
           )}
         </div>
@@ -1289,7 +1288,7 @@ export default function ScreenerPage() {
       )}
 
       {/* ── Query Mode — two-column row (textarea + sidebar) ──────── */}
-      {screenerMode === 'query' && (isAdmin || isPro || isPremium) && (
+      {screenerMode === 'query' && (isAdmin || isPro) && (
       <div className="w-full flex flex-col lg:flex-row gap-4">
         <div className="flex-1 min-w-0 flex flex-col">
 
@@ -1301,7 +1300,7 @@ export default function ScreenerPage() {
                 <Code2 className="w-4 h-4 text-orange-600" />
                 <span className="font-semibold text-gray-800 text-sm">Query Mode</span>
                 <span className="text-[10px] bg-orange-100 text-orange-700 border border-orange-200 rounded px-1.5 py-0.5 font-bold">
-                  {isAdmin ? 'ADMIN' : 'PRO'}
+                  {isAdmin ? 'ADMIN' : isPremium ? 'PREMIUM' : 'PRO'}
                 </span>
               </div>
               <span className="text-xs text-gray-500 hidden sm:block">

@@ -467,6 +467,7 @@ export default function ScreenerPage() {
   const [queryText, setQueryText]                     = useState('')
   const [queryLoading, setQueryLoading]               = useState(false)
   const [queryError, setQueryError]                   = useState<string | null>(null)
+  const [upgradeNotice, setUpgradeNotice]             = useState<string | null>(null)
   const [queryFields, setQueryFields]                 = useState<QueryFieldRef[]>([])
   const [queryFieldSearch, setQueryFieldSearch]       = useState('')
   const [queryFieldsLoaded, setQueryFieldsLoaded]     = useState(false)
@@ -764,6 +765,10 @@ export default function ScreenerPage() {
 
   const loadSavedScreen = (screen: SavedScreen) => {
     if (screen.query_text) {
+      if (!isAdmin && !isPro) {
+        setUpgradeNotice('This community screen uses Query Mode, which requires a Pro or Premium plan. Upgrade to Pro to run it.')
+        return
+      }
       setQueryText(screen.query_text)
       setSortBy(screen.sort_by)
       setSortDir(screen.sort_dir as 'asc' | 'desc')
@@ -1040,6 +1045,19 @@ export default function ScreenerPage() {
 
   return (
     <>
+      {/* Upgrade notice — shown when a free user tries to open a Query Mode community screen */}
+      {upgradeNotice && (
+        <div className="flex items-center justify-between gap-3 p-3 bg-orange-50 border border-orange-200 rounded-xl text-sm">
+          <div className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-orange-500 flex-shrink-0" />
+            <span className="text-orange-800">{upgradeNotice}</span>
+          </div>
+          <button onClick={() => setUpgradeNotice(null)} className="text-orange-400 hover:text-orange-600 flex-shrink-0">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Header + Mode Tabs — always full width */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-xl font-bold text-gray-900">Stock Screener</h1>

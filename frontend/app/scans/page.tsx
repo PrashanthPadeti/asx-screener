@@ -5,7 +5,7 @@ import {
   Shield, Zap, Award, RotateCcw, DollarSign, Search,
   TrendingUp, TrendingDown, BarChart2, ArrowUp, ArrowDown,
   Star, Activity, Flame, Lock,
-  Globe, Users, Play,
+  Globe, Users, Play, Code2,
 } from 'lucide-react'
 import { getScreenerPresets, getCommunityScreens, incrementScreenUse, getMarketSectors, type ScreenerPreset, type SavedScreen } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
@@ -230,8 +230,10 @@ function ScanCard({ preset, isPro, tier }: { preset: ScreenerPreset; isPro: bool
 
 export default function ScansPage() {
   const { user } = useAuth()
-  const isPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(user?.plan ?? 'free')
+  const isPro    = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(user?.plan ?? 'free')
   const isPremium = ['premium', 'enterprise_premium'].includes(user?.plan ?? 'free')
+  const isAdmin  = user?.is_admin ?? false
+  const hasQueryAccess = isAdmin || isPro
   const [presets, setPresets] = useState<ScreenerPreset[]>([])
   const [loading, setLoading] = useState(true)
   const [community, setCommunity] = useState<SavedScreen[]>([])
@@ -449,33 +451,72 @@ export default function ScansPage() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {community.map(s => (
-                    <Link key={s.id} href={"/screener?screen=" + s.id} onClick={() => incrementScreenUse(s.id)}
-                      className="group relative flex flex-col gap-3 p-5 rounded-xl border border-gray-200 bg-white hover:border-blue-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-green-50 group-hover:bg-green-100 flex items-center justify-center shrink-0 transition-colors">
-                          <Globe className="w-5 h-5 text-green-600" />
+                  {community.map(s => {
+                    const isQueryScreen = !!s.query_text
+                    const locked = isQueryScreen && !hasQueryAccess
+                    const cardContent = (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className={cn(
+                            'w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors',
+                            isQueryScreen
+                              ? 'bg-orange-50 group-hover:bg-orange-100'
+                              : 'bg-green-50 group-hover:bg-green-100'
+                          )}>
+                            {isQueryScreen
+                              ? <Code2 className="w-5 h-5 text-orange-500" />
+                              : <Globe className="w-5 h-5 text-green-600" />}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {isQueryScreen && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-600 font-semibold">Query Mode</span>
+                            )}
+                            <span className="text-xs text-gray-400">{s.use_count > 0 ? s.use_count + " runs" : ""}</span>
+                          </div>
                         </div>
-                        <span className="text-xs text-gray-400 shrink-0">{s.use_count > 0 ? s.use_count + " runs" : ""}</span>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold text-sm text-gray-900 mb-0.5">{s.name}</h3>
-                        {s.description && <p className="text-xs text-gray-500 leading-relaxed">{s.description}</p>}
-                        <p className="text-[11px] text-gray-400 mt-1">by {s.user_name}</p>
-                      </div>
-                      <div className="flex flex-wrap gap-1 mt-auto pt-1">
-                        {s.filters.slice(0, 3).map((f, i) => (
-                          <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{(f.field as string).replace(/_/g, " ")}</span>
-                        ))}
-                        {s.filters.length > 3 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">+{s.filters.length - 3} more</span>}
-                      </div>
-                      <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <div className="w-6 h-6 rounded-full bg-blue-600 flex items-center justify-center">
-                          <Play className="w-3 h-3 text-white" />
+                        <div>
+                          <h3 className="font-semibold text-sm text-gray-900 mb-0.5">{s.name}</h3>
+                          {s.description && <p className="text-xs text-gray-500 leading-relaxed">{s.description}</p>}
+                          <p className="text-[11px] text-gray-400 mt-1">by {s.user_name}</p>
                         </div>
+                        <div className="flex flex-wrap gap-1 mt-auto pt-1">
+                          {isQueryScreen ? (
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-orange-50 text-orange-500 font-mono">SQL-like query</span>
+                          ) : (
+                            <>
+                              {s.filters.slice(0, 3).map((f, i) => (
+                                <span key={i} className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{(f.field as string).replace(/_/g, " ")}</span>
+                              ))}
+                              {s.filters.length > 3 && <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-500">+{s.filters.length - 3} more</span>}
+                            </>
+                          )}
+                        </div>
+                        {locked ? (
+                          <div className="absolute inset-0 rounded-xl bg-white/70 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1.5 bg-orange-500 text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow">
+                              <Lock className="w-3 h-3" /> Pro / Premium required
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className={cn('w-6 h-6 rounded-full flex items-center justify-center', isQueryScreen ? 'bg-orange-500' : 'bg-blue-600')}>
+                              <Play className="w-3 h-3 text-white" />
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )
+                    return locked ? (
+                      <div key={s.id} className="group relative flex flex-col gap-3 p-5 rounded-xl border border-gray-200 bg-white cursor-not-allowed opacity-80">
+                        {cardContent}
                       </div>
-                    </Link>
-                  ))}
+                    ) : (
+                      <Link key={s.id} href={"/screener?screen=" + s.id} onClick={() => incrementScreenUse(s.id)}
+                        className="group relative flex flex-col gap-3 p-5 rounded-xl border border-gray-200 bg-white hover:border-orange-300 hover:shadow-md hover:-translate-y-0.5 transition-all duration-150">
+                        {cardContent}
+                      </Link>
+                    )
+                  })}
                 </div>
               )}
             </section>

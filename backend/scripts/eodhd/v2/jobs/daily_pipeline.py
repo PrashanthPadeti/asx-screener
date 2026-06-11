@@ -17,7 +17,8 @@ Steps:
   11. [SKIPPED] ASX index prices → market.index_prices        (APScheduler handles at 5:30 PM)
   12. [SKIPPED] ETF & fund prices → market.fund_prices        (APScheduler handles at 5:35 PM)
   13. Build screener.universe → Golden Record
-  14. [SKIPPED] Market snapshots → snapshots                  (APScheduler handles at 6:45 PM)
+  14. Heatmap cache → market.heatmap_cache / heatmap_labels
+  15. [SKIPPED] Market snapshots → snapshots                  (APScheduler handles at 6:45 PM)
 
 Usage:
     python scripts/eodhd/v2/jobs/daily_pipeline.py
@@ -281,7 +282,7 @@ def main():
     # ── Initialise pipeline tracker ───────────────────────────────────────────
     tracker = PipelineTracker()
     tracker.connect()
-    tracker.start_pipeline(TODAY, total_steps=14)
+    tracker.start_pipeline(TODAY, total_steps=15)
 
     # ── Step 1: Download EOD prices (per-stock from yesterday) ────────────────
     # Uses historical per-stock endpoint — bulk endpoint not available on this tier.
@@ -365,10 +366,15 @@ def main():
         PYTHON, str(SCRIPTS / "build_screener_universe.py"),
     ], tracker=tracker, step=13)
 
-    # ── Step 14: Market snapshots (runs after universe rebuild) ───────────────
+    # ── Step 14: Heatmap cache ────────────────────────────────────────────────
+    run_optional("Step 14: Heatmap cache → market.heatmap_cache", [
+        PYTHON, "-m", "compute.engine.heatmap_compute",
+    ], tracker=tracker, step=14)
+
+    # ── Step 15: Market snapshots (runs after universe rebuild) ───────────────
     # Skipped — APScheduler handles this at 6:45 PM (admin dashboard only, non-core)
-    log.info("Step 14: Skipped (handled by APScheduler at 6:45 PM)")
-    tracker.skip_step(14, "Step 14: Market snapshots")
+    log.info("Step 15: Skipped (handled by APScheduler at 6:45 PM)")
+    tracker.skip_step(15, "Step 15: Market snapshots")
 
     # ── Mark pipeline as successful ───────────────────────────────────────────
     tracker.finish_pipeline(success=True)

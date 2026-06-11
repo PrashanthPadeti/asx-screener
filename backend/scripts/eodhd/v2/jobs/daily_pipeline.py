@@ -368,7 +368,7 @@ def main():
 
     # ── Step 14: Heatmap cache ────────────────────────────────────────────────
     run_optional("Step 14: Heatmap cache → market.heatmap_cache", [
-        PYTHON, "-m", "compute.engine.heatmap_compute",
+        PYTHON, str(COMPUTE / "heatmap_compute.py"),
     ], tracker=tracker, step=14)
 
     # ── Step 15: Market snapshots (runs after universe rebuild) ───────────────

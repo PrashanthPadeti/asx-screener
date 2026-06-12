@@ -13,13 +13,23 @@ Security model:
   - Operators validated against a fixed whitelist
 
 Supported syntax:
-  field_name  operator  number   [ AND | OR  field_name operator number ]
-  field_name  operator  number   AND ( field_name operator number OR ... )
+  field_name  operator  value   [ AND | OR  field_name operator value ]
+  field_name  operator  value   AND ( field_name operator value OR ... )
 
-  Operators:  >  >=  <  <=  =  !=  <>
   Connectors: AND  OR  (case-insensitive)
   Grouping:   ( ... )
-  Values:     integers or decimals (e.g. 10, 15.5, -5)
+
+  Value types (determined by the field):
+    number   →  operators >  >=  <  <=  =  !=  <>   value: 10, 15.5, -5
+    text     →  operators =  !=                     value: 'Materials', "Health Care"
+    boolean  →  operators =  !=                     value: true / false (or 1 / 0)
+                bare boolean field also means "= true", e.g.  is_reit AND roe > 10
+
+  Examples:
+    roe > 10 AND (roce > 10 OR roic > 10)
+    sector = 'Materials' AND market_cap > 1000
+    is_reit = true AND dividend_yield > 5
+    is_miner AND pe_ratio < 15 AND sector != 'Energy'
 
 Field names are matched case-insensitively against a combined alias map that
 includes all ALLOWED_FIELDS keys plus human-readable aliases (see EXTRA_ALIASES).
@@ -331,6 +341,15 @@ EXTRA_ALIASES: dict[str, str] = {
     "52 week high":                                  "high_52w",
     "52w low":                                       "low_52w",
     "52 week low":                                   "low_52w",
+
+    # ── Text & boolean fields ──────────────────────────────────────────────────
+    "industry group":                                "industry",
+    "type":                                          "stock_type",
+    "reit":                                          "is_reit",
+    "is a reit":                                     "is_reit",
+    "miner":                                         "is_miner",
+    "mining":                                        "is_miner",
+    "is a miner":                                    "is_miner",
 }
 
 
@@ -360,16 +379,19 @@ TT_OP     = "OP"      # >=, <=, !=, <>, >, <, =
 TT_LPAREN = "LPAREN"  # (
 TT_RPAREN = "RPAREN"  # )
 TT_NUMBER = "NUMBER"  # integer or decimal (may be negative)
+TT_STRING = "STRING"  # quoted text value, e.g. 'Materials' or "Health Care"
 TT_WORD   = "WORD"    # identifier / keyword token
 
 _TOKEN_RE = re.compile(
     r"""
     \s+                                   # skip whitespace
-    | (>=|<=|!=|<>|>|<|=)                # comparison operators
-    | (\()                                # left paren
-    | (\))                                # right paren
-    | (-?\d+(?:\.\d+)?)                   # numbers (incl. negative)
-    | ([A-Za-z_][A-Za-z0-9_\-\./]*)      # words / identifiers
+    | (>=|<=|!=|<>|>|<|=)                # 1: comparison operators
+    | (\()                                # 2: left paren
+    | (\))                                # 3: right paren
+    | '([^']*)'                           # 4: single-quoted string value
+    | "([^"]*)"                           # 5: double-quoted string value
+    | (-?\d+(?:\.\d+)?)                   # 6: numbers (incl. negative)
+    | ([A-Za-z_][A-Za-z0-9_\-\./]*)      # 7: words / identifiers
     """,
     re.VERBOSE,
 )
@@ -392,8 +414,9 @@ def _tokenize(text: str) -> list[_Token]:
     """Lex the query into a flat token list, skipping whitespace."""
     tokens: list[_Token] = []
     for m in _TOKEN_RE.finditer(text):
-        op, lp, rp, num, word = (
-            m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        op, lp, rp, sq, dq, num, word = (
+            m.group(1), m.group(2), m.group(3),
+            m.group(4), m.group(5), m.group(6), m.group(7),
         )
         if op is not None:
             tokens.append(_Token(TT_OP, op))
@@ -401,6 +424,10 @@ def _tokenize(text: str) -> list[_Token]:
             tokens.append(_Token(TT_LPAREN, "("))
         elif rp is not None:
             tokens.append(_Token(TT_RPAREN, ")"))
+        elif sq is not None:
+            tokens.append(_Token(TT_STRING, sq))
+        elif dq is not None:
+            tokens.append(_Token(TT_STRING, dq))
         elif num is not None:
             tokens.append(_Token(TT_NUMBER, num))
         elif word is not None:
@@ -412,14 +439,28 @@ def _tokenize(text: str) -> list[_Token]:
 # ── AST Node classes ──────────────────────────────────────────────────────────
 
 class _ConditionNode:
-    """Leaf: (sql_col) op :param"""
+    """
+    Leaf condition. Renders one of three SQL shapes depending on ``kind``:
 
-    def __init__(self, col: str, op: str, value: float):
+      number  → (col) op :param        (value parameterized, scale already applied)
+      text    → (col) op :param        (value parameterized as a string)
+      boolean → (col)::int != 0  / = 0 (matches build_screener_sql so it works for
+                                        both smallint columns and boolean expressions)
+    """
+
+    def __init__(self, col: str, op: str, value, kind: str = "number"):
         self.col   = col
         self.op    = op
         self.value = value
+        self.kind  = kind
 
     def to_sql(self, params: dict, counter: list) -> str:
+        if self.kind == "boolean":
+            # value is a Python bool; op is "=" or "!=".
+            # "!=" inverts the requested truth value.
+            want_true = self.value if self.op == "=" else not self.value
+            return f"({self.col})::int != 0" if want_true else f"({self.col})::int = 0"
+
         key = f"qp{counter[0]}"
         params[key] = self.value
         counter[0] += 1
@@ -590,13 +631,31 @@ class _Parser:
             )
 
         field_info = self.allowed_fields[field_key]
+        ftype      = field_info.get("type", "number")
+        col        = field_info["col"]
+
+        # ── Bare boolean shortcut: "is_reit" means "is_reit = true" ───────────
+        # Allowed when the next token ends the condition (AND/OR/")"/end).
+        if ftype == "boolean":
+            nxt = self._peek()
+            if (
+                nxt is None
+                or nxt.type == TT_RPAREN
+                or (nxt.type == TT_WORD and nxt.value.upper() in _KEYWORDS)
+            ):
+                return _ConditionNode(col, "=", True, kind="boolean")
 
         # ── Operator ──────────────────────────────────────────────────────────
         if self._eof() or self._peek().type != TT_OP:
             got = self._peek().value if not self._eof() else "end of query"
+            hint = (
+                " (e.g. is_reit = true)" if ftype == "boolean"
+                else " (e.g. sector = 'Materials')" if ftype == "text"
+                else ""
+            )
             raise QueryParseError(
                 f"Expected an operator (>, >=, <, <=, =, !=) after '{raw_phrase}', "
-                f"got '{got}'"
+                f"got '{got}'{hint}"
             )
         op_tok = self._consume()
         sql_op = _OP_SQL.get(op_tok.value)
@@ -606,12 +665,21 @@ class _Parser:
                 "Supported operators: >  >=  <  <=  =  !=  <>"
             )
 
-        # ── Value ─────────────────────────────────────────────────────────────
+        # ── Value — branch by field type ──────────────────────────────────────
+        if ftype == "text":
+            return self._parse_text_value(field_key, col, sql_op, op_tok, raw_phrase)
+        if ftype == "boolean":
+            return self._parse_boolean_value(field_key, col, sql_op, op_tok, raw_phrase)
+        return self._parse_number_value(field_info, col, sql_op, op_tok, raw_phrase)
+
+    # ── Typed value parsers ─────────────────────────────────────────────────────
+
+    def _parse_number_value(self, field_info, col, sql_op, op_tok, raw_phrase):
         if self._eof() or self._peek().type != TT_NUMBER:
             got = self._peek().value if not self._eof() else "end of query"
             raise QueryParseError(
                 f"Expected a numeric value after '{raw_phrase} {op_tok.value}', "
-                f"got '{got}'. Only numeric conditions are supported."
+                f"got '{got}'."
             )
         val_tok = self._consume()
         try:
@@ -622,8 +690,50 @@ class _Parser:
         # Apply scale factor (user types 10 meaning 10%; DB stores 0.10)
         scale    = field_info.get("scale", 1.0)
         db_value = raw_value * scale
+        return _ConditionNode(col, sql_op, db_value, kind="number")
 
-        return _ConditionNode(field_info["col"], sql_op, db_value)
+    def _parse_text_value(self, field_key, col, sql_op, op_tok, raw_phrase):
+        if sql_op not in ("=", "!="):
+            raise QueryParseError(
+                f"'{field_key}' is a text field — only = and != are supported "
+                f"(got '{op_tok.value}'). Example: sector = 'Materials'"
+            )
+        tok = self._peek()
+        if tok is None or tok.type not in (TT_STRING, TT_WORD) or (
+            tok.type == TT_WORD and tok.value.upper() in _KEYWORDS
+        ):
+            got = tok.value if tok is not None else "end of query"
+            raise QueryParseError(
+                f"Expected a text value after '{raw_phrase} {op_tok.value}', "
+                f"got '{got}'. Put multi-word values in quotes, "
+                "e.g. sector = 'Health Care'"
+            )
+        value = self._consume().value
+        return _ConditionNode(col, sql_op, value, kind="text")
+
+    def _parse_boolean_value(self, field_key, col, sql_op, op_tok, raw_phrase):
+        if sql_op not in ("=", "!="):
+            raise QueryParseError(
+                f"'{field_key}' is a true/false field — only = and != are supported "
+                f"(got '{op_tok.value}'). Example: is_reit = true"
+            )
+        tok = self._peek()
+        truth: bool | None = None
+        if tok is not None and tok.type == TT_WORD and tok.value.lower() in (
+            "true", "false", "yes", "no",
+        ):
+            truth = tok.value.lower() in ("true", "yes")
+            self._consume()
+        elif tok is not None and tok.type == TT_NUMBER and tok.value in ("0", "1"):
+            truth = tok.value == "1"
+            self._consume()
+        else:
+            got = tok.value if tok is not None else "end of query"
+            raise QueryParseError(
+                f"Expected true or false after '{raw_phrase} {op_tok.value}', "
+                f"got '{got}'. Example: is_reit = true"
+            )
+        return _ConditionNode(col, sql_op, truth, kind="boolean")
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

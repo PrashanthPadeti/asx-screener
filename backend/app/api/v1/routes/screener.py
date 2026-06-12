@@ -1590,11 +1590,17 @@ async def query_screener(
         roe > 10 AND roce > 10 AND roic > 10
         roe > 10 AND (roce > 10 OR roic > 10)
         sales growth 5years > 10 AND average return on equity 3years > 15
+        sector = 'Materials' AND market_cap > 1000
+        is_reit = true AND dividend_yield > 5
+        is_miner AND pe_ratio < 15 AND sector != 'Energy'
 
     Field names are case-insensitive. The field reference endpoint
     (GET /api/v1/screener/query/fields) lists all available fields and aliases.
 
-    Percentage fields: enter the human-readable % value (e.g. "roe > 10" means ROE > 10%).
+    Value types:
+      number  — enter the human-readable value (e.g. "roe > 10" means ROE > 10%)
+      text    — quote the value, e.g. sector = 'Materials' (use = or !=)
+      boolean — is_reit = true / false, or just "is_reit" to mean true
     """
     # Parse the text query into a parameterized SQL WHERE fragment
     try:

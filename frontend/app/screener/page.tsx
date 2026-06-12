@@ -990,8 +990,13 @@ export default function ScreenerPage() {
 
     // Auto-newline: if user just typed " AND " or " OR ", replace the trailing
     // space with a newline so each condition goes on its own line.
+    // Skip when inside an open quote (an odd count of ' or " means an
+    // unterminated string value like sector = 'Oil and ...) so we don't break it.
     const upper = val.toUpperCase()
-    if (upper.endsWith(' AND ') || upper.endsWith(' OR ')) {
+    const singleQuotes = (val.match(/'/g) || []).length
+    const doubleQuotes = (val.match(/"/g) || []).length
+    const insideString = singleQuotes % 2 === 1 || doubleQuotes % 2 === 1
+    if (!insideString && (upper.endsWith(' AND ') || upper.endsWith(' OR '))) {
       const keyword = upper.endsWith(' AND ') ? ' AND ' : ' OR '
       const base    = val.slice(0, val.length - keyword.length)
       const kw      = val.slice(val.length - keyword.length).trimEnd()
@@ -1392,7 +1397,7 @@ export default function ScreenerPage() {
                 value={queryText}
                 onChange={handleQueryChange}
                 onKeyDown={handleQueryKeyDown}
-                placeholder={`roe > 10 AND\n(roce > 10 OR\n  roic > 10)`}
+                placeholder={`market_cap > 1000 AND\nsector = 'Materials' AND\nis_reit = false AND\n(roe > 10 OR roce > 10)`}
                 rows={8}
                 className="w-full flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg p-3
                            text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2
@@ -1594,6 +1599,20 @@ export default function ScreenerPage() {
                                              px-1 py-0.5 rounded border border-orange-100">{f.key}</code>
                             {f.unit && (
                               <span className="text-[10px] text-gray-400">{f.unit}</span>
+                            )}
+                            {f.type === 'text' && (
+                              <span className="text-[9px] font-medium text-purple-600 bg-purple-50
+                                               border border-purple-100 rounded px-1 py-0.5"
+                                    title="Text field — use = or != with a quoted value, e.g. sector = 'Materials'">
+                                = &apos;text&apos;
+                              </span>
+                            )}
+                            {f.type === 'boolean' && (
+                              <span className="text-[9px] font-medium text-emerald-600 bg-emerald-50
+                                               border border-emerald-100 rounded px-1 py-0.5"
+                                    title="True/false field — use = true or = false (or just the field name to mean true)">
+                                = true/false
+                              </span>
                             )}
                           </div>
                           <p className="text-[11px] text-gray-600 mt-0.5 truncate">{f.label}</p>

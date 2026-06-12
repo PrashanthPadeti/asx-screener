@@ -342,6 +342,19 @@ EXTRA_ALIASES: dict[str, str] = {
     "52w low":                                       "low_52w",
     "52 week low":                                   "low_52w",
 
+    # ── Balance sheet absolutes & derived ──────────────────────────────────────
+    "total assets":                                  "total_assets",
+    "total equity":                                  "total_equity",
+    "shareholders equity":                           "total_equity",
+    "net worth":                                     "total_equity",
+    "reserves":                                      "total_equity",   # approx: reserves are a component of equity
+    "cash":                                          "cash",
+    "cash and equivalents":                          "cash",
+    "cash end of last year":                         "cash",
+    "capital employed":                              "capital_employed",
+    "total capital employed":                        "capital_employed",
+    "earnings yield":                                "earnings_yield",
+
     # ── Text & boolean fields ──────────────────────────────────────────────────
     "industry group":                                "industry",
     "type":                                          "stock_type",

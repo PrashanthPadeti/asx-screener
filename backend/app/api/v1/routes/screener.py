@@ -83,6 +83,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "ev_to_ebit":      {"col": "u.ev_to_ebit",      "scale": 1,    "type": "number",  "label": "EV / EBIT",            "unit": "x",    "cat": "Valuation"},  # TODO: populate in build script
     "graham_number":   {"col": "u.graham_number",   "scale": 1,    "type": "number",  "label": "Graham Number",        "unit": "AUD",  "cat": "Valuation"},  # TODO: populate in build script
     "fcf_yield":       {"col": "u.fcf_yield",       "scale": 0.01, "type": "number",  "label": "FCF Yield %",          "unit": "%",    "cat": "Valuation"},
+    "earnings_yield":  {"col": "(1.0 / NULLIF(u.pe_ratio, 0) * 100)", "scale": 1, "type": "number",  "label": "Earnings Yield %",     "unit": "%",    "cat": "Valuation"},  # inverse of P/E
 
     # ── Dividends & Franking ──────────────────────────────────────────────────
     "dividend_yield":           {"col": "u.dividend_yield",           "scale": 0.01, "type": "number", "label": "Dividend Yield %",          "unit": "%",   "cat": "Dividends"},
@@ -164,6 +165,10 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "cash_conversion_cycle": {"col": "u.cash_conversion_cycle","scale": 1,    "type": "number", "label": "Cash Conversion Cycle (days)","unit": "days", "cat": "Financial Health"},  # TODO: add to screener.universe schema
     "fcf_fy0":               {"col": "u.fcf_fy0",              "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)",      "unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":               {"col": "u.cfo_fy0",              "scale": 1,    "type": "number", "label": "Operating CF (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
+    "total_assets":          {"col": "u.total_assets",         "scale": 1,    "type": "number", "label": "Total Assets (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
+    "total_equity":          {"col": "u.total_equity",         "scale": 1,    "type": "number", "label": "Total Equity (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
+    "cash":                  {"col": "u.cash",                 "scale": 1,    "type": "number", "label": "Cash & Equivalents (AUD M)",  "unit": "AUD M","cat": "Financial Health"},
+    "capital_employed":      {"col": "(u.total_equity + u.total_debt)", "scale": 1, "type": "number", "label": "Capital Employed (AUD M)",  "unit": "AUD M","cat": "Financial Health"},  # equity + total debt
 
     # ── Quality Scores ────────────────────────────────────────────────────────
     "piotroski_f_score":       {"col": "u.piotroski_f_score",        "scale": 1,    "type": "number", "label": "Piotroski F-Score",          "unit": "",    "cat": "Quality"},

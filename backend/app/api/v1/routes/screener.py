@@ -62,7 +62,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "enterprise_value":    {"col": "u.ev",                  "scale": 1_000_000,  "type": "number",  "label": "Enterprise Value (AUD M)",       "unit": "AUD M", "cat": "Price"},  # col=u.ev
     "volume":              {"col": "u.volume",              "scale": 1,          "type": "number",  "label": "Volume",                         "unit": "",      "cat": "Market Data"},
     "avg_volume_20d":      {"col": "u.avg_volume_20d",      "scale": 1,          "type": "number",  "label": "Avg Volume 20D",                 "unit": "",      "cat": "Market Data"},
-    "dollar_volume_avg_20d":{"col": "u.dollar_volume_avg_20d","scale": 1_000_000,"type": "number",  "label": "Avg Dollar Volume 20D (AUD M)",  "unit": "AUD M", "cat": "Price"},  # TODO: fix daily_metrics computation
+    "dollar_volume_avg_20d":{"col": "u.dollar_volume_avg_20d","scale": 1_000_000,"type": "number",  "label": "Avg Dollar Volume 20D (AUD M)",  "unit": "AUD M", "cat": "Price"},
     "shares_outstanding":  {"col": "u.shares_outstanding",  "scale": 1,          "type": "number",  "label": "Shares Outstanding",             "unit": "",      "cat": "Market Data"},
     "high_52w":            {"col": "u.high_52w",            "scale": 1,          "type": "number",  "label": "52W High",                       "unit": "AUD",   "cat": "Price"},
     "low_52w":             {"col": "u.low_52w",             "scale": 1,          "type": "number",  "label": "52W Low",                        "unit": "AUD",   "cat": "Price"},
@@ -80,7 +80,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "price_to_fcf":    {"col": "u.price_to_fcf",    "scale": 1,    "type": "number",  "label": "Price / FCF",          "unit": "x",    "cat": "Valuation"},  # TODO: populate in build script
     "ev_to_ebitda":    {"col": "u.ev_to_ebitda",    "scale": 1,    "type": "number",  "label": "EV / EBITDA",          "unit": "x",    "cat": "Valuation"},
     "ev_to_revenue":   {"col": "u.ev_to_revenue",   "scale": 1,    "type": "number",  "label": "EV / Revenue",         "unit": "x",    "cat": "Valuation"},
-    "ev_to_ebit":      {"col": "u.ev_to_ebit",      "scale": 1,    "type": "number",  "label": "EV / EBIT",            "unit": "x",    "cat": "Valuation"},  # TODO: populate in build script
+    "ev_to_ebit":      {"col": "u.ev_to_ebit",      "scale": 1,    "type": "number",  "label": "EV / EBIT",            "unit": "x",    "cat": "Valuation"},
     "graham_number":   {"col": "u.graham_number",   "scale": 1,    "type": "number",  "label": "Graham Number",        "unit": "AUD",  "cat": "Valuation"},  # TODO: populate in build script
     "fcf_yield":       {"col": "u.fcf_yield",       "scale": 0.01, "type": "number",  "label": "FCF Yield %",          "unit": "%",    "cat": "Valuation"},
     "earnings_yield":  {"col": "(1.0 / NULLIF(u.pe_ratio, 0) * 100)", "scale": 1, "type": "number",  "label": "Earnings Yield %",     "unit": "%",    "cat": "Valuation"},  # inverse of P/E
@@ -115,10 +115,10 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number", "label": "Inventory Turnover",        "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
 
     # ── Per-Share (EPS → Profitability; BVPS → Financial Strength) ──────────────
-    "eps":                  {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},   # col=u.eps_fy0; TODO: fix annual_pnl.eps
-    "eps_fy0":              {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},   # TODO: fix annual_pnl.eps population
+    "eps":                  {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},   # col=u.eps_fy0
+    "eps_fy0":              {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},
     "eps_fy1":              {"col": "u.eps_fy1",          "scale": 1,    "type": "number", "label": "EPS FY1 Est (AUD)",         "unit": "AUD", "cat": "Profitability"},   # TODO: populate from analyst_ratings
-    "book_value_per_share": {"col": "u.book_value_per_share", "scale": 1, "type": "number", "label": "Book Value per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"}, # TODO: fix annual_balance_sheet
+    "book_value_per_share": {"col": "u.book_value_per_share", "scale": 1, "type": "number", "label": "Book Value per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"},
 
     # ── Growth ────────────────────────────────────────────────────────────────
     "revenue":                  {"col": "u.revenue_ttm",          "scale": 1_000_000, "type": "number", "label": "Revenue TTM (AUD M)",      "unit": "AUD M", "cat": "Financial Strength"},  # col=u.revenue_ttm
@@ -179,8 +179,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "eps_volatility_5y":       {"col": "u.eps_volatility_5y",        "scale": 1,    "type": "number", "label": "EPS Volatility 5Y",          "unit": "",    "cat": "Quality"},
     "fcf_positive_years":      {"col": "u.fcf_positive_years",       "scale": 1,    "type": "number", "label": "FCF +ve Years (0-5)",        "unit": "",    "cat": "Quality"},
     "earnings_stability_score":{"col": "u.earnings_stability_score", "scale": 1,    "type": "number", "label": "Earnings Stability Score",   "unit": "",    "cat": "Quality"},
-    "percent_insiders":        {"col": "u.percent_insiders",         "scale": 1,    "type": "number", "label": "Insider Ownership %",        "unit": "%",   "cat": "Quality"},   # TODO: add to build script from shares_stats
-    "percent_institutions":    {"col": "u.percent_institutions",     "scale": 1,    "type": "number", "label": "Institutional Ownership %",  "unit": "%",   "cat": "Quality"},   # TODO: add to build script from shares_stats
+    "percent_insiders":        {"col": "u.percent_insiders",         "scale": 1,    "type": "number", "label": "Insider Ownership %",        "unit": "%",   "cat": "Quality"},
+    "percent_institutions":    {"col": "u.percent_institutions",     "scale": 1,    "type": "number", "label": "Institutional Ownership %",  "unit": "%",   "cat": "Quality"},
     "short_pct":               {"col": "u.short_pct",                "scale": 1,    "type": "number", "label": "Short Interest %",           "unit": "%",   "cat": "Quality"},   # TODO: populate short_positions from ASIC
     "short_interest_chg_1w":   {"col": "u.short_interest_chg_1w",   "scale": 1,    "type": "number", "label": "Short Interest Change 1W",   "unit": "%",   "cat": "Quality"},   # TODO: populate short_positions from ASIC
     "shares_dilution_3y":      {"col": "u.shares_dilution_3y",       "scale": 0.01, "type": "number", "label": "Share Dilution 3Y %",        "unit": "%",   "cat": "Quality"},   # TODO: compute in yearly_metrics

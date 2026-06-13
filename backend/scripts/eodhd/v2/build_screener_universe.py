@@ -202,6 +202,10 @@ INSERT INTO screener.universe (
     rsi_overbought, rsi_oversold,
     macd_bullish_cross, macd_bearish_cross,
 
+    -- ── Per-share & working capital ──────────────────────────────────────────
+    ocf_per_share, fcf_per_share, revenue_per_share,
+    working_capital, price_to_52w_low,
+
     universe_built_at
 )
 SELECT
@@ -518,6 +522,21 @@ SELECT
     dm.rsi_oversold,
     dm.macd_bullish_cross,
     dm.macd_bearish_cross,
+
+    -- ── Per-share & working capital ──────────────────────────────────────────
+    -- cfo/fcf are AUD millions, shares_outstanding is a raw count → ×1e6 = AUD/share
+    CASE WHEN ss.shares_outstanding > 0
+         THEN ROUND((cf0.cfo * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS ocf_per_share,
+    CASE WHEN ss.shares_outstanding > 0
+         THEN ROUND((cf0.fcf * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS fcf_per_share,
+    -- vs.revenue_ttm is already raw AUD → divide directly
+    CASE WHEN ss.shares_outstanding > 0
+         THEN ROUND((vs.revenue_ttm / ss.shares_outstanding)::numeric, 4) END AS revenue_per_share,
+    -- working capital: current assets − current liabilities (already AUD millions)
+    (bs0.total_current_assets - bs0.total_current_liab) AS working_capital,
+    -- price position vs 52w low (1.0 = sitting at the low)
+    CASE WHEN dp52.low_52w > 0
+         THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low,
 
     NOW()
 
@@ -1006,6 +1025,12 @@ ON CONFLICT (asx_code) DO UPDATE SET
     rsi_oversold            = EXCLUDED.rsi_oversold,
     macd_bullish_cross      = EXCLUDED.macd_bullish_cross,
     macd_bearish_cross      = EXCLUDED.macd_bearish_cross,
+    -- Per-share & working capital
+    ocf_per_share           = EXCLUDED.ocf_per_share,
+    fcf_per_share           = EXCLUDED.fcf_per_share,
+    revenue_per_share       = EXCLUDED.revenue_per_share,
+    working_capital         = EXCLUDED.working_capital,
+    price_to_52w_low        = EXCLUDED.price_to_52w_low,
     universe_built_at       = NOW()
 """
 

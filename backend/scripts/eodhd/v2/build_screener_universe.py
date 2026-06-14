@@ -212,6 +212,10 @@ INSERT INTO screener.universe (
     revenue_fy3, revenue_fy5, revenue_fy7, revenue_fy10,
     net_profit_fy3, net_profit_fy5, net_profit_fy7, net_profit_fy10,
 
+    -- ── Growth rates (Sales prev-yr + Pre-tax Profit YoY/CAGR) ───────────────
+    sales_growth_prev_y, pbt_growth_1y, pbt_growth_prev_y,
+    pbt_cagr_3y, pbt_cagr_5y, pbt_cagr_7y, pbt_cagr_10y,
+
     universe_built_at
 )
 SELECT
@@ -568,6 +572,22 @@ SELECT
     pnl7.net_profit    AS net_profit_fy7,
     pnl10.net_profit   AS net_profit_fy10,
 
+    -- ── Growth rates (decimal ratios; YoY = (end-base)/|base|, CAGR needs both > 0)
+    CASE WHEN pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0
+         THEN ROUND(((pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))::numeric, 4) END AS sales_growth_prev_y,
+    CASE WHEN pnl1.pbt IS NOT NULL AND pnl1.pbt <> 0
+         THEN ROUND(((pnl0.pbt - pnl1.pbt) / ABS(pnl1.pbt))::numeric, 4) END AS pbt_growth_1y,
+    CASE WHEN pnl2.pbt IS NOT NULL AND pnl2.pbt <> 0
+         THEN ROUND(((pnl1.pbt - pnl2.pbt) / ABS(pnl2.pbt))::numeric, 4) END AS pbt_growth_prev_y,
+    CASE WHEN pnl0.pbt > 0 AND pnl3.pbt > 0
+         THEN ROUND((power(pnl0.pbt / pnl3.pbt, 1.0/3) - 1)::numeric, 4) END AS pbt_cagr_3y,
+    CASE WHEN pnl0.pbt > 0 AND pnl5.pbt > 0
+         THEN ROUND((power(pnl0.pbt / pnl5.pbt, 1.0/5) - 1)::numeric, 4) END AS pbt_cagr_5y,
+    CASE WHEN pnl0.pbt > 0 AND pnl7.pbt > 0
+         THEN ROUND((power(pnl0.pbt / pnl7.pbt, 1.0/7) - 1)::numeric, 4) END AS pbt_cagr_7y,
+    CASE WHEN pnl0.pbt > 0 AND pnl10.pbt > 0
+         THEN ROUND((power(pnl0.pbt / pnl10.pbt, 1.0/10) - 1)::numeric, 4) END AS pbt_cagr_10y,
+
     NOW()
 
 FROM market.companies_current c
@@ -632,7 +652,11 @@ LEFT JOIN LATERAL (
     LIMIT 1 OFFSET 1
 ) pnl1 ON TRUE
 
--- ── Annual P&L history (3/5/7/10 fiscal years back, for level screening) ──────
+-- ── Annual P&L history (2/3/5/7/10 fiscal years back, for level + growth screening)
+LEFT JOIN LATERAL (
+    SELECT revenue, pbt FROM financials.annual_pnl
+    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 2
+) pnl2 ON TRUE
 LEFT JOIN LATERAL (
     SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
     WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 3
@@ -1100,6 +1124,14 @@ ON CONFLICT (asx_code) DO UPDATE SET
     net_profit_fy5          = EXCLUDED.net_profit_fy5,
     net_profit_fy7          = EXCLUDED.net_profit_fy7,
     net_profit_fy10         = EXCLUDED.net_profit_fy10,
+    -- Growth rates
+    sales_growth_prev_y     = EXCLUDED.sales_growth_prev_y,
+    pbt_growth_1y           = EXCLUDED.pbt_growth_1y,
+    pbt_growth_prev_y       = EXCLUDED.pbt_growth_prev_y,
+    pbt_cagr_3y             = EXCLUDED.pbt_cagr_3y,
+    pbt_cagr_5y             = EXCLUDED.pbt_cagr_5y,
+    pbt_cagr_7y             = EXCLUDED.pbt_cagr_7y,
+    pbt_cagr_10y            = EXCLUDED.pbt_cagr_10y,
     universe_built_at       = NOW()
 """
 

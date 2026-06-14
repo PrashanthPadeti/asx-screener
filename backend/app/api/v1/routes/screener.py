@@ -282,6 +282,15 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
     "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
 
+    # ── Profit growth (PBT) & sales growth prior year ────────────────────────────
+    "sales_growth_prev_y": {"col": "u.sales_growth_prev_y", "scale": 0.01, "type": "number", "label": "Sales Growth (last yr) %", "unit": "%", "cat": "Growth"},
+    "pbt_growth_1y": {"col": "u.pbt_growth_1y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit Growth %", "unit": "%", "cat": "Growth"},
+    "pbt_growth_prev_y": {"col": "u.pbt_growth_prev_y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit Growth (last yr) %", "unit": "%", "cat": "Growth"},
+    "pbt_cagr_3y": {"col": "u.pbt_cagr_3y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit CAGR 3Y %", "unit": "%", "cat": "Growth"},
+    "pbt_cagr_5y": {"col": "u.pbt_cagr_5y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit CAGR 5Y %", "unit": "%", "cat": "Growth"},
+    "pbt_cagr_7y": {"col": "u.pbt_cagr_7y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit CAGR 7Y %", "unit": "%", "cat": "Growth"},
+    "pbt_cagr_10y": {"col": "u.pbt_cagr_10y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit CAGR 10Y %", "unit": "%", "cat": "Growth"},
+
     # ── Income Statement history (annual levels, AUD M) ──────────────────────────
     "revenue_fy0": {"col": "u.revenue_fy0", "scale": 1, "type": "number", "label": "Sales (FY0) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
     "revenue_fy1": {"col": "u.revenue_fy1", "scale": 1, "type": "number", "label": "Sales (last yr) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

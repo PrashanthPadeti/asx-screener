@@ -343,6 +343,14 @@ EXTRA_ALIASES: dict[str, str] = {
     "52 week low":                                   "low_52w",
 
 
+
+    # ── Profit growth (PBT) ─────────────────────────────────────────────────────
+    "profit growth":                       "pbt_growth_1y",
+    "pretax profit growth":                "pbt_growth_1y",
+    "profit growth last year":             "pbt_growth_prev_y",
+    "sales growth last year":              "sales_growth_prev_y",
+    "revenue growth last year":            "sales_growth_prev_y",
+
     # ── Income statement history ────────────────────────────────────────────────
     "sales":                                 "revenue_fy0",
     "sales last year":                       "revenue_fy1",

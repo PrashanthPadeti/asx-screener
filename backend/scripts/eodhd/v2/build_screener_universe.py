@@ -216,6 +216,12 @@ INSERT INTO screener.universe (
     sales_growth_prev_y, pbt_growth_1y, pbt_growth_prev_y,
     pbt_cagr_3y, pbt_cagr_5y, pbt_cagr_7y, pbt_cagr_10y,
 
+    -- ── Income-statement & balance-sheet line items (annual, AUD millions) ───
+    cogs, ebit, income_tax_expense, interest_expense, depreciation,
+    trade_receivables, inventory, goodwill, intangibles, ppe_net,
+    total_current_assets, total_current_liabilities, total_liabilities,
+    long_term_debt, retained_earnings, cfi, dividends_paid,
+
     universe_built_at
 )
 SELECT
@@ -292,12 +298,13 @@ SELECT
     -- price_to_fcf: use yearly_compute's pre-computed p_fcf_ratio (reliable,
     -- already guards against negative/zero FCF and extreme values)
     ym.p_fcf_ratio          AS price_to_fcf,
-    -- graham_number: prefer yearly_metrics; else sqrt(22.5 * EPS * BVPS), both > 0
-    COALESCE(ym.graham_number,
-             CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0
-                       AND COALESCE(bs0.book_value_per_share, ym.bvps) > 0
-                  THEN ROUND(sqrt(22.5 * COALESCE(pnl0.eps, ym.eps)
-                                  * COALESCE(bs0.book_value_per_share, ym.bvps))::numeric, 4) END) AS graham_number,
+    -- graham_number: sqrt(22.5 * EPS * BVPS), both > 0. BVPS computed fresh from
+    -- total_equity / shares (ym.bvps was unreliable — mostly <= 0).
+    CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0
+              AND (bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0)) > 0
+         THEN ROUND(sqrt(22.5 * COALESCE(pnl0.eps, ym.eps)
+                         * (bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0)))::numeric, 4)
+    END AS graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
     vs.dividend_yield,
@@ -357,9 +364,9 @@ SELECT
     bs0.total_debt,
     bs0.net_debt,
     bs0.cash_equivalents    AS cash,
-    -- COALESCE: transform_financials passes None for bvps (EODHD omits it);
-    -- yearly_compute derives it from total_equity / shares → use as fallback.
-    COALESCE(bs0.book_value_per_share, ym.bvps) AS book_value_per_share,
+    -- BVPS computed fresh from total_equity / shares (bs0.bvps is None and ym.bvps
+    -- was unreliable — mostly <= 0). total_equity is AUD millions, shares is a raw count.
+    ROUND((bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0))::numeric, 4) AS book_value_per_share,
     CASE WHEN bs0.total_equity <> 0 AND bs0.total_equity IS NOT NULL
          THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END AS debt_to_equity,
     CASE WHEN bs0.total_current_liab <> 0 AND bs0.total_current_liab IS NOT NULL
@@ -603,6 +610,25 @@ SELECT
     CASE WHEN pnl0.pbt > 0 AND pnl10.pbt > 0
          THEN ROUND((power(pnl0.pbt / pnl10.pbt, 1.0/10) - 1)::numeric, 4) END AS pbt_cagr_10y,
 
+    -- ── Income-statement & balance-sheet line items (annual, AUD millions) ───
+    pnl0.cost_of_sales      AS cogs,
+    pnl0.ebit               AS ebit,
+    pnl0.tax                AS income_tax_expense,
+    pnl0.interest_expense   AS interest_expense,
+    pnl0.depreciation       AS depreciation,
+    bs0.trade_receivables   AS trade_receivables,
+    bs0.inventory           AS inventory,
+    bs0.goodwill            AS goodwill,
+    bs0.intangibles         AS intangibles,
+    bs0.gross_block         AS ppe_net,
+    bs0.total_current_assets   AS total_current_assets,
+    bs0.total_current_liab     AS total_current_liabilities,
+    bs0.total_liabilities      AS total_liabilities,
+    bs0.long_term_debt      AS long_term_debt,
+    bs0.retained_earnings   AS retained_earnings,
+    cf0.cfi                 AS cfi,
+    cf0.dividends_paid      AS dividends_paid,
+
     NOW()
 
 FROM market.companies_current c
@@ -651,7 +677,8 @@ LEFT JOIN LATERAL (
 
 -- ── Annual P&L FY0 (most recent) ─────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT fiscal_year, revenue, gross_profit, ebitda, pbt, net_profit, eps
+    SELECT fiscal_year, revenue, cost_of_sales, gross_profit, ebit, ebitda,
+           depreciation, interest_expense, pbt, tax, net_profit, eps
     FROM financials.annual_pnl
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -693,7 +720,9 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
     SELECT total_assets, total_equity, total_debt, net_debt,
            cash_equivalents, book_value_per_share,
-           total_current_assets, total_current_liab
+           total_current_assets, total_current_liab,
+           trade_receivables, inventory, goodwill, intangibles, gross_block,
+           total_liabilities, long_term_debt, retained_earnings
     FROM financials.annual_balance_sheet
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -702,7 +731,7 @@ LEFT JOIN LATERAL (
 
 -- ── Cash Flow (latest FY) ─────────────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT cfo, capex, fcf
+    SELECT cfo, capex, fcf, cfi, dividends_paid
     FROM financials.annual_cashflow
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -1147,6 +1176,24 @@ ON CONFLICT (asx_code) DO UPDATE SET
     pbt_cagr_5y             = EXCLUDED.pbt_cagr_5y,
     pbt_cagr_7y             = EXCLUDED.pbt_cagr_7y,
     pbt_cagr_10y            = EXCLUDED.pbt_cagr_10y,
+    -- Income-statement & balance-sheet line items
+    cogs                    = EXCLUDED.cogs,
+    ebit                    = EXCLUDED.ebit,
+    income_tax_expense      = EXCLUDED.income_tax_expense,
+    interest_expense        = EXCLUDED.interest_expense,
+    depreciation            = EXCLUDED.depreciation,
+    trade_receivables       = EXCLUDED.trade_receivables,
+    inventory               = EXCLUDED.inventory,
+    goodwill                = EXCLUDED.goodwill,
+    intangibles             = EXCLUDED.intangibles,
+    ppe_net                 = EXCLUDED.ppe_net,
+    total_current_assets    = EXCLUDED.total_current_assets,
+    total_current_liabilities = EXCLUDED.total_current_liabilities,
+    total_liabilities       = EXCLUDED.total_liabilities,
+    long_term_debt          = EXCLUDED.long_term_debt,
+    retained_earnings       = EXCLUDED.retained_earnings,
+    cfi                     = EXCLUDED.cfi,
+    dividends_paid          = EXCLUDED.dividends_paid,
     universe_built_at       = NOW()
 """
 

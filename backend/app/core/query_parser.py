@@ -344,6 +344,38 @@ EXTRA_ALIASES: dict[str, str] = {
 
 
 
+
+    # ── Line items ──────────────────────────────────────────────────────────────
+    "cost of goods sold":                  "cogs",
+    "cost of sales":                       "cogs",
+    "cost of revenue":                     "cogs",
+    "operating profit":                    "ebit",
+    "operating income":                    "ebit",
+    "income tax":                          "income_tax_expense",
+    "interest expense":                    "interest_expense",
+    "finance costs":                       "interest_expense",
+    "depreciation":                        "depreciation",
+    "trade receivables":                   "trade_receivables",
+    "accounts receivable":                 "trade_receivables",
+    "receivables":                         "trade_receivables",
+    "inventory":                           "inventory",
+    "inventories":                         "inventory",
+    "goodwill":                            "goodwill",
+    "intangibles":                         "intangibles",
+    "intangible assets":                   "intangibles",
+    "ppe":                                 "ppe_net",
+    "property plant and equipment":        "ppe_net",
+    "fixed assets":                        "ppe_net",
+    "current assets":                      "total_current_assets",
+    "current liabilities":                 "total_current_liabilities",
+    "total liabilities":                   "total_liabilities",
+    "long term debt":                      "long_term_debt",
+    "long-term debt":                      "long_term_debt",
+    "retained earnings":                   "retained_earnings",
+    "accumulated losses":                  "retained_earnings",
+    "investing cash flow":                 "cfi",
+    "dividends paid":                      "dividends_paid",
+
     # ── Profit growth (PBT) ─────────────────────────────────────────────────────
     "profit growth":                       "pbt_growth_1y",
     "pretax profit growth":                "pbt_growth_1y",

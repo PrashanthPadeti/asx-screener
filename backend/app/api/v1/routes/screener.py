@@ -282,6 +282,25 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
     "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
 
+    # ── Line items (income statement / balance sheet / cash flow, AUD M) ─────────
+    "cogs": {"col": "u.cogs", "scale": 1, "type": "number", "label": "Cost of Goods Sold (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "ebit": {"col": "u.ebit", "scale": 1, "type": "number", "label": "EBIT / Operating Profit (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "income_tax_expense": {"col": "u.income_tax_expense", "scale": 1, "type": "number", "label": "Income Tax Expense (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "interest_expense": {"col": "u.interest_expense", "scale": 1, "type": "number", "label": "Interest Expense (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "depreciation": {"col": "u.depreciation", "scale": 1, "type": "number", "label": "Depreciation & Amortisation (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "trade_receivables": {"col": "u.trade_receivables", "scale": 1, "type": "number", "label": "Trade Receivables (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "inventory": {"col": "u.inventory", "scale": 1, "type": "number", "label": "Inventory (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "goodwill": {"col": "u.goodwill", "scale": 1, "type": "number", "label": "Goodwill (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "intangibles": {"col": "u.intangibles", "scale": 1, "type": "number", "label": "Intangible Assets (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "ppe_net": {"col": "u.ppe_net", "scale": 1, "type": "number", "label": "PP&E Net / Fixed Assets (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "total_current_assets": {"col": "u.total_current_assets", "scale": 1, "type": "number", "label": "Current Assets (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "total_current_liabilities": {"col": "u.total_current_liabilities", "scale": 1, "type": "number", "label": "Current Liabilities (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "total_liabilities": {"col": "u.total_liabilities", "scale": 1, "type": "number", "label": "Total Liabilities (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "long_term_debt": {"col": "u.long_term_debt", "scale": 1, "type": "number", "label": "Long-term Debt (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "retained_earnings": {"col": "u.retained_earnings", "scale": 1, "type": "number", "label": "Retained Earnings (AUD M)", "unit": "AUD M", "cat": "Balance Sheet"},
+    "cfi": {"col": "u.cfi", "scale": 1, "type": "number", "label": "Investing Cash Flow (AUD M)", "unit": "AUD M", "cat": "Cash Flow"},
+    "dividends_paid": {"col": "u.dividends_paid", "scale": 1, "type": "number", "label": "Dividends Paid (AUD M)", "unit": "AUD M", "cat": "Cash Flow"},
+
     # ── Profit growth (PBT) & sales growth prior year ────────────────────────────
     "sales_growth_prev_y": {"col": "u.sales_growth_prev_y", "scale": 0.01, "type": "number", "label": "Sales Growth (last yr) %", "unit": "%", "cat": "Growth"},
     "pbt_growth_1y": {"col": "u.pbt_growth_1y", "scale": 0.01, "type": "number", "label": "Pre-tax Profit Growth %", "unit": "%", "cat": "Growth"},

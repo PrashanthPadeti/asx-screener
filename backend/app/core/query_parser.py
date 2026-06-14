@@ -364,6 +364,9 @@ EXTRA_ALIASES: dict[str, str] = {
     "tangible book value per share":       "tangible_book_value_per_share",
     "cash per share":                      "cash_per_share",
 
+    "price to cash flow":                  "price_to_cash_flow",
+    "p/cf":                                "price_to_cash_flow",
+
     # ── Line items ──────────────────────────────────────────────────────────────
     "cost of goods sold":                  "cogs",
     "cost of sales":                       "cogs",

@@ -229,6 +229,9 @@ INSERT INTO screener.universe (
     liabilities_to_assets, fixed_asset_turnover, capex_to_revenue,
     tangible_book_value_per_share, cash_per_share,
 
+    -- ── Quick wins (existing columns, previously unwritten) ──────────────────
+    revenue_fy2, net_profit_ttm, price_to_cash_flow,
+
     universe_built_at
 )
 SELECT
@@ -669,6 +672,12 @@ SELECT
          THEN ROUND(((bs0.total_equity - COALESCE(bs0.goodwill,0) - COALESCE(bs0.intangibles,0)) * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS tangible_book_value_per_share,
     CASE WHEN ss.shares_outstanding > 0
          THEN ROUND((bs0.cash_equivalents * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS cash_per_share,
+
+    -- ── Quick wins ───────────────────────────────────────────────────────────
+    pnl2.revenue    AS revenue_fy2,
+    pnl0.net_profit AS net_profit_ttm,
+    CASE WHEN cf0.cfo > 0
+         THEN ROUND((vs.market_cap / (cf0.cfo * 1000000.0))::numeric, 4) END AS price_to_cash_flow,
 
     NOW()
 
@@ -1252,6 +1261,9 @@ ON CONFLICT (asx_code) DO UPDATE SET
     capex_to_revenue        = EXCLUDED.capex_to_revenue,
     tangible_book_value_per_share = EXCLUDED.tangible_book_value_per_share,
     cash_per_share          = EXCLUDED.cash_per_share,
+    revenue_fy2             = EXCLUDED.revenue_fy2,
+    net_profit_ttm          = EXCLUDED.net_profit_ttm,
+    price_to_cash_flow      = EXCLUDED.price_to_cash_flow,
     universe_built_at       = NOW()
 """
 

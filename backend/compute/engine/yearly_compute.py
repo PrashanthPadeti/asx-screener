@@ -500,6 +500,15 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         if eps is not None:
             yearly[i]["eps"] = eps
 
+        # ── Derive BVPS from total_equity / shares ────────────────────────────
+        # book_value_per_share is NULL in the feed; mirror EPS using the
+        # current_shares proxy so PB / Graham / BVPS CAGR populate.
+        if bvps is None and shares is not None and shares > 0:
+            te = _f(row.get("total_equity"))
+            if te is not None:
+                bvps = round(te / (shares / 1_000_000), 4)
+                yearly[i]["book_value_per_share"] = bvps
+
         # Stored margins (preferred) or compute from P&L
         gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)
         ebitda_margin = _f(row.get("ebitda_margin")) or _div(ebitda, rev)

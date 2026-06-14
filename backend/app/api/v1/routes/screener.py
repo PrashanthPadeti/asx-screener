@@ -282,6 +282,10 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
     "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
 
+    # ── Quick-win fields ─────────────────────────────────────────────────────────
+    "revenue_fy2": {"col": "u.revenue_fy2", "scale": 1, "type": "number", "label": "Sales (2Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "price_to_cash_flow": {"col": "u.price_to_cash_flow", "scale": 1, "type": "number", "label": "Price / Cash Flow", "unit": "x", "cat": "Valuation"},
+
     # ── Derived ratios (Tier B) ─────────────────────────────────────────────────
     "cash_ratio": {"col": "u.cash_ratio", "scale": 1, "type": "number", "label": "Cash Ratio", "unit": "x", "cat": "Financial Strength"},
     "days_sales_outstanding": {"col": "u.days_sales_outstanding", "scale": 1, "type": "number", "label": "Days Sales Outstanding", "unit": "days", "cat": "Profitability"},

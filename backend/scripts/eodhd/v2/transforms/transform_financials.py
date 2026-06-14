@@ -194,6 +194,10 @@ def transform_balance_sheet(cur, codes, fiscal_year) -> int:
             total_debt = (total_debt or 0) + _m(long_term_debt)
         cash_m = _m(cash)
         net_debt = round(total_debt - cash_m, 2) if total_debt and cash_m is not None else None
+        # working capital = current assets − current liabilities (AUD millions)
+        tca_m = _m(total_current_assets)
+        tcl_m = _m(current_liab)
+        working_capital_m = round(tca_m - tcl_m, 2) if tca_m is not None and tcl_m is not None else None
 
         transformed.append((
             asx_code, fy, period_end_date,
@@ -223,7 +227,7 @@ def transform_balance_sheet(cur, codes, fiscal_year) -> int:
             _m(total_equity),
             round(total_debt, 2) if isinstance(total_debt, float) else total_debt,
             net_debt,
-            None,  # working_capital
+            working_capital_m,  # current assets − current liabilities
             None,  # book_value_per_share
             None,  # face_value
             None,  # shares_outstanding
@@ -274,6 +278,7 @@ def transform_balance_sheet(cur, codes, fiscal_year) -> int:
             total_equity           = EXCLUDED.total_equity,
             total_debt             = EXCLUDED.total_debt,
             net_debt               = EXCLUDED.net_debt,
+            working_capital        = EXCLUDED.working_capital,
             data_source            = EXCLUDED.data_source,
             data_as_of             = NOW()
     """, transformed, page_size=1000)

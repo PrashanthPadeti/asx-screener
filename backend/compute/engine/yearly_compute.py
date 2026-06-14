@@ -357,6 +357,12 @@ def piotroski_f_score(row: dict, prev: Optional[dict]) -> Optional[int]:
 def altman_z_score(row: dict, market_cap: Optional[float]) -> Optional[float]:
     ta   = _f(row.get("total_assets"))
     wc   = _f(row.get("working_capital"))
+    if wc is None:
+        # working_capital is NULL in the feed — derive from current assets/liab
+        tca = _f(row.get("total_current_assets"))
+        tcl = _f(row.get("total_current_liab"))
+        if tca is not None and tcl is not None:
+            wc = tca - tcl
     re   = _f(row.get("retained_earnings"))
     ebit = _f(row.get("ebit"))
     rev  = _f(row.get("revenue"))

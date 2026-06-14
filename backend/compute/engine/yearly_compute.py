@@ -506,7 +506,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         if bvps is None and shares is not None and shares > 0:
             te = _f(row.get("total_equity"))
             if te is not None:
-                bvps = round(te / (shares / 1_000_000), 4)
+                bvps = round(float(te) / (float(shares) / 1_000_000), 4)
                 yearly[i]["book_value_per_share"] = bvps
 
         # Stored margins (preferred) or compute from P&L
@@ -568,7 +568,9 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         payout    = _clamp(_div(dps, eps) if (eps and eps > 0) else None)
         graham    = None
         if eps and bvps and eps > 0 and bvps > 0:
-            graham = round(np.sqrt(22.5 * eps * bvps), 4)
+            # float() — np.sqrt returns numpy.float64 whose repr ("np.float64(x)")
+            # breaks psycopg2 INSERT (reads "np." as a schema).
+            graham = round(float(np.sqrt(22.5 * eps * bvps)), 4)
 
         fr_yld = None
         if div_yld is not None and fpc is not None:

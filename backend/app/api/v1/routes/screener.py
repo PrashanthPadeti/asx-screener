@@ -367,7 +367,11 @@ CATEGORY_ORDER: list[str] = [
     "Profitability",      # Margins, ROE, ROA, ROCE, EPS
     "Quality",            # Avg ROE/ROA/ROCE 3Y & 5Y, Piotroski, Altman, …
     "Growth",             # Revenue / EPS / EBITDA growth rates (1Y, 3Y CAGR, …)
-    "Financial Strength", # Debt ratios, liquidity, cash flow, net income
+    "Financial Strength", # Debt ratios, liquidity, coverage
+    "Financial Health",   # Net debt, total debt, cash, FCF/CFO
+    "Income Statement",   # COGS, EBIT, tax, interest, depreciation (+ history)
+    "Balance Sheet",      # Receivables, inventory, goodwill, PP&E, liabilities
+    "Cash Flow",          # Investing CF, dividends paid
     "Dividends",          # Yield, grossed-up yield, franking, payout, CAGR
     "Returns",            # Price returns over various time horizons
     "Technicals",         # RSI, MACD, SMA, momentum, volatility, beta

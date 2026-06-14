@@ -206,6 +206,12 @@ INSERT INTO screener.universe (
     ocf_per_share, fcf_per_share, revenue_per_share,
     working_capital, price_to_52w_low,
 
+    -- ── Income statement history (annual levels, AUD millions) ───────────────
+    gross_profit_fy0, gross_profit_fy1, gross_profit_fy3, gross_profit_fy5, gross_profit_fy7, gross_profit_fy10,
+    pbt_fy0, pbt_fy1, pbt_fy3, pbt_fy5, pbt_fy7, pbt_fy10,
+    revenue_fy3, revenue_fy5, revenue_fy7, revenue_fy10,
+    net_profit_fy3, net_profit_fy5, net_profit_fy7, net_profit_fy10,
+
     universe_built_at
 )
 SELECT
@@ -538,6 +544,28 @@ SELECT
     CASE WHEN dp52.low_52w > 0
          THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low,
 
+    -- ── Income statement history (annual levels, AUD millions) ───────────────
+    pnl0.gross_profit  AS gross_profit_fy0,
+    pnl1.gross_profit  AS gross_profit_fy1,
+    pnl3.gross_profit  AS gross_profit_fy3,
+    pnl5.gross_profit  AS gross_profit_fy5,
+    pnl7.gross_profit  AS gross_profit_fy7,
+    pnl10.gross_profit AS gross_profit_fy10,
+    pnl0.pbt           AS pbt_fy0,
+    pnl1.pbt           AS pbt_fy1,
+    pnl3.pbt           AS pbt_fy3,
+    pnl5.pbt           AS pbt_fy5,
+    pnl7.pbt           AS pbt_fy7,
+    pnl10.pbt          AS pbt_fy10,
+    pnl3.revenue       AS revenue_fy3,
+    pnl5.revenue       AS revenue_fy5,
+    pnl7.revenue       AS revenue_fy7,
+    pnl10.revenue      AS revenue_fy10,
+    pnl3.net_profit    AS net_profit_fy3,
+    pnl5.net_profit    AS net_profit_fy5,
+    pnl7.net_profit    AS net_profit_fy7,
+    pnl10.net_profit   AS net_profit_fy10,
+
     NOW()
 
 FROM market.companies_current c
@@ -586,7 +614,7 @@ LEFT JOIN LATERAL (
 
 -- ── Annual P&L FY0 (most recent) ─────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT fiscal_year, revenue, ebitda, net_profit, eps
+    SELECT fiscal_year, revenue, gross_profit, ebitda, pbt, net_profit, eps
     FROM financials.annual_pnl
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -595,12 +623,30 @@ LEFT JOIN LATERAL (
 
 -- ── Annual P&L FY1 (second most recent) ──────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT fiscal_year, revenue, ebitda, net_profit, eps
+    SELECT fiscal_year, revenue, gross_profit, ebitda, pbt, net_profit, eps
     FROM financials.annual_pnl
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
     LIMIT 1 OFFSET 1
 ) pnl1 ON TRUE
+
+-- ── Annual P&L history (3/5/7/10 fiscal years back, for level screening) ──────
+LEFT JOIN LATERAL (
+    SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
+    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 3
+) pnl3 ON TRUE
+LEFT JOIN LATERAL (
+    SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
+    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 5
+) pnl5 ON TRUE
+LEFT JOIN LATERAL (
+    SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
+    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 7
+) pnl7 ON TRUE
+LEFT JOIN LATERAL (
+    SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
+    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 10
+) pnl10 ON TRUE
 
 -- ── Balance Sheet (latest FY) ─────────────────────────────────────────────────
 LEFT JOIN LATERAL (
@@ -1031,6 +1077,27 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_per_share       = EXCLUDED.revenue_per_share,
     working_capital         = EXCLUDED.working_capital,
     price_to_52w_low        = EXCLUDED.price_to_52w_low,
+    -- Income statement history (annual levels)
+    gross_profit_fy0        = EXCLUDED.gross_profit_fy0,
+    gross_profit_fy1        = EXCLUDED.gross_profit_fy1,
+    gross_profit_fy3        = EXCLUDED.gross_profit_fy3,
+    gross_profit_fy5        = EXCLUDED.gross_profit_fy5,
+    gross_profit_fy7        = EXCLUDED.gross_profit_fy7,
+    gross_profit_fy10       = EXCLUDED.gross_profit_fy10,
+    pbt_fy0                 = EXCLUDED.pbt_fy0,
+    pbt_fy1                 = EXCLUDED.pbt_fy1,
+    pbt_fy3                 = EXCLUDED.pbt_fy3,
+    pbt_fy5                 = EXCLUDED.pbt_fy5,
+    pbt_fy7                 = EXCLUDED.pbt_fy7,
+    pbt_fy10                = EXCLUDED.pbt_fy10,
+    revenue_fy3             = EXCLUDED.revenue_fy3,
+    revenue_fy5             = EXCLUDED.revenue_fy5,
+    revenue_fy7             = EXCLUDED.revenue_fy7,
+    revenue_fy10            = EXCLUDED.revenue_fy10,
+    net_profit_fy3          = EXCLUDED.net_profit_fy3,
+    net_profit_fy5          = EXCLUDED.net_profit_fy5,
+    net_profit_fy7          = EXCLUDED.net_profit_fy7,
+    net_profit_fy10         = EXCLUDED.net_profit_fy10,
     universe_built_at       = NOW()
 """
 

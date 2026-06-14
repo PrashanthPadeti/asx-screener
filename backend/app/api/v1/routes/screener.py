@@ -281,6 +281,32 @@ ALLOWED_FIELDS: dict[str, dict] = {
 
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
     "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
+
+    # ── Income Statement history (annual levels, AUD M) ──────────────────────────
+    "revenue_fy0": {"col": "u.revenue_fy0", "scale": 1, "type": "number", "label": "Sales (FY0) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "revenue_fy1": {"col": "u.revenue_fy1", "scale": 1, "type": "number", "label": "Sales (last yr) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "revenue_fy3": {"col": "u.revenue_fy3", "scale": 1, "type": "number", "label": "Sales (3Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "revenue_fy5": {"col": "u.revenue_fy5", "scale": 1, "type": "number", "label": "Sales (5Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "revenue_fy7": {"col": "u.revenue_fy7", "scale": 1, "type": "number", "label": "Sales (7Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "revenue_fy10": {"col": "u.revenue_fy10", "scale": 1, "type": "number", "label": "Sales (10Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "gross_profit_fy0": {"col": "u.gross_profit_fy0", "scale": 1, "type": "number", "label": "Gross Profit (FY0) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "gross_profit_fy1": {"col": "u.gross_profit_fy1", "scale": 1, "type": "number", "label": "Gross Profit (last yr) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "gross_profit_fy3": {"col": "u.gross_profit_fy3", "scale": 1, "type": "number", "label": "Gross Profit (3Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "gross_profit_fy5": {"col": "u.gross_profit_fy5", "scale": 1, "type": "number", "label": "Gross Profit (5Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "gross_profit_fy7": {"col": "u.gross_profit_fy7", "scale": 1, "type": "number", "label": "Gross Profit (7Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "gross_profit_fy10": {"col": "u.gross_profit_fy10", "scale": 1, "type": "number", "label": "Gross Profit (10Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "pbt_fy0": {"col": "u.pbt_fy0", "scale": 1, "type": "number", "label": "Pre-tax Profit (FY0) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "pbt_fy1": {"col": "u.pbt_fy1", "scale": 1, "type": "number", "label": "Pre-tax Profit (last yr) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "pbt_fy3": {"col": "u.pbt_fy3", "scale": 1, "type": "number", "label": "Pre-tax Profit (3Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "pbt_fy5": {"col": "u.pbt_fy5", "scale": 1, "type": "number", "label": "Pre-tax Profit (5Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "pbt_fy7": {"col": "u.pbt_fy7", "scale": 1, "type": "number", "label": "Pre-tax Profit (7Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "pbt_fy10": {"col": "u.pbt_fy10", "scale": 1, "type": "number", "label": "Pre-tax Profit (10Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "net_profit_fy0": {"col": "u.net_profit_fy0", "scale": 1, "type": "number", "label": "Net Profit (FY0) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "net_profit_fy1": {"col": "u.net_profit_fy1", "scale": 1, "type": "number", "label": "Net Profit (last yr) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "net_profit_fy3": {"col": "u.net_profit_fy3", "scale": 1, "type": "number", "label": "Net Profit (3Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "net_profit_fy5": {"col": "u.net_profit_fy5", "scale": 1, "type": "number", "label": "Net Profit (5Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "net_profit_fy7": {"col": "u.net_profit_fy7", "scale": 1, "type": "number", "label": "Net Profit (7Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
+    "net_profit_fy10": {"col": "u.net_profit_fy10", "scale": 1, "type": "number", "label": "Net Profit (10Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
 }
 
 # ── Category display order ────────────────────────────────────────────────────

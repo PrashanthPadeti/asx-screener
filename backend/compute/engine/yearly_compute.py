@@ -978,6 +978,13 @@ INSERT_SQL = """
 def upsert_rows(cur, rows: list[tuple]) -> int:
     if not rows:
         return 0
+    # Sanitize: convert any numpy scalars to Python natives. numpy 2.0 changed the
+    # repr of np.float64 to "np.float64(x)", which psycopg2 pastes verbatim into the
+    # INSERT and then reads "np." as a schema → InvalidSchemaName. .item() unwraps.
+    rows = [
+        tuple(v.item() if isinstance(v, np.generic) else v for v in row)
+        for row in rows
+    ]
     execute_values(cur, INSERT_SQL, rows, page_size=200)
     return len(rows)
 

@@ -275,7 +275,7 @@ SELECT
                        AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999
                   THEN ROUND((dp.close / COALESCE(pnl0.eps, ym.eps))::numeric, 4) END) AS pe_ratio,
     vs.forward_pe,
-    -- PEG: prefer snapshot; else derived P/E ÷ (3Y earnings growth %), growth > 0
+    -- PEG: prefer snapshot; else derived P/E over 3Y earnings growth pct, growth > 0
     COALESCE(vs.peg_ratio,
              CASE WHEN COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) > 0
                        AND COALESCE(pnl0.eps, ym.eps) > 0

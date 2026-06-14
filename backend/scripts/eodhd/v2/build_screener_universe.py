@@ -291,7 +291,9 @@ SELECT
     CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL
               AND COALESCE(pnl0.eps, ym.eps) > 0
               AND vs.dividend_per_share IS NOT NULL
-              AND ABS(vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 10000000
+              -- guard must match the NUMERIC(8,4) column range (max 9999.9999):
+              -- a payout ratio above ~9999x means near-zero EPS, i.e. garbage → NULL
+              AND ABS(vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 9999
          THEN ROUND((vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4)
     END AS payout_ratio,
 

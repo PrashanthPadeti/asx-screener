@@ -1,0 +1,47 @@
+-- Widen narrow NUMERIC(8,4) ratio/percentage columns on screener.universe to
+-- DOUBLE PRECISION. NUMERIC(8,4) caps at 9999.9999, which overflows for extreme
+-- stocks (e.g. huge % returns/growth off a near-zero base, or tiny-EPS payout
+-- ratios). These are ratios/percentages that should never have been capped.
+-- Idempotent: re-running TYPE DOUBLE PRECISION on an already-double column is a no-op.
+
+ALTER TABLE screener.universe
+    ALTER COLUMN adx_14                   TYPE DOUBLE PRECISION,
+    ALTER COLUMN altman_z_score           TYPE DOUBLE PRECISION,
+    ALTER COLUMN analyst_upside           TYPE DOUBLE PRECISION,
+    ALTER COLUMN avg_roe_3y               TYPE DOUBLE PRECISION,
+    ALTER COLUMN bb_pct                   TYPE DOUBLE PRECISION,
+    ALTER COLUMN beta_1y                  TYPE DOUBLE PRECISION,
+    ALTER COLUMN dividend_cagr_3y         TYPE DOUBLE PRECISION,
+    ALTER COLUMN dma200_ratio             TYPE DOUBLE PRECISION,
+    ALTER COLUMN dma50_ratio              TYPE DOUBLE PRECISION,
+    ALTER COLUMN drawdown_from_ath        TYPE DOUBLE PRECISION,
+    ALTER COLUMN earnings_growth_1y       TYPE DOUBLE PRECISION,
+    ALTER COLUMN earnings_growth_3y_cagr  TYPE DOUBLE PRECISION,
+    ALTER COLUMN eps_growth_3y_cagr       TYPE DOUBLE PRECISION,
+    ALTER COLUMN eps_growth_yoy_q         TYPE DOUBLE PRECISION,
+    ALTER COLUMN fcf_yield                TYPE DOUBLE PRECISION,
+    ALTER COLUMN momentum_12m             TYPE DOUBLE PRECISION,
+    ALTER COLUMN momentum_3m              TYPE DOUBLE PRECISION,
+    ALTER COLUMN momentum_6m              TYPE DOUBLE PRECISION,
+    ALTER COLUMN net_income_growth_yoy_q  TYPE DOUBLE PRECISION,
+    ALTER COLUMN payout_ratio             TYPE DOUBLE PRECISION,
+    ALTER COLUMN percent_insiders         TYPE DOUBLE PRECISION,
+    ALTER COLUMN percent_institutions     TYPE DOUBLE PRECISION,
+    ALTER COLUMN relative_volume          TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_1m                TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_1w                TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_1y                TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_3m                TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_3y                TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_6m                TYPE DOUBLE PRECISION,
+    ALTER COLUMN return_ytd               TYPE DOUBLE PRECISION,
+    ALTER COLUMN revenue_cagr_5y          TYPE DOUBLE PRECISION,
+    ALTER COLUMN revenue_growth_1y        TYPE DOUBLE PRECISION,
+    ALTER COLUMN revenue_growth_3y_cagr   TYPE DOUBLE PRECISION,
+    ALTER COLUMN revenue_growth_yoy_q     TYPE DOUBLE PRECISION,
+    ALTER COLUMN rsi_14                   TYPE DOUBLE PRECISION,
+    ALTER COLUMN sharpe_1y                TYPE DOUBLE PRECISION,
+    ALTER COLUMN short_interest_chg_1w    TYPE DOUBLE PRECISION,
+    ALTER COLUMN short_pct                TYPE DOUBLE PRECISION,
+    ALTER COLUMN volatility_20d           TYPE DOUBLE PRECISION,
+    ALTER COLUMN volatility_60d           TYPE DOUBLE PRECISION;

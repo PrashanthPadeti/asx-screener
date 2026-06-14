@@ -224,6 +224,20 @@ async def get_company_overview(
             momentum_3m, momentum_6m,
             composite_score, value_score, quality_score,
             growth_score, momentum_score, income_score,
+            -- Extended fundamentals (added 2026-06)
+            quick_ratio, cash_ratio, working_capital,
+            (total_equity + total_debt) AS capital_employed,
+            interest_coverage, ebitda_interest_coverage, debt_to_ebitda, net_debt_to_ebitda,
+            debt_to_assets, lt_debt_to_capital, equity_ratio, liabilities_to_assets,
+            nopat, pretax_margin, ocf_margin, fcf_margin, asset_turnover, fixed_asset_turnover,
+            receivables_turnover, inventory_turnover, days_sales_outstanding, days_inventory_outstanding,
+            capex_intensity, capex_to_revenue,
+            revenue_per_share, ocf_per_share, fcf_per_share, cash_per_share, tangible_book_value_per_share,
+            total_current_assets, total_current_liabilities, total_liabilities,
+            trade_receivables, inventory, goodwill, intangibles, ppe_net, long_term_debt, retained_earnings,
+            cogs, ebit, depreciation, interest_expense, income_tax_expense,
+            cfi, dividends_paid,
+            (1.0 / NULLIF(pe_ratio, 0)) AS earnings_yield, price_to_cash_flow,
             COALESCE(pros, '{}') AS pros,
             COALESCE(cons, '{}') AS cons
         FROM screener.universe

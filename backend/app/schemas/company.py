@@ -171,6 +171,63 @@ class CompanyOverview(BaseModel):
     capex_fy0: Optional[float] = None
     fcf_fy0: Optional[float] = None
 
+    # ── Extended fundamentals (added 2026-06) ──────────────────────────────────
+    # Liquidity & leverage
+    quick_ratio: Optional[float] = None
+    cash_ratio: Optional[float] = None
+    working_capital: Optional[float] = None        # AUD M
+    capital_employed: Optional[float] = None        # AUD M
+    interest_coverage: Optional[float] = None
+    ebitda_interest_coverage: Optional[float] = None
+    debt_to_ebitda: Optional[float] = None
+    net_debt_to_ebitda: Optional[float] = None
+    debt_to_assets: Optional[float] = None
+    lt_debt_to_capital: Optional[float] = None
+    equity_ratio: Optional[float] = None            # decimal ratio
+    liabilities_to_assets: Optional[float] = None   # decimal ratio
+    # Efficiency
+    nopat: Optional[float] = None                   # AUD M
+    pretax_margin: Optional[float] = None           # decimal ratio
+    ocf_margin: Optional[float] = None              # decimal ratio
+    fcf_margin: Optional[float] = None              # decimal ratio
+    asset_turnover: Optional[float] = None
+    fixed_asset_turnover: Optional[float] = None
+    receivables_turnover: Optional[float] = None
+    inventory_turnover: Optional[float] = None
+    days_sales_outstanding: Optional[float] = None
+    days_inventory_outstanding: Optional[float] = None
+    capex_intensity: Optional[float] = None         # decimal ratio
+    capex_to_revenue: Optional[float] = None        # decimal ratio
+    # Per-share
+    revenue_per_share: Optional[float] = None       # AUD
+    ocf_per_share: Optional[float] = None           # AUD
+    fcf_per_share: Optional[float] = None           # AUD
+    cash_per_share: Optional[float] = None          # AUD
+    tangible_book_value_per_share: Optional[float] = None  # AUD
+    # Balance-sheet detail (AUD M)
+    total_current_assets: Optional[float] = None
+    total_current_liabilities: Optional[float] = None
+    total_liabilities: Optional[float] = None
+    trade_receivables: Optional[float] = None
+    inventory: Optional[float] = None
+    goodwill: Optional[float] = None
+    intangibles: Optional[float] = None
+    ppe_net: Optional[float] = None
+    long_term_debt: Optional[float] = None
+    retained_earnings: Optional[float] = None
+    # Income-statement detail (AUD M)
+    cogs: Optional[float] = None
+    ebit: Optional[float] = None
+    depreciation: Optional[float] = None
+    interest_expense: Optional[float] = None
+    income_tax_expense: Optional[float] = None
+    # Cash-flow detail (AUD M)
+    cfi: Optional[float] = None
+    dividends_paid: Optional[float] = None
+    # Valuation extras
+    earnings_yield: Optional[float] = None          # decimal ratio (1/PE)
+    price_to_cash_flow: Optional[float] = None
+
     # ── Growth (all decimal ratios) ────────────────────────────────────────────
     revenue_growth_1y: Optional[float] = None
     revenue_growth_3y_cagr: Optional[float] = None

@@ -662,6 +662,8 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
           <MetricRow label="EV / EBIT"        value={fmtX(o.ev_to_ebit)} />
           <MetricRow label="Price / FCF"      value={fmtX(o.price_to_fcf)} />
           <MetricRow label="FCF Yield"        value={formatRatio(o.fcf_yield)} />
+          <MetricRow label="Earnings Yield"   value={formatRatio(o.earnings_yield)} />
+          <MetricRow label="Price / Cash Flow" value={fmtX(o.price_to_cash_flow)} />
           {o.graham_number != null && (
             <MetricRow label="Graham Number" value={`$${o.graham_number.toFixed(2)}`} />
           )}
@@ -790,6 +792,78 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
             <MetricRow label="FCF (FY0)"       value={fmtM(o.fcf_fy0)}
               highlight={o.fcf_fy0 > 0 ? 'green' : 'red'} />
           )}
+        </Card>
+
+        {/* Liquidity & Leverage */}
+        <Card title="Liquidity & Leverage">
+          <MetricRow label="Quick Ratio (Acid Test)" value={fmtX(o.quick_ratio)}
+            highlight={o.quick_ratio == null ? 'neutral' : o.quick_ratio >= 1 ? 'green' : o.quick_ratio < 0.5 ? 'red' : 'neutral'} />
+          <MetricRow label="Cash Ratio"             value={fmtX(o.cash_ratio)} />
+          <MetricRow label="Working Capital"        value={fmtM(o.working_capital)} />
+          <MetricRow label="Capital Employed"       value={fmtM(o.capital_employed)} />
+          <MetricRow label="Interest Coverage"      value={fmtX(o.interest_coverage)}
+            highlight={o.interest_coverage == null ? 'neutral' : o.interest_coverage >= 3 ? 'green' : o.interest_coverage < 1.5 ? 'red' : 'neutral'} />
+          <MetricRow label="EBITDA Int. Coverage"   value={fmtX(o.ebitda_interest_coverage)} />
+          <MetricRow label="Debt / EBITDA"          value={fmtX(o.debt_to_ebitda)} />
+          <MetricRow label="Net Debt / EBITDA"      value={fmtX(o.net_debt_to_ebitda)} />
+          <MetricRow label="Debt / Assets"          value={fmtX(o.debt_to_assets)} />
+          <MetricRow label="LT Debt / Capital"      value={fmtX(o.lt_debt_to_capital)} />
+          <MetricRow label="Equity Ratio"           value={formatRatio(o.equity_ratio)} />
+          <MetricRow label="Liabilities / Assets"   value={formatRatio(o.liabilities_to_assets)} />
+        </Card>
+
+        {/* Efficiency */}
+        <Card title="Efficiency & Returns on Sales">
+          <MetricRow label="NOPAT"                  value={fmtM(o.nopat)} />
+          <MetricRow label="Pre-tax Margin"         value={formatRatio(o.pretax_margin)} />
+          <MetricRow label="OCF Margin"             value={formatRatio(o.ocf_margin)} />
+          <MetricRow label="FCF Margin"             value={formatRatio(o.fcf_margin)} />
+          <MetricRow label="Asset Turnover"         value={fmtX(o.asset_turnover)} />
+          <MetricRow label="Fixed Asset Turnover"   value={fmtX(o.fixed_asset_turnover)} />
+          <MetricRow label="Receivables Turnover"   value={fmtX(o.receivables_turnover)} />
+          <MetricRow label="Inventory Turnover"     value={fmtX(o.inventory_turnover)} />
+          <MetricRow label="Days Sales Outstanding"  value={o.days_sales_outstanding != null ? `${o.days_sales_outstanding.toFixed(0)} days` : '—'} />
+          <MetricRow label="Days Inventory Outst."   value={o.days_inventory_outstanding != null ? `${o.days_inventory_outstanding.toFixed(0)} days` : '—'} />
+          <MetricRow label="Capex Intensity"        value={formatRatio(o.capex_intensity)} />
+          <MetricRow label="Capex / Revenue"        value={formatRatio(o.capex_to_revenue)} />
+        </Card>
+
+        {/* Per-Share Values */}
+        <Card title="Per-Share Values">
+          <MetricRow label="Revenue / Share"        value={o.revenue_per_share != null ? `$${o.revenue_per_share.toFixed(2)}` : '—'} />
+          <MetricRow label="OCF / Share"            value={o.ocf_per_share != null ? `$${o.ocf_per_share.toFixed(2)}` : '—'} />
+          <MetricRow label="FCF / Share"            value={o.fcf_per_share != null ? `$${o.fcf_per_share.toFixed(2)}` : '—'} />
+          <MetricRow label="Cash / Share"           value={o.cash_per_share != null ? `$${o.cash_per_share.toFixed(2)}` : '—'} />
+          <MetricRow label="Tangible Book / Share"  value={o.tangible_book_value_per_share != null ? `$${o.tangible_book_value_per_share.toFixed(2)}` : '—'} />
+        </Card>
+
+        {/* Balance Sheet Detail */}
+        <Card title="Balance Sheet Detail">
+          <MetricRow label="Current Assets"         value={fmtM(o.total_current_assets)} />
+          <MetricRow label="Current Liabilities"    value={fmtM(o.total_current_liabilities)} />
+          <MetricRow label="Total Liabilities"      value={fmtM(o.total_liabilities)} />
+          <MetricRow label="Trade Receivables"      value={fmtM(o.trade_receivables)} />
+          <MetricRow label="Inventory"              value={fmtM(o.inventory)} />
+          <MetricRow label="Goodwill"               value={fmtM(o.goodwill)} />
+          <MetricRow label="Intangibles"            value={fmtM(o.intangibles)} />
+          <MetricRow label="PP&E (Net)"             value={fmtM(o.ppe_net)} />
+          <MetricRow label="Long-term Debt"         value={fmtM(o.long_term_debt)} />
+          <MetricRow label="Retained Earnings"      value={fmtM(o.retained_earnings)} />
+        </Card>
+
+        {/* Income Statement Detail */}
+        <Card title="Income Statement (Latest FY)">
+          <MetricRow label="Cost of Goods Sold"     value={fmtM(o.cogs)} />
+          <MetricRow label="EBIT (Operating Profit)" value={fmtM(o.ebit)} />
+          <MetricRow label="Depreciation & Amort."  value={fmtM(o.depreciation)} />
+          <MetricRow label="Interest Expense"       value={fmtM(o.interest_expense)} />
+          <MetricRow label="Income Tax Expense"     value={fmtM(o.income_tax_expense)} />
+        </Card>
+
+        {/* Cash Flow Detail */}
+        <Card title="Cash Flow Detail">
+          <MetricRow label="Investing Cash Flow"    value={fmtM(o.cfi)} />
+          <MetricRow label="Dividends Paid"         value={fmtM(o.dividends_paid)} />
         </Card>
       </div>
 

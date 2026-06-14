@@ -419,6 +419,56 @@ export interface CompanyOverview {
   capex_fy0: number | null
   fcf_fy0: number | null
 
+  // Extended fundamentals (added 2026-06)
+  quick_ratio: number | null
+  cash_ratio: number | null
+  working_capital: number | null
+  capital_employed: number | null
+  interest_coverage: number | null
+  ebitda_interest_coverage: number | null
+  debt_to_ebitda: number | null
+  net_debt_to_ebitda: number | null
+  debt_to_assets: number | null
+  lt_debt_to_capital: number | null
+  equity_ratio: number | null
+  liabilities_to_assets: number | null
+  nopat: number | null
+  pretax_margin: number | null
+  ocf_margin: number | null
+  fcf_margin: number | null
+  asset_turnover: number | null
+  fixed_asset_turnover: number | null
+  receivables_turnover: number | null
+  inventory_turnover: number | null
+  days_sales_outstanding: number | null
+  days_inventory_outstanding: number | null
+  capex_intensity: number | null
+  capex_to_revenue: number | null
+  revenue_per_share: number | null
+  ocf_per_share: number | null
+  fcf_per_share: number | null
+  cash_per_share: number | null
+  tangible_book_value_per_share: number | null
+  total_current_assets: number | null
+  total_current_liabilities: number | null
+  total_liabilities: number | null
+  trade_receivables: number | null
+  inventory: number | null
+  goodwill: number | null
+  intangibles: number | null
+  ppe_net: number | null
+  long_term_debt: number | null
+  retained_earnings: number | null
+  cogs: number | null
+  ebit: number | null
+  depreciation: number | null
+  interest_expense: number | null
+  income_tax_expense: number | null
+  cfi: number | null
+  dividends_paid: number | null
+  earnings_yield: number | null
+  price_to_cash_flow: number | null
+
   // Growth (all ratios)
   revenue_growth_1y: number | null
   revenue_growth_3y_cagr: number | null

@@ -282,6 +282,21 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
     "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
 
+    # ── Derived ratios (Tier B) ─────────────────────────────────────────────────
+    "cash_ratio": {"col": "u.cash_ratio", "scale": 1, "type": "number", "label": "Cash Ratio", "unit": "x", "cat": "Financial Strength"},
+    "days_sales_outstanding": {"col": "u.days_sales_outstanding", "scale": 1, "type": "number", "label": "Days Sales Outstanding", "unit": "days", "cat": "Profitability"},
+    "days_inventory_outstanding": {"col": "u.days_inventory_outstanding", "scale": 1, "type": "number", "label": "Days Inventory Outstanding", "unit": "days", "cat": "Profitability"},
+    "receivables_turnover": {"col": "u.receivables_turnover", "scale": 1, "type": "number", "label": "Receivables Turnover", "unit": "x", "cat": "Profitability"},
+    "pretax_margin": {"col": "u.pretax_margin", "scale": 0.01, "type": "number", "label": "Pre-tax Margin %", "unit": "%", "cat": "Profitability"},
+    "nopat": {"col": "u.nopat", "scale": 1, "type": "number", "label": "NOPAT (AUD M)", "unit": "AUD M", "cat": "Profitability"},
+    "ebitda_interest_coverage": {"col": "u.ebitda_interest_coverage", "scale": 1, "type": "number", "label": "EBITDA Interest Coverage", "unit": "x", "cat": "Financial Strength"},
+    "equity_ratio": {"col": "u.equity_ratio", "scale": 0.01, "type": "number", "label": "Equity Ratio %", "unit": "%", "cat": "Financial Strength"},
+    "liabilities_to_assets": {"col": "u.liabilities_to_assets", "scale": 0.01, "type": "number", "label": "Liabilities / Assets %", "unit": "%", "cat": "Financial Strength"},
+    "fixed_asset_turnover": {"col": "u.fixed_asset_turnover", "scale": 1, "type": "number", "label": "Fixed Asset Turnover", "unit": "x", "cat": "Profitability"},
+    "capex_to_revenue": {"col": "u.capex_to_revenue", "scale": 0.01, "type": "number", "label": "Capex / Revenue %", "unit": "%", "cat": "Profitability"},
+    "tangible_book_value_per_share": {"col": "u.tangible_book_value_per_share", "scale": 1, "type": "number", "label": "Tangible Book Value per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"},
+    "cash_per_share": {"col": "u.cash_per_share", "scale": 1, "type": "number", "label": "Cash per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"},
+
     # ── Line items (income statement / balance sheet / cash flow, AUD M) ─────────
     "cogs": {"col": "u.cogs", "scale": 1, "type": "number", "label": "Cost of Goods Sold (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
     "ebit": {"col": "u.ebit", "scale": 1, "type": "number", "label": "EBIT / Operating Profit (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

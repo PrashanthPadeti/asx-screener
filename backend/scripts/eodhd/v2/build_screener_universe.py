@@ -222,6 +222,13 @@ INSERT INTO screener.universe (
     total_current_assets, total_current_liabilities, total_liabilities,
     long_term_debt, retained_earnings, cfi, dividends_paid,
 
+    -- ── Derived ratios ──────────────────────────────────────────────────────
+    quick_ratio, cash_ratio, debt_to_ebitda, days_sales_outstanding,
+    days_inventory_outstanding, inventory_turnover, receivables_turnover,
+    pretax_margin, nopat, ebitda_interest_coverage, equity_ratio,
+    liabilities_to_assets, fixed_asset_turnover, capex_to_revenue,
+    tangible_book_value_per_share, cash_per_share,
+
     universe_built_at
 )
 SELECT
@@ -628,6 +635,40 @@ SELECT
     bs0.retained_earnings   AS retained_earnings,
     cf0.cfi                 AS cfi,
     cf0.dividends_paid      AS dividends_paid,
+
+    -- ── Derived ratios (from the line items above) ───────────────────────────
+    CASE WHEN bs0.total_current_liab > 0
+         THEN ROUND(((bs0.total_current_assets - COALESCE(bs0.inventory,0)) / bs0.total_current_liab)::numeric, 4) END AS quick_ratio,
+    CASE WHEN bs0.total_current_liab > 0
+         THEN ROUND((bs0.cash_equivalents / bs0.total_current_liab)::numeric, 4) END AS cash_ratio,
+    CASE WHEN pnl0.ebitda > 0
+         THEN ROUND((bs0.total_debt / pnl0.ebitda)::numeric, 4) END AS debt_to_ebitda,
+    CASE WHEN pnl0.revenue > 0
+         THEN ROUND((bs0.trade_receivables / pnl0.revenue * 365)::numeric, 2) END AS days_sales_outstanding,
+    CASE WHEN pnl0.cost_of_sales > 0
+         THEN ROUND((bs0.inventory / pnl0.cost_of_sales * 365)::numeric, 2) END AS days_inventory_outstanding,
+    CASE WHEN bs0.inventory > 0
+         THEN ROUND((pnl0.cost_of_sales / bs0.inventory)::numeric, 4) END AS inventory_turnover,
+    CASE WHEN bs0.trade_receivables > 0
+         THEN ROUND((pnl0.revenue / bs0.trade_receivables)::numeric, 4) END AS receivables_turnover,
+    CASE WHEN pnl0.revenue > 0
+         THEN ROUND((pnl0.pbt / pnl0.revenue)::numeric, 4) END AS pretax_margin,
+    CASE WHEN pnl0.pbt <> 0 AND pnl0.pbt IS NOT NULL
+         THEN ROUND((pnl0.ebit * (1 - pnl0.tax / pnl0.pbt))::numeric, 2) END AS nopat,
+    CASE WHEN ABS(pnl0.interest_expense) > 0
+         THEN ROUND((pnl0.ebitda / ABS(pnl0.interest_expense))::numeric, 4) END AS ebitda_interest_coverage,
+    CASE WHEN bs0.total_assets > 0
+         THEN ROUND((bs0.total_equity / bs0.total_assets)::numeric, 4) END AS equity_ratio,
+    CASE WHEN bs0.total_assets > 0
+         THEN ROUND((bs0.total_liabilities / bs0.total_assets)::numeric, 4) END AS liabilities_to_assets,
+    CASE WHEN bs0.gross_block > 0
+         THEN ROUND((pnl0.revenue / bs0.gross_block)::numeric, 4) END AS fixed_asset_turnover,
+    CASE WHEN pnl0.revenue > 0
+         THEN ROUND((ABS(cf0.capex) / pnl0.revenue)::numeric, 4) END AS capex_to_revenue,
+    CASE WHEN ss.shares_outstanding > 0
+         THEN ROUND(((bs0.total_equity - COALESCE(bs0.goodwill,0) - COALESCE(bs0.intangibles,0)) * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS tangible_book_value_per_share,
+    CASE WHEN ss.shares_outstanding > 0
+         THEN ROUND((bs0.cash_equivalents * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS cash_per_share,
 
     NOW()
 
@@ -1194,6 +1235,23 @@ ON CONFLICT (asx_code) DO UPDATE SET
     retained_earnings       = EXCLUDED.retained_earnings,
     cfi                     = EXCLUDED.cfi,
     dividends_paid          = EXCLUDED.dividends_paid,
+    -- Derived ratios
+    quick_ratio             = EXCLUDED.quick_ratio,
+    cash_ratio              = EXCLUDED.cash_ratio,
+    debt_to_ebitda          = EXCLUDED.debt_to_ebitda,
+    days_sales_outstanding  = EXCLUDED.days_sales_outstanding,
+    days_inventory_outstanding = EXCLUDED.days_inventory_outstanding,
+    inventory_turnover      = EXCLUDED.inventory_turnover,
+    receivables_turnover    = EXCLUDED.receivables_turnover,
+    pretax_margin           = EXCLUDED.pretax_margin,
+    nopat                   = EXCLUDED.nopat,
+    ebitda_interest_coverage = EXCLUDED.ebitda_interest_coverage,
+    equity_ratio            = EXCLUDED.equity_ratio,
+    liabilities_to_assets   = EXCLUDED.liabilities_to_assets,
+    fixed_asset_turnover    = EXCLUDED.fixed_asset_turnover,
+    capex_to_revenue        = EXCLUDED.capex_to_revenue,
+    tangible_book_value_per_share = EXCLUDED.tangible_book_value_per_share,
+    cash_per_share          = EXCLUDED.cash_per_share,
     universe_built_at       = NOW()
 """
 

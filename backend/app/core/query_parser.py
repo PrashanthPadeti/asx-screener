@@ -345,6 +345,25 @@ EXTRA_ALIASES: dict[str, str] = {
 
 
 
+
+    # ── Derived ratios ──────────────────────────────────────────────────────────
+    "quick ratio":                         "quick_ratio",
+    "cash ratio":                          "cash_ratio",
+    "debt to ebitda":                      "debt_to_ebitda",
+    "dso":                                 "days_sales_outstanding",
+    "days sales outstanding":              "days_sales_outstanding",
+    "dio":                                 "days_inventory_outstanding",
+    "inventory turnover":                  "inventory_turnover",
+    "receivables turnover":                "receivables_turnover",
+    "pretax margin":                       "pretax_margin",
+    "nopat":                               "nopat",
+    "equity ratio":                        "equity_ratio",
+    "fixed asset turnover":                "fixed_asset_turnover",
+    "capex to revenue":                    "capex_to_revenue",
+    "tangible book value":                 "tangible_book_value_per_share",
+    "tangible book value per share":       "tangible_book_value_per_share",
+    "cash per share":                      "cash_per_share",
+
     # ── Line items ──────────────────────────────────────────────────────────────
     "cost of goods sold":                  "cogs",
     "cost of sales":                       "cogs",

@@ -362,7 +362,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
 # at the end.
 
 CATEGORY_ORDER: list[str] = [
-    "Market Data",        # Sector, index membership, price, market cap, volume
+    "Market Data",        # Sector, industry, index membership, stock type
+    "Price",              # Price, market cap, EV, 52W high/low, volume ratio
     "Valuation",          # P/E, P/B, EV/EBITDA, FCF yield, …
     "Profitability",      # Margins, ROE, ROA, ROCE, EPS
     "Quality",            # Avg ROE/ROA/ROCE 3Y & 5Y, Piotroski, Altman, …

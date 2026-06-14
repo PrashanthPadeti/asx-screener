@@ -268,9 +268,20 @@ SELECT
     dp52.low_52w,
 
     -- ── Valuation ratios ─────────────────────────────────────────────────────
-    vs.pe_ratio,
+    -- P/E: prefer valuation_snapshot; fall back to price / derived EPS (eps_fy0)
+    -- when snapshot is null. Guard < 9999 so a tiny-EPS garbage P/E is dropped.
+    COALESCE(vs.pe_ratio,
+             CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0
+                       AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999
+                  THEN ROUND((dp.close / COALESCE(pnl0.eps, ym.eps))::numeric, 4) END) AS pe_ratio,
     vs.forward_pe,
-    vs.peg_ratio,
+    -- PEG: prefer snapshot; else derived P/E ÷ (3Y earnings growth %), growth > 0
+    COALESCE(vs.peg_ratio,
+             CASE WHEN COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) > 0
+                       AND COALESCE(pnl0.eps, ym.eps) > 0
+                       AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999
+                  THEN ROUND(((dp.close / COALESCE(pnl0.eps, ym.eps))
+                              / (COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) * 100))::numeric, 4) END) AS peg_ratio,
     vs.price_to_book,
     vs.price_to_sales,
     vs.enterprise_value     AS ev,
@@ -281,8 +292,12 @@ SELECT
     -- price_to_fcf: use yearly_compute's pre-computed p_fcf_ratio (reliable,
     -- already guards against negative/zero FCF and extreme values)
     ym.p_fcf_ratio          AS price_to_fcf,
-    -- graham_number: from yearly_metrics (sqrt(22.5 * eps * bvps))
-    ym.graham_number        AS graham_number,
+    -- graham_number: prefer yearly_metrics; else sqrt(22.5 * EPS * BVPS), both > 0
+    COALESCE(ym.graham_number,
+             CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0
+                       AND COALESCE(bs0.book_value_per_share, ym.bvps) > 0
+                  THEN ROUND(sqrt(22.5 * COALESCE(pnl0.eps, ym.eps)
+                                  * COALESCE(bs0.book_value_per_share, ym.bvps))::numeric, 4) END) AS graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
     vs.dividend_yield,

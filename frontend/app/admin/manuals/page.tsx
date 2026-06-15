@@ -471,12 +471,191 @@ function CompanyDetailManual() {
   )
 }
 
+// ── Alpha Screens manual ──────────────────────────────────────────────────────
+const ATOC = [
+  ['a-overview', '1. Page Overview'],
+  ['a-benefits', '2. User Benefits'],
+  ['a-sections', '3. Sections Covered'],
+  ['a-data', '4. How It Works & the Data'],
+  ['a-cards', '5. What Each Screen Card Shows'],
+  ['a-features', '6. Functional Features'],
+  ['a-technical', '7. Technical Details'],
+  ['a-examples', '8. Usage Examples'],
+  ['a-support', '9. Quick Reference (Support)'],
+  ['a-future', '10. Future Improvements'],
+]
+function AlphaScreensManual() {
+  return (
+    <div>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">On this page</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+          {ATOC.map(([id, label]) => <a key={id} href={`#${id}`} className="text-sm text-blue-600 hover:underline">{label}</a>)}
+        </div>
+      </div>
+
+      {/* 1 */}
+      <H2 id="a-overview">1. Page Overview</H2>
+      <H3>What is the Alpha Screens page?</H3>
+      <P>The <strong>Alpha Screens</strong> page (<Code>/scans</Code>) is a library of <strong>ready-made, one-click stock screens</strong> — “institutional-grade screens built on proven quant strategies.” Instead of building filters by hand in the Screener, the user picks a pre-built strategy (e.g. “Fully Franked Value”, “ROIC Compounder”, “RSI Oversold”) and instantly sees the ASX stocks that match it.</P>
+      <H3>Purpose</H3>
+      <P>To give users <strong>expert-designed screens out of the box</strong>. It answers “<strong>I don’t know which filters to use — just show me good income / value / growth / momentum stocks.</strong>” Each card is a named strategy with its filter logic already set.</P>
+      <H3>What problem it solves</H3>
+      <UL items={[
+        <><strong>Blank-page problem</strong> — many users don’t know which metrics or thresholds to combine. Alpha Screens packages proven combinations for them.</>,
+        <><strong>Speed</strong> — a curated strategy is one click away, versus minutes of manual filter-building.</>,
+        <><strong>Idea generation</strong> — browsing the categories surfaces strategies users hadn’t thought to run.</>,
+      ]} />
+      <H3>How it fits into the platform</H3>
+      <P>Alpha Screens is the <strong>guided entry point to screening</strong>. Picking a screen opens the full <strong>Screener</strong> with that strategy pre-loaded and run, where the user can tweak it, sort, export, or save it. It sits in the top nav next to the Screener and Market Overview.</P>
+
+      {/* 2 */}
+      <H2 id="a-benefits">2. User Benefits</H2>
+      <Table head={['User type', 'How they use Alpha Screens']} rows={[
+        ['Beginners', 'Run a proven strategy without knowing any metrics — a safe, guided way to discover stocks.'],
+        ['Income investors', 'Use the Dividend & Income screens (high yield, fully franked, dividend aristocrats) to build an income shortlist.'],
+        ['Value & quality investors', 'Use value + financial-health screens (low P/E + Piotroski, Altman safety, ROIC compounders).'],
+        ['Growth & momentum traders', 'Use accelerating-revenue/earnings and price-momentum screens for trend ideas.'],
+        ['Technical traders', 'Use chart-based screens (breakouts, golden cross, RSI oversold/overbought).'],
+        ['All users', 'Generate a fresh shortlist in seconds, then deep-dive any result on its Company page.'],
+      ]} />
+
+      {/* 3 */}
+      <H2 id="a-sections">3. Sections Covered</H2>
+      <H3>Pre-built screen categories</H3>
+      <P>Screens are grouped into themed categories, each a grid of strategy cards:</P>
+      <UL items={[
+        <><strong>Dividend &amp; Income</strong> — high-yield and franked-dividend strategies for income investors.</>,
+        <><strong>Value &amp; Quality</strong> — undervalued stocks with strong fundamentals and financial health.</>,
+        <><strong>Growth &amp; Momentum</strong> — companies accelerating revenue, earnings and price momentum.</>,
+        <><strong>Technical Signals</strong> — chart-based breakout, trend-following and mean-reversion signals.</>,
+        <>(plus specialist / ASX-specific strategies such as miners, A-REITs and franking optimisers.)</>,
+      ]} />
+      <H3>Screen tiers (Free / Pro / Premium)</H3>
+      <P>Each card carries a tier badge. <strong>Free</strong> screens (e.g. Value + Fully Franked, Price Momentum, Piotroski Strong, Potential Turnaround) are open to everyone. <strong>Pro</strong> screens unlock more advanced multi-factor strategies. <strong>Premium</strong> screens are the most sophisticated (AI-ranked Top 5, mining value, A-REIT income, franking optimiser, dividend aristocrats, quality compounders, Altman safety, etc.). Locked cards show a badge and link to pricing.</P>
+      <H3>Sector Screens</H3>
+      <P>Browse the market by <strong>GICS sector</strong> — one click filters the Screener to that sector (with a stock count per sector).</P>
+      <H3>Community Picks</H3>
+      <P>Screens <strong>shared by other users</strong> (saved as public/community). These include both visual filter screens and SQL-style Query Mode screens. <strong>Gated to Pro/Premium</strong>: free users see an upgrade card; Pro users see free/Pro-created screens; Premium/admin see all (Premium-created screens are hidden from Pro).</P>
+      <H3>Stats bar</H3>
+      <P>A header summary counts the total screens available and breaks them down by Premium / Pro / Free / Sector / Community.</P>
+
+      {/* 4 */}
+      <H2 id="a-data">4. How It Works &amp; the Data</H2>
+      <UL items={[
+        <><strong>What a screen is:</strong> a named, predefined set of filter conditions (e.g. <Code>dividend_yield ≥ 4 AND franking_pct ≥ 70 AND net_margin &gt; 0</Code>) plus a default sort.</>,
+        <><strong>What clicking does:</strong> it opens the Screener with that strategy applied and runs it against the live <Code>screener.universe</Code> — so results always reflect the latest end-of-day data, not a frozen list.</>,
+        <><strong>Where the data comes from:</strong> the same nightly pipeline that powers the Screener (EODHD end-of-day prices + statements, ASIC shorts) → <Code>screener.universe</Code>.</>,
+        <><strong>How often it updates:</strong> results refresh whenever you run a screen, against data rebuilt nightly after the ASX close. It is end-of-day, not intraday.</>,
+        <><strong>Be careful:</strong> a screen is a <em>shortlist generator</em>, not a buy list. A strategy that fit the market last cycle may not this cycle. Always research each result before acting.</>,
+      ]} />
+      <Callout tone="red" title="Not financial advice">
+        Alpha Screens surface stocks that match a strategy’s rules — they are a <strong>research starting point</strong>, never a recommendation to buy or sell.
+      </Callout>
+
+      {/* 5 */}
+      <H2 id="a-cards">5. What Each Screen Card Shows</H2>
+      <Table head={['Element', 'Meaning']} rows={[
+        ['Strategy name', 'The screen’s title (e.g. “Dividend Income Portfolio”).'],
+        ['Description', 'One line on what the screen looks for.'],
+        ['Filter chips', 'The first few filter conditions, with “+N more” if there are others.'],
+        ['Tier badge', 'Free / Pro / Premium access level for the screen.'],
+        ['Lock state', 'Premium/Pro screens appear locked for lower tiers and link to pricing.'],
+        ['Click target', 'Opens /screener?preset=<id> (runs the strategy) or /pricing if locked.'],
+      ]} />
+
+      {/* 6 */}
+      <H2 id="a-features">6. Functional Features</H2>
+      <UL items={[
+        <><strong>Category sections</strong> — Dividend &amp; Income, Value &amp; Quality, Growth &amp; Momentum, Technical Signals (+ specialist).</>,
+        <><strong>Strategy cards</strong> — themed, icon-coded, with name, description and filter chips.</>,
+        <><strong>Tier badges &amp; locking</strong> — Free/Pro/Premium; locked cards route to pricing.</>,
+        <><strong>One-click run</strong> — opens the Screener with the strategy applied.</>,
+        <><strong>Sector Screens</strong> — jump straight into a single GICS sector.</>,
+        <><strong>Community Picks</strong> — run screens shared by other users (Pro/Premium); save your own as public from the Screener.</>,
+        <><strong>Stats summary</strong> — total and per-tier/sector/community counts.</>,
+        <><strong>Help drawer</strong> — an in-page “Scans Guide” explaining how the screens and categories work.</>,
+      ]} />
+      <H3>Step-by-step: using a screen</H3>
+      <OL items={[
+        'Open /scans (Alpha Screens).',
+        'Pick a category that matches your goal (e.g. Dividend & Income).',
+        'Read the cards; note the tier badge and the filter chips.',
+        'Click a screen — the Screener opens with it applied and the results listed.',
+        'Sort, tweak thresholds, add columns or export as needed.',
+        'Click any result to open its Company page, or save the (tweaked) screen as your own.',
+      ]} />
+
+      {/* 7 */}
+      <H2 id="a-technical">7. Technical Details</H2>
+      <H3>Frontend</H3>
+      <UL items={[
+        <>Page: <Code>frontend/app/scans/page.tsx</Code>; each strategy renders via the <Code>ScanCard</Code> component (icon, theme, tier badge, lock).</>,
+        <>Plan flags: <Code>isPro</Code> / <Code>isPremium</Code> / <Code>isAdmin</Code> drive lock state and Community Picks visibility; <Code>presetTier()</Code> maps each preset id to free/pro/premium.</>,
+        <>Categories are defined in a <Code>CATEGORIES</Code> array that groups preset ids into themes.</>,
+      ]} />
+      <H3>Backend &amp; data flow</H3>
+      <Table head={['Endpoint', 'Feeds', 'Source']} rows={[
+        [<Code>GET /screener/presets</Code>, 'The pre-built strategy definitions (name, description, filters, tier).', 'Defined in get_screener_presets()'],
+        [<Code>GET /screener community</Code>, 'Community Picks (public saved screens), gated by plan rank.', <Code>screener.saved_screens</Code>],
+        [<Code>GET /market/sectors</Code>, 'Sector list + stock counts for Sector Screens.', <Code>screener.universe</Code>],
+        [<span><Code>POST /screener</Code> + <Code>/screener/query</Code></span>, 'Runs the applied strategy when the Screener opens.', <Code>screener.universe</Code>],
+      ]} />
+      <UL items={[
+        <><strong>Presets</strong> are server-defined filter sets (id, name, description, <Code>filters[]</Code>, sort, <Code>premium</Code>/<Code>min_plan</Code>). They are <em>not</em> stored results — clicking re-runs them live, so results stay current.</>,
+        <><strong>Community Picks</strong> come from <Code>screener.saved_screens</Code> with a <Code>creator_plan</Code> column; the API filters by <Code>PLAN_RANK</Code> so Pro users don’t see Premium-created screens, and free users get a 403 (the UI shows an upgrade card).</>,
+        <><strong>Access:</strong> enforced on both the frontend (locked cards) and backend (plan checks) — locking is never client-only.</>,
+        <><strong>Caching / performance:</strong> the presets list is small and cached; running a screen reuses the standard, indexed Screener query path. Loading/error states are handled per section.</>,
+      ]} />
+
+      {/* 8 */}
+      <H2 id="a-examples">8. Usage Examples</H2>
+      <UL items={[
+        <><strong>Run a strategy:</strong> click “Value + Fully Franked” → the Screener opens showing low-P/E, 100%-franked, profitable ASX stocks, sorted by grossed-up yield.</>,
+        <><strong>Read a tier badge:</strong> a “Premium” badge on “AI Ranked Top 5” means you need Premium; clicking on a lower plan routes you to pricing.</>,
+        <><strong>Sector screen:</strong> click “Materials” to instantly list every Materials stock in the Screener, ready to refine.</>,
+        <><strong>Community pick:</strong> open a shared “High Yield Franked Miners” screen, run it, then tweak the franking threshold to taste.</>,
+        <><strong>Make it your own:</strong> after tweaking a preset in the Screener, Save it (optionally Public) so it appears in Community Picks for others.</>,
+        <><strong>Screen → research:</strong> from any result, click the ticker to open its Company page and validate the idea.</>,
+      ]} />
+
+      {/* 9 */}
+      <H2 id="a-support">9. Quick Reference (Support)</H2>
+      <Table head={['Question / issue', 'Answer']} rows={[
+        ['“A screen is locked.”', 'It’s a Pro or Premium strategy. Free users can run the Free screens; upgrade to unlock the rest.'],
+        ['“Community Picks shows an upgrade card.”', 'Community Picks are Pro/Premium. Pro users see free/Pro screens; Premium sees all.'],
+        ['“I clicked a screen and it opened the Screener.”', 'That’s by design — the screen runs in the full Screener so you can tweak, sort and export.'],
+        ['“Results changed since last time.”', 'Screens run live against nightly-rebuilt data, so results update as the market/data does.'],
+        ['“A Query Mode community screen won’t open for me.”', 'Query Mode is Pro/Premium; free users get an upgrade prompt for those.'],
+      ]} />
+
+      {/* 10 */}
+      <H2 id="a-future">10. Future Improvements</H2>
+      <UL items={[
+        <><strong>Backtest preview</strong> — show how each strategy would have performed historically.</>,
+        <><strong>Result counts on cards</strong> — “matches 42 stocks today” before you click.</>,
+        <><strong>Favourite / pin screens</strong> and a “recently run” list.</>,
+        <><strong>Alerts on a screen</strong> — notify when a new stock enters/leaves a saved strategy.</>,
+        <><strong>More categories &amp; ASX-specific strategies</strong> (e.g. capital-raise plays, short-squeeze candidates).</>,
+        <><strong>Community ratings</strong> — upvote/sort the most useful shared screens.</>,
+        <><strong>One-click compare</strong> — run two strategies side by side.</>,
+        <><strong>Scheduled emails</strong> — “your weekly Dividend Aristocrats shortlist”.</>,
+        <><strong>Mobile improvements</strong> — swipeable category carousels and condensed cards.</>,
+      ]} />
+
+      <div className="mt-10 pt-4 border-t border-slate-200 text-xs text-slate-400">
+        Internal documentation — Admin only. Reflects the Alpha Screens page as built. Update this manual when the page changes.
+      </div>
+    </div>
+  )
+}
+
 // ── Manual registry (add a page manual here, then a render case below) ─────────
 const MANUALS = [
   { slug: 'market-overview', title: 'Market Overview', page: '/market', status: 'ready' as const },
   { slug: 'screener',        title: 'Stock Screener',  page: '/screener', status: 'soon' as const },
   { slug: 'company-detail',  title: 'Company Detail',  page: '/company/[code]', status: 'ready' as const },
-  { slug: 'alpha-screens',   title: 'Alpha Screens',   page: '/scans', status: 'soon' as const },
+  { slug: 'alpha-screens',   title: 'Alpha Screens',   page: '/scans', status: 'ready' as const },
   { slug: 'glossary',        title: 'Metrics Glossary', page: '/glossary', status: 'soon' as const },
   { slug: 'portfolio',       title: 'Portfolio',       page: '/portfolio', status: 'soon' as const },
 ]
@@ -529,6 +708,7 @@ export default function AdminManualsPage() {
           </div>
           {active === 'market-overview' && <MarketOverviewManual />}
           {active === 'company-detail' && <CompanyDetailManual />}
+          {active === 'alpha-screens' && <AlphaScreensManual />}
         </main>
       </div>
     </div>

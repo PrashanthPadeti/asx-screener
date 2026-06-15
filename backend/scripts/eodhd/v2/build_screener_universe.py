@@ -237,12 +237,12 @@ INSERT INTO screener.universe (
     -- ── Quick wins (existing columns, previously unwritten) ──────────────────
     revenue_fy2, net_profit_ttm, price_to_cash_flow,
 
-    -- ── Sales-based signals ──────────────────────────────────────────────────
-    revenue_growth_accelerating, revenue_growth_delta, revenue_growth_consistency,
-
     -- ── Profit-based signals ─────────────────────────────────────────────────
     operating_margin_expanding, gross_margin_expanding, fcf_conversion,
     eps_beats_revenue_growth, operating_leverage,
+
+    -- ── Sales-based signals ──────────────────────────────────────────────────
+    revenue_growth_accelerating, revenue_growth_delta, revenue_growth_consistency,
 
     universe_built_at
 )

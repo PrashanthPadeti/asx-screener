@@ -153,6 +153,9 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "fcf_cagr_5y":              {"col": "u.fcf_cagr_5y",              "scale": 0.01, "type": "number", "label": "FCF CAGR 5Y %",             "unit": "%",   "cat": "Growth"},
     "bvps_cagr_3y":             {"col": "u.bvps_cagr_3y",             "scale": 0.01, "type": "number", "label": "BVPS CAGR 3Y %",            "unit": "%",   "cat": "Growth"},
     "bvps_cagr_5y":             {"col": "u.bvps_cagr_5y",             "scale": 0.01, "type": "number", "label": "BVPS CAGR 5Y %",            "unit": "%",   "cat": "Growth"},
+    "revenue_growth_accelerating": {"col": "u.revenue_growth_accelerating", "scale": 1,    "type": "boolean", "label": "Revenue Growth Accelerating",      "unit": "",    "cat": "Growth"},
+    "revenue_growth_delta":     {"col": "u.revenue_growth_delta",     "scale": 0.01, "type": "number",  "label": "Revenue Growth Acceleration (pp)", "unit": "pp",  "cat": "Growth"},
+    "revenue_growth_consistency":{"col": "u.revenue_growth_consistency","scale": 1,   "type": "number",  "label": "Revenue Growth Consistency (0-3)", "unit": "",    "cat": "Growth"},
     "momentum_3m":              {"col": "u.momentum_3m",              "scale": 0.01, "type": "number", "label": "Price Momentum 3M %",      "unit": "%",   "cat": "Technicals"},
     "momentum_6m":              {"col": "u.momentum_6m",              "scale": 0.01, "type": "number", "label": "Price Momentum 6M %",      "unit": "%",   "cat": "Technicals"},
 
@@ -877,6 +880,7 @@ _PCT_COLS = {
     "earnings_growth_1y", "eps_growth_3y_cagr",
     "revenue_growth_yoy_q", "eps_growth_yoy_q",
     "revenue_growth_hoh", "net_income_growth_hoh", "eps_growth_hoh",
+    "revenue_growth_delta",
     "return_1w", "return_1m", "return_3m", "return_6m",
     "return_1y", "return_ytd", "return_3y", "return_5y",
     "drawdown_from_ath", "volatility_20d", "volatility_60d",

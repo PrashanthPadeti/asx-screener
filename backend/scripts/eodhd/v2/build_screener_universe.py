@@ -237,6 +237,9 @@ INSERT INTO screener.universe (
     -- ── Quick wins (existing columns, previously unwritten) ──────────────────
     revenue_fy2, net_profit_ttm, price_to_cash_flow,
 
+    -- ── Sales-based signals ──────────────────────────────────────────────────
+    revenue_growth_accelerating, revenue_growth_delta, revenue_growth_consistency,
+
     universe_built_at
 )
 SELECT
@@ -690,6 +693,29 @@ SELECT
     pnl0.net_profit AS net_profit_ttm,
     CASE WHEN cf0.cfo > 0
          THEN ROUND((vs.market_cap / (cf0.cfo * 1000000.0))::numeric, 4) END AS price_to_cash_flow,
+
+    -- ── Sales-based signals ──────────────────────────────────────────────────
+    -- Acceleration: is this year's revenue growth faster than last year's?
+    CASE WHEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+          AND pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0
+         THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y)
+              > ((pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))
+         END AS revenue_growth_accelerating,
+    -- Delta: magnitude of acceleration in pp (positive = speeding up, negative = slowing)
+    CASE WHEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+          AND pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0
+         THEN ROUND((COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y)
+                     - (pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))::numeric, 4)
+         END AS revenue_growth_delta,
+    -- Consistency: count of last 3 years with positive revenue growth (0-3)
+    CASE WHEN pnl0.revenue IS NOT NULL AND pnl1.revenue IS NOT NULL
+         THEN (
+             CASE WHEN pnl0.revenue > pnl1.revenue THEN 1 ELSE 0 END
+           + CASE WHEN pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL
+                       AND pnl1.revenue > pnl2.revenue THEN 1 ELSE 0 END
+           + CASE WHEN pnl2.revenue IS NOT NULL AND pnl3.revenue IS NOT NULL
+                       AND pnl2.revenue > pnl3.revenue THEN 1 ELSE 0 END
+         )::smallint END AS revenue_growth_consistency,
 
     NOW()
 
@@ -1285,6 +1311,10 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_fy2             = EXCLUDED.revenue_fy2,
     net_profit_ttm          = EXCLUDED.net_profit_ttm,
     price_to_cash_flow      = EXCLUDED.price_to_cash_flow,
+    -- Sales-based signals
+    revenue_growth_accelerating = EXCLUDED.revenue_growth_accelerating,
+    revenue_growth_delta        = EXCLUDED.revenue_growth_delta,
+    revenue_growth_consistency  = EXCLUDED.revenue_growth_consistency,
     universe_built_at       = NOW()
 """
 

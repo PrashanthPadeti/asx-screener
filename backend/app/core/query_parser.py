@@ -318,6 +318,24 @@ EXTRA_ALIASES: dict[str, str] = {
     "receivables slower than sales":                 "receivables_growing_slower_than_sales",
     "sales grow faster than receivables":            "receivables_growing_slower_than_sales",
 
+    # ── Cash flow signals ─────────────────────────────────────────────────────
+    "ocf beats net income":                          "ocf_beats_net_income",
+    "ocf greater than net income":                   "ocf_beats_net_income",
+    "operating cash flow beats profit":              "ocf_beats_net_income",
+    "cash conversion quality":                       "ocf_beats_net_income",
+    "capex to ocf":                                  "capex_to_ocf",
+    "capex ocf ratio":                               "capex_to_ocf",
+    "capex burden":                                  "capex_to_ocf",
+    "fcf growing faster than revenue":               "fcf_growing_faster_than_revenue",
+    "fcf grows faster than revenue":                 "fcf_growing_faster_than_revenue",
+    "free cash flow growing faster than revenue":    "fcf_growing_faster_than_revenue",
+    "ocf positive":                                  "ocf_positive",
+    "positive operating cash flow":                  "ocf_positive",
+    "operating cash flow positive":                  "ocf_positive",
+    "ocf growing":                                   "ocf_growing",
+    "operating cash flow growing":                   "ocf_growing",
+    "ocf growth":                                    "ocf_growing",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

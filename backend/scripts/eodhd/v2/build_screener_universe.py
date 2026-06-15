@@ -250,6 +250,10 @@ INSERT INTO screener.universe (
     inventory_growing_slower_than_sales,
     receivables_growing_slower_than_sales,
 
+    -- ── Cash flow signals ─────────────────────────────────────────────────────
+    ocf_beats_net_income, capex_to_ocf, fcf_growing_faster_than_revenue,
+    ocf_positive, ocf_growing,
+
     universe_built_at
 )
 SELECT
@@ -792,6 +796,29 @@ SELECT
               >= (bs0.trade_receivables - bs1.trade_receivables) / ABS(bs1.trade_receivables)
          END AS receivables_growing_slower_than_sales,
 
+    -- ── Cash flow signals ─────────────────────────────────────────────────────
+    -- OCF beats net income: operating cash flow >= reported net profit (earnings quality)
+    CASE WHEN ym.ocf_to_net_profit IS NOT NULL
+         THEN ym.ocf_to_net_profit >= 1.0
+         END AS ocf_beats_net_income,
+    -- Capex to OCF: what fraction of operating cash flow is consumed by capex
+    CASE WHEN cf0.cfo IS NOT NULL AND cf0.cfo > 0 AND cf0.capex IS NOT NULL
+         THEN ROUND((ABS(cf0.capex) / cf0.cfo)::numeric, 4)
+         END AS capex_to_ocf,
+    -- FCF growing faster than revenue: FCF growth outpaces revenue growth (quality compounder)
+    CASE WHEN ym.fcf_growth_1y IS NOT NULL
+          AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+         THEN ym.fcf_growth_1y > COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y)
+         END AS fcf_growing_faster_than_revenue,
+    -- OCF positive: basic operating quality gate
+    CASE WHEN cf0.cfo IS NOT NULL
+         THEN cf0.cfo > 0
+         END AS ocf_positive,
+    -- OCF growing: operating cash flow higher than prior year
+    CASE WHEN cf0.cfo IS NOT NULL AND cf1.cfo IS NOT NULL
+         THEN cf0.cfo > cf1.cfo
+         END AS ocf_growing,
+
     NOW()
 
 FROM market.companies_current c
@@ -909,6 +936,15 @@ LEFT JOIN LATERAL (
     ORDER BY fiscal_year DESC
     LIMIT 1
 ) cf0 ON TRUE
+
+-- ── Cash Flow (prior FY — for OCF growing signal) ────────────────────────────
+LEFT JOIN LATERAL (
+    SELECT cfo
+    FROM financials.annual_cashflow
+    WHERE asx_code = c.asx_code
+    ORDER BY fiscal_year DESC
+    LIMIT 1 OFFSET 1
+) cf1 ON TRUE
 
 -- ── Computed metrics (daily compute — freshest ratios & margins) ──────────────
 LEFT JOIN LATERAL (
@@ -1413,6 +1449,12 @@ ON CONFLICT (asx_code) DO UPDATE SET
     debt_growing_slower_than_profit       = EXCLUDED.debt_growing_slower_than_profit,
     inventory_growing_slower_than_sales   = EXCLUDED.inventory_growing_slower_than_sales,
     receivables_growing_slower_than_sales = EXCLUDED.receivables_growing_slower_than_sales,
+    -- Cash flow signals
+    ocf_beats_net_income            = EXCLUDED.ocf_beats_net_income,
+    capex_to_ocf                    = EXCLUDED.capex_to_ocf,
+    fcf_growing_faster_than_revenue = EXCLUDED.fcf_growing_faster_than_revenue,
+    ocf_positive                    = EXCLUDED.ocf_positive,
+    ocf_growing                     = EXCLUDED.ocf_growing,
     universe_built_at       = NOW()
 """
 

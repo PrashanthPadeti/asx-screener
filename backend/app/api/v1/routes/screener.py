@@ -321,6 +321,12 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "debt_growing_slower_than_profit":       {"col": "u.debt_growing_slower_than_profit",       "scale": 1,    "type": "boolean", "label": "Debt Growing Slower Than Profit",         "unit": "",    "cat": "Financial Strength"},
     "inventory_growing_slower_than_sales":   {"col": "u.inventory_growing_slower_than_sales",   "scale": 1,    "type": "boolean", "label": "Inventory Growing Slower Than Sales",     "unit": "",    "cat": "Financial Strength"},
     "receivables_growing_slower_than_sales": {"col": "u.receivables_growing_slower_than_sales", "scale": 1,    "type": "boolean", "label": "Receivables Growing Slower Than Sales",   "unit": "",    "cat": "Financial Strength"},
+    # ── Cash flow signals ─────────────────────────────────────────────────────────
+    "ocf_beats_net_income":            {"col": "u.ocf_beats_net_income",            "scale": 1,    "type": "boolean", "label": "OCF Beats Net Income",                   "unit": "",    "cat": "Cash Flow"},
+    "capex_to_ocf":                    {"col": "u.capex_to_ocf",                    "scale": 1,    "type": "number",  "label": "Capex to OCF (ratio)",                   "unit": "x",   "cat": "Cash Flow"},
+    "fcf_growing_faster_than_revenue": {"col": "u.fcf_growing_faster_than_revenue", "scale": 1,    "type": "boolean", "label": "FCF Growing Faster Than Revenue",         "unit": "",    "cat": "Cash Flow"},
+    "ocf_positive":                    {"col": "u.ocf_positive",                    "scale": 1,    "type": "boolean", "label": "OCF Positive",                           "unit": "",    "cat": "Cash Flow"},
+    "ocf_growing":                     {"col": "u.ocf_growing",                     "scale": 1,    "type": "boolean", "label": "OCF Growing (YoY)",                      "unit": "",    "cat": "Cash Flow"},
 
     # ── Line items (income statement / balance sheet / cash flow, AUD M) ─────────
     "cogs": {"col": "u.cogs", "scale": 1, "type": "number", "label": "Cost of Goods Sold (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

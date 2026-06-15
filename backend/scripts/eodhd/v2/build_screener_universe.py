@@ -244,6 +244,12 @@ INSERT INTO screener.universe (
     -- ── Sales-based signals ──────────────────────────────────────────────────
     revenue_growth_accelerating, revenue_growth_delta, revenue_growth_consistency,
 
+    -- ── Balance sheet signals ─────────────────────────────────────────────────
+    net_cash, cash_to_debt, fcf_to_debt, working_capital_to_sales,
+    debt_growing_slower_than_profit,
+    inventory_growing_slower_than_sales,
+    receivables_growing_slower_than_sales,
+
     universe_built_at
 )
 SELECT
@@ -746,6 +752,46 @@ SELECT
                        AND pnl2.revenue > pnl3.revenue THEN 1 ELSE 0 END
          )::smallint END AS revenue_growth_consistency,
 
+    -- ── Balance sheet signals ─────────────────────────────────────────────────
+    -- Net cash: company holds more cash than total debt
+    CASE WHEN bs0.net_debt IS NOT NULL
+         THEN bs0.net_debt < 0
+         END AS net_cash,
+    -- Cash to debt: how many times cash covers total debt
+    CASE WHEN bs0.total_debt IS NOT NULL AND bs0.total_debt > 0 AND bs0.cash_equivalents IS NOT NULL
+         THEN ROUND((bs0.cash_equivalents / bs0.total_debt)::numeric, 4)
+         END AS cash_to_debt,
+    -- FCF to debt: free cash flow coverage of total debt
+    CASE WHEN bs0.total_debt IS NOT NULL AND bs0.total_debt > 0 AND cf0.fcf IS NOT NULL
+         THEN ROUND((cf0.fcf / bs0.total_debt)::numeric, 4)
+         END AS fcf_to_debt,
+    -- Working capital to sales: how much working capital is tied up per $ of revenue
+    CASE WHEN pnl0.revenue IS NOT NULL AND pnl0.revenue > 0
+          AND bs0.total_current_assets IS NOT NULL AND bs0.total_current_liab IS NOT NULL
+         THEN ROUND(((bs0.total_current_assets - bs0.total_current_liab) / pnl0.revenue)::numeric, 4)
+         END AS working_capital_to_sales,
+    -- Debt growing slower than profit: profit growth 1Y > debt growth 1Y
+    CASE WHEN bs0.total_debt IS NOT NULL AND bs1.total_debt IS NOT NULL
+          AND bs1.total_debt <> 0
+          AND COALESCE(cm.profit_growth_1y, ym.net_income_growth_1y) IS NOT NULL
+         THEN COALESCE(cm.profit_growth_1y, ym.net_income_growth_1y)
+              > (bs0.total_debt - bs1.total_debt) / ABS(bs1.total_debt)
+         END AS debt_growing_slower_than_profit,
+    -- Inventory growing slower than sales: revenue growth >= inventory growth
+    CASE WHEN bs0.inventory IS NOT NULL AND bs1.inventory IS NOT NULL
+          AND bs1.inventory > 0
+          AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+         THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y)
+              >= (bs0.inventory - bs1.inventory) / ABS(bs1.inventory)
+         END AS inventory_growing_slower_than_sales,
+    -- Receivables growing slower than sales: revenue growth >= receivables growth
+    CASE WHEN bs0.trade_receivables IS NOT NULL AND bs1.trade_receivables IS NOT NULL
+          AND bs1.trade_receivables > 0
+          AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+         THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y)
+              >= (bs0.trade_receivables - bs1.trade_receivables) / ABS(bs1.trade_receivables)
+         END AS receivables_growing_slower_than_sales,
+
     NOW()
 
 FROM market.companies_current c
@@ -845,6 +891,15 @@ LEFT JOIN LATERAL (
     ORDER BY fiscal_year DESC
     LIMIT 1
 ) bs0 ON TRUE
+
+-- ── Balance Sheet (prior FY — for YoY growth signals) ────────────────────────
+LEFT JOIN LATERAL (
+    SELECT total_debt, inventory, trade_receivables
+    FROM financials.annual_balance_sheet
+    WHERE asx_code = c.asx_code
+    ORDER BY fiscal_year DESC
+    LIMIT 1 OFFSET 1
+) bs1 ON TRUE
 
 -- ── Cash Flow (latest FY) ─────────────────────────────────────────────────────
 LEFT JOIN LATERAL (
@@ -1350,6 +1405,14 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_growth_accelerating = EXCLUDED.revenue_growth_accelerating,
     revenue_growth_delta        = EXCLUDED.revenue_growth_delta,
     revenue_growth_consistency  = EXCLUDED.revenue_growth_consistency,
+    -- Balance sheet signals
+    net_cash                              = EXCLUDED.net_cash,
+    cash_to_debt                          = EXCLUDED.cash_to_debt,
+    fcf_to_debt                           = EXCLUDED.fcf_to_debt,
+    working_capital_to_sales              = EXCLUDED.working_capital_to_sales,
+    debt_growing_slower_than_profit       = EXCLUDED.debt_growing_slower_than_profit,
+    inventory_growing_slower_than_sales   = EXCLUDED.inventory_growing_slower_than_sales,
+    receivables_growing_slower_than_sales = EXCLUDED.receivables_growing_slower_than_sales,
     universe_built_at       = NOW()
 """
 

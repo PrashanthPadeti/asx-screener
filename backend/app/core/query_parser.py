@@ -297,6 +297,27 @@ EXTRA_ALIASES: dict[str, str] = {
     "operating leverage":                            "operating_leverage",
     "op leverage":                                   "operating_leverage",
 
+    # ── Balance sheet signals ─────────────────────────────────────────────────
+    "net cash":                                      "net_cash",
+    "net cash position":                             "net_cash",
+    "cash positive":                                 "net_cash",
+    "cash exceeds debt":                             "net_cash",
+    "cash to debt":                                  "cash_to_debt",
+    "cash debt ratio":                               "cash_to_debt",
+    "fcf to debt":                                   "fcf_to_debt",
+    "free cash flow to debt":                        "fcf_to_debt",
+    "working capital to sales":                      "working_capital_to_sales",
+    "working capital ratio":                         "working_capital_to_sales",
+    "debt growing slower than profit":               "debt_growing_slower_than_profit",
+    "debt slower than profit":                       "debt_growing_slower_than_profit",
+    "profit grows faster than debt":                 "debt_growing_slower_than_profit",
+    "inventory growing slower than sales":           "inventory_growing_slower_than_sales",
+    "inventory slower than sales":                   "inventory_growing_slower_than_sales",
+    "sales grow faster than inventory":              "inventory_growing_slower_than_sales",
+    "receivables growing slower than sales":         "receivables_growing_slower_than_sales",
+    "receivables slower than sales":                 "receivables_growing_slower_than_sales",
+    "sales grow faster than receivables":            "receivables_growing_slower_than_sales",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

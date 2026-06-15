@@ -313,6 +313,14 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "capex_to_revenue": {"col": "u.capex_to_revenue", "scale": 0.01, "type": "number", "label": "Capex / Revenue %", "unit": "%", "cat": "Profitability"},
     "tangible_book_value_per_share": {"col": "u.tangible_book_value_per_share", "scale": 1, "type": "number", "label": "Tangible Book Value per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"},
     "cash_per_share": {"col": "u.cash_per_share", "scale": 1, "type": "number", "label": "Cash per Share (AUD)", "unit": "AUD", "cat": "Financial Strength"},
+    # ── Balance sheet signals ─────────────────────────────────────────────────────
+    "net_cash":                              {"col": "u.net_cash",                              "scale": 1,    "type": "boolean", "label": "Net Cash Position",                       "unit": "",    "cat": "Financial Strength"},
+    "cash_to_debt":                          {"col": "u.cash_to_debt",                          "scale": 1,    "type": "number",  "label": "Cash to Debt (ratio)",                    "unit": "x",   "cat": "Financial Strength"},
+    "fcf_to_debt":                           {"col": "u.fcf_to_debt",                           "scale": 1,    "type": "number",  "label": "FCF to Debt (ratio)",                     "unit": "x",   "cat": "Financial Strength"},
+    "working_capital_to_sales":              {"col": "u.working_capital_to_sales",              "scale": 1,    "type": "number",  "label": "Working Capital to Sales (ratio)",        "unit": "x",   "cat": "Financial Strength"},
+    "debt_growing_slower_than_profit":       {"col": "u.debt_growing_slower_than_profit",       "scale": 1,    "type": "boolean", "label": "Debt Growing Slower Than Profit",         "unit": "",    "cat": "Financial Strength"},
+    "inventory_growing_slower_than_sales":   {"col": "u.inventory_growing_slower_than_sales",   "scale": 1,    "type": "boolean", "label": "Inventory Growing Slower Than Sales",     "unit": "",    "cat": "Financial Strength"},
+    "receivables_growing_slower_than_sales": {"col": "u.receivables_growing_slower_than_sales", "scale": 1,    "type": "boolean", "label": "Receivables Growing Slower Than Sales",   "unit": "",    "cat": "Financial Strength"},
 
     # ── Line items (income statement / balance sheet / cash flow, AUD M) ─────────
     "cogs": {"col": "u.cogs", "scale": 1, "type": "number", "label": "Cost of Goods Sold (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

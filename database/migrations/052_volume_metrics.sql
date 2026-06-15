@@ -17,3 +17,12 @@ ALTER TABLE screener.universe
     ADD COLUMN IF NOT EXISTS up_down_vol_ratio_20d DOUBLE PRECISION,
     ADD COLUMN IF NOT EXISTS obv_rising            BOOLEAN,
     ADD COLUMN IF NOT EXISTS volume_breakout       BOOLEAN;
+
+-- Ensure correct types if columns existed before with narrower NUMERIC type
+ALTER TABLE market.daily_metrics
+    ALTER COLUMN adl                   TYPE DOUBLE PRECISION,
+    ALTER COLUMN up_down_vol_ratio_20d TYPE DOUBLE PRECISION;
+
+ALTER TABLE screener.universe
+    ALTER COLUMN adl                   TYPE DOUBLE PRECISION,
+    ALTER COLUMN up_down_vol_ratio_20d TYPE DOUBLE PRECISION;

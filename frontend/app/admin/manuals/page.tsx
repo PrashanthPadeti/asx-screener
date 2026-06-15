@@ -650,6 +650,211 @@ function AlphaScreensManual() {
   )
 }
 
+// ── Stock Screener manual ─────────────────────────────────────────────────────
+const STOC = [
+  ['s-overview',   '1. Page Overview'],
+  ['s-benefits',   '2. User Benefits'],
+  ['s-sections',   '3. Sections Covered'],
+  ['s-modes',      '4. Screener Modes'],
+  ['s-results',    '5. Results Table'],
+  ['s-features',   '6. Functional Features'],
+  ['s-technical',  '7. Technical Details'],
+  ['s-examples',   '8. Usage Examples'],
+  ['s-support',    '9. Quick Reference (Support)'],
+  ['s-future',     '10. Future Improvements'],
+]
+function ScreenerManual() {
+  return (
+    <div>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">On this page</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+          {STOC.map(([id, label]) => <a key={id} href={`#${id}`} className="text-sm text-blue-600 hover:underline">{label}</a>)}
+        </div>
+      </div>
+
+      {/* 1 */}
+      <H2 id="s-overview">1. Page Overview</H2>
+      <H3>What is the Stock Screener?</H3>
+      <P>The <strong>Stock Screener</strong> (<Code>/screener</Code>) is the core research tool of ASX Screener — a fully customisable filter engine that lets users build any combination of conditions across <strong>263+ financial, technical, and quality metrics</strong> and instantly see every ASX-listed stock that matches. Results are sorted, paginated, exportable, and link directly to Company Detail pages.</P>
+      <H3>Purpose</H3>
+      <P>To answer: <strong>"Which ASX stocks meet my exact criteria right now?"</strong> The Screener replaces hours of spreadsheet work with a real-time, data-driven shortlist generator — useful for stock discovery, strategy validation, and research workflow.</P>
+      <H3>How it fits into the platform</H3>
+      <P>The Screener is the <strong>execution layer</strong>: Alpha Screens provides curated one-click strategies that open <em>here</em>; the Market Overview surfaces themes that link <em>here</em>; the Heatmap's sector clicks land <em>here</em>. The Screener is where ideas become filtered shortlists.</P>
+
+      {/* 2 */}
+      <H2 id="s-benefits">2. User Benefits</H2>
+      <Table head={['User type', 'How they use the Screener']} rows={[
+        ['Value investors', 'Filter by low P/E, P/B and high F-Score + profitable → shortlist of undervalued quality stocks.'],
+        ['Income investors', 'Filter by dividend yield ≥ 5%, franking = 100%, net margin > 0 → fully franked income list.'],
+        ['Growth investors', 'Filter by revenue growth 3Y CAGR > 20%, ROE > 15% → growing quality companies.'],
+        ['Technical traders', 'Filter by RSI ≤ 30, price above 200-day MA → oversold stocks in uptrends.'],
+        ['Power users (admin/Pro)', 'Use Query Mode or AI Mode to express complex multi-condition logic.'],
+        ['All users', 'Load a community screen or Alpha Screen preset, then refine it to taste.'],
+      ]} />
+
+      {/* 3 */}
+      <H2 id="s-sections">3. Sections Covered</H2>
+      <H3>Filter panel (top)</H3>
+      <P>The primary workspace where users add, edit, and remove filter rows. Each row has: field selector (263+ fields in category groups), operator, and value. Multiple filters always AND together. A "stale" banner appears when filters have changed but results haven't been re-run.</P>
+      <H3>Mode toggle bar</H3>
+      <P>Three modes: <strong>Manual</strong> (visual filter builder), <strong>AI Mode</strong> (natural-language input, Pro/Premium), <strong>Query Mode</strong> (SQL-like syntax, admin/Pro/Premium). The mode toggle is visible at the top of the filter panel.</P>
+      <H3>Market cap quick-filter</H3>
+      <P>Seven one-click size tiers above the filter rows: All / Mega ≥$50B / Large $10B–$50B / Mid $2B–$10B / Small $300M–$2B / Micro $50M–$300M / Nano &lt;$50M. Clicking adds a market_cap range filter automatically.</P>
+      <H3>Sector browser</H3>
+      <P>Browse by GICS sector — one click adds a sector filter. Also reached from the Market Overview heatmap or sector screens on Alpha Screens.</P>
+      <H3>Alpha Screens presets</H3>
+      <P>A dropdown of all pre-built strategies. Selecting one replaces the current filters with that strategy's filter set and runs it. The active preset name is shown; editing a filter clears the preset label.</P>
+      <H3>My Screens / Community Picks</H3>
+      <P>Saved personal screens and community-shared screens. "My Screens" panel lists your saves with edit/delete options. Community screens are run via <Code>?screen=id</Code> URL param or from the Alpha Screens page.</P>
+      <H3>Results table</H3>
+      <P>Paginated results (default 50 per page) with sortable columns, colour-coded value cells, watchlist button per row, and links to each company's detail page.</P>
+      <H3>Column picker</H3>
+      <P>Customise which columns appear. Choices persist to <Code>localStorage</Code> across sessions. Code and Company Name are always visible; all others are toggleable.</P>
+      <H3>Export</H3>
+      <P>Download all results as CSV (not just the current page). Available in all modes.</P>
+
+      {/* 4 */}
+      <H2 id="s-modes">4. Screener Modes</H2>
+      <H3>Manual Mode (default — all plans)</H3>
+      <P>A structured filter-builder UI. Each row is: field → operator → value. Fields are grouped by category (Valuation, Profitability, Growth, Dividends, Financial Health, Technicals, etc.). Operators: ≥, ≤, &gt;, &lt;, =, ≠ for numbers; is true/false for booleans; = / ≠ for text. All filters are ANDed.</P>
+      <Callout tone="blue" title="How filter values work">
+        Values are entered in user-facing units. Percentage fields: type <Code>15</Code> for 15%. Dollar fields: type in AUD. The backend applies scale factors automatically.
+      </Callout>
+      <H3>AI Mode (Pro / Premium)</H3>
+      <P>Type a plain-English description of what you want, e.g. <em>"Profitable miners under $1B market cap"</em> or <em>"REITs with low debt and positive earnings."</em> Claude parses the request and generates a set of filters, which are shown to the user for review before running. Powered by <Code>POST /api/v1/screener/nl</Code>.</P>
+      <H3>Query Mode (Admin / Pro / Premium)</H3>
+      <P>A monospace textarea for SQL-WHERE-style expressions, e.g. <Code>roe &gt; 15 AND (roce &gt; 12 OR roic &gt; 12)</Code>. Supports OR logic and nested parentheses — something Manual Mode's AND-only builder cannot express. A searchable <strong>Field Reference</strong> panel sits below with all 263 fields, their aliases, units and categories; click any field to insert it at the cursor. Keyboard shortcut: Ctrl+Enter to run. Powered by <Code>POST /api/v1/screener/query</Code> with a safe parser that whitelists field names and parameterises all values.</P>
+      <Callout tone="amber" title="Security in Query Mode">
+        No raw SQL reaches the database. The backend parser maps field names through the ALLOWED_FIELDS whitelist and parameterises every value — SQL injection is structurally impossible.
+      </Callout>
+
+      {/* 5 */}
+      <H2 id="s-results">5. Results Table</H2>
+      <H3>Default columns</H3>
+      <P>Code, Company, Sector, Price, Mkt Cap, P/E, ROE %, Div Yield, Grossed-Up Yield, Franking, F-Score, 1Y Return.</P>
+      <H3>Optional columns (toggle via Column Picker)</H3>
+      <P>Forward P/E, P/B, EV/EBITDA, Net Margin, EBITDA Margin, Gross Margin, Rev Growth 1Y, Rev HoH ★, EPS HoH ★, D/E, Current Ratio, Altman Z, RSI 14, YTD Return, 3M Return, Short %, Volume.</P>
+      <H3>Colour-coding</H3>
+      <UL items={[
+        <><strong>ROE</strong>: green when ≥ 15%.</>,
+        <><strong>Grossed-Up Yield</strong>: green when ≥ 6%.</>,
+        <><strong>Franking</strong>: green badge (100%), yellow (&gt;0%), grey (0%).</>,
+        <><strong>F-Score</strong>: green badge (7–9), yellow (4–6), red (0–3).</>,
+        <><strong>1Y / YTD / 3M Return</strong>: green positive, red negative.</>,
+        <><strong>Altman Z</strong>: green ≥ 2.99, yellow 1.81–2.99, red &lt; 1.81.</>,
+        <><strong>RSI 14</strong>: red ≥ 70 (overbought), green ≤ 30 (oversold).</>,
+        <><strong>D/E</strong>: red when &gt; 2×.</>,
+        <><strong>Current Ratio</strong>: green ≥ 1.5, red &lt; 1.</>,
+        <><strong>Short %</strong>: red when ≥ 5%.</>,
+      ]} />
+      <H3>Sorting</H3>
+      <P>Click any column header to sort ascending; click again for descending. Sort persists between pages. Default sort: Market Cap descending.</P>
+      <H3>Pagination</H3>
+      <P>50 results per page, with prev/next controls and a total-count display. Export always downloads all pages (not just current).</P>
+      <H3>Cap warning</H3>
+      <P>If the server returns a capped result set (e.g. free-tier export limits), a banner explains the cap and suggests upgrading.</P>
+
+      {/* 6 */}
+      <H2 id="s-features">6. Functional Features</H2>
+      <UL items={[
+        <><strong>263+ filter fields</strong> — grouped by category; searchable in the field dropdown.</>,
+        <><strong>Three modes</strong> — Manual (all), AI (Pro/Premium), Query (admin/Pro/Premium).</>,
+        <><strong>Market cap quick-filter</strong> — one click for 7 size tiers.</>,
+        <><strong>Sector browser</strong> — filter to a GICS sector instantly.</>,
+        <><strong>Preset library</strong> — load any Alpha Screen strategy; active preset name shown in toolbar.</>,
+        <><strong>Save screens</strong> — save your filter set with a name and description; optionally make it public (Community Picks).</>,
+        <><strong>My Screens</strong> — view, run, edit and delete your saved screens.</>,
+        <><strong>URL params</strong> — <Code>?preset=id</Code>, <Code>?sector=X</Code>, <Code>?index=ASX200</Code>, <Code>?screen=id</Code> all auto-apply on load; shareable links.</>,
+        <><strong>Column picker</strong> — toggle optional columns; persists to localStorage.</>,
+        <><strong>Watchlist button</strong> — add any result to your watchlist (star icon per row).</>,
+        <><strong>CSV export</strong> — download all matched results.</>,
+        <><strong>Help drawer</strong> — in-page guide for the Screener (via <Code>SCREENER_SECTIONS</Code>).</>,
+        <><strong>Stale indicator</strong> — a banner prompts re-run when filters change after a run.</>,
+      ]} />
+      <H3>Step-by-step: building a screen</H3>
+      <OL items={[
+        'Open /screener.',
+        'Click "+ Add Filter" to add a filter row.',
+        'Select a field from the grouped dropdown (e.g. Dividend & Income → Dividend Yield).',
+        'Choose an operator (≥) and enter a value (e.g. 5).',
+        'Repeat for additional conditions (e.g. Franking % = 100, Net Margin ≥ 0).',
+        'Click "Run Screen" — results appear in the table below.',
+        'Sort by any column; toggle optional columns via the Columns button.',
+        'Click a ticker to open its Company Detail page.',
+        'Optionally save the screen (name, description, public/private) or export to CSV.',
+      ]} />
+
+      {/* 7 */}
+      <H2 id="s-technical">7. Technical Details</H2>
+      <H3>Frontend</H3>
+      <UL items={[
+        <>Page: <Code>frontend/app/screener/page.tsx</Code> — a single large client-side page (~1000+ lines). State: filters, mode, results, sort, pagination, column visibility, AI result, query text, saved screens.</>,
+        <><Code>ALL_COLUMNS</Code>: typed array of column definitions with key, label, sortKey, default flag, always flag, and render function.</>,
+        <>Column visibility persisted in <Code>localStorage</Code> under <Code>screener_visible_columns_v1</Code>.</>,
+        <>Market cap tiers defined in <Code>CAP_TIER_RANGES</Code> (values in AUD millions — backend multiplies by 1,000,000).</>,
+        <>URL params handled in a <Code>useEffect</Code> on mount: preset, sector, index, screen.</>,
+        <>Sector component: <Code>frontend/app/screener/components/BrowseSectors.tsx</Code>.</>,
+      ]} />
+      <H3>API endpoints</H3>
+      <Table head={['Endpoint', 'Mode', 'What it does']} rows={[
+        [<Code>GET /api/v1/screener/fields</Code>, 'All', 'Returns all 263 fields with metadata (key, label, type, category, unit, scale) for the filter builder.'],
+        [<Code>GET /api/v1/screener/presets</Code>, 'All', 'Returns preset strategy definitions (id, name, description, filters, min_plan).'],
+        [<Code>POST /api/v1/screener</Code>, 'Manual', 'Runs the filter array against screener.universe; returns paginated ScreenerRow list.'],
+        [<Code>POST /api/v1/screener/nl</Code>, 'AI', 'Sends natural-language query to Claude; returns parsed filters + results.'],
+        [<Code>POST /api/v1/screener/query</Code>, 'Query', 'Parses SQL-like text, maps to ALLOWED_FIELDS, runs safe parameterised query.'],
+        [<Code>GET /api/v1/screener/query/fields</Code>, 'Query', 'Returns field reference list for the Field Reference panel.'],
+        [<Code>POST /api/v1/screener/export</Code>, 'Manual', 'Returns CSV of all matched results.'],
+        [<Code>POST /api/v1/screens</Code> + <Code>GET</Code> + <Code>PUT</Code> + <Code>DELETE</Code>, 'All', 'Save/load/edit/delete personal screens.'],
+        [<Code>GET /api/v1/screens/community</Code>, 'All', 'Returns community-shared screens (plan-gated).'],
+      ]} />
+      <H3>Data source</H3>
+      <P>All screener results come from <Code>screener.universe</Code> — a wide PostgreSQL table rebuilt nightly from EODHD prices, financial statements, ASIC short data, and computed ratios. It covers all listed ASX stocks with an active trading status. Data is end-of-day; the nightly build typically completes between 8–10pm AEST.</P>
+
+      {/* 8 */}
+      <H2 id="s-examples">8. Usage Examples</H2>
+      <UL items={[
+        <><strong>Fully franked income screen:</strong> Dividend Yield ≥ 5%, Franking % = 100, Net Margin ≥ 0 → profitable, 100%-franked, high-yield stocks.</>,
+        <><strong>Value + quality screen:</strong> P/E ≤ 15, P/B ≤ 1.5, F-Score ≥ 7 → cheap stocks with strong accounting signals.</>,
+        <><strong>Momentum screen:</strong> 1Y Return ≥ 20%, RSI 14 ≥ 50, Price / 200-Day MA ≥ 1 → stocks in uptrends with momentum.</>,
+        <><strong>AI Mode:</strong> type "small cap healthcare companies with no debt and positive earnings" → AI generates filters automatically.</>,
+        <><strong>Query Mode:</strong> <Code>roe &gt; 20 AND (revenue_cagr_3y &gt; 0.15 OR revenue_growth_1y &gt; 0.20)</Code> → high-ROE companies with accelerating revenue, using OR logic impossible in Manual Mode.</>,
+        <><strong>Index membership:</strong> open <Code>/screener?index=ASX200</Code> to auto-filter to ASX 200 constituents.</>,
+        <><strong>Save and share:</strong> after building a screen, click Save → toggle "Public" → the screen appears in Community Picks for other users.</>,
+      ]} />
+
+      {/* 9 */}
+      <H2 id="s-support">9. Quick Reference (Support)</H2>
+      <Table head={['Question / issue', 'Answer']} rows={[
+        ['"Run Screen does nothing."', 'Check that at least one filter has a valid value, or that no filter value is blank. A blank value is skipped by the builder.'],
+        ['"I can\'t see AI Mode / Query Mode."', 'AI Mode is Pro/Premium. Query Mode is Admin/Pro/Premium. Upgrade or check login plan.'],
+        ['"Results show a \'capped\' banner."', 'The result set is capped — usually a plan limit on export or result size. Upgrade or narrow the filters.'],
+        ['"My saved screen disappeared."', 'Saved screens are per-user in the backend. If the user is logged in on a different account, their screens won\'t show. Also check My Screens panel is open.'],
+        ['"Filters say \'stale\' but I haven\'t changed anything."', 'The stale banner appears after any filter edit. Click Run Screen to refresh results.'],
+        ['"How do I filter to the ASX 200?"', 'Add a filter: Is ASX 200 = true. Or open /screener?index=ASX200.'],
+        ['"Column choices don\'t persist."', 'Column visibility is saved to localStorage. If the user cleared their browser storage, choices reset. They must re-select.'],
+      ]} />
+
+      {/* 10 */}
+      <H2 id="s-future">10. Future Improvements</H2>
+      <UL items={[
+        <><strong>OR logic in Manual Mode</strong> — currently only Query Mode supports OR. A visual OR toggle between filter groups would help non-technical users.</>,
+        <><strong>Screener alerts</strong> — notify when a stock enters or exits the results of a saved screen.</>,
+        <><strong>More preset strategies</strong> — additional built-in screens for Mining, A-REIT, short-squeeze, capital-raise plays.</>,
+        <><strong>Analyst consensus data</strong> — forward EPS, revenue forecasts and price targets as filterable fields (pending EODHD plan upgrade).</>,
+        <><strong>Beta 1Y field</strong> — computed beta relative to the ASX 200, planned.</>,
+        <><strong>Saved column presets</strong> — name and save a column configuration (e.g. "Income view", "Technical view").</>,
+        <><strong>Result charts inline</strong> — mini sparkline per row for price trend without leaving the table.</>,
+        <><strong>Screener history</strong> — replay a past screen run to see how results have changed over time.</>,
+      ]} />
+
+      <div className="mt-10 pt-4 border-t border-slate-200 text-xs text-slate-400">
+        Internal documentation — Admin only. Reflects the Stock Screener as built. Update this manual when modes, fields, or features change.
+      </div>
+    </div>
+  )
+}
+
 // ── Metrics Glossary manual ───────────────────────────────────────────────────
 const GTOC = [
   ['g-overview',   '1. Page Overview'],
@@ -849,14 +1054,214 @@ function GlossaryManual() {
   )
 }
 
+// ── Portfolio manual ──────────────────────────────────────────────────────────
+const PTOC = [
+  ['p-overview',      '1. Page Overview'],
+  ['p-benefits',      '2. User Benefits'],
+  ['p-sections',      '3. Sections Covered'],
+  ['p-tabs',          '4. Portfolio Tabs'],
+  ['p-transactions',  '5. Transactions & Import'],
+  ['p-features',      '6. Functional Features'],
+  ['p-technical',     '7. Technical Details'],
+  ['p-examples',      '8. Usage Examples'],
+  ['p-support',       '9. Quick Reference (Support)'],
+  ['p-future',        '10. Future Improvements'],
+]
+function PortfolioManual() {
+  return (
+    <div>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">On this page</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+          {PTOC.map(([id, label]) => <a key={id} href={`#${id}`} className="text-sm text-blue-600 hover:underline">{label}</a>)}
+        </div>
+      </div>
+
+      {/* 1 */}
+      <H2 id="p-overview">1. Page Overview</H2>
+      <H3>What is the Portfolio page?</H3>
+      <P>The <strong>Portfolio</strong> page (<Code>/portfolio</Code>) is a <strong>personal portfolio tracker</strong> — users record their ASX holdings and transactions, and the platform calculates live performance (P&amp;L, unrealised gain/loss, total return), income (dividends received and upcoming), allocation breakdowns, estimated tax, and AI-powered portfolio insights.</P>
+      <H3>Purpose</H3>
+      <P>To give investors a <strong>single place to monitor their actual ASX positions</strong> alongside the screening and research tools — closing the loop between finding stocks (Screener) and tracking ownership (Portfolio).</P>
+      <H3>Multiple portfolios</H3>
+      <P>Users can maintain more than one portfolio (e.g. super, personal, wife's account). The number of portfolios is plan-gated: <strong>Free: 1, Pro: 10, Premium: 50</strong>. A portfolio selector (top of page) lets users switch, create, rename, or delete portfolios.</P>
+      <H3>Plan gating summary</H3>
+      <Table head={['Plan', 'Portfolios', 'Available tabs']} rows={[
+        ['Free', '1', 'Holdings, Transactions'],
+        ['Pro', '10', 'Holdings, Transactions, Chart, Allocation, Dividends, Tax'],
+        ['Premium', '50', 'Holdings, Transactions, Chart, Allocation, Dividends, Tax, Insights (AI)'],
+      ]} />
+
+      {/* 2 */}
+      <H2 id="p-benefits">2. User Benefits</H2>
+      <UL items={[
+        <><strong>Live P&amp;L</strong> — see your unrealised gain/loss and % return updated with the latest EOD prices, across every holding.</>,
+        <><strong>Income planning</strong> — the Dividend Calendar shows upcoming ex-dates and estimated franked income for your specific holdings.</>,
+        <><strong>Tax estimation</strong> — the Tax tab calculates estimated CGT (with 50% discount for &gt;12-month holds) and income from dividends.</>,
+        <><strong>Allocation awareness</strong> — pie charts by stock and by sector show concentration risk at a glance.</>,
+        <><strong>AI Insights</strong> — Premium users get an AI-generated portfolio analysis covering strengths, risks, diversification, income outlook and suggestions.</>,
+        <><strong>Transaction history</strong> — a complete ledger of buys, sells and DRP events for record-keeping and cost-base tracking.</>,
+        <><strong>Easy import</strong> — upload a CSV of holdings or transactions to bootstrap the portfolio instantly.</>,
+      ]} />
+
+      {/* 3 */}
+      <H2 id="p-sections">3. Sections Covered</H2>
+      <H3>Portfolio selector</H3>
+      <P>Top of the page. Shows the active portfolio name and a dropdown to switch between portfolios, create a new one, or rename/delete the current one. Displays the plan limit (e.g. "2 of 10 portfolios").</P>
+      <H3>Summary cards row</H3>
+      <P>Four headline numbers for the selected portfolio: <strong>Total Value</strong> (current market value of all holdings), <strong>Total Cost</strong> (cost basis including brokerage), <strong>Gain/Loss</strong> (unrealised P&amp;L in dollars), <strong>Return %</strong> (total return %).</P>
+      <H3>Tab bar</H3>
+      <P>Up to 7 tabs depending on plan: Holdings, Transactions, Chart, Allocation, Dividends, Tax, Insights. Locked tabs for lower plans show an upgrade prompt.</P>
+      <H3>Import / Add buttons</H3>
+      <P>Two action buttons at the top right: <strong>Import CSV</strong> (bulk upload holdings or transactions) and <strong>+ Add Transaction</strong> (single-transaction modal).</P>
+
+      {/* 4 */}
+      <H2 id="p-tabs">4. Portfolio Tabs</H2>
+      <H3>Holdings (Free+)</H3>
+      <P>A table of current positions: ASX Code, Company, Sector, Quantity, Avg Cost, Current Price, Current Value, P&amp;L ($), P&amp;L (%), and action buttons (Add Transaction for this holding, Remove). Prices come from the nightly EOD data. Gain/loss is colour-coded green/red.</P>
+      <H3>Transactions (Free+)</H3>
+      <P>The full transaction ledger: date, ASX Code, type (Buy / Sell / DRP), quantity, price per share, brokerage, and a delete button. Sorted by date descending. Transactions drive holdings; adding a sell updates the P&amp;L and cost-base calculations.</P>
+      <H3>Chart (Pro+)</H3>
+      <P>A line chart of <strong>Portfolio Value Over Time</strong> vs the cost basis line. Period selector: 1M, 3M, 6M, 1Y, 2Y, All. Shows total unrealised gain/loss at the latest data point vs cost. Powered by end-of-day price history applied to the holding quantities.</P>
+      <H3>Allocation (Pro+)</H3>
+      <P>Two pie charts: <strong>By Stock</strong> (each holding's share of total value, with percentage labels) and <strong>By Sector</strong> (GICS sector concentration). Useful for identifying over-concentration and rebalancing decisions.</P>
+      <H3>Dividends (Pro+)</H3>
+      <P>The <strong>Dividend Calendar</strong> with two tabs:</P>
+      <UL items={[
+        <><strong>Upcoming</strong> — ex-dates within the next 6 months for your holdings: ex-date, pay date, DPS amount, quantity held, estimated income, and estimated grossed-up income (if franked). Total upcoming income is shown.</>,
+        <><strong>Last 12M</strong> — dividends received over the past 12 months on your holdings. Total received income is shown.</>,
+      ]} />
+      <H3>Tax (Pro+)</H3>
+      <P>An <strong>estimated tax summary</strong> for the current financial year:</P>
+      <UL items={[
+        <><strong>Realised gains</strong> — proceeds minus cost base for closed positions; applies 50% CGT discount for holdings over 12 months.</>,
+        <><strong>Dividend income</strong> — estimated total dividends received in the FY, and estimated franking credits.</>,
+        <><strong>Summary</strong> — total estimated assessable income from the portfolio for CGT and income tax purposes.</>,
+      ]} />
+      <Callout tone="red" title="Tax is an estimate only">
+        The Tax tab provides estimates for planning purposes. It is not financial or tax advice — users must verify figures with their accountant or tax professional.
+      </Callout>
+      <H3>Insights (Premium only)</H3>
+      <P>An <strong>AI-generated analysis</strong> of the portfolio. Covers: overall portfolio strengths, key risks or weaknesses, diversification assessment (stock and sector concentration), income and franking picture, and actionable suggestions. Generated on demand — click the "Generate Insights" button. The analysis is based on the current holdings and their fundamental/technical metrics.</P>
+
+      {/* 5 */}
+      <H2 id="p-transactions">5. Transactions &amp; Import</H2>
+      <H3>Adding a single transaction (modal)</H3>
+      <P>Click "+ Add Transaction" to open the modal. Fields: ASX Code, Type (Buy / Sell / DRP), Date, Quantity, Price per Share, Brokerage (optional), Notes (optional). The modal shows a calculated total (quantity × price + brokerage) before confirming.</P>
+      <H3>Transaction types</H3>
+      <Table head={['Type', 'What it records']} rows={[
+        ['Buy', 'Purchase of shares — increases holding quantity and cost basis.'],
+        ['Sell', 'Sale of shares — reduces holding quantity and realises P&L.'],
+        ['DRP', 'Dividend Reinvestment Plan — shares received in lieu of a cash dividend; treated as a buy at the DRP price.'],
+      ]} />
+      <H3>CSV import</H3>
+      <P>Two import modes — switch via the tab in the Import CSV modal:</P>
+      <UL items={[
+        <><strong>Holdings import</strong>: CSV with columns <Code>asx_code, quantity, avg_cost, purchase_date</Code>. Useful for a one-time snapshot upload.</>,
+        <><strong>Transactions import</strong>: CSV with columns <Code>date, asx_code, type, quantity, price, brokerage</Code>. Uploads a complete transaction history.</>,
+      ]} />
+      <P>A <strong>Download Template</strong> button in the modal provides a correctly formatted CSV template with example rows. The importer validates, reports a count of imported vs skipped rows, and refreshes the holdings view.</P>
+
+      {/* 6 */}
+      <H2 id="p-features">6. Functional Features</H2>
+      <UL items={[
+        <><strong>Multiple portfolios</strong> — create, switch, rename, delete (plan-limited).</>,
+        <><strong>Live portfolio value</strong> — nightly EOD prices applied to current quantities.</>,
+        <><strong>Detailed holdings table</strong> — avg cost, current price, unrealised P&amp;L per holding.</>,
+        <><strong>Transaction ledger</strong> — full buy/sell/DRP history with brokerage.</>,
+        <><strong>Portfolio value chart</strong> — historical value vs cost line, 6 time periods (Pro+).</>,
+        <><strong>Allocation pie charts</strong> — by stock and by sector (Pro+).</>,
+        <><strong>Dividend Calendar</strong> — upcoming and received dividends for your holdings, with franking detail (Pro+).</>,
+        <><strong>Tax summary</strong> — estimated CGT (with 50% discount) and dividend income (Pro+).</>,
+        <><strong>AI Portfolio Insights</strong> — on-demand AI analysis of strengths, risks, diversification and income (Premium).</>,
+        <><strong>CSV import</strong> — bulk upload holdings or transactions via template CSV.</>,
+        <><strong>Company links</strong> — each holding and dividend entry links to the Company Detail page.</>,
+        <><strong>Help drawer</strong> — in-page guide (<Code>PORTFOLIO_SECTIONS</Code>) accessible via the help button.</>,
+      ]} />
+
+      {/* 7 */}
+      <H2 id="p-technical">7. Technical Details</H2>
+      <H3>Frontend</H3>
+      <UL items={[
+        <>Page: <Code>frontend/app/portfolio/page.tsx</Code> — client-side; layout: <Code>frontend/app/portfolio/layout.tsx</Code>.</>,
+        <>Plan gates via <Code>PORTFOLIO_LIMITS</Code> (portfolio count) and <Code>TAB_ACCESS</Code> (tab visibility by plan).</>,
+        <>Charts: <Code>recharts</Code> — <Code>LineChart</Code> for value history, <Code>PieChart</Code> for allocation.</>,
+        <>Formatters: <Code>fmtMoney</Code> (negative-safe "$X,XXX.XX"), <Code>fmtPct</Code> (signed percent), <Code>glColor</Code> (green/red text class).</>,
+      ]} />
+      <H3>API endpoints</H3>
+      <Table head={['Endpoint', 'What it provides']} rows={[
+        [<Code>GET /api/v1/portfolios</Code>, 'List all portfolios for the user.'],
+        [<Code>POST /api/v1/portfolios</Code>, 'Create a new portfolio.'],
+        [<Code>PUT /api/v1/portfolios/{'{id}'}</Code>, 'Rename a portfolio.'],
+        [<Code>DELETE /api/v1/portfolios/{'{id}'}</Code>, 'Delete a portfolio.'],
+        [<Code>GET /api/v1/portfolios/{'{id}'}/performance</Code>, 'Holdings with live prices, P&L, total value and cost.'],
+        [<Code>GET /api/v1/portfolios/{'{id}'}/history?period=1y</Code>, 'Daily value history for the portfolio chart.'],
+        [<Code>GET /api/v1/portfolios/{'{id}'}/dividends</Code>, 'Upcoming and received dividends for holdings.'],
+        [<Code>GET /api/v1/portfolios/{'{id}'}/tax</Code>, 'Estimated CGT and dividend income for the current FY.'],
+        [<Code>GET /api/v1/portfolios/{'{id}'}/insights</Code>, 'AI-generated portfolio analysis (Premium).'],
+        [<Code>GET /api/v1/portfolios/{'{id}'}/transactions</Code>, 'Full transaction history.'],
+        [<Code>POST /api/v1/portfolios/{'{id}'}/transactions</Code>, 'Add a single transaction.'],
+        [<Code>DELETE /api/v1/portfolios/{'{id}'}/transactions/{'{txn_id}'}</Code>, 'Delete a transaction.'],
+        [<Code>POST /api/v1/portfolios/{'{id}'}/import/holdings</Code>, 'Bulk import holdings CSV.'],
+        [<Code>POST /api/v1/portfolios/{'{id}'}/import/transactions</Code>, 'Bulk import transactions CSV.'],
+        [<Code>DELETE /api/v1/portfolios/{'{id}'}/holdings/{'{code}'}</Code>, 'Remove a holding (all transactions for that stock).'],
+      ]} />
+      <H3>Data flow</H3>
+      <P>Holdings are reconstructed from transactions (buy/sell/DRP) at query time. Current prices come from <Code>screener.universe</Code> or the price history tables — the same EOD data as the rest of the platform. Tax calculations run server-side using actual transaction dates and quantities; the 50% CGT discount is applied when holding period exceeds 365 days.</P>
+
+      {/* 8 */}
+      <H2 id="p-examples">8. Usage Examples</H2>
+      <UL items={[
+        <><strong>First setup:</strong> click "Import CSV", download the holdings template, fill in ASX codes / quantities / avg costs, upload → portfolio populates instantly.</>,
+        <><strong>Track a new buy:</strong> click "+ Add Transaction" → Buy, enter CBA, 100 shares at $145.50 + $19.95 brokerage → holding updated with new avg cost.</>,
+        <><strong>Check income outlook:</strong> open Dividends tab → Upcoming — see which holdings have ex-dates in the next 6 months and estimated income. Useful before FY end.</>,
+        <><strong>Check concentration:</strong> Allocation tab → By Sector pie → if Materials is 60% of portfolio, consider diversifying.</>,
+        <><strong>Tax prep:</strong> Tax tab → share the CGT summary with your accountant as a starting estimate.</>,
+        <><strong>AI Insights:</strong> Premium users click "Generate Insights" on the Insights tab → receive a written analysis flagging high concentration, low income diversification, or overleveraged stocks.</>,
+        <><strong>Multi-portfolio:</strong> create a "Super" portfolio and a "Personal" portfolio separately; switch with the portfolio selector at the top.</>,
+      ]} />
+
+      {/* 9 */}
+      <H2 id="p-support">9. Quick Reference (Support)</H2>
+      <Table head={['Question / issue', 'Answer']} rows={[
+        ['"I can\'t create another portfolio."', 'You\'ve hit the plan limit (Free: 1, Pro: 10, Premium: 50). Upgrade or delete an unused portfolio.'],
+        ['"Tabs like Chart, Dividends, Tax are locked."', 'These are Pro/Premium tabs. Free users only get Holdings and Transactions.'],
+        ['"My holdings show — for price."', 'Prices update nightly (EOD). If a stock was just listed or has no recent trade, price data may be missing.'],
+        ['"Import CSV returned errors."', 'Check that: (1) the column headers exactly match the template, (2) ASX codes are valid, (3) dates are YYYY-MM-DD format, (4) quantities and prices are numbers.'],
+        ['"Dividend Calendar shows nothing upcoming."', 'Holdings must have current quantities and the stocks must have announced upcoming dividends in EODHD data. Check the company page to confirm dividends exist.'],
+        ['"Tax tab — the numbers look wrong."', 'Tax figures are estimates only. DRP transactions, corporate actions, and return-of-capital events may not be handled correctly. Always confirm with an accountant.'],
+        ['"Insights tab says \'Generate Insights\'."', 'Insights are generated on demand — click the button. Requires Premium plan.'],
+      ]} />
+
+      {/* 10 */}
+      <H2 id="p-future">10. Future Improvements</H2>
+      <UL items={[
+        <><strong>Corporate actions support</strong> — handle stock splits, rights issues, spin-offs correctly in cost-base calculations.</>,
+        <><strong>FY income report</strong> — a printable summary of all dividends received and franking credits claimed in the financial year.</>,
+        <><strong>Benchmark comparison</strong> — compare portfolio performance vs ASX 200 / ASX 300 over the same period on the Chart tab.</>,
+        <><strong>Watchlist integration</strong> — show watchlist vs portfolio holdings side by side to spot opportunities.</>,
+        <><strong>DRP automation</strong> — auto-generate DRP transactions based on dividend history and holding quantities.</>,
+        <><strong>Real-time prices</strong> — intraday price updates (currently EOD only) for more accurate intraday P&amp;L.</>,
+        <><strong>Broker integration</strong> — direct connection to CommSec, SelfWealth, Stake etc. to auto-import transactions.</>,
+        <><strong>CGT parcel optimisation</strong> — show which parcel to sell first (HIFO/FIFO) to minimise CGT.</>,
+        <><strong>Portfolio alerts</strong> — notify when a holding drops below a stop-loss level or dividend is announced.</>,
+      ]} />
+
+      <div className="mt-10 pt-4 border-t border-slate-200 text-xs text-slate-400">
+        Internal documentation — Admin only. Reflects the Portfolio page as built. Update this manual when portfolio features, tab gating or API endpoints change.
+      </div>
+    </div>
+  )
+}
+
 // ── Manual registry (add a page manual here, then a render case below) ─────────
 const MANUALS = [
   { slug: 'market-overview', title: 'Market Overview', page: '/market', status: 'ready' as const },
-  { slug: 'screener',        title: 'Stock Screener',  page: '/screener', status: 'soon' as const },
+  { slug: 'screener',        title: 'Stock Screener',  page: '/screener', status: 'ready' as const },
   { slug: 'company-detail',  title: 'Company Detail',  page: '/company/[code]', status: 'ready' as const },
   { slug: 'alpha-screens',   title: 'Alpha Screens',   page: '/scans', status: 'ready' as const },
   { slug: 'glossary',        title: 'Metrics Glossary', page: '/glossary', status: 'ready' as const },
-  { slug: 'portfolio',       title: 'Portfolio',       page: '/portfolio', status: 'soon' as const },
+  { slug: 'portfolio',       title: 'Portfolio',       page: '/portfolio', status: 'ready' as const },
 ]
 
 export default function AdminManualsPage() {
@@ -909,6 +1314,8 @@ export default function AdminManualsPage() {
           {active === 'company-detail' && <CompanyDetailManual />}
           {active === 'alpha-screens' && <AlphaScreensManual />}
           {active === 'glossary' && <GlossaryManual />}
+          {active === 'screener' && <ScreenerManual />}
+          {active === 'portfolio' && <PortfolioManual />}
         </main>
       </div>
     </div>

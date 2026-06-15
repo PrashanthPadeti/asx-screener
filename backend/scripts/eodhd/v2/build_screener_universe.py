@@ -516,6 +516,8 @@ SELECT
     -- ── Partial metrics ──────────────────────────────────────────────────────
     dm.dollar_volume_avg_20d,
     ym.avg_roic_3y,
+    ym.avg_roic_5y,
+    ym.asset_light_score,
 
     -- ── Volume signals (daily_metrics) ───────────────────────────────────────
     dm.volume_avg_50d         AS avg_volume_50d,
@@ -523,8 +525,6 @@ SELECT
     dm.up_down_vol_ratio_20d,
     dm.obv_rising,
     dm.volume_breakout,
-    ym.avg_roic_5y,
-    ym.asset_light_score,
 
     -- ── Analyst-derived (computed from existing buy/sell/hold counts) ─────────
     NULLIF(

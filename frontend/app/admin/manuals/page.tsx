@@ -805,7 +805,7 @@ function ScreenerManual() {
         [<Code>POST /api/v1/screener/query</Code>, 'Query', 'Parses SQL-like text, maps to ALLOWED_FIELDS, runs safe parameterised query.'],
         [<Code>GET /api/v1/screener/query/fields</Code>, 'Query', 'Returns field reference list for the Field Reference panel.'],
         [<Code>POST /api/v1/screener/export</Code>, 'Manual', 'Returns CSV of all matched results.'],
-        [<Code>POST /api/v1/screens</Code> + <Code>GET</Code> + <Code>PUT</Code> + <Code>DELETE</Code>, 'All', 'Save/load/edit/delete personal screens.'],
+        [<span><Code>POST /api/v1/screens</Code> <Code>GET</Code> <Code>PUT</Code> <Code>DELETE</Code></span>, 'All', 'Save/load/edit/delete personal screens.'],
         [<Code>GET /api/v1/screens/community</Code>, 'All', 'Returns community-shared screens (plan-gated).'],
       ]} />
       <H3>Data source</H3>

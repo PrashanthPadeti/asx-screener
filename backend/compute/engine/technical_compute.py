@@ -411,6 +411,29 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["pct_from_52w_low"]  = ((c - df["low_52w"])  / df["low_52w"].replace(0, np.nan)).round(4)
     df["pct_from_ath"]      = ((c - df["ath_price"]) / df["ath_price"].replace(0, np.nan)).round(4)
 
+    # ── Volume momentum signals ───────────────────────────────────────────────
+    # ADL: cumulative money flow — positive = accumulation, negative = distribution
+    hl_range      = (h - l).replace(0, np.nan)
+    clv           = ((c - l) - (h - c)) / hl_range
+    df["adl"]     = (clv * v).cumsum().round(0)
+
+    # Up/Down Volume Ratio (20d): rolling buying pressure vs selling pressure
+    up_vol   = v.where(c.diff() > 0, 0.0)
+    down_vol = v.where(c.diff() < 0, 0.0)
+    df["up_down_vol_ratio_20d"] = (
+        up_vol.rolling(20).sum() /
+        down_vol.rolling(20).sum().replace(0, np.nan)
+    ).round(4)
+
+    # OBV Rising: OBV above its 20-day EMA signals sustained accumulation
+    df["obv_rising"] = df["obv"].astype(float) > df["obv_ema"].astype(float)
+
+    # Volume Breakout: elevated volume + stock within 3% of 52-week high
+    df["volume_breakout"] = (
+        (df["relative_volume"] >= 1.5) &
+        (df["pct_from_52w_high"] >= -0.03)
+    )
+
     # ── Market Cap (AUD millions) ─────────────────────────────────────────────
     if shares and shares > 0:
         df["market_cap"] = (c * shares / 1_000_000).round(2)
@@ -482,6 +505,7 @@ INSERT_COLS = [
     "obv", "obv_ema", "vwap", "above_vwap", "cmf_20", "mfi_14",
     "volume_avg_5d", "volume_avg_20d", "volume_avg_50d",
     "relative_volume", "dollar_volume_avg_20d",
+    "adl", "up_down_vol_ratio_20d", "obv_rising", "volume_breakout",
     # Levels
     "high_52w", "low_52w", "ath_price", "atl_price",
     "pct_from_52w_high", "pct_from_52w_low", "pct_from_ath",
@@ -556,6 +580,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None) ->
             gi("obv"), gi("obv_ema"), g("vwap"), g("above_vwap"), c("cmf_20"), g("mfi_14"),
             gi("volume_avg_5d"), gi("volume_avg_20d"), gi("volume_avg_50d"),
             c("relative_volume"), g("dollar_volume_avg_20d"),
+            g("adl"), g("up_down_vol_ratio_20d"), g("obv_rising"), g("volume_breakout"),
             g("high_52w"), g("low_52w"), g("ath_price"), g("atl_price"),
             c("pct_from_52w_high"), c("pct_from_52w_low"), c("pct_from_ath"),
             g("above_sma20"), g("above_sma50"), g("above_sma100"), g("above_sma200"),

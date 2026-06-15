@@ -70,6 +70,12 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "pct_from_52w_low":    {"col": "((u.price - u.low_52w)  / NULLIF(u.low_52w,  0) * 100)", "scale": 1, "type": "number", "label": "% from 52W Low",  "unit": "%", "cat": "Price"},
     "volume_ratio":        {"col": "(u.volume::float / NULLIF(u.avg_volume_20d, 0))",         "scale": 1, "type": "number", "label": "Volume Ratio (vs 20D Avg)", "unit": "x", "cat": "Price"},
     "above_vwap":          {"col": "u.above_vwap",          "scale": 1,          "type": "boolean", "label": "Price Above VWAP",               "unit": "",      "cat": "Market Data"},
+    "avg_volume_50d":      {"col": "u.avg_volume_50d",      "scale": 1,          "type": "number",  "label": "Avg Volume 50D",                 "unit": "",      "cat": "Market Data"},
+    "cmf_20":              {"col": "u.cmf_20",              "scale": 1,          "type": "number",  "label": "CMF 20 (Chaikin Money Flow)",    "unit": "",      "cat": "Technicals"},
+    "adl":                 {"col": "u.adl",                 "scale": 1,          "type": "number",  "label": "Accumulation/Distribution Line", "unit": "",      "cat": "Technicals"},
+    "up_down_vol_ratio_20d":{"col": "u.up_down_vol_ratio_20d","scale": 1,        "type": "number",  "label": "Up/Down Volume Ratio 20D",       "unit": "x",     "cat": "Technicals"},
+    "obv_rising":          {"col": "u.obv_rising",          "scale": 1,          "type": "boolean", "label": "OBV Rising (above EMA20)",       "unit": "",      "cat": "Technicals"},
+    "volume_breakout":     {"col": "u.volume_breakout",     "scale": 1,          "type": "boolean", "label": "Volume Breakout",                "unit": "",      "cat": "Technicals"},
 
     # ── Valuation ─────────────────────────────────────────────────────────────
     "pe_ratio":        {"col": "u.pe_ratio",        "scale": 1,    "type": "number",  "label": "P/E Ratio",            "unit": "x",    "cat": "Valuation"},

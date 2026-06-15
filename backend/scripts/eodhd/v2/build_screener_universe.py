@@ -183,6 +183,11 @@ INSERT INTO screener.universe (
     dollar_volume_avg_20d,
     avg_roic_3y, avg_roic_5y, asset_light_score,
 
+    -- ── Volume signals (daily_metrics) ───────────────────────────────────────
+    avg_volume_50d,
+    cmf_20, adl, up_down_vol_ratio_20d,
+    obv_rising, volume_breakout,
+
     -- ── Analyst-derived (from existing buy/sell/hold counts) ─────────────────
     analyst_count, analyst_buy_pct, analyst_consensus_score,
 
@@ -511,6 +516,14 @@ SELECT
     -- ── Partial metrics ──────────────────────────────────────────────────────
     dm.dollar_volume_avg_20d,
     ym.avg_roic_3y,
+
+    -- ── Volume signals (daily_metrics) ───────────────────────────────────────
+    dm.volume_avg_50d         AS avg_volume_50d,
+    dm.cmf_20,
+    dm.adl,
+    dm.up_down_vol_ratio_20d,
+    dm.obv_rising,
+    dm.volume_breakout,
     ym.avg_roic_5y,
     ym.asset_light_score,
 
@@ -840,7 +853,10 @@ LEFT JOIN LATERAL (
            relative_volume,
            bb_pct, rsi_21, stoch_k, stoch_d,
            rsi_overbought, rsi_oversold,
-           macd_bullish_cross, macd_bearish_cross
+           macd_bullish_cross, macd_bearish_cross,
+           -- Volume signals
+           volume_avg_50d, cmf_20,
+           adl, up_down_vol_ratio_20d, obv_rising, volume_breakout
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
     ORDER BY date DESC
@@ -1160,6 +1176,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- Partial metrics
     dollar_volume_avg_20d   = EXCLUDED.dollar_volume_avg_20d,
     avg_roic_3y             = EXCLUDED.avg_roic_3y,
+    -- Volume signals
+    avg_volume_50d          = EXCLUDED.avg_volume_50d,
+    cmf_20                  = EXCLUDED.cmf_20,
+    adl                     = EXCLUDED.adl,
+    up_down_vol_ratio_20d   = EXCLUDED.up_down_vol_ratio_20d,
+    obv_rising              = EXCLUDED.obv_rising,
+    volume_breakout         = EXCLUDED.volume_breakout,
     avg_roic_5y             = EXCLUDED.avg_roic_5y,
     asset_light_score       = EXCLUDED.asset_light_score,
     -- Analyst-derived

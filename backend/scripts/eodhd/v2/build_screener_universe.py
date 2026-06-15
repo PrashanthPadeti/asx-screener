@@ -250,13 +250,13 @@ INSERT INTO screener.universe (
     inventory_growing_slower_than_sales,
     receivables_growing_slower_than_sales,
 
-    -- ── Cash flow signals ─────────────────────────────────────────────────────
-    ocf_beats_net_income, capex_to_ocf, fcf_growing_faster_than_revenue,
-    ocf_positive, ocf_growing,
-
     -- ── Ratio framework signals ───────────────────────────────────────────────
     earning_power, financial_leverage, days_payable_outstanding,
     cash_conversion_cycle, roe_improving, roce_improving,
+
+    -- ── Cash flow signals ─────────────────────────────────────────────────────
+    ocf_beats_net_income, capex_to_ocf, fcf_growing_faster_than_revenue,
+    ocf_positive, ocf_growing,
 
     universe_built_at
 )

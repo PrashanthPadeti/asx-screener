@@ -254,6 +254,10 @@ INSERT INTO screener.universe (
     ocf_beats_net_income, capex_to_ocf, fcf_growing_faster_than_revenue,
     ocf_positive, ocf_growing,
 
+    -- ── Ratio framework signals ───────────────────────────────────────────────
+    earning_power, financial_leverage, days_payable_outstanding,
+    cash_conversion_cycle, roe_improving, roce_improving,
+
     universe_built_at
 )
 SELECT
@@ -796,6 +800,39 @@ SELECT
               >= (bs0.trade_receivables - bs1.trade_receivables) / ABS(bs1.trade_receivables)
          END AS receivables_growing_slower_than_sales,
 
+    -- ── Ratio framework signals ───────────────────────────────────────────────
+    -- Earning power: EBIT / Total Assets (pre-tax, pre-interest return on assets)
+    CASE WHEN pnl0.ebit IS NOT NULL AND bs0.total_assets IS NOT NULL AND bs0.total_assets > 0
+         THEN ROUND((pnl0.ebit / bs0.total_assets)::numeric, 4)
+         END AS earning_power,
+    -- Financial leverage: Total Assets / Equity (DuPont leverage factor)
+    CASE WHEN bs0.total_assets IS NOT NULL AND bs0.total_equity IS NOT NULL AND bs0.total_equity > 0
+         THEN ROUND((bs0.total_assets / bs0.total_equity)::numeric, 4)
+         END AS financial_leverage,
+    -- Days Payable Outstanding: how long the company takes to pay suppliers
+    CASE WHEN bs0.trade_payables IS NOT NULL AND bs0.trade_payables > 0
+          AND pnl0.cost_of_sales IS NOT NULL AND pnl0.cost_of_sales > 0
+         THEN ROUND((bs0.trade_payables / pnl0.cost_of_sales * 365)::numeric, 2)
+         END AS days_payable_outstanding,
+    -- Cash Conversion Cycle: DIO + DSO - DPO (full working capital cycle in days)
+    CASE WHEN bs0.inventory IS NOT NULL AND pnl0.cost_of_sales IS NOT NULL AND pnl0.cost_of_sales > 0
+          AND bs0.trade_receivables IS NOT NULL AND pnl0.revenue IS NOT NULL AND pnl0.revenue > 0
+          AND bs0.trade_payables IS NOT NULL AND bs0.trade_payables > 0
+         THEN ROUND((
+                (bs0.inventory / pnl0.cost_of_sales * 365)
+              + (bs0.trade_receivables / pnl0.revenue * 365)
+              - (bs0.trade_payables / pnl0.cost_of_sales * 365)
+             )::numeric, 2)
+         END AS cash_conversion_cycle,
+    -- ROE improving: current ROE above 3-year average (quality trend signal)
+    CASE WHEN COALESCE(cm.roe, ym.roe) IS NOT NULL AND ym.avg_roe_3y IS NOT NULL
+         THEN COALESCE(cm.roe, ym.roe) > ym.avg_roe_3y
+         END AS roe_improving,
+    -- ROCE improving: current ROCE above 3-year average
+    CASE WHEN COALESCE(cm.roce, ym.roce) IS NOT NULL AND ym.avg_roce_3y IS NOT NULL
+         THEN COALESCE(cm.roce, ym.roce) > ym.avg_roce_3y
+         END AS roce_improving,
+
     -- ── Cash flow signals ─────────────────────────────────────────────────────
     -- OCF beats net income: operating cash flow >= reported net profit (earnings quality)
     CASE WHEN ym.ocf_to_net_profit IS NOT NULL
@@ -912,7 +949,8 @@ LEFT JOIN LATERAL (
            cash_equivalents, book_value_per_share,
            total_current_assets, total_current_liab,
            trade_receivables, inventory, goodwill, intangibles, gross_block,
-           total_liabilities, long_term_debt, retained_earnings
+           total_liabilities, long_term_debt, retained_earnings,
+           trade_payables
     FROM financials.annual_balance_sheet
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -1455,6 +1493,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     fcf_growing_faster_than_revenue = EXCLUDED.fcf_growing_faster_than_revenue,
     ocf_positive                    = EXCLUDED.ocf_positive,
     ocf_growing                     = EXCLUDED.ocf_growing,
+    -- Ratio framework signals
+    earning_power              = EXCLUDED.earning_power,
+    financial_leverage         = EXCLUDED.financial_leverage,
+    days_payable_outstanding   = EXCLUDED.days_payable_outstanding,
+    cash_conversion_cycle      = EXCLUDED.cash_conversion_cycle,
+    roe_improving              = EXCLUDED.roe_improving,
+    roce_improving             = EXCLUDED.roce_improving,
     universe_built_at       = NOW()
 """
 

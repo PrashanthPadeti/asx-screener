@@ -327,6 +327,13 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "fcf_growing_faster_than_revenue": {"col": "u.fcf_growing_faster_than_revenue", "scale": 1,    "type": "boolean", "label": "FCF Growing Faster Than Revenue",         "unit": "",    "cat": "Cash Flow"},
     "ocf_positive":                    {"col": "u.ocf_positive",                    "scale": 1,    "type": "boolean", "label": "OCF Positive",                           "unit": "",    "cat": "Cash Flow"},
     "ocf_growing":                     {"col": "u.ocf_growing",                     "scale": 1,    "type": "boolean", "label": "OCF Growing (YoY)",                      "unit": "",    "cat": "Cash Flow"},
+    # ── Ratio framework signals ───────────────────────────────────────────────────
+    "earning_power":            {"col": "u.earning_power",            "scale": 0.01, "type": "number",  "label": "Earning Power (EBIT/Assets %)",   "unit": "%",   "cat": "Profitability"},
+    "financial_leverage":       {"col": "u.financial_leverage",       "scale": 1,    "type": "number",  "label": "Financial Leverage (Assets/Equity)", "unit": "x", "cat": "Financial Strength"},
+    "days_payable_outstanding": {"col": "u.days_payable_outstanding", "scale": 1,    "type": "number",  "label": "Days Payable Outstanding",        "unit": "days","cat": "Profitability"},
+    "cash_conversion_cycle":    {"col": "u.cash_conversion_cycle",    "scale": 1,    "type": "number",  "label": "Cash Conversion Cycle (days)",    "unit": "days","cat": "Profitability"},
+    "roe_improving":            {"col": "u.roe_improving",            "scale": 1,    "type": "boolean", "label": "ROE Improving",                   "unit": "",    "cat": "Profitability"},
+    "roce_improving":           {"col": "u.roce_improving",           "scale": 1,    "type": "boolean", "label": "ROCE Improving",                  "unit": "",    "cat": "Profitability"},
 
     # ── Line items (income statement / balance sheet / cash flow, AUD M) ─────────
     "cogs": {"col": "u.cogs", "scale": 1, "type": "number", "label": "Cost of Goods Sold (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

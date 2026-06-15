@@ -336,6 +336,27 @@ EXTRA_ALIASES: dict[str, str] = {
     "operating cash flow growing":                   "ocf_growing",
     "ocf growth":                                    "ocf_growing",
 
+    # ── Ratio framework signals ───────────────────────────────────────────────
+    "earning power":                                 "earning_power",
+    "ebit to assets":                                "earning_power",
+    "ebit return on assets":                         "earning_power",
+    "financial leverage":                            "financial_leverage",
+    "assets to equity":                              "financial_leverage",
+    "leverage ratio":                                "financial_leverage",
+    "days payable":                                  "days_payable_outstanding",
+    "days payable outstanding":                      "days_payable_outstanding",
+    "dpo":                                           "days_payable_outstanding",
+    "payable days":                                  "days_payable_outstanding",
+    "cash conversion cycle":                         "cash_conversion_cycle",
+    "ccc":                                           "cash_conversion_cycle",
+    "working capital cycle":                         "cash_conversion_cycle",
+    "roe improving":                                 "roe_improving",
+    "return on equity improving":                    "roe_improving",
+    "roe above average":                             "roe_improving",
+    "roce improving":                                "roce_improving",
+    "return on capital employed improving":          "roce_improving",
+    "roce above average":                            "roce_improving",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

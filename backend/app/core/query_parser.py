@@ -357,6 +357,18 @@ EXTRA_ALIASES: dict[str, str] = {
     "return on capital employed improving":          "roce_improving",
     "roce above average":                            "roce_improving",
 
+    # ── Tier-1 qualitative proxies ────────────────────────────────────────────
+    "gross margin stability":                        "gross_margin_stability",
+    "margin stability":                              "gross_margin_stability",
+    "gm stability":                                  "gross_margin_stability",
+    "revenue predictability":                        "revenue_predictability",
+    "rev predictability":                            "revenue_predictability",
+    "revenue consistency":                           "revenue_predictability",
+    "revenue above sector median":                   "revenue_above_sector_median",
+    "revenue above sector":                          "revenue_above_sector_median",
+    "above sector median":                           "revenue_above_sector_median",
+    "beats sector":                                  "revenue_above_sector_median",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

@@ -444,6 +444,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
     eps_l  = []   # for eps_volatility_5y
     fcf_l  = []   # for fcf_positive_years
     roic_l = []   # for avg_roic_3y / avg_roic_5y
+    rev_g_l = []  # for revenue_predictability
 
     for i, row in enumerate(yearly):
         fy  = int(row["fiscal_year"])
@@ -598,6 +599,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         roe_l .append(roe);   roa_l .append(roa)
         roce_l.append(roce);  roic_l.append(roic)
         gm_l  .append(gross_margin)
+        rev_g_l.append(rev_g1)
         em_l  .append(ebitda_margin); om_l.append(ebit_margin)
         nm_l  .append(net_margin);    epsg_l.append(eps_g1)
 
@@ -709,6 +711,28 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             else None
         )
 
+        # 10. Gross Margin Stability (std dev of gross margin over 5Y)
+        #     Lower = more stable pricing power / moat. Stored as decimal pp.
+        gm_vals = [v for v in [_f(x) for x in gm_l[-5:]] if v is not None]
+        if len(gm_vals) >= 3:
+            gross_margin_stability = _clamp(
+                round(float(np.std(gm_vals, ddof=1)), 4)
+            )
+        else:
+            gross_margin_stability = None
+
+        # 11. Revenue Predictability (CV of revenue growth over 5Y)
+        #     Coefficient of variation: std dev / |mean|. Lower = more predictable.
+        rg_vals = [v for v in [_f(x) for x in rev_g_l[-5:]] if v is not None]
+        if len(rg_vals) >= 3:
+            mean_rg = float(np.mean(rg_vals))
+            revenue_predictability = (
+                _clamp(round(float(np.std(rg_vals, ddof=1)) / abs(mean_rg), 4))
+                if mean_rg != 0 else None
+            )
+        else:
+            revenue_predictability = None
+
         # ── Quality ───────────────────────────────────────────────────────
         f_score = piotroski_f_score(row, prev)
         z_score = altman_z_score(row, mc)
@@ -797,6 +821,8 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             avg_roic_3y, avg_roic_5y, asset_light_score,
             # Quality proxy scores
             brand_proxy_score, capital_efficiency_score, earnings_stability_score,
+            # Tier-1 qualitative proxies
+            gross_margin_stability, revenue_predictability,
             COMPUTE_VERSION, now,
         ))
 
@@ -849,6 +875,7 @@ INSERT_SQL = """
         eps_volatility_5y, fcf_positive_years,
         avg_roic_3y, avg_roic_5y, asset_light_score,
         brand_proxy_score, capital_efficiency_score, earnings_stability_score,
+        gross_margin_stability, revenue_predictability,
         compute_version, computed_at
     ) VALUES %s
     ON CONFLICT (asx_code, fiscal_year) DO UPDATE SET
@@ -970,6 +997,8 @@ INSERT_SQL = """
         brand_proxy_score       = EXCLUDED.brand_proxy_score,
         capital_efficiency_score = EXCLUDED.capital_efficiency_score,
         earnings_stability_score = EXCLUDED.earnings_stability_score,
+        gross_margin_stability  = EXCLUDED.gross_margin_stability,
+        revenue_predictability  = EXCLUDED.revenue_predictability,
         compute_version         = EXCLUDED.compute_version,
         computed_at             = EXCLUDED.computed_at
 """

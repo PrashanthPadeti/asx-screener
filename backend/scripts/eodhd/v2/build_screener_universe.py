@@ -250,6 +250,9 @@ INSERT INTO screener.universe (
     inventory_growing_slower_than_sales,
     receivables_growing_slower_than_sales,
 
+    -- ── Tier-1 qualitative proxies ───────────────────────────────────────────
+    gross_margin_stability, revenue_predictability, revenue_above_sector_median,
+
     -- ── Ratio framework signals ───────────────────────────────────────────────
     earning_power, financial_leverage, days_payable_outstanding,
     cash_conversion_cycle, roe_improving, roce_improving,
@@ -800,6 +803,14 @@ SELECT
               >= (bs0.trade_receivables - bs1.trade_receivables) / ABS(bs1.trade_receivables)
          END AS receivables_growing_slower_than_sales,
 
+    -- ── Tier-1 qualitative proxies ───────────────────────────────────────────
+    -- Gross margin stability: std dev of gross margin over 5Y (from yearly_metrics)
+    ym.gross_margin_stability                              AS gross_margin_stability,
+    -- Revenue predictability: CV of revenue growth over 5Y (from yearly_metrics)
+    ym.revenue_predictability                             AS revenue_predictability,
+    -- Revenue above sector median: populated by post-processing UPDATE after insert
+    NULL::boolean                                         AS revenue_above_sector_median,
+
     -- ── Ratio framework signals ───────────────────────────────────────────────
     -- Earning power: EBIT / Total Assets (pre-tax, pre-interest return on assets)
     CASE WHEN pnl0.ebit IS NOT NULL AND bs0.total_assets IS NOT NULL AND bs0.total_assets > 0
@@ -1086,7 +1097,9 @@ LEFT JOIN LATERAL (
            avg_ebitda_margin_3y, avg_ebitda_margin_5y,
            avg_operating_margin_3y, avg_operating_margin_5y,
            avg_net_margin_3y, avg_net_margin_5y,
-           avg_eps_growth_3y, avg_eps_growth_5y
+           avg_eps_growth_3y, avg_eps_growth_5y,
+           -- Tier-1 qualitative proxies
+           gross_margin_stability, revenue_predictability
     FROM market.yearly_metrics
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -1493,6 +1506,10 @@ ON CONFLICT (asx_code) DO UPDATE SET
     fcf_growing_faster_than_revenue = EXCLUDED.fcf_growing_faster_than_revenue,
     ocf_positive                    = EXCLUDED.ocf_positive,
     ocf_growing                     = EXCLUDED.ocf_growing,
+    -- Tier-1 qualitative proxies
+    gross_margin_stability       = EXCLUDED.gross_margin_stability,
+    revenue_predictability       = EXCLUDED.revenue_predictability,
+    revenue_above_sector_median  = EXCLUDED.revenue_above_sector_median,
     -- Ratio framework signals
     earning_power              = EXCLUDED.earning_power,
     financial_leverage         = EXCLUDED.financial_leverage,
@@ -1525,6 +1542,27 @@ def main():
     log.info(f"Building screener.universe {'for ' + str(args.codes) if args.codes else '(all stocks)'}…")
     cur.execute(sql, params)
     n = cur.rowcount
+    conn.commit()
+
+    # Post-processing: revenue_above_sector_median
+    # True when a stock's revenue_cagr_3y exceeds its sector's median
+    log.info("Computing revenue_above_sector_median…")
+    cur.execute("""
+        UPDATE screener.universe u
+        SET revenue_above_sector_median = (
+            u.revenue_cagr_3y > sector_medians.median_cagr
+        )
+        FROM (
+            SELECT sector,
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY revenue_cagr_3y) AS median_cagr
+            FROM screener.universe
+            WHERE revenue_cagr_3y IS NOT NULL
+              AND sector IS NOT NULL
+            GROUP BY sector
+        ) sector_medians
+        WHERE u.sector = sector_medians.sector
+          AND u.revenue_cagr_3y IS NOT NULL
+    """)
     conn.commit()
 
     cur.close()

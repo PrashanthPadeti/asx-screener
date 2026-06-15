@@ -335,6 +335,11 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "roe_improving":            {"col": "u.roe_improving",            "scale": 1,    "type": "boolean", "label": "ROE Improving",                   "unit": "",    "cat": "Profitability"},
     "roce_improving":           {"col": "u.roce_improving",           "scale": 1,    "type": "boolean", "label": "ROCE Improving",                  "unit": "",    "cat": "Profitability"},
 
+    # ── Tier-1 qualitative proxies ────────────────────────────────────────────────
+    "gross_margin_stability":       {"col": "u.gross_margin_stability",       "scale": 1,    "type": "number",  "label": "Gross Margin Stability (5Y Std Dev)", "unit": "",  "cat": "Quality"},
+    "revenue_predictability":       {"col": "u.revenue_predictability",       "scale": 1,    "type": "number",  "label": "Revenue Predictability (5Y CV)",      "unit": "",  "cat": "Quality"},
+    "revenue_above_sector_median":  {"col": "u.revenue_above_sector_median",  "scale": 1,    "type": "boolean", "label": "Revenue Growth Above Sector Median",  "unit": "",  "cat": "Quality"},
+
     # ── Line items (income statement / balance sheet / cash flow, AUD M) ─────────
     "cogs": {"col": "u.cogs", "scale": 1, "type": "number", "label": "Cost of Goods Sold (AUD M)", "unit": "AUD M", "cat": "Income Statement"},
     "ebit": {"col": "u.ebit", "scale": 1, "type": "number", "label": "EBIT / Operating Profit (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

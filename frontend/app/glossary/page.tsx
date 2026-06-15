@@ -1637,6 +1637,41 @@ const METRICS: Metric[] = [
     tags: ['ROCE', 'return on capital', 'improving', 'trend', 'capital efficiency', 'quality'],
   },
 
+  // ── TIER-1 QUALITATIVE PROXIES ────────────────────────────────────────────
+  {
+    id: 'gross_margin_stability',
+    name: 'Gross Margin Stability',
+    category: 'Quality',
+    shortDesc: 'Standard deviation of gross margin over 5 years — lower values indicate a more stable, defensible business model',
+    definition: 'Measures the variability of gross margin (gross profit ÷ revenue) across the most recent 5 fiscal years, expressed as a standard deviation. A low score means the company consistently earns similar margins regardless of market conditions — a hallmark of pricing power, brand strength, or durable cost advantages.',
+    formula: 'Gross Margin Stability = StdDev(Gross Margin %, last 5 FY)',
+    interpretation: 'A low value (e.g., under 0.03) means gross margins have barely moved over 5 years — indicating the company can maintain pricing in downturns and isn\'t exposed to volatile input costs. This is a proxy for moat durability. Combine with high avg_gross_margin_3y to identify businesses with both high and stable margins. A high value suggests the company\'s margins swing with commodity prices, project mix, or competitive pressure.',
+    usedIn: ['Screener', 'Filter Builder', 'Query Mode'],
+    tags: ['gross margin', 'stability', 'moat', 'pricing power', 'quality', 'consistency'],
+  },
+  {
+    id: 'revenue_predictability',
+    name: 'Revenue Predictability',
+    category: 'Quality',
+    shortDesc: 'Coefficient of variation of revenue growth over 5 years — lower values indicate more predictable, recurring revenue',
+    definition: 'Measures how consistently a company grows revenue by computing the coefficient of variation (standard deviation ÷ mean) of annual revenue growth rates over the last 5 fiscal years. A lower score means revenue growth is smoother and more reliable — suggesting recurring contracts, subscription models, or structural demand rather than lumpy project wins.',
+    formula: 'Revenue Predictability = StdDev(Revenue Growth %, last 5 FY) ÷ Mean(Revenue Growth %, last 5 FY)',
+    interpretation: 'A value close to 0 indicates highly consistent growth year-on-year — the business is predictable, which markets typically reward with higher P/E multiples. Values above 1.0 suggest growth is erratic: the company may boom in some years and stall or contract in others, making it harder to model future earnings. Use alongside revenue_cagr_3y to distinguish between high-growth-but-lumpy versus steady-compounding businesses.',
+    usedIn: ['Screener', 'Filter Builder', 'Query Mode'],
+    tags: ['revenue', 'predictability', 'consistency', 'recurring revenue', 'quality', 'growth'],
+  },
+  {
+    id: 'revenue_above_sector_median',
+    name: 'Revenue Growth Above Sector Median',
+    category: 'Quality',
+    shortDesc: 'True when a company\'s 3-year revenue CAGR exceeds its sector\'s median — a proxy for market share gain',
+    definition: 'A boolean that is true when the company\'s 3-year revenue CAGR (revenue_cagr_3y) is above the median 3-year revenue CAGR for all companies in the same sector. This is a relative strength signal: even if the sector is growing slowly, companies beating the median are likely taking market share from competitors.',
+    formula: 'Revenue Above Sector Median = Revenue CAGR 3Y > Median(Revenue CAGR 3Y, same sector)',
+    interpretation: 'This signal is powerful precisely because it is relative. A company growing at 8% in a sector with a median of 4% is outperforming its peers — even if 8% sounds modest in isolation. Combine with gross_margin_stability and operating_margin_expanding to identify companies gaining share without sacrificing profitability. The sector median is recomputed each nightly build, so the signal adapts as sector composition changes.',
+    usedIn: ['Screener', 'Filter Builder', 'Query Mode'],
+    tags: ['revenue', 'sector', 'market share', 'relative strength', 'growth', 'quality'],
+  },
+
   // ── QUALITY (ADDITIONAL) ──────────────────────────────────────────────────
   {
     id: 'avg_roic_3y',

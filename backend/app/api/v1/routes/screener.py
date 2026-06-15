@@ -72,7 +72,6 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "above_vwap":          {"col": "u.above_vwap",          "scale": 1,          "type": "boolean", "label": "Price Above VWAP",               "unit": "",      "cat": "Market Data"},
     "avg_volume_50d":      {"col": "u.avg_volume_50d",      "scale": 1,          "type": "number",  "label": "Avg Volume 50D",                 "unit": "",      "cat": "Market Data"},
     "cmf_20":              {"col": "u.cmf_20",              "scale": 1,          "type": "number",  "label": "CMF 20 (Chaikin Money Flow)",    "unit": "",      "cat": "Technicals"},
-    "adl":                 {"col": "u.adl",                 "scale": 1,          "type": "number",  "label": "Accumulation/Distribution Line", "unit": "",      "cat": "Technicals"},
     "up_down_vol_ratio_20d":{"col": "u.up_down_vol_ratio_20d","scale": 1,        "type": "number",  "label": "Up/Down Volume Ratio 20D",       "unit": "x",     "cat": "Technicals"},
     "obv_rising":          {"col": "u.obv_rising",          "scale": 1,          "type": "boolean", "label": "OBV Rising (above EMA20)",       "unit": "",      "cat": "Technicals"},
     "volume_breakout":     {"col": "u.volume_breakout",     "scale": 1,          "type": "boolean", "label": "Volume Breakout",                "unit": "",      "cat": "Technicals"},

@@ -185,7 +185,7 @@ INSERT INTO screener.universe (
 
     -- ── Volume signals (daily_metrics) ───────────────────────────────────────
     avg_volume_50d,
-    cmf_20, adl, up_down_vol_ratio_20d,
+    cmf_20, up_down_vol_ratio_20d,
     obv_rising, volume_breakout,
 
     -- ── Analyst-derived (from existing buy/sell/hold counts) ─────────────────
@@ -520,7 +520,6 @@ SELECT
     -- ── Volume signals (daily_metrics) ───────────────────────────────────────
     dm.volume_avg_50d         AS avg_volume_50d,
     dm.cmf_20,
-    dm.adl,
     dm.up_down_vol_ratio_20d,
     dm.obv_rising,
     dm.volume_breakout,
@@ -856,7 +855,7 @@ LEFT JOIN LATERAL (
            macd_bullish_cross, macd_bearish_cross,
            -- Volume signals
            volume_avg_50d, cmf_20,
-           adl, up_down_vol_ratio_20d, obv_rising, volume_breakout
+           up_down_vol_ratio_20d, obv_rising, volume_breakout
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
     ORDER BY date DESC
@@ -1179,7 +1178,6 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- Volume signals
     avg_volume_50d          = EXCLUDED.avg_volume_50d,
     cmf_20                  = EXCLUDED.cmf_20,
-    adl                     = EXCLUDED.adl,
     up_down_vol_ratio_20d   = EXCLUDED.up_down_vol_ratio_20d,
     obv_rising              = EXCLUDED.obv_rising,
     volume_breakout         = EXCLUDED.volume_breakout,

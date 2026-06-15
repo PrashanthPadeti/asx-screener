@@ -650,13 +650,212 @@ function AlphaScreensManual() {
   )
 }
 
+// ── Metrics Glossary manual ───────────────────────────────────────────────────
+const GTOC = [
+  ['g-overview',   '1. Page Overview'],
+  ['g-benefits',   '2. User Benefits'],
+  ['g-sections',   '3. Sections Covered'],
+  ['g-data',       '4. How to Read a Metric Card'],
+  ['g-categories', '5. Metric Categories'],
+  ['g-features',   '6. Functional Features'],
+  ['g-technical',  '7. Technical Details'],
+  ['g-examples',   '8. Usage Examples'],
+  ['g-support',    '9. Quick Reference (Support)'],
+  ['g-future',     '10. Future Improvements'],
+]
+function GlossaryManual() {
+  return (
+    <div>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">On this page</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+          {GTOC.map(([id, label]) => <a key={id} href={`#${id}`} className="text-sm text-blue-600 hover:underline">{label}</a>)}
+        </div>
+      </div>
+
+      {/* 1 */}
+      <H2 id="g-overview">1. Page Overview</H2>
+      <H3>What is the Metrics Glossary?</H3>
+      <P>The <strong>Metrics Glossary</strong> (<Code>/glossary</Code>) is an <strong>investment education library</strong> — a searchable, categorised reference for every financial and technical metric used across the ASX Screener platform. It currently covers <strong>283 metrics</strong> across <strong>9 categories</strong>, with plain-English definitions, calculation formulas, real-world worked examples, industry benchmarks, and beginner explanations for many entries.</P>
+      <H3>Purpose</H3>
+      <P>To make <em>every number visible in the platform</em> fully understandable. When a user sees "Altman Z-Score" or "FCF Yield" in the Screener and wonders what it means, the Glossary gives them the complete picture — not just a one-liner tooltip, but a full definition, formula, interpretation guide, and example.</P>
+      <H3>What problem it solves</H3>
+      <UL items={[
+        <><strong>Knowledge gap</strong> — most investors can't name 50 financial ratios. The Glossary makes professional-level analysis accessible to everyone.</>,
+        <><strong>Interpretation uncertainty</strong> — knowing a P/E is 22× is useless without knowing whether that's cheap or expensive for the sector. The Glossary provides context.</>,
+        <><strong>Confidence in the Screener</strong> — users who understand their filters make better decisions; the Glossary turns passive users into active analysts.</>,
+      ]} />
+      <H3>Plan gating</H3>
+      <P>The Glossary is a <strong>Pro &amp; Premium</strong> feature (shown with a badge in the page header). Free users see an upgrade prompt via <Code>PlanGate</Code>. The full content is available to Pro and above.</P>
+
+      {/* 2 */}
+      <H2 id="g-benefits">2. User Benefits</H2>
+      <Table head={['User type', 'How they use the Glossary']} rows={[
+        ['Beginners', 'Learn the fundamentals with plain-English "Simple Explanation" tips and worked numerical examples.'],
+        ['Intermediate investors', 'Look up formulas, benchmarks and sector norms to calibrate their Screener filter thresholds correctly.'],
+        ['Experienced analysts', 'Quick-reference for ASX-specific nuances (franking, REIT metrics, mining metrics) not covered elsewhere.'],
+        ['Support team', 'Point users to the Glossary to answer "what does X mean?" without needing a manual response.'],
+        ['Product & engineering', 'Authoritative source of metric definitions, formulas, and tags — useful when adding new fields to the Screener.'],
+      ]} />
+
+      {/* 3 */}
+      <H2 id="g-sections">3. Sections Covered</H2>
+      <H3>Page header</H3>
+      <P>Shows the total metric count, number of categories, how many have formulas, how many have benchmarks, and how many have beginner tips — giving users an instant sense of depth.</P>
+      <H3>Category sidebar (desktop) / pill bar (mobile)</H3>
+      <P>9 colour-coded category buttons, each with a live count. Clicking one filters the metric list to that category. On mobile these become horizontally scrollable pill chips.</P>
+      <H3>Search bar</H3>
+      <P>Free-text search across metric name, short description, full definition, tags and where-used labels. Results update instantly as you type.</P>
+      <H3>Quick-filter chips</H3>
+      <P>Five one-click filter chips to narrow by attribute:</P>
+      <UL items={[
+        <><strong>∑ Has Formula</strong> — only metrics that include a calculation formula.</>,
+        <><strong>⬡ Has Benchmark</strong> — metrics with sector or market benchmarks / ranges.</>,
+        <><strong>🔍 Used in Screener</strong> — metrics that appear as filter fields in the Screener.</>,
+        <><strong>🏆 Used in AlphaFive</strong> — metrics that power the AI-ranked AlphaFive Top 5 screen.</>,
+        <><strong>✦ Beginner Friendly</strong> — metrics with a plain-English "Simple Explanation" box.</>,
+      ]} />
+      <H3>Metric cards list</H3>
+      <P>The main content area: one card per metric, collapsed by default and expandable on click. An <strong>Expand All / Collapse All</strong> button lets you open every card at once (useful for printing or in-depth review).</P>
+      <H3>Results bar</H3>
+      <P>Shows "<em>N</em> of 283 metrics in [Category]" so the user always knows how many results match the current filters.</P>
+
+      {/* 4 */}
+      <H2 id="g-data">4. How to Read a Metric Card</H2>
+      <P>Each card has a collapsed header (always visible) and an expanded details panel (click to reveal):</P>
+      <H3>Card header (always visible)</H3>
+      <Table head={['Element', 'What it shows']} rows={[
+        ['Category badge', 'Colour-coded category (e.g. blue = Valuation, green = Profitability).'],
+        ['Beginner Friendly badge', 'Green ✦ badge when a plain-English tip exists for this metric.'],
+        ['Metric name', 'Full formal name (e.g. "P/E Ratio (Price-to-Earnings)").'],
+        ['Short description', 'One-line plain-English summary (e.g. "How much investors pay for each dollar of earnings").'],
+        ['∑ formula chip', 'Appears when a calculation formula is defined.'],
+        ['⬡ benchmark chip', 'Appears when sector benchmarks or ranges are defined.'],
+        ['Expand arrow', 'Click anywhere on the header to toggle the details panel.'],
+      ]} />
+      <H3>Expanded card — detail sections</H3>
+      <Table head={['Section', 'What it shows']} rows={[
+        ['💡 Simple Explanation', 'Amber callout: a plain-English analogy for beginners (shown only on beginner-tagged metrics).'],
+        ['What it measures', 'Full definition in clear, precise language.'],
+        ['∑ Formula / Calculation', 'Dark code block with the exact formula (e.g. P/E = Share Price ÷ EPS).'],
+        ['Real-World Example', 'Blue callout: a worked numerical example so the user can see the maths in action.'],
+        ['How to Interpret It', 'Guidance on what high/low values mean, red flags, comparisons to make.'],
+        ['⬡ Benchmarks & Ranges', 'Purple callout: sector-specific typical ranges so the user knows if a value is cheap/expensive.'],
+        ['Related Metrics', 'Clickable chips linking to other metrics in the same theme.'],
+        ["Where you'll see this", 'Blue chips: which platform areas use this metric (Screener, Company Detail, Financials Tab, etc.).'],
+        ['Tags', 'Grey hashtag chips for search keywords associated with this metric.'],
+      ]} />
+
+      {/* 5 */}
+      <H2 id="g-categories">5. Metric Categories</H2>
+      <Table head={['Category', 'Colour', 'What it covers']} rows={[
+        ['Valuation', 'Blue', 'P/E, P/B, P/S, EV/EBITDA, PEG, Graham Number, FCF Yield — how cheap or expensive a stock is.'],
+        ['Profitability', 'Emerald', 'Gross margin, EBITDA margin, net margin, ROE, ROIC, ROCE, efficiency ratios — how well the company earns.'],
+        ['Growth', 'Violet', 'Revenue/earnings/EBITDA CAGRs over 1Y/3Y/5Y/7Y/10Y, BVPS CAGR — how fast the business is expanding.'],
+        ['Dividends & Income', 'Amber', 'Dividend yield, franking, payout ratio, DPS, dividend CAGR — income-focused metrics.'],
+        ['Financial Health', 'Rose', 'Debt ratios, current ratio, Altman Z-Score, interest cover, working capital, cash flow — balance sheet strength.'],
+        ['Technical Indicators', 'Cyan', 'RSI, MACD, Bollinger Bands, moving averages, ATR, momentum signals — price and volume analysis.'],
+        ['Price & Returns', 'Orange', 'Price changes, total return, 52-week high/low, beta, performance periods — market price data.'],
+        ['Quality Scores', 'Purple', 'Piotroski F-Score, Altman Z-Score, composite quality scores, capital efficiency score — composite ratings.'],
+        ['ASX-Specific', 'Green', 'Franking credits, grossed-up yield, mining metrics, REIT metrics — metrics unique to the Australian market.'],
+      ]} />
+
+      {/* 6 */}
+      <H2 id="g-features">6. Functional Features</H2>
+      <UL items={[
+        <><strong>Full-text search</strong> — searches name, description, definition, tags and where-used simultaneously.</>,
+        <><strong>Category filtering</strong> — sidebar (desktop) and pill bar (mobile); click "All Metrics" to reset.</>,
+        <><strong>Quick filters</strong> — multi-select chips for Formula, Benchmark, Screener, AlphaFive, Beginner Friendly. Multiple chips AND together (e.g. "has formula AND used in Screener").</>,
+        <><strong>Combinable filters</strong> — search, category, and quick filters all apply simultaneously.</>,
+        <><strong>Expand All / Collapse All</strong> — global toggle to open or close every card at once.</>,
+        <><strong>Beginner Friendly highlights</strong> — amber tip boxes and green badges surface approachable content for new investors.</>,
+        <><strong>Related metrics</strong> — cards cross-link to related entries, guiding deeper exploration.</>,
+        <><strong>Where-used tags</strong> — users can see which platform screens or tabs reference each metric.</>,
+        <><strong>Colour-coded category accents</strong> — each card's top border matches its category colour for quick visual scanning.</>,
+        <><strong>Plan gate</strong> — free users see an upgrade prompt; Pro/Premium get full access.</>,
+      ]} />
+      <H3>Step-by-step: looking up a metric</H3>
+      <OL items={[
+        'Open /glossary.',
+        'Type the metric name (e.g. "Altman Z") in the search bar — results filter instantly.',
+        'Click the card to expand it.',
+        'Read the definition, formula, example and benchmarks.',
+        'Check "Where you\'ll see this" to know which Screener fields or Company tabs use it.',
+        'Follow Related Metrics chips to explore connected concepts.',
+      ]} />
+
+      {/* 7 */}
+      <H2 id="g-technical">7. Technical Details</H2>
+      <H3>Frontend architecture</H3>
+      <UL items={[
+        <>Page: <Code>frontend/app/glossary/page.tsx</Code> — a <strong>fully client-side</strong> page; all 283 metric objects are bundled statically (no API calls at runtime).</>,
+        <><Code>METRICS</Code>: a typed <Code>Metric[]</Code> array of objects. Each object has: <Code>id</Code>, <Code>name</Code>, <Code>category</Code>, <Code>shortDesc</Code>, <Code>definition</Code>, optional <Code>formula</Code>, <Code>interpretation</Code>, <Code>benchmark</Code>, <Code>example</Code>, <Code>beginnerTip</Code>, <Code>beginner</Code>, <Code>relatedMetrics</Code>, <Code>usedIn[]</Code>, <Code>tags[]</Code>.</>,
+        <><Code>CATEGORIES</Code>: 9 category config objects with <Code>key</Code>, <Code>label</Code>, <Code>colour</Code> (Tailwind badge class), and <Code>bar</Code> (Tailwind accent bar class).</>,
+        <>State: <Code>search</Code>, <Code>activeCat</Code>, <Code>activeQF</Code> (Set), <Code>expandAll</Code> (<Code>boolean | null</Code>).</>,
+        <><Code>filtered</Code> is a <Code>useMemo</Code> — category filter → quick filter → search, applied in order. No debounce needed (in-memory, instantaneous).</>,
+        <><Code>MetricCard</Code> component: its <Code>open</Code> state is managed locally (per card); it listens to the <Code>expandAll</Code> prop via <Code>useEffect</Code> to sync with the global toggle.</>,
+        <>Plan gate: <Code>&lt;PlanGate minPlan="pro"&gt;</Code> wraps the full <Code>GlossaryContent</Code>. Free users see the upgrade prompt; the metric data is still bundled but the UI is not rendered.</>,
+      ]} />
+      <H3>Data management</H3>
+      <UL items={[
+        <>All 283 metrics are <strong>statically defined in the source file</strong>. There is no database or API for the Glossary. This means changes to metric content require a code change and redeploy.</>,
+        <>Adding a new metric: add a new object to the <Code>METRICS</Code> array in <Code>frontend/app/glossary/page.tsx</Code> with the correct category key matching one of the 9 values in <Code>CATEGORIES</Code>.</>,
+        <>Counts displayed in the page header (total metrics, with formulas, with benchmarks, with beginner tips) are computed dynamically from the <Code>METRICS</Code> array at render time — no manual maintenance needed.</>,
+      ]} />
+      <Callout tone="amber" title="Adding or updating metrics">
+        Since the Glossary is statically bundled, any new Screener field should have a corresponding Glossary entry added at the same time. Match the <Code>id</Code> to the screener field key and list <Code>usedIn: ['Screener', ...]</Code>.
+      </Callout>
+
+      {/* 8 */}
+      <H2 id="g-examples">8. Usage Examples</H2>
+      <UL items={[
+        <><strong>Finding a metric:</strong> type "piotroski" → the F-Score card appears instantly; click to expand and read all 9 signals, the formula and an example.</>,
+        <><strong>Learning before screening:</strong> user is about to filter on EV/EBITDA for the first time → opens Glossary, reads the definition and benchmark (10–14× global average), then sets a threshold with confidence.</>,
+        <><strong>Sector comparison:</strong> user sees gross margin of 78% and wonders if that's good → opens the Gross Margin card → Benchmarks say "Software: 65–90%" → confirms the stock is well within sector norms.</>,
+        <><strong>Beginner path:</strong> filter by "✦ Beginner Friendly" to see only the ~40 most approachable metrics, read the amber Simple Explanation boxes to build foundational knowledge.</>,
+        <><strong>Auditing a screen:</strong> before publishing a Community Pick, a power user opens the Glossary to verify their understanding of each filter field they used.</>,
+        <><strong>Support deflection:</strong> user emails asking "what is ROIC?" — support team links them to <Code>/glossary</Code> and they find a full definition, formula, example and benchmark.</>,
+      ]} />
+
+      {/* 9 */}
+      <H2 id="g-support">9. Quick Reference (Support)</H2>
+      <Table head={['Question / issue', 'Answer']} rows={[
+        ['"I can\'t see the Glossary."', 'The Glossary is Pro & Premium only. Free users see an upgrade prompt. Upgrade at /pricing.'],
+        ['"The metric I\'m looking for isn\'t there."', 'Search by abbreviation, keyword or tag (e.g. search "roce" or "capital employed"). If still not found, it may be a new field not yet in the Glossary — log it for the product team.'],
+        ['"The formula looks wrong."', 'All formulas are manually maintained in page.tsx. If a formula is incorrect, it needs a code fix and redeploy. Log it as a bug.'],
+        ['"How do I find only beginner-friendly metrics?"', 'Click the "✦ Beginner Friendly" quick-filter chip to show only the metrics that have plain-English tip boxes.'],
+        ['"How do I print the Glossary?"', 'Click Expand All, then use the browser print function. All cards will be fully expanded for printing.'],
+        ['"Can I export the Glossary?"', 'Not yet — export is a planned future feature. For now, print or screenshot.'],
+      ]} />
+
+      {/* 10 */}
+      <H2 id="g-future">10. Future Improvements</H2>
+      <UL items={[
+        <><strong>Deep-link to a specific metric</strong> — e.g. <Code>/glossary#pe_ratio</Code> auto-opens that card (useful for tooltips linking out).</>,
+        <><strong>In-app tooltip integration</strong> — hover any metric name in the Screener or Company page and see the Glossary definition inline, without leaving the page.</>,
+        <><strong>CSV / PDF export</strong> — download the full Glossary as a reference PDF or spreadsheet.</>,
+        <><strong>User-contributed notes</strong> — allow Pro/Premium users to add personal notes or annotations to metric cards.</>,
+        <><strong>Video explainers</strong> — short 60-second video clips for complex metrics (e.g. Altman Z-Score, Piotroski F-Score).</>,
+        <><strong>Comparative benchmarking</strong> — show where a specific company falls on a metric's benchmark scale directly within the card.</>,
+        <><strong>Recently viewed history</strong> — remember which metrics a user last opened for quick re-access.</>,
+        <><strong>ASX sector norms update</strong> — benchmarks currently reflect global averages; update to ASX-specific norms per GICS sector.</>,
+        <><strong>Auto-sync with Screener fields</strong> — when a new field is added to <Code>ALLOWED_FIELDS</Code>, flag it as missing in the Glossary via a CI check.</>,
+      ]} />
+
+      <div className="mt-10 pt-4 border-t border-slate-200 text-xs text-slate-400">
+        Internal documentation — Admin only. Reflects the Metrics Glossary as built. Update this manual when metric definitions, categories or features change.
+      </div>
+    </div>
+  )
+}
+
 // ── Manual registry (add a page manual here, then a render case below) ─────────
 const MANUALS = [
   { slug: 'market-overview', title: 'Market Overview', page: '/market', status: 'ready' as const },
   { slug: 'screener',        title: 'Stock Screener',  page: '/screener', status: 'soon' as const },
   { slug: 'company-detail',  title: 'Company Detail',  page: '/company/[code]', status: 'ready' as const },
   { slug: 'alpha-screens',   title: 'Alpha Screens',   page: '/scans', status: 'ready' as const },
-  { slug: 'glossary',        title: 'Metrics Glossary', page: '/glossary', status: 'soon' as const },
+  { slug: 'glossary',        title: 'Metrics Glossary', page: '/glossary', status: 'ready' as const },
   { slug: 'portfolio',       title: 'Portfolio',       page: '/portfolio', status: 'soon' as const },
 ]
 
@@ -709,6 +908,7 @@ export default function AdminManualsPage() {
           {active === 'market-overview' && <MarketOverviewManual />}
           {active === 'company-detail' && <CompanyDetailManual />}
           {active === 'alpha-screens' && <AlphaScreensManual />}
+          {active === 'glossary' && <GlossaryManual />}
         </main>
       </div>
     </div>

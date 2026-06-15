@@ -1254,6 +1254,206 @@ function PortfolioManual() {
   )
 }
 
+// ── Performance Heatmap manual ────────────────────────────────────────────────
+const HTOC = [
+  ['h-overview',    '1. Page Overview'],
+  ['h-benefits',    '2. User Benefits'],
+  ['h-sections',    '3. Sections Covered'],
+  ['h-colours',     '4. Reading the Colour Scale'],
+  ['h-modes',       '5. Daily vs Weekly Mode'],
+  ['h-features',    '6. Functional Features'],
+  ['h-technical',   '7. Technical Details'],
+  ['h-examples',    '8. Usage Examples'],
+  ['h-support',     '9. Quick Reference (Support)'],
+  ['h-future',      '10. Future Improvements'],
+]
+function HeatmapManual() {
+  return (
+    <div>
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">On this page</p>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1">
+          {HTOC.map(([id, label]) => <a key={id} href={`#${id}`} className="text-sm text-blue-600 hover:underline">{label}</a>)}
+        </div>
+      </div>
+
+      {/* 1 */}
+      <H2 id="h-overview">1. Page Overview</H2>
+      <H3>What is the Performance Heatmap?</H3>
+      <P>The <strong>Performance Heatmap</strong> (<Code>/market/heatmap</Code>) is a colour-coded table that shows the <strong>price performance of every ASX-listed stock</strong> across the last 5 trading days or last 5 weeks — all on one screen. Each stock occupies one row; each of the five period columns is shaded from deep red (large loss) through orange (flat) to deep green (large gain), so patterns of strength and weakness jump out visually, at a glance.</P>
+      <H3>The core idea</H3>
+      <P>Instead of looking at one stock at a time, the Heatmap lets users see <strong>the entire market simultaneously</strong>. A wall of green tells you breadth is strong; isolated red rows inside a green table identify laggards worth investigating; a sector block turning red day after day signals a theme worth watching.</P>
+      <H3>Plan gating</H3>
+      <P>The Heatmap is a <strong>Premium</strong> feature. Free and Pro users see an upgrade prompt via <Code>PlanGate</Code>. Premium and admin accounts have full access including export.</P>
+
+      {/* 2 */}
+      <H2 id="h-benefits">2. User Benefits</H2>
+      <Table head={['User type', 'How they use the Heatmap']} rows={[
+        ['Momentum traders', 'Spot multi-day green streaks (consistent upward momentum) or red streaks (persistent selling pressure) instantly across the whole market.'],
+        ['Sector rotators', 'Filter to a GICS sector and see whether the whole sector is moving together — confirming a sector rotation theme.'],
+        ['Income / value investors', 'Identify sudden red days in otherwise stable stocks as potential dip-buy opportunities.'],
+        ['Risk managers', 'Detect sudden broad red days (market-wide sell-offs) vs isolated stock-specific moves in seconds.'],
+        ['Analysts & fund managers', 'Export a colour-coded Excel snapshot to include in reports or morning briefings.'],
+        ['Support team', 'Show users that the Heatmap is a quick breadth check — not a trade signal on its own.'],
+      ]} />
+
+      {/* 3 */}
+      <H2 id="h-sections">3. Sections Covered</H2>
+      <H3>Page header</H3>
+      <P>Shows the page title ("Performance Heatmap"), the current mode subtitle ("Rolling 5-day / 5-week price performance — all ASX stocks"), last-updated time, an <strong>Export Excel</strong> button, and a <strong>Refresh</strong> button.</P>
+      <H3>Controls bar</H3>
+      <P>Contains all filter and mode controls:</P>
+      <UL items={[
+        <><strong>Mode toggle</strong> — "Last 5 Days" / "Last 5 Weeks" (swaps the period columns).</>,
+        <><strong>Sector filter</strong> — dropdown to narrow to one of 12 GICS sectors (or All Sectors).</>,
+        <><strong>Market cap filter</strong> — dropdown: All Caps / $1B+ / $500M+ / $100M+ / $50M+. Removes tiny stocks to reduce noise.</>,
+        <><strong>Stats bar</strong> (right side) — live count of total stocks shown, gainers (up) and losers (down) based on the most recent period (P1).</>,
+      ]} />
+      <H3>Colour legend</H3>
+      <P>A horizontal legend strip directly below the controls explaining the 7 colour bands (deep red → flat orange → deep green) with the percentage thresholds for each band.</P>
+      <H3>Info note</H3>
+      <P>A blue informational banner explaining what the columns represent: "Each column shows the daily % price change for that trading day. Column 1 is the most recent trading day. Columns are sorted newest → oldest (left to right)."</P>
+      <H3>Data table</H3>
+      <P>The main content. Columns: Row # / Code / Company / Sector / Industry / Price / Mkt Cap / P1 / P2 / P3 / P4 / P5. The five period columns (P1–P5) are heat-coloured cells. Clicking any column header sorts the table by that column.</P>
+      <H3>Load more</H3>
+      <P>Results load 200 rows at a time. A "Load more (N remaining)" button appends the next 200 rows without a page reload.</P>
+      <H3>Footer summary</H3>
+      <P>Shows "Showing X of Y stocks" plus which sector and min-cap filters are active.</P>
+      <H3>Disclaimer</H3>
+      <P>"Price data sourced from EOD Historical Data. Past performance is not indicative of future results. This is not financial advice."</P>
+
+      {/* 4 */}
+      <H2 id="h-colours">4. Reading the Colour Scale</H2>
+      <P>Each heat cell is shaded by the percentage return for that period. There are <strong>7 bands</strong>:</P>
+      <Table head={['Colour', 'Range', 'What it means']} rows={[
+        ['Deep red (bg-red-700 / white text)', '< −5%', 'Large single-day or single-week loss. Significant selling pressure.'],
+        ['Red (bg-red-500 / white text)', '−5% to −2%', 'Moderate loss. Meaningful underperformance.'],
+        ['Light red (bg-red-200 / dark red text)', '−2% to ~0%', 'Small loss. Minor weakness.'],
+        ['Orange (bg-orange-300 / dark text)', '~flat (±0.5%)', 'Essentially unchanged. No directional signal.'],
+        ['Light green (bg-emerald-200 / dark green text)', '0% to +2%', 'Small gain. Mild strength.'],
+        ['Green (bg-emerald-500 / white text)', '+2% to +5%', 'Moderate gain. Solid outperformance.'],
+        ['Deep green (bg-emerald-700 / white text)', '> +5%', 'Large gain. Strong buying interest.'],
+      ]} />
+      <Callout tone="blue" title="Text contrast">
+        Text is white when the background is dark (gains ≥ +2% or losses ≥ −2%), and dark when the background is light (flat or small moves), ensuring readability at all colour intensities.
+      </Callout>
+      <H3>How to scan the heatmap quickly</H3>
+      <UL items={[
+        <><strong>All green across a row</strong> — consistent multi-day/week strength. The stock has been in an uptrend.</>,
+        <><strong>All red across a row</strong> — persistent selling across multiple periods. A trend or fundamental problem.</>,
+        <><strong>Green then red (left to right)</strong> — recent strength reversing. Watch for breakdown.</>,
+        <><strong>Red then green</strong> — recent recovery after a selloff. Potential reversal.</>,
+        <><strong>Broad deep green column</strong> — strong market-wide day/week. Risk-on breadth.</>,
+        <><strong>Broad deep red column</strong> — market-wide selloff. Risk-off.</>,
+        <><strong>Isolated red row in a green table</strong> — stock-specific weakness worth investigating.</>,
+      ]} />
+
+      {/* 5 */}
+      <H2 id="h-modes">5. Daily vs Weekly Mode</H2>
+      <Table head={['Feature', 'Daily Mode (Last 5 Days)', 'Weekly Mode (Last 5 Weeks)']} rows={[
+        ['Column label', 'Each trading day (e.g. Mon 9 Jun, Fri 6 Jun...)', 'Each completed week (e.g. Wk 2 Jun, Wk 26 May...)'],
+        ['P1 = most recent', 'Yesterday\'s (or today\'s) price change', 'Last completed week (Friday close vs prior Friday)'],
+        ['Best for', 'Short-term traders, day traders, news-driven moves', 'Swing traders, trend-followers, weekly position review'],
+        ['Signal noise', 'Higher — individual days can be volatile', 'Lower — weekly moves are smoother and more meaningful'],
+        ['Typical use', '"What moved yesterday and is the move holding?"', '"What sectors have been strong/weak over the past month?"'],
+      ]} />
+      <P>Both modes pull from the same endpoint (<Code>GET /api/v1/market/heatmap?mode=days|weeks</Code>); the backend computes the period returns server-side and sends pre-calculated values.</P>
+
+      {/* 6 */}
+      <H2 id="h-features">6. Functional Features</H2>
+      <UL items={[
+        <><strong>Two time modes</strong> — Daily (5 days) and Weekly (5 weeks); toggle instantly without a page reload.</>,
+        <><strong>Sector filter</strong> — narrow to any of the 12 GICS sectors to focus analysis.</>,
+        <><strong>Market cap filter</strong> — exclude tiny stocks (min $50M, $100M, $500M, or $1B+) to reduce noise.</>,
+        <><strong>Colour-coded heat cells</strong> — 7-band scale from deep red to deep green for instant visual pattern recognition.</>,
+        <><strong>Sortable columns</strong> — sort by company name, sector, price, market cap, or any of the 5 period returns. Click header to sort; click again to reverse.</>,
+        <><strong>Live stats bar</strong> — total stocks shown, count of gainers and losers (based on P1).</>,
+        <><strong>Colour legend</strong> — always-visible reference strip for the 7 colour bands.</>,
+        <><strong>Load more</strong> — progressive loading (200 at a time) to keep the initial load fast.</>,
+        <><strong>Refresh button</strong> — manually re-fetch data (useful if the page has been open a while).</>,
+        <><strong>Export to Excel</strong> — download a colour-coded .xlsx file of the full result set (all rows, all 5 columns, with the same heat colours applied via Excel conditional formatting).</>,
+        <><strong>Company links</strong> — click any ASX code or company name to open its Company Detail page.</>,
+        <><strong>Last updated time</strong> — shown in the header so users know how fresh the data is.</>,
+      ]} />
+      <H3>Step-by-step: using the Heatmap</H3>
+      <OL items={[
+        'Open /market/heatmap (requires Premium).',
+        'Choose a mode: "Last 5 Days" for short-term, "Last 5 Weeks" for medium-term.',
+        'Optionally filter by Sector or Market Cap to focus the view.',
+        'Scan the heat cells — look for multi-period streaks, sector clusters, or isolated moves.',
+        'Click a column header (e.g. "P1") to sort by most recent return and see top gainers/losers.',
+        'Click a company code to deep-dive into its Company Detail page.',
+        'Use "Export Excel" to save a colour-coded snapshot for a report or morning briefing.',
+      ]} />
+
+      {/* 7 */}
+      <H2 id="h-technical">7. Technical Details</H2>
+      <H3>Frontend</H3>
+      <UL items={[
+        <>Page: <Code>frontend/app/market/heatmap/page.tsx</Code> — client-side; layout: <Code>frontend/app/market/heatmap/layout.tsx</Code>.</>,
+        <>Plan gate: <Code>&lt;PlanGate required="premium"&gt;</Code> wraps the entire page.</>,
+        <>State: <Code>mode</Code> (days/weeks), <Code>sector</Code>, <Code>capTier</Code> (index into <Code>CAP_TIERS</Code>), <Code>rows</Code> (<Code>HeatmapRow[]</Code>), <Code>labels</Code> (5 period label strings), <Code>sortKey</Code>, <Code>sortDir</Code>, <Code>page</Code> (for load-more).</>,
+        <><Code>heatBg(pct)</Code> and <Code>heatText(pct)</Code>: pure functions mapping a decimal return to Tailwind background and text colour classes respectively. Thresholds: ±0.5% = flat, ±2% = light, ±5% = medium, outside = dark.</>,
+        <>Sorting: <Code>sortRows()</Code> is a pure sort with null-last behaviour. Result memoised via <Code>useMemo</Code>.</>,
+        <>Load-more: <Code>paginated = sorted.slice(0, page × 200)</Code>; "Load more" increments <Code>page</Code>. Avoids virtualisation complexity while keeping initial render fast.</>,
+        <>Export: direct <Code>fetch()</Code> to <Code>/api/v1/market/heatmap/export</Code> with query params; receives a blob, creates an object URL and triggers a download link click.</>,
+      ]} />
+      <H3>API endpoints</H3>
+      <Table head={['Endpoint', 'What it returns']} rows={[
+        [<Code>GET /api/v1/market/heatmap</Code>, <span>Main data: <Code>&#123; rows: HeatmapRow[], labels: string[] &#125;</Code>. Params: <Code>mode</Code> (days|weeks), <Code>sector</Code> (optional), <Code>min_cap</Code> (AUD millions).</span>],
+        [<Code>GET /api/v1/market/heatmap/export</Code>, 'Returns a colour-coded .xlsx file as a binary blob. Same query params as the main endpoint. Excel conditional formatting mirrors the 7-band heat colour scale.'],
+      ]} />
+      <H3>HeatmapRow shape</H3>
+      <P>Each row object has: <Code>asx_code</Code>, <Code>company_name</Code>, <Code>sector</Code>, <Code>industry</Code>, <Code>price</Code>, <Code>market_cap</Code> (raw AUD), <Code>p1</Code>–<Code>p5</Code> (decimal returns, e.g. 0.032 = +3.2%), and <Code>labels</Code> (5 strings describing each period — e.g. "Mon 9 Jun" or "Wk 2 Jun").</P>
+      <H3>Data source</H3>
+      <P>Returns are computed server-side from the EOD price history table. Daily mode: each column is <Code>(close_today − close_yesterday) ÷ close_yesterday</Code> for 5 consecutive trading days. Weekly mode: <Code>(friday_close − prior_friday_close) ÷ prior_friday_close</Code> for 5 completed weeks. No intraday data — prices update nightly after the ASX close.</P>
+      <Callout tone="amber" title="Data freshness">
+        The Heatmap reflects <strong>end-of-day prices</strong>. The most recent column (P1) shows yesterday's return until tonight's nightly build completes. There is no live intraday update.
+      </Callout>
+
+      {/* 8 */}
+      <H2 id="h-examples">8. Usage Examples</H2>
+      <UL items={[
+        <><strong>Finding momentum leaders:</strong> switch to Weekly mode → sort by P1 (most recent week) descending → top rows are the strongest performers over the last week, with the prior weeks visible for context.</>,
+        <><strong>Sector health check:</strong> filter to "Materials" → scan the P1 column — if most cells are green, the Materials sector had a good day/week; deep green on every column suggests sustained sector strength.</>,
+        <><strong>Breadth assessment:</strong> keep All Sectors, check the stats bar — "847 up / 312 down" in a 1200-stock view signals broad market strength. "400 up / 800 down" is a weak breadth day.</>,
+        <><strong>Finding dip candidates:</strong> sort by P1 ascending → stocks with the biggest single-day losses at the top. Check P2–P5 for prior stability — a one-day red in an otherwise green row may be a dip on strength.</>,
+        <><strong>Morning briefing export:</strong> set the filter to $1B+ cap, weekly mode → Export Excel → attach the colour-coded file to the morning team report.</>,
+        <><strong>Sector rotation evidence:</strong> compare "Energy" (filter) week-on-week in Weekly mode — if P5–P3 are red and P2–P1 are green, sector rotation into Energy is under way.</>,
+      ]} />
+
+      {/* 9 */}
+      <H2 id="h-support">9. Quick Reference (Support)</H2>
+      <Table head={['Question / issue', 'Answer']} rows={[
+        ['"I can\'t see the Heatmap — it shows an upgrade prompt."', 'The Heatmap is Premium only. Free and Pro users must upgrade to access it.'],
+        ['"What do the column dates mean?"', 'In Daily mode: the actual trading date. In Weekly mode: the week ending (Friday). P1 is always the most recent; P5 is the oldest.'],
+        ['"All cells show — (dash)."', 'Price data is missing for those stocks/periods. This can happen for very recently listed stocks with no history for those dates.'],
+        ['"The data looks stale."', 'The Heatmap shows EOD data updated nightly. P1 shows the most recent completed trading day. Hit Refresh to pull the latest version from the server.'],
+        ['"Export Excel gives me an error."', 'Check network connectivity. If the issue persists, the export endpoint may be timing out on very large result sets — try applying a Sector or Cap filter to reduce the row count, then export.'],
+        ['"Only 200 rows show but I expected more."', 'The table loads 200 rows at a time. Scroll to the bottom and click "Load more" to see the next 200.'],
+        ['"I want to filter to ASX 200 stocks only."', 'Use the $1B+ cap filter as a rough proxy (most ASX 200 stocks are above $1B). For exact ASX index membership, use the Screener with is_asx200 = true.'],
+      ]} />
+
+      {/* 10 */}
+      <H2 id="h-future">10. Future Improvements</H2>
+      <UL items={[
+        <><strong>Volume overlay</strong> — optionally colour or size cells by volume relative to the 20-day average, to distinguish price moves on high vs low volume.</>,
+        <><strong>More period options</strong> — add 10-day and 10-week views, or a custom date range picker.</>,
+        <><strong>Treemap / block view</strong> — an alternative visual mode where tile size reflects market cap (like Finviz), giving proportional visual weight to large-caps.</>,
+        <><strong>Index-member filter</strong> — show only ASX 20 / 50 / 100 / 200 stocks.</>,
+        <><strong>Watchlist filter</strong> — show only stocks on the user's watchlist for a personalised heatmap.</>,
+        <><strong>Intraday refresh</strong> — live intraday price updates during ASX trading hours.</>,
+        <><strong>Click-to-screen</strong> — clicking a sector block opens the Screener pre-filtered to that sector + today's gainers.</>,
+        <><strong>Relative strength ranking column</strong> — a composite score of the 5 periods weighted by recency.</>,
+      ]} />
+
+      <div className="mt-10 pt-4 border-t border-slate-200 text-xs text-slate-400">
+        Internal documentation — Admin only. Reflects the Performance Heatmap as built. Update this manual when modes, colour thresholds, filters or export formats change.
+      </div>
+    </div>
+  )
+}
+
 // ── Manual registry (add a page manual here, then a render case below) ─────────
 const MANUALS = [
   { slug: 'market-overview', title: 'Market Overview', page: '/market', status: 'ready' as const },
@@ -1262,6 +1462,7 @@ const MANUALS = [
   { slug: 'alpha-screens',   title: 'Alpha Screens',   page: '/scans', status: 'ready' as const },
   { slug: 'glossary',        title: 'Metrics Glossary', page: '/glossary', status: 'ready' as const },
   { slug: 'portfolio',       title: 'Portfolio',       page: '/portfolio', status: 'ready' as const },
+  { slug: 'heatmap',         title: 'Performance Heatmap', page: '/market/heatmap', status: 'ready' as const },
 ]
 
 export default function AdminManualsPage() {
@@ -1316,6 +1517,7 @@ export default function AdminManualsPage() {
           {active === 'glossary' && <GlossaryManual />}
           {active === 'screener' && <ScreenerManual />}
           {active === 'portfolio' && <PortfolioManual />}
+          {active === 'heatmap' && <HeatmapManual />}
         </main>
       </div>
     </div>

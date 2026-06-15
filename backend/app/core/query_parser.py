@@ -282,6 +282,21 @@ EXTRA_ALIASES: dict[str, str] = {
     "fully franked":                                 "franking_pct",
     "payout ratio":                                  "payout_ratio",
 
+    # ── Profit-based signals ─────────────────────────────────────────────────
+    "operating margin expanding":                    "operating_margin_expanding",
+    "opm expanding":                                 "operating_margin_expanding",
+    "margin expanding":                              "operating_margin_expanding",
+    "gross margin expanding":                        "gross_margin_expanding",
+    "gpm expanding":                                 "gross_margin_expanding",
+    "fcf conversion":                                "fcf_conversion",
+    "free cash flow conversion":                     "fcf_conversion",
+    "cash conversion":                               "fcf_conversion",
+    "eps beats revenue":                             "eps_beats_revenue_growth",
+    "eps beats revenue growth":                      "eps_beats_revenue_growth",
+    "earnings beats revenue":                        "eps_beats_revenue_growth",
+    "operating leverage":                            "operating_leverage",
+    "op leverage":                                   "operating_leverage",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

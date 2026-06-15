@@ -116,8 +116,11 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "asset_turnover":           {"col": "u.asset_turnover",           "scale": 1,    "type": "number", "label": "Asset Turnover",            "unit": "x",   "cat": "Profitability"},
     "ocf_margin":               {"col": "u.ocf_margin",               "scale": 0.01, "type": "number", "label": "OCF Margin %",              "unit": "%",   "cat": "Profitability"},
     "fcf_margin":               {"col": "u.fcf_margin",               "scale": 0.01, "type": "number", "label": "FCF Margin %",              "unit": "%",   "cat": "Profitability"},
-    "capex_intensity":          {"col": "u.capex_intensity",          "scale": 0.01, "type": "number", "label": "Capex Intensity %",         "unit": "%",   "cat": "Profitability"},
-    "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number", "label": "Inventory Turnover",        "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
+    "capex_intensity":          {"col": "u.capex_intensity",          "scale": 0.01, "type": "number",  "label": "Capex Intensity %",              "unit": "%",   "cat": "Profitability"},
+    "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number",  "label": "Inventory Turnover",             "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
+    "operating_margin_expanding":{"col": "u.operating_margin_expanding","scale": 1,  "type": "boolean", "label": "Operating Margin Expanding",     "unit": "",    "cat": "Profitability"},
+    "gross_margin_expanding":   {"col": "u.gross_margin_expanding",   "scale": 1,    "type": "boolean", "label": "Gross Margin Expanding",         "unit": "",    "cat": "Profitability"},
+    "fcf_conversion":           {"col": "u.fcf_conversion",           "scale": 1,    "type": "number",  "label": "FCF Conversion (ratio)",         "unit": "x",   "cat": "Profitability"},
 
     # ── Per-Share (EPS → Profitability; BVPS → Financial Strength) ──────────────
     "eps":                  {"col": "u.eps_fy0",          "scale": 1,    "type": "number", "label": "EPS FY0 (AUD)",             "unit": "AUD", "cat": "Profitability"},   # col=u.eps_fy0
@@ -156,6 +159,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "revenue_growth_accelerating": {"col": "u.revenue_growth_accelerating", "scale": 1,    "type": "boolean", "label": "Revenue Growth Accelerating",      "unit": "",    "cat": "Growth"},
     "revenue_growth_delta":     {"col": "u.revenue_growth_delta",     "scale": 0.01, "type": "number",  "label": "Revenue Growth Acceleration (pp)", "unit": "pp",  "cat": "Growth"},
     "revenue_growth_consistency":{"col": "u.revenue_growth_consistency","scale": 1,   "type": "number",  "label": "Revenue Growth Consistency (0-3)", "unit": "",    "cat": "Growth"},
+    "eps_beats_revenue_growth": {"col": "u.eps_beats_revenue_growth", "scale": 1,    "type": "boolean", "label": "EPS Beats Revenue Growth",         "unit": "",    "cat": "Growth"},
+    "operating_leverage":       {"col": "u.operating_leverage",       "scale": 0.01, "type": "number",  "label": "Operating Leverage (pp)",          "unit": "pp",  "cat": "Growth"},
     "momentum_3m":              {"col": "u.momentum_3m",              "scale": 0.01, "type": "number", "label": "Price Momentum 3M %",      "unit": "%",   "cat": "Technicals"},
     "momentum_6m":              {"col": "u.momentum_6m",              "scale": 0.01, "type": "number", "label": "Price Momentum 6M %",      "unit": "%",   "cat": "Technicals"},
 
@@ -881,6 +886,7 @@ _PCT_COLS = {
     "revenue_growth_yoy_q", "eps_growth_yoy_q",
     "revenue_growth_hoh", "net_income_growth_hoh", "eps_growth_hoh",
     "revenue_growth_delta",
+    "operating_leverage",
     "return_1w", "return_1m", "return_3m", "return_6m",
     "return_1y", "return_ytd", "return_3y", "return_5y",
     "drawdown_from_ath", "volatility_20d", "volatility_60d",

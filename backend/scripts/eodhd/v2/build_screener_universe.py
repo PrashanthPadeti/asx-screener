@@ -240,6 +240,10 @@ INSERT INTO screener.universe (
     -- ── Sales-based signals ──────────────────────────────────────────────────
     revenue_growth_accelerating, revenue_growth_delta, revenue_growth_consistency,
 
+    -- ── Profit-based signals ─────────────────────────────────────────────────
+    operating_margin_expanding, gross_margin_expanding, fcf_conversion,
+    eps_beats_revenue_growth, operating_leverage,
+
     universe_built_at
 )
 SELECT
@@ -693,6 +697,31 @@ SELECT
     pnl0.net_profit AS net_profit_ttm,
     CASE WHEN cf0.cfo > 0
          THEN ROUND((vs.market_cap / (cf0.cfo * 1000000.0))::numeric, 4) END AS price_to_cash_flow,
+
+    -- ── Profit-based signals ─────────────────────────────────────────────────
+    -- Margin expansion: current margin above 3Y average?
+    CASE WHEN COALESCE(cm.opm, vs.operating_margin) IS NOT NULL
+          AND ym.avg_operating_margin_3y IS NOT NULL
+         THEN COALESCE(cm.opm, vs.operating_margin) > ym.avg_operating_margin_3y
+         END AS operating_margin_expanding,
+    CASE WHEN cm.gpm IS NOT NULL AND ym.avg_gross_margin_3y IS NOT NULL
+         THEN cm.gpm > ym.avg_gross_margin_3y
+         END AS gross_margin_expanding,
+    -- FCF Conversion: how much of net profit turns into free cash flow (ratio)?
+    CASE WHEN pnl0.net_profit IS NOT NULL AND pnl0.net_profit > 0 AND cf0.fcf IS NOT NULL
+         THEN ROUND((cf0.fcf / pnl0.net_profit)::numeric, 4)
+         END AS fcf_conversion,
+    -- EPS beats revenue growth: true when EPS growth > revenue growth (operating leverage)
+    CASE WHEN ym.eps_growth_1y IS NOT NULL
+          AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+         THEN ym.eps_growth_1y > COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y)
+         END AS eps_beats_revenue_growth,
+    -- Operating leverage: EBITDA growth minus revenue growth in decimal pp
+    CASE WHEN ym.ebitda_growth_1y IS NOT NULL
+          AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL
+         THEN ROUND((ym.ebitda_growth_1y
+                     - COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y))::numeric, 4)
+         END AS operating_leverage,
 
     -- ── Sales-based signals ──────────────────────────────────────────────────
     -- Acceleration: is this year's revenue growth faster than last year's?
@@ -1311,6 +1340,12 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_fy2             = EXCLUDED.revenue_fy2,
     net_profit_ttm          = EXCLUDED.net_profit_ttm,
     price_to_cash_flow      = EXCLUDED.price_to_cash_flow,
+    -- Profit-based signals
+    operating_margin_expanding  = EXCLUDED.operating_margin_expanding,
+    gross_margin_expanding      = EXCLUDED.gross_margin_expanding,
+    fcf_conversion              = EXCLUDED.fcf_conversion,
+    eps_beats_revenue_growth    = EXCLUDED.eps_beats_revenue_growth,
+    operating_leverage          = EXCLUDED.operating_leverage,
     -- Sales-based signals
     revenue_growth_accelerating = EXCLUDED.revenue_growth_accelerating,
     revenue_growth_delta        = EXCLUDED.revenue_growth_delta,

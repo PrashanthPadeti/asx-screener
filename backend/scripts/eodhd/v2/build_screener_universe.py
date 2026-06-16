@@ -1604,23 +1604,23 @@ def main():
     conn.commit()
 
     # Post-processing: revenue_above_sector_median
-    # True when a stock's revenue_cagr_3y exceeds its sector's median
+    # True when a stock's revenue_growth_3y_cagr exceeds its sector's median
     log.info("Computing revenue_above_sector_median…")
     cur.execute("""
         UPDATE screener.universe u
         SET revenue_above_sector_median = (
-            u.revenue_cagr_3y > sector_medians.median_cagr
+            u.revenue_growth_3y_cagr > sector_medians.median_cagr
         )
         FROM (
             SELECT sector,
-                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY revenue_cagr_3y) AS median_cagr
+                   PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY revenue_growth_3y_cagr) AS median_cagr
             FROM screener.universe
-            WHERE revenue_cagr_3y IS NOT NULL
+            WHERE revenue_growth_3y_cagr IS NOT NULL
               AND sector IS NOT NULL
             GROUP BY sector
         ) sector_medians
         WHERE u.sector = sector_medians.sector
-          AND u.revenue_cagr_3y IS NOT NULL
+          AND u.revenue_growth_3y_cagr IS NOT NULL
     """)
     conn.commit()
 

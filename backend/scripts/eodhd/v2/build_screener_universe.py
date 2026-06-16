@@ -178,6 +178,10 @@ INSERT INTO screener.universe (
     eps_beat_rate_4q, eps_beat_rate_8q, consecutive_eps_beats,
     analyst_upside_pct, short_ratio, years_listed,
 
+    -- ── Tier 2: ASX announcements signals ────────────────────────────────────
+    capital_raise_count_1y, recent_capital_raise, trading_halt_count_1y,
+    director_change_count_1y, days_since_last_announcement, announcement_count_1y,
+
     -- ── Quick-win metrics ────────────────────────────────────────────────────
     ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
     eps_volatility_5y, fcf_positive_years,
@@ -551,6 +555,14 @@ SELECT
     CASE WHEN cp.ipo_date IS NOT NULL
          THEN ROUND(((CURRENT_DATE - cp.ipo_date) / 365.25)::numeric, 2)
     END AS years_listed,
+
+    -- ── Tier 2: ASX announcements signals (market.asx_announcements) ─────────
+    ann.capital_raise_count_1y,
+    ann.recent_capital_raise,
+    ann.trading_halt_count_1y,
+    ann.director_change_count_1y,
+    ann.days_since_last_announcement,
+    ann.announcement_count_1y,
 
     -- ── Quick-win metrics (from yearly_metrics + daily_metrics) ──────────────
     ym.ocf_to_net_profit,
@@ -1190,6 +1202,36 @@ LEFT JOIN LATERAL (
     ) ranked
 ) eq ON TRUE
 
+-- ── ASX announcements signals (Tier 2 — market.asx_announcements) ────────────
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (
+            WHERE released_at >= NOW() - INTERVAL '1 year'
+              AND (document_type ILIKE '%Placement%' OR document_type ILIKE '%Capital Raising%'
+                   OR document_type ILIKE '%Rights Issue%' OR document_type ILIKE '%Entitlement%'
+                   OR document_type ILIKE '%SPP%')
+        )::SMALLINT AS capital_raise_count_1y,
+        COUNT(*) FILTER (
+            WHERE released_at >= NOW() - INTERVAL '90 days'
+              AND (document_type ILIKE '%Placement%' OR document_type ILIKE '%Capital Raising%'
+                   OR document_type ILIKE '%Rights Issue%' OR document_type ILIKE '%Entitlement%'
+                   OR document_type ILIKE '%SPP%')
+        ) > 0 AS recent_capital_raise,
+        COUNT(*) FILTER (
+            WHERE released_at >= NOW() - INTERVAL '1 year'
+              AND document_type ILIKE '%Trading Halt%'
+        )::SMALLINT AS trading_halt_count_1y,
+        COUNT(*) FILTER (
+            WHERE released_at >= NOW() - INTERVAL '1 year'
+              AND (document_type ILIKE '%Director%' OR document_type ILIKE '%Substantial Holder%'
+                   OR document_type ILIKE '%Becoming a substantial%')
+        )::SMALLINT AS director_change_count_1y,
+        EXTRACT(DAY FROM NOW() - MAX(released_at))::INT AS days_since_last_announcement,
+        COUNT(*) FILTER (WHERE released_at >= NOW() - INTERVAL '1 year')::SMALLINT AS announcement_count_1y
+    FROM market.asx_announcements
+    WHERE asx_code = c.asx_code
+) ann ON TRUE
+
 -- ── market.companies (admin-maintained tags) ─────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT business_model_tag, commodity_exposure
@@ -1421,6 +1463,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     analyst_upside_pct      = EXCLUDED.analyst_upside_pct,
     short_ratio             = EXCLUDED.short_ratio,
     years_listed            = EXCLUDED.years_listed,
+    -- Tier 2: ASX announcements signals
+    capital_raise_count_1y         = EXCLUDED.capital_raise_count_1y,
+    recent_capital_raise           = EXCLUDED.recent_capital_raise,
+    trading_halt_count_1y          = EXCLUDED.trading_halt_count_1y,
+    director_change_count_1y       = EXCLUDED.director_change_count_1y,
+    days_since_last_announcement   = EXCLUDED.days_since_last_announcement,
+    announcement_count_1y          = EXCLUDED.announcement_count_1y,
     -- Quick-win metrics
     ocf_to_net_profit       = EXCLUDED.ocf_to_net_profit,
     fcf_payout_ratio        = EXCLUDED.fcf_payout_ratio,

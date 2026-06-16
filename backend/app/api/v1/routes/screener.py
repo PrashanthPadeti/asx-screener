@@ -209,6 +209,14 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "short_ratio":             {"col": "u.short_ratio",              "scale": 1,    "type": "number", "label": "Short Ratio (Days to Cover)","unit": "days","cat": "Quality"},
     "years_listed":            {"col": "u.years_listed",             "scale": 1,    "type": "number", "label": "Years Listed (IPO Age)",     "unit": "yrs", "cat": "Quality"},
 
+    # ── Tier 2: ASX announcements signals ─────────────────────────────────────
+    "capital_raise_count_1y":       {"col": "u.capital_raise_count_1y",       "scale": 1, "type": "number",  "label": "Capital Raises (1Y)",        "unit": "",    "cat": "Quality"},
+    "recent_capital_raise":          {"col": "u.recent_capital_raise",         "scale": 1, "type": "boolean", "label": "Recent Capital Raise (90d)", "unit": "",    "cat": "Quality"},
+    "trading_halt_count_1y":        {"col": "u.trading_halt_count_1y",        "scale": 1, "type": "number",  "label": "Trading Halts (1Y)",         "unit": "",    "cat": "Quality"},
+    "director_change_count_1y":     {"col": "u.director_change_count_1y",     "scale": 1, "type": "number",  "label": "Director Changes (1Y)",      "unit": "",    "cat": "Quality"},
+    "days_since_last_announcement": {"col": "u.days_since_last_announcement", "scale": 1, "type": "number",  "label": "Days Since Last Announcement","unit": "days","cat": "Quality"},
+    "announcement_count_1y":        {"col": "u.announcement_count_1y",        "scale": 1, "type": "number",  "label": "Announcement Count (1Y)",    "unit": "",    "cat": "Quality"},
+
     # ── Quality / Rolling Averages ────────────────────────────────────────────
     "avg_roe_5y":              {"col": "u.avg_roe_5y",              "scale": 0.01, "type": "number", "label": "Avg ROE 5Y %",              "unit": "%",   "cat": "Quality"},
     "avg_roa_3y":              {"col": "u.avg_roa_3y",              "scale": 0.01, "type": "number", "label": "Avg ROA 3Y %",              "unit": "%",   "cat": "Quality"},

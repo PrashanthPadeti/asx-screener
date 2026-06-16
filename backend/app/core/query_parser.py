@@ -386,6 +386,22 @@ EXTRA_ALIASES: dict[str, str] = {
     "company age":                                    "years_listed",
     "ipo age":                                         "years_listed",
 
+    # ── Tier 2: ASX announcements signals ─────────────────────────────────────
+    "capital raises":                                 "capital_raise_count_1y",
+    "capital raise count":                            "capital_raise_count_1y",
+    "placements 1 year":                              "capital_raise_count_1y",
+    "recent capital raise":                           "recent_capital_raise",
+    "recently raised capital":                        "recent_capital_raise",
+    "trading halts":                                  "trading_halt_count_1y",
+    "trading halt count":                             "trading_halt_count_1y",
+    "director changes":                               "director_change_count_1y",
+    "director change count":                          "director_change_count_1y",
+    "substantial holder changes":                     "director_change_count_1y",
+    "days since last announcement":                   "days_since_last_announcement",
+    "days since announcement":                         "days_since_last_announcement",
+    "announcement count":                              "announcement_count_1y",
+    "disclosure frequency":                            "announcement_count_1y",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

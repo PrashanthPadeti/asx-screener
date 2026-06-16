@@ -1207,24 +1207,24 @@ LEFT JOIN LATERAL (
     SELECT
         COUNT(*) FILTER (
             WHERE released_at >= NOW() - INTERVAL '1 year'
-              AND (document_type ILIKE '%Placement%' OR document_type ILIKE '%Capital Raising%'
-                   OR document_type ILIKE '%Rights Issue%' OR document_type ILIKE '%Entitlement%'
-                   OR document_type ILIKE '%SPP%')
+              AND (document_type ILIKE '%%Placement%%' OR document_type ILIKE '%%Capital Raising%%'
+                   OR document_type ILIKE '%%Rights Issue%%' OR document_type ILIKE '%%Entitlement%%'
+                   OR document_type ILIKE '%%SPP%%')
         )::SMALLINT AS capital_raise_count_1y,
         COUNT(*) FILTER (
             WHERE released_at >= NOW() - INTERVAL '90 days'
-              AND (document_type ILIKE '%Placement%' OR document_type ILIKE '%Capital Raising%'
-                   OR document_type ILIKE '%Rights Issue%' OR document_type ILIKE '%Entitlement%'
-                   OR document_type ILIKE '%SPP%')
+              AND (document_type ILIKE '%%Placement%%' OR document_type ILIKE '%%Capital Raising%%'
+                   OR document_type ILIKE '%%Rights Issue%%' OR document_type ILIKE '%%Entitlement%%'
+                   OR document_type ILIKE '%%SPP%%')
         ) > 0 AS recent_capital_raise,
         COUNT(*) FILTER (
             WHERE released_at >= NOW() - INTERVAL '1 year'
-              AND document_type ILIKE '%Trading Halt%'
+              AND document_type ILIKE '%%Trading Halt%%'
         )::SMALLINT AS trading_halt_count_1y,
         COUNT(*) FILTER (
             WHERE released_at >= NOW() - INTERVAL '1 year'
-              AND (document_type ILIKE '%Director%' OR document_type ILIKE '%Substantial Holder%'
-                   OR document_type ILIKE '%Becoming a substantial%')
+              AND (document_type ILIKE '%%Director%%' OR document_type ILIKE '%%Substantial Holder%%'
+                   OR document_type ILIKE '%%Becoming a substantial%%')
         )::SMALLINT AS director_change_count_1y,
         EXTRACT(DAY FROM NOW() - MAX(released_at))::INT AS days_since_last_announcement,
         COUNT(*) FILTER (WHERE released_at >= NOW() - INTERVAL '1 year')::SMALLINT AS announcement_count_1y

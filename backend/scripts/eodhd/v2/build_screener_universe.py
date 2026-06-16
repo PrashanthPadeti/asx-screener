@@ -174,6 +174,10 @@ INSERT INTO screener.universe (
     shares_outstanding,
     percent_insiders, percent_institutions,
 
+    -- ── Tier 3: EODHD data previously unused ─────────────────────────────────
+    eps_beat_rate_4q, eps_beat_rate_8q, consecutive_eps_beats,
+    analyst_upside_pct, short_ratio, years_listed,
+
     -- ── Quick-win metrics ────────────────────────────────────────────────────
     ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
     eps_volatility_5y, fcf_positive_years,
@@ -528,6 +532,25 @@ SELECT
     ss.shares_outstanding,
     ss.percent_insiders,
     ss.percent_institutions,
+
+    -- ── Tier 3: EODHD data previously unused ──────────────────────────────────
+    -- EPS earnings-surprise streak (financials.earnings_quarterly)
+    eq.eps_beat_rate_4q,
+    eq.eps_beat_rate_8q,
+    eq.consecutive_eps_beats::SMALLINT AS consecutive_eps_beats,
+    -- Analyst target price upside/downside vs current price
+    CASE WHEN ar.target_price IS NOT NULL AND dp.close IS NOT NULL AND dp.close > 0
+         THEN ROUND(((ar.target_price / dp.close) - 1) * 100, 4)
+    END AS analyst_upside_pct,
+    -- EODHD days-to-cover (shares short / 50d avg daily volume)
+    CASE WHEN ss.shares_short IS NOT NULL AND dm.volume_avg_50d IS NOT NULL
+              AND dm.volume_avg_50d > 0
+         THEN ROUND((ss.shares_short / dm.volume_avg_50d)::numeric, 4)
+    END AS short_ratio,
+    -- Years since IPO (company maturity proxy)
+    CASE WHEN cp.ipo_date IS NOT NULL
+         THEN ROUND((EXTRACT(EPOCH FROM (CURRENT_DATE - cp.ipo_date)) / 86400 / 365.25)::numeric, 2)
+    END AS years_listed,
 
     -- ── Quick-win metrics (from yearly_metrics + daily_metrics) ──────────────
     ym.ocf_to_net_profit,
@@ -1132,11 +1155,40 @@ LEFT JOIN LATERAL (
     SELECT
         shares_outstanding::BIGINT,
         percent_insiders,
-        percent_institutions
+        percent_institutions,
+        shares_short
     FROM staging_au.shares_stats
     WHERE asx_code = c.asx_code
     LIMIT 1
 ) ss ON TRUE
+
+-- ── Company profile (staging — IPO date for company maturity proxy) ──────────
+LEFT JOIN LATERAL (
+    SELECT ipo_date
+    FROM staging_au.company_profile
+    WHERE asx_code = c.asx_code
+    LIMIT 1
+) cp ON TRUE
+
+-- ── EPS earnings-surprise history (Tier 3 — quarterly beat/miss streak) ──────
+LEFT JOIN LATERAL (
+    SELECT
+        ROUND(AVG(CASE WHEN beat_miss = 'beat' THEN 1.0 ELSE 0.0 END)
+              FILTER (WHERE rn <= 4), 4) AS eps_beat_rate_4q,
+        ROUND(AVG(CASE WHEN beat_miss = 'beat' THEN 1.0 ELSE 0.0 END)
+              FILTER (WHERE rn <= 8), 4) AS eps_beat_rate_8q,
+        COUNT(*) FILTER (WHERE beat_miss = 'beat' AND miss_before = 0) AS consecutive_eps_beats
+    FROM (
+        SELECT
+            beat_miss,
+            ROW_NUMBER() OVER (ORDER BY period_end_date DESC) AS rn,
+            COUNT(*) FILTER (WHERE beat_miss <> 'beat')
+                OVER (ORDER BY period_end_date DESC) AS miss_before
+        FROM financials.earnings_quarterly
+        WHERE asx_code = c.asx_code
+          AND beat_miss IS NOT NULL
+    ) ranked
+) eq ON TRUE
 
 -- ── market.companies (admin-maintained tags) ─────────────────────────────────
 LEFT JOIN LATERAL (
@@ -1362,6 +1414,13 @@ ON CONFLICT (asx_code) DO UPDATE SET
     shares_outstanding      = EXCLUDED.shares_outstanding,
     percent_insiders        = EXCLUDED.percent_insiders,
     percent_institutions    = EXCLUDED.percent_institutions,
+    -- Tier 3: EODHD data previously unused
+    eps_beat_rate_4q        = EXCLUDED.eps_beat_rate_4q,
+    eps_beat_rate_8q        = EXCLUDED.eps_beat_rate_8q,
+    consecutive_eps_beats   = EXCLUDED.consecutive_eps_beats,
+    analyst_upside_pct      = EXCLUDED.analyst_upside_pct,
+    short_ratio             = EXCLUDED.short_ratio,
+    years_listed            = EXCLUDED.years_listed,
     -- Quick-win metrics
     ocf_to_net_profit       = EXCLUDED.ocf_to_net_profit,
     fcf_payout_ratio        = EXCLUDED.fcf_payout_ratio,

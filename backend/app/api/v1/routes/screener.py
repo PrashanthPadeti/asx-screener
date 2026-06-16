@@ -201,6 +201,14 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "analyst_buy_pct":         {"col": "u.analyst_buy_pct",          "scale": 1,    "type": "number", "label": "Analyst Buy %",              "unit": "%",   "cat": "Quality"},   # TODO: populate analyst_ratings
     "analyst_consensus_score": {"col": "u.analyst_consensus_score",  "scale": 1,    "type": "number", "label": "Analyst Consensus Score",    "unit": "",    "cat": "Quality"},   # TODO: populate analyst_ratings
 
+    # ── Tier 3: EODHD data previously unused ──────────────────────────────────
+    "eps_beat_rate_4q":        {"col": "u.eps_beat_rate_4q",         "scale": 1,    "type": "number", "label": "EPS Beat Rate (4Q)",         "unit": "%",   "cat": "Quality"},
+    "eps_beat_rate_8q":        {"col": "u.eps_beat_rate_8q",         "scale": 1,    "type": "number", "label": "EPS Beat Rate (8Q)",         "unit": "%",   "cat": "Quality"},
+    "consecutive_eps_beats":   {"col": "u.consecutive_eps_beats",    "scale": 1,    "type": "number", "label": "Consecutive EPS Beats",      "unit": "qtrs","cat": "Quality"},
+    "analyst_upside_pct":      {"col": "u.analyst_upside_pct",       "scale": 1,    "type": "number", "label": "Analyst Target Upside %",    "unit": "%",   "cat": "Quality"},
+    "short_ratio":             {"col": "u.short_ratio",              "scale": 1,    "type": "number", "label": "Short Ratio (Days to Cover)","unit": "days","cat": "Quality"},
+    "years_listed":            {"col": "u.years_listed",             "scale": 1,    "type": "number", "label": "Years Listed (IPO Age)",     "unit": "yrs", "cat": "Quality"},
+
     # ── Quality / Rolling Averages ────────────────────────────────────────────
     "avg_roe_5y":              {"col": "u.avg_roe_5y",              "scale": 0.01, "type": "number", "label": "Avg ROE 5Y %",              "unit": "%",   "cat": "Quality"},
     "avg_roa_3y":              {"col": "u.avg_roa_3y",              "scale": 0.01, "type": "number", "label": "Avg ROA 3Y %",              "unit": "%",   "cat": "Quality"},

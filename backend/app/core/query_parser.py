@@ -369,6 +369,23 @@ EXTRA_ALIASES: dict[str, str] = {
     "above sector median":                           "revenue_above_sector_median",
     "beats sector":                                  "revenue_above_sector_median",
 
+    # ── Tier 3: EODHD data previously unused ──────────────────────────────────
+    "eps beat rate 4q":                              "eps_beat_rate_4q",
+    "eps beat rate 4 quarters":                       "eps_beat_rate_4q",
+    "eps beat rate 8q":                              "eps_beat_rate_8q",
+    "eps beat rate 8 quarters":                       "eps_beat_rate_8q",
+    "consecutive eps beats":                          "consecutive_eps_beats",
+    "eps beat streak":                                "consecutive_eps_beats",
+    "earnings beat streak":                           "consecutive_eps_beats",
+    "analyst upside":                                 "analyst_upside_pct",
+    "analyst target upside":                          "analyst_upside_pct",
+    "upside to target":                               "analyst_upside_pct",
+    "short ratio":                                    "short_ratio",
+    "days to cover":                                  "short_ratio",
+    "years listed":                                   "years_listed",
+    "company age":                                    "years_listed",
+    "ipo age":                                         "years_listed",
+
     # ── Financial Strength ────────────────────────────────────────────────────
     "debt equity":                                   "debt_to_equity",
     "debt to equity":                                "debt_to_equity",

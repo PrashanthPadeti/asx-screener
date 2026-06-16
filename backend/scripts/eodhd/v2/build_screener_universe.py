@@ -549,7 +549,7 @@ SELECT
     END AS short_ratio,
     -- Years since IPO (company maturity proxy)
     CASE WHEN cp.ipo_date IS NOT NULL
-         THEN ROUND((EXTRACT(EPOCH FROM (CURRENT_DATE - cp.ipo_date)) / 86400 / 365.25)::numeric, 2)
+         THEN ROUND(((CURRENT_DATE - cp.ipo_date) / 365.25)::numeric, 2)
     END AS years_listed,
 
     -- ── Quick-win metrics (from yearly_metrics + daily_metrics) ──────────────

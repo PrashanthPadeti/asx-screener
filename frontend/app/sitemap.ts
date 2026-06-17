@@ -30,7 +30,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/learn/how-to-find-asx-growth-stocks`,          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-use-asx-volume-and-momentum`,     lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-check-asx-dividend-sustainability`, lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
-    { url: `${base}/learn/building-an-asx-dividend-portfolio`,       lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/building-an-asx-dividend-portfolio`,             lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-find-asx-dividend-stocks-with-franking`, lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-find-quality-asx-companies`,             lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-screen-for-strong-cash-flow-stocks`,     lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-find-undervalued-asx-stocks`,            lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-asx-screener-ai-query-works`,               lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-use-asx-alpha-screens`,                  lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/dividend-yield-vs-grossed-up-yield`,            lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/best-metrics-for-asx-dividend-investors`,       lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-asx-screener-watchlists-and-alerts-work`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────

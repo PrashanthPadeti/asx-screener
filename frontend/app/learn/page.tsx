@@ -230,6 +230,74 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         readTime: '9 min', level: 'Intermediate',
         href: '/learn/how-to-use-asx-volume-and-momentum', buttonLabel: 'Read guide',
       },
+      {
+        title: 'How to Find Undervalued ASX Stocks',
+        description: 'Value investing metrics explained — P/E, P/B, EV/EBITDA, FCF yield, and how to avoid value traps when screening the ASX.',
+        readTime: '10 min', level: 'Intermediate',
+        href: '/learn/how-to-find-undervalued-asx-stocks', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How to Find Quality ASX Companies',
+        description: 'Six pillars of quality investing — ROIC, gross margins, earnings consistency, FCF conversion, balance sheet strength, and F-Score.',
+        readTime: '10 min', level: 'Intermediate',
+        href: '/learn/how-to-find-quality-asx-companies', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How to Screen for Strong Cash Flow ASX Stocks',
+        description: 'Why free cash flow matters more than earnings, and how to screen for FCF margin, FCF yield, and cash conversion on the ASX.',
+        readTime: '9 min', level: 'Intermediate',
+        href: '/learn/how-to-screen-for-strong-cash-flow-stocks', buttonLabel: 'Read guide',
+      },
+    ],
+  },
+  {
+    category: 'Dividend Deep Dive',
+    icon: DollarSign,
+    color: 'emerald',
+    guides: [
+      {
+        title: 'How to Find ASX Dividend Stocks with Franking Credits',
+        description: 'A 6-step screening process to find high-quality ASX dividend stocks with strong franking — including grossed-up yield tables by tax bracket.',
+        readTime: '10 min', level: 'Intermediate',
+        href: '/learn/how-to-find-asx-dividend-stocks-with-franking', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'Dividend Yield vs Grossed-Up Yield Explained',
+        description: 'What grossed-up yield means, how franking credits increase effective income, and how to compare franked and unfranked dividends on equal terms.',
+        readTime: '8 min', level: 'Beginner',
+        href: '/learn/dividend-yield-vs-grossed-up-yield', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'Best Metrics for ASX Dividend Investors',
+        description: 'Eight metrics every income investor should track — grossed-up yield, payout ratio, FCF cover, franking, dividend growth, earnings trend, debt, and history.',
+        readTime: '10 min', level: 'Intermediate',
+        href: '/learn/best-metrics-for-asx-dividend-investors', buttonLabel: 'Read guide',
+      },
+    ],
+  },
+  {
+    category: 'ASX Screener Product Guides',
+    icon: Zap,
+    color: 'blue',
+    guides: [
+      {
+        title: 'How ASX Screener AI Query Helps Investors Search in Plain English',
+        description: 'Type your investment idea in plain English — AI Query converts it to structured filters instantly. Includes example queries and tips for better results.',
+        readTime: '6 min', level: 'Beginner',
+        href: '/learn/how-asx-screener-ai-query-works', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How to Use ASX Screener Alpha Screens',
+        description: 'Ready-made screens for dividend, value, growth, quality, momentum, and sector strategies — run any in one click, then customise.',
+        readTime: '6 min', level: 'Beginner',
+        href: '/learn/how-to-use-asx-alpha-screens', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How Watchlists and Alerts Help Investors Stay Organised',
+        description: 'Track your shortlisted stocks in one place and get notified at your target prices — the screening-to-watchlist workflow explained.',
+        readTime: '6 min', level: 'Beginner',
+        href: '/learn/how-asx-screener-watchlists-and-alerts-work', buttonLabel: 'Read guide',
+      },
     ],
   },
 ]

@@ -72,6 +72,9 @@ const siteSchema = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
+      <head>
+        <meta name="google-site-verification" content="42Vl_6jkLmVW1klkNqSSjfse1wxr0sNN8NkUXaiqGwQ" />
+      </head>
       <body className={`${inter.className} bg-gray-50 min-h-screen overflow-x-hidden`}>
         <script
           type="application/ld+json"

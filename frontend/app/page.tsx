@@ -9,7 +9,7 @@ export const metadata: Metadata = {
   title: 'ASX Screener — Screen Every ASX Stock',
   description: 'The most powerful ASX stock screener. Filter by PE ratio, dividend yield, franking credits, ROE, debt and 80+ more metrics. Free to start.',
   alternates: { canonical: 'https://asxscreener.com.au/' },
-  other: { 'google-site-verification': '42Vl_6jkLmVW1klkNqSSjfse1wxr0sNN8NkUXaiqGwQ' },
+
 }
 
 // Force dynamic rendering so every request fetches live data.

@@ -33,9 +33,6 @@ export const metadata: Metadata = {
     description: 'Screen ASX stocks with franking credits, mining & REIT depth, and AI insights. Free for Australian investors.',
     images:      ['/og-image.png'],
   },
-  other: {
-    'google-site-verification': '42Vl_6jkLmVW1klkNqSSjfse1wxr0sNN8NkUXaiqGwQ',
-  },
 }
 
 const siteSchema = {
@@ -72,9 +69,6 @@ const siteSchema = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <head>
-        <meta name="google-site-verification" content="42Vl_6jkLmVW1klkNqSSjfse1wxr0sNN8NkUXaiqGwQ" />
-      </head>
       <body className={`${inter.className} bg-gray-50 min-h-screen overflow-x-hidden`}>
         <script
           type="application/ld+json"

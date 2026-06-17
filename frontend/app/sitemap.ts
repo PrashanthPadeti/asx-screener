@@ -26,6 +26,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/learn/how-to-screen-asx-stocks-for-beginners`, lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
     { url: `${base}/learn/roe-explained`,                          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/asx-screener-three-ways-to-search`,      lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/roic-explained`,                          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-find-asx-growth-stocks`,          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-use-asx-volume-and-momentum`,     lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────

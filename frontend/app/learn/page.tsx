@@ -143,6 +143,12 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         href: '/learn/roe-explained', buttonLabel: 'Read guide',
       },
       {
+        title: 'ROIC Explained: Return on Invested Capital',
+        description: 'What ROIC is, the WACC test, why it beats ROE for comparing companies, and how to screen for high-ROIC ASX stocks.',
+        readTime: '9 min', level: 'Intermediate',
+        href: '/learn/roic-explained', buttonLabel: 'Read guide',
+      },
+      {
         title: 'Analysing ASX Mining Stocks',
         description: 'How to read AISC, ore reserves, JORC resources, and interpret mining feasibility studies.',
         readTime: '12 min', level: 'Intermediate', comingSoon: true,
@@ -206,9 +212,16 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         href: '/screener', internal: true, buttonLabel: 'Try this screen',
       },
       {
-        title: 'Growth Stock Screening for ASX',
-        description: 'Revenue growth, earnings momentum, and quality factors to filter for ASX growth companies.',
-        readTime: '9 min', level: 'Advanced', comingSoon: true,
+        title: 'How to Find ASX Growth Stocks Using Revenue Growth',
+        description: 'Revenue growth, earnings momentum, operating leverage, and PEG ratio — how to screen for quality ASX growth companies.',
+        readTime: '10 min', level: 'Intermediate',
+        href: '/learn/how-to-find-asx-growth-stocks', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How ASX Traders Use Volume and Momentum',
+        description: 'RSI, moving averages, ADX, volume breakouts — practical technical screens for active ASX traders.',
+        readTime: '9 min', level: 'Intermediate',
+        href: '/learn/how-to-use-asx-volume-and-momentum', buttonLabel: 'Read guide',
       },
     ],
   },

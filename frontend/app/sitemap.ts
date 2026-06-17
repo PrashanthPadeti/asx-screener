@@ -40,6 +40,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/learn/dividend-yield-vs-grossed-up-yield`,            lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/best-metrics-for-asx-dividend-investors`,       lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-asx-screener-watchlists-and-alerts-work`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/what-is-a-multibagger-stock`,                   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-screen-for-asx-multibagger-stocks`,      lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/lessons-from-successful-multibagger-investors`,  lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────

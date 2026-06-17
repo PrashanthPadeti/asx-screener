@@ -251,6 +251,31 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
     ],
   },
   {
+    category: 'Multibagger Investing',
+    icon: TrendingUp,
+    color: 'purple',
+    guides: [
+      {
+        title: 'What Is a Multibagger Stock?',
+        description: 'The definition, the 8 traits most multibaggers share before becoming big winners, and why growth, ROIC, and patience are the core ingredients.',
+        readTime: '8 min', level: 'Beginner',
+        href: '/learn/what-is-a-multibagger-stock', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How to Screen for ASX Multibagger Stocks',
+        description: 'Growth, quality, reinvestment, and valuation metrics for identifying multibagger candidates — with 8 practical screen examples.',
+        readTime: '12 min', level: 'Intermediate',
+        href: '/learn/how-to-screen-for-asx-multibagger-stocks', buttonLabel: 'Read guide',
+      },
+      {
+        title: "Lessons from the World's Best Multibagger Investors",
+        description: "Peter Lynch, Buffett, Munger, Fisher, Greenblatt, Terry Smith — what they found in common and what ASX investors can learn from each of them.",
+        readTime: '12 min', level: 'Intermediate',
+        href: '/learn/lessons-from-successful-multibagger-investors', buttonLabel: 'Read guide',
+      },
+    ],
+  },
+  {
     category: 'Dividend Deep Dive',
     icon: DollarSign,
     color: 'emerald',

@@ -88,6 +88,18 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         href: '/learn/what-is-an-asx-stock-screener', buttonLabel: 'Read guide',
       },
       {
+        title: 'How to Screen ASX Stocks for Beginners',
+        description: 'Step-by-step guide to your first ASX screen — which filters to start with, how to research results, and common mistakes to avoid.',
+        readTime: '10 min', level: 'Beginner',
+        href: '/learn/how-to-screen-asx-stocks-for-beginners', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'One ASX Screener, Three Ways to Search',
+        description: 'Filter mode, AI Query, and Query Mode explained — which approach suits your investing style and when to use each one.',
+        readTime: '8 min', level: 'Beginner',
+        href: '/learn/asx-screener-three-ways-to-search', buttonLabel: 'Read guide',
+      },
+      {
         title: 'Understanding Franking Credits',
         description: 'Australia\'s unique dividend imputation system explained — and how to calculate your grossed-up yield.',
         readTime: '8 min', level: 'Beginner',
@@ -123,6 +135,12 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         description: 'P/E, P/B, EV/EBITDA, ROE — which ratios matter most for Australian stocks and how to use them.',
         readTime: '10 min', level: 'Intermediate',
         href: '/learn/key-financial-ratios', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'ROE Explained: How Investors Use Return on Equity',
+        description: 'What ROE is, how to calculate it, what counts as a good ROE by sector, and how to use it with ROCE and ROIC.',
+        readTime: '9 min', level: 'Intermediate',
+        href: '/learn/roe-explained', buttonLabel: 'Read guide',
       },
       {
         title: 'Analysing ASX Mining Stocks',

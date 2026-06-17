@@ -23,6 +23,9 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/learn/franking-credits-explained`,          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/key-financial-ratios`,                lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-read-company-announcements`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-screen-asx-stocks-for-beginners`, lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+    { url: `${base}/learn/roe-explained`,                          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/asx-screener-three-ways-to-search`,      lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────

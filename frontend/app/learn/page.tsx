@@ -178,6 +178,12 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         href: '/learn/how-to-build-an-asx-watchlist', buttonLabel: 'Read guide',
       },
       {
+        title: 'How to Check If an ASX Dividend Is Sustainable',
+        description: 'Payout ratio, FCF cover, dividend cover, debt, earnings trend, and franking history — six metrics to avoid yield traps.',
+        readTime: '10 min', level: 'Intermediate',
+        href: '/learn/how-to-check-asx-dividend-sustainability', buttonLabel: 'Read guide',
+      },
+      {
         title: 'Building a Dividend Portfolio on the ASX',
         description: 'How to construct a diversified income portfolio using the ASX\'s high-yield dividend payers.',
         readTime: '15 min', level: 'Intermediate', comingSoon: true,

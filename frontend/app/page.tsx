@@ -6,10 +6,9 @@ import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
 
 export const metadata: Metadata = {
-  title: 'ASX Screener — Screen Every ASX Stock',
-  description: 'The most powerful ASX stock screener. Filter by PE ratio, dividend yield, franking credits, ROE, debt and 80+ more metrics. Free to start.',
+  title: 'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
+  description: 'Discover, filter, compare, monitor, and research ASX stocks using simple filters, AI queries, advanced screens, watchlists, alerts, and market data tools. Free for Australian investors.',
   alternates: { canonical: 'https://asxscreener.com.au/' },
-
 }
 
 // Force dynamic rendering so every request fetches live data.
@@ -200,6 +199,45 @@ function FreshnessBadge({ builtAt }: { builtAt: string | null }) {
   )
 }
 
+// ── FAQ schema ────────────────────────────────────────────────
+
+const faqSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: [
+    {
+      '@type': 'Question',
+      name: 'What is ASX Screener?',
+      acceptedAnswer: { '@type': 'Answer', text: 'ASX Screener is an Australian stock screening and research platform that helps investors discover, filter, compare, monitor, and research ASX-listed stocks using simple filters, AI queries, advanced screens, watchlists, alerts, and market data tools.' },
+    },
+    {
+      '@type': 'Question',
+      name: 'What can I screen for on ASX Screener?',
+      acceptedAnswer: { '@type': 'Answer', text: 'You can screen ASX stocks by market cap, sector, P/E ratio, ROE, ROIC, dividend yield, franking credits, revenue growth, earnings growth, cash flow, debt, returns, price momentum, Piotroski F-Score, and 80+ more metrics.' },
+    },
+    {
+      '@type': 'Question',
+      name: 'What are franking credits and why does ASX Screener show them?',
+      acceptedAnswer: { '@type': 'Answer', text: 'Franking credits (imputation credits) are tax credits attached to Australian dividends. ASX Screener shows grossed-up dividend yields that include franking, so Australian investors can compare the true after-tax value of dividends across stocks.' },
+    },
+    {
+      '@type': 'Question',
+      name: 'Does ASX Screener support AI stock screening?',
+      acceptedAnswer: { '@type': 'Answer', text: 'Yes. ASX Screener includes an AI Query mode that lets you type plain English stock screening ideas — for example "profitable small caps with low debt and growing revenue" — and converts them into structured screens automatically.' },
+    },
+    {
+      '@type': 'Question',
+      name: 'Is ASX Screener financial advice?',
+      acceptedAnswer: { '@type': 'Answer', text: 'No. ASX Screener is a data, screening, and research tool only. It does not provide personal financial advice. Always do your own research or consult a licensed financial adviser before making investment decisions.' },
+    },
+    {
+      '@type': 'Question',
+      name: 'Is ASX Screener free to use?',
+      acceptedAnswer: { '@type': 'Answer', text: 'Yes, ASX Screener has a free plan that gives access to the core stock screener and market data. Premium plans unlock additional features including AI insights, advanced screens, watchlists, alerts, and portfolio tracking.' },
+    },
+  ],
+}
+
 // ── Page ──────────────────────────────────────────────────────
 
 export default async function HomePage() {
@@ -214,6 +252,10 @@ export default async function HomePage() {
 
   return (
     <div className="space-y-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }}
+      />
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <section className="py-10 px-4">
@@ -249,11 +291,10 @@ export default async function HomePage() {
             </div>
 
             <h1 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
-              ASX Stock Screener
+              ASX Stock Screener for Australian Investors
             </h1>
             <p className="text-lg text-gray-600 max-w-2xl mx-auto mb-8">
-              The most comprehensive ASX screener — franking credits, mining metrics,
-              A-REIT depth, and AI insights. Built for Australian investors.
+              Discover, filter, compare, monitor, and research ASX stocks using simple filters, AI queries, advanced screens, watchlists, and market data tools. Built for Australian investors — with franking credits, mining depth, and A-REIT metrics you won&apos;t find anywhere else.
             </p>
 
             <div className="flex flex-wrap gap-3 justify-center mb-8">

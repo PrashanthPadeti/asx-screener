@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Market Scans',
-  description: 'Pre-built ASX stock screens for value investing, dividend income, growth, momentum and more. Run any scan instantly in the full screener.',
+  title: 'ASX Alpha Screens | Ready-Made Stock Screens for Australian Investors',
+  description: 'Explore ready-made ASX stock screens for dividend income, growth, value, momentum, quality, and sector strategies. Run any screen instantly in the ASX Screener.',
   alternates: { canonical: 'https://asxscreener.com.au/scans' },
 }
 

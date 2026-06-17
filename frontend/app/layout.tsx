@@ -12,10 +12,10 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   metadataBase: new URL('https://asxscreener.com.au'),
   title: {
-    default:  'ASX Screener — Australian Stock Screener',
+    default:  'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
     template: '%s | ASX Screener',
   },
-  description: 'Screen ASX stocks with franking credits, mining & REIT depth, and AI insights. Free for Australian investors.',
+  description: 'Discover, filter, compare, monitor, and research ASX stocks using simple filters, AI queries, advanced screens, watchlists, and market data tools. Built for Australian investors.',
   alternates: {
     canonical: 'https://asxscreener.com.au',
   },

@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Market Overview',
-  description: 'Live ASX market overview — sector heatmap, top movers, ASX 200 & 300 summary, and market breadth data.',
+  title: 'ASX Market Overview | Top Movers, Sector Heatmap and Market Signals',
+  description: 'Track ASX market activity, sector performance, top gainers, top losers, volume activity, and market signals. Live ASX market overview for Australian investors.',
   alternates: { canonical: 'https://asxscreener.com.au/market' },
 }
 

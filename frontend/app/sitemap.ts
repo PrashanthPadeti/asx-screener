@@ -32,6 +32,21 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/commodities`,    lastModified: now, changeFrequency: 'daily',   priority: 0.6 },
     { url: `${base}/top5`,           lastModified: now, changeFrequency: 'weekly',  priority: 0.5 },
 
+    // ── Resources ─────────────────────────────────────────────────────────────
+    { url: `${base}/resources`,                                      lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/resources/asx-stock-screening-checklist`,        lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/resources/dividend-research-checklist`,          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/resources/15-minute-asx-market-review-routine`,  lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+
+    // ── Curated screener pages ────────────────────────────────────────────────
+    { url: `${base}/screener/asx-dividend-yield`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+    { url: `${base}/screener/asx-market-cap`,      lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+    { url: `${base}/screener/asx-moving-average`,  lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+
+    // ── Sector pages ──────────────────────────────────────────────────────────
+    { url: `${base}/sectors/materials`,   lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+    { url: `${base}/sectors/financials`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+
     // ── Trust & transparency ──────────────────────────────────────────────────
     { url: `${base}/disclaimer`,              lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
     { url: `${base}/data-freshness`,          lastModified: now, changeFrequency: 'monthly', priority: 0.5 },

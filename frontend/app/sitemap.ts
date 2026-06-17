@@ -32,6 +32,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/commodities`,    lastModified: now, changeFrequency: 'daily',   priority: 0.6 },
     { url: `${base}/top5`,           lastModified: now, changeFrequency: 'weekly',  priority: 0.5 },
 
+    // ── Trust & transparency ──────────────────────────────────────────────────
+    { url: `${base}/disclaimer`,              lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
+    { url: `${base}/data-freshness`,          lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
+    { url: `${base}/ai-insights-limitations`, lastModified: now, changeFrequency: 'monthly', priority: 0.5 },
+
     // ── Legal & support ───────────────────────────────────────────────────────
     { url: `${base}/pricing`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
     { url: `${base}/contact`,  lastModified: now, changeFrequency: 'monthly', priority: 0.5 },

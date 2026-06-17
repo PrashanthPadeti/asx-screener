@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft, Zap, BarChart2, BookOpen, ArrowRight, Info, AlertTriangle } from 'lucide-react'
+import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata = {
   title: 'Franking Credits Explained — ASX Investor Guide | ASX Screener',
@@ -11,11 +12,7 @@ export default function FrankingCreditsPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
-      {/* Breadcrumb */}
-      <Link href="/learn" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-blue-600 transition-colors">
-        <ChevronLeft className="w-4 h-4" />
-        Education Hub
-      </Link>
+      <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'Franking Credits Explained', href: '/learn/franking-credits-explained' }]} />
 
       {/* Article header */}
       <div>

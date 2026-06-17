@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, Search, Filter, ArrowRight, AlertTriangle, Zap, BookOpen, CheckCircle2 } from 'lucide-react'
+import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata = {
   title: 'What Is an ASX Stock Screener? How Investors Use One | ASX Screener',
@@ -23,10 +24,7 @@ export default function WhatIsAnASXStockScreenerPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
-      <Link href="/learn" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-blue-600 transition-colors">
-        <ChevronLeft className="w-4 h-4" />
-        Education Hub
-      </Link>
+      <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'What Is an ASX Stock Screener?', href: '/learn/what-is-an-asx-stock-screener' }]} />
 
       <div>
         <div className="flex flex-wrap items-center gap-2 mb-3">

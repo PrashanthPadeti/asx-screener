@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, BookOpen, ArrowRight, AlertTriangle, Zap, FileText } from 'lucide-react'
+import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata = {
   title: 'How to Read ASX Company Announcements | ASX Screener Education',
@@ -84,11 +85,7 @@ export default function CompanyAnnouncementsPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
-      {/* Breadcrumb */}
-      <Link href="/learn" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-blue-600 transition-colors">
-        <ChevronLeft className="w-4 h-4" />
-        Education Hub
-      </Link>
+      <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'How to Read ASX Announcements', href: '/learn/how-to-read-company-announcements' }]} />
 
       {/* Header */}
       <div>

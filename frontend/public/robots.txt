@@ -6,6 +6,7 @@ Disallow: /admin/
 Disallow: /auth/
 Disallow: /account/
 Disallow: /notifications/
+Disallow: /unsubscribe/
 Disallow: /api/
 
 Sitemap: https://asxscreener.com.au/sitemap.xml

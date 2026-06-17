@@ -3985,6 +3985,36 @@ function GlossaryContent() {
         {/* Main */}
         <div className="flex-1 min-w-0">
 
+          {/* ── Key Investing Concepts ─────────────────────────────────────── */}
+          {!search && activeCat === 'all' && activeQF.size === 0 && (
+            <div className="mb-6 bg-blue-50 border border-blue-200 rounded-2xl p-5">
+              <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                <BookOpen className="w-3.5 h-3.5" /> Key Investing Concepts
+              </p>
+              <p className="text-xs text-blue-600 mb-4">
+                New to ASX investing? These plain-English guides explain the core concepts behind the metrics below.
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {[
+                  { label: 'What Is a Stock Screener?',  href: '/learn/what-is-an-asx-stock-screener' },
+                  { label: 'Dividend Yield Explained',    href: '/learn/dividend-yield-explained' },
+                  { label: 'Franking Credits Explained',  href: '/learn/franking-credits-explained' },
+                  { label: 'DYOR Research Workflow',      href: '/learn/how-to-research-asx-stocks-dyor' },
+                  { label: 'Key Financial Ratios',        href: '/learn/key-financial-ratios' },
+                  { label: 'All Education Guides',        href: '/learn' },
+                ].map(({ label, href }) => (
+                  <a
+                    key={href}
+                    href={href}
+                    className="text-xs font-medium text-blue-700 bg-white border border-blue-200 hover:border-blue-400 hover:text-blue-900 px-3 py-2 rounded-lg transition-colors leading-snug"
+                  >
+                    {label} →
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Search bar */}
           <div className="relative mb-4">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />

@@ -15,6 +15,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // ── Resources ─────────────────────────────────────────────────────────────
     { url: `${base}/glossary`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
     { url: `${base}/learn`,     lastModified: now, changeFrequency: 'weekly',  priority: 0.7 },
+    { url: `${base}/learn/what-is-an-asx-stock-screener`,       lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+    { url: `${base}/learn/how-to-research-asx-stocks-dyor`,     lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/asx-stock-research-checklist`,        lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/how-to-build-an-asx-watchlist`,       lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/dividend-yield-explained`,            lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/franking-credits-explained`,          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/key-financial-ratios`,                lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-read-company-announcements`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },

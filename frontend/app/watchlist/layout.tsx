@@ -4,6 +4,7 @@ export const metadata: Metadata = {
   title: 'Watchlist',
   description: 'Track your favourite ASX stocks in one place. Get alerts when they hit your targets.',
   alternates: { canonical: 'https://asxscreener.com.au/watchlist' },
+  robots: { index: false, follow: false },
 }
 
 export default function Layout({ children }: { children: React.ReactNode }) {

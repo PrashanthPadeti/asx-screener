@@ -65,11 +65,11 @@ interface BeginnerStep {
 // All 6 steps link to real pages — no coming-soon items in the pathway.
 
 const BEGINNER_STEPS: BeginnerStep[] = [
-  { n: 1, title: 'Learn ASX Basics',          desc: 'What is the ASX and how does share investing work?',     href: '/screener',                                icon: BookOpen    },
+  { n: 1, title: 'What Is a Stock Screener?',  desc: 'How investors use screeners to filter the ASX market.',  href: '/learn/what-is-an-asx-stock-screener',     icon: BookOpen    },
   { n: 2, title: 'Franking Credits',           desc: 'Australia\'s unique dividend tax system explained.',      href: '/learn/franking-credits-explained',         icon: Zap         },
   { n: 3, title: 'Company Announcements',      desc: 'How to read and interpret ASX company updates.',         href: '/learn/how-to-read-company-announcements',  icon: TrendingUp  },
   { n: 4, title: 'Key Financial Ratios',       desc: 'P/E, ROE, D/E — the metrics every investor needs.',      href: '/learn/key-financial-ratios',               icon: BarChart2   },
-  { n: 5, title: 'Build Your First Watchlist', desc: 'Save stocks you\'re watching and track their progress.', href: '/watchlist',                               icon: CheckCircle2 },
+  { n: 5, title: 'Build Your First Watchlist', desc: 'How to build and maintain an ASX watchlist.',            href: '/learn/how-to-build-an-asx-watchlist',     icon: CheckCircle2 },
   { n: 6, title: 'Run Your First Screen',      desc: 'Filter 200+ ASX stocks using real fundamental data.',    href: '/screener',                                icon: ArrowRight  },
 ]
 
@@ -82,10 +82,10 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
     color: 'blue',
     guides: [
       {
-        title: 'How to Use the ASX Screener',
-        description: 'Filter ASX stocks by fundamentals, dividends, and sector to build your watchlist faster.',
-        readTime: '5 min', level: 'Beginner',
-        href: '/screener', internal: true, buttonLabel: 'Open tool',
+        title: 'What Is an ASX Stock Screener?',
+        description: 'How investors use a stock screener to filter 2,000+ ASX stocks down to a shortlist worth researching.',
+        readTime: '7 min', level: 'Beginner',
+        href: '/learn/what-is-an-asx-stock-screener', buttonLabel: 'Read guide',
       },
       {
         title: 'Understanding Franking Credits',
@@ -98,6 +98,18 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
         description: 'The different announcement types on the ASX and what to look for in each one.',
         readTime: '6 min', level: 'Beginner',
         href: '/learn/how-to-read-company-announcements', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How to Research ASX Stocks — DYOR Workflow',
+        description: 'A step-by-step process for researching any ASX company before adding it to your watchlist.',
+        readTime: '10 min', level: 'Beginner',
+        href: '/learn/how-to-research-asx-stocks-dyor', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'ASX Stock Research Checklist',
+        description: 'Six-section due diligence checklist: business, financials, valuation, management, announcements, and risks.',
+        readTime: '6 min', level: 'Beginner',
+        href: '/learn/asx-stock-research-checklist', buttonLabel: 'Read guide',
       },
     ],
   },
@@ -129,6 +141,18 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
     icon: PieChart,
     color: 'emerald',
     guides: [
+      {
+        title: 'Dividend Yield Explained for ASX Investors',
+        description: 'How to calculate dividend yield, what counts as a good yield, how to spot yield traps, and why payout ratio matters.',
+        readTime: '8 min', level: 'Beginner',
+        href: '/learn/dividend-yield-explained', buttonLabel: 'Read guide',
+      },
+      {
+        title: 'How to Build and Maintain an ASX Watchlist',
+        description: 'Screen for candidates, research them, set price alerts, and maintain a live watchlist of stocks worth monitoring.',
+        readTime: '7 min', level: 'Beginner',
+        href: '/learn/how-to-build-an-asx-watchlist', buttonLabel: 'Read guide',
+      },
       {
         title: 'Building a Dividend Portfolio on the ASX',
         description: 'How to construct a diversified income portfolio using the ASX\'s high-yield dividend payers.',

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, Search, Filter, ArrowRight, AlertTriangle, Zap, BookOpen, CheckCircle2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'What Is an ASX Stock Screener? How Investors Use One | ASX Screener',
@@ -24,6 +25,7 @@ export default function WhatIsAnASXStockScreenerPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="What Is an ASX Stock Screener? How Investors Use One" description="Learn what an ASX stock screener is, how it works, and how Australian investors use screening criteria like PE ratio, dividend yield, and ROE to find stocks worth researching." url="https://asxscreener.com.au/learn/what-is-an-asx-stock-screener" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'What Is an ASX Stock Screener?', href: '/learn/what-is-an-asx-stock-screener' }]} />
 
       <div>

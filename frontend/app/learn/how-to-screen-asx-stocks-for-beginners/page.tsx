@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, Filter, CheckCircle2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'How to Screen ASX Stocks for Beginners | ASX Screener',
@@ -38,6 +39,7 @@ export default function HowToScreenASXStocksPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="How to Screen ASX Stocks for Beginners" description="A step-by-step guide to screening ASX stocks for beginners. Learn what a stock screener does, which filters to start with, and how to research the results." url="https://asxscreener.com.au/learn/how-to-screen-asx-stocks-for-beginners" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'How to Screen ASX Stocks for Beginners', href: '/learn/how-to-screen-asx-stocks-for-beginners' }]} />
 
       <div>

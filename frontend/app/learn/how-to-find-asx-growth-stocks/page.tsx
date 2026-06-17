@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, TrendingUp, Zap } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'How to Find ASX Growth Stocks Using Revenue Growth | ASX Screener',
@@ -30,6 +31,7 @@ export default function HowToFindASXGrowthStocksPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="How to Find ASX Growth Stocks Using Revenue Growth" description="How to screen for ASX growth stocks using revenue growth, earnings growth, and momentum metrics. Includes example screens and key signals to watch." url="https://asxscreener.com.au/learn/how-to-find-asx-growth-stocks" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'How to Find ASX Growth Stocks', href: '/learn/how-to-find-asx-growth-stocks' }]} />
 
       <div>

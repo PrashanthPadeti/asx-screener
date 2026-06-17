@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, Activity, TrendingUp } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'How ASX Traders Use Volume and Momentum | ASX Screener',
@@ -46,6 +47,7 @@ export default function VolumeAndMomentumPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="How ASX Traders Use Volume and Momentum" description="How to use trading volume, price momentum, RSI, and moving averages to find ASX stocks showing strength. Practical screens for active ASX traders." url="https://asxscreener.com.au/learn/how-to-use-asx-volume-and-momentum" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'Volume and Momentum for ASX Traders', href: '/learn/how-to-use-asx-volume-and-momentum' }]} />
 
       <div>

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, Bell, Eye, AlertTriangle, Zap, BookOpen, TrendingUp, CheckCircle2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'How to Build and Maintain an ASX Watchlist | ASX Screener',
@@ -13,6 +14,7 @@ export default function HowToBuildWatchlistPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="How to Build and Maintain an ASX Watchlist" description="Learn how to build and maintain an ASX stock watchlist. Covers how to choose stocks for your watchlist, what to monitor, when to set price alerts, and how to manage your watchlist over time." url="https://asxscreener.com.au/learn/how-to-build-an-asx-watchlist" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'How to Build an ASX Watchlist', href: '/learn/how-to-build-an-asx-watchlist' }]} />
 
       <div>

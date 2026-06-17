@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, CheckCircle2, AlertTriangle, Zap, BookOpen, XCircle } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'ASX Stock Research Checklist for Investors | ASX Screener',
@@ -92,6 +93,7 @@ export default function ASXStockResearchChecklistPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="ASX Stock Research Checklist for Investors" description="A practical checklist for researching ASX stocks. Covers business model, financial health, valuation, management, recent announcements, and risk factors." url="https://asxscreener.com.au/learn/asx-stock-research-checklist" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'ASX Stock Research Checklist', href: '/learn/asx-stock-research-checklist' }]} />
 
       <div>

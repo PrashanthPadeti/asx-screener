@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, Filter, Brain, Code2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'One ASX Screener, Three Ways to Search | ASX Screener',
@@ -76,6 +77,7 @@ export default function ThreeWaysToSearchPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="One ASX Screener, Three Ways to Search" description="ASX Screener offers three ways to find stocks: click filters, plain English AI queries, and SQL-like query mode. Learn which approach suits your investing style." url="https://asxscreener.com.au/learn/asx-screener-three-ways-to-search" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'Three Ways to Search', href: '/learn/asx-screener-three-ways-to-search' }]} />
 
       <div>

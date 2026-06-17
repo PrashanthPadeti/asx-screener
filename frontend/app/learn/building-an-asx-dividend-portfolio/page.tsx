@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, DollarSign, PieChart, Shield } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'Building a Dividend Portfolio on the ASX | ASX Screener',
@@ -42,6 +43,7 @@ export default function BuildingDividendPortfolioPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="Building a Dividend Portfolio on the ASX" description="How to construct a diversified ASX income portfolio — sector allocation, stock selection criteria, franking credits, reinvestment, and common mistakes to avoid." url="https://asxscreener.com.au/learn/building-an-asx-dividend-portfolio" />
       <Breadcrumb crumbs={[
         { label: 'Education Hub', href: '/learn' },
         { label: 'Building an ASX Dividend Portfolio', href: '/learn/building-an-asx-dividend-portfolio' },

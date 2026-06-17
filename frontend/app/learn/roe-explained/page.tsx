@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, TrendingUp } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'ROE Explained: How Investors Use Return on Equity | ASX Screener',
@@ -28,6 +29,7 @@ export default function ROEExplainedPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="ROE Explained: How Investors Use Return on Equity" description="What is Return on Equity (ROE), how to calculate it, what counts as a good ROE on the ASX, and how to use it alongside other metrics to find quality ASX stocks." url="https://asxscreener.com.au/learn/roe-explained" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'ROE Explained', href: '/learn/roe-explained' }]} />
 
       <div>

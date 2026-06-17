@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, Zap, BookOpen, TrendingDown } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'Dividend Yield Explained for ASX Investors | ASX Screener',
@@ -21,6 +22,7 @@ export default function DividendYieldExplainedPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="Dividend Yield Explained for ASX Investors" description="What is dividend yield, how to calculate it, what counts as a good yield on the ASX, and how to spot yield traps. Includes grossed-up yield with franking credits for Australian investors." url="https://asxscreener.com.au/learn/dividend-yield-explained" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'Dividend Yield Explained', href: '/learn/dividend-yield-explained' }]} />
 
       <div>

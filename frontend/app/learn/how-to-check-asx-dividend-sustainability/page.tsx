@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, DollarSign, TrendingDown } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'How to Check If an ASX Dividend Is Sustainable | ASX Screener',
@@ -72,6 +73,7 @@ export default function DividendSustainabilityPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="How to Check If an ASX Dividend Is Sustainable" description="Five metrics ASX investors use to check whether a dividend is sustainable — payout ratio, free cash flow cover, debt, earnings trend, and franking history." url="https://asxscreener.com.au/learn/how-to-check-asx-dividend-sustainability" />
       <Breadcrumb crumbs={[
         { label: 'Education Hub', href: '/learn' },
         { label: 'How to Check If an ASX Dividend Is Sustainable', href: '/learn/how-to-check-asx-dividend-sustainability' },

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, TrendingUp } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'ROIC Explained: Return on Invested Capital for ASX Investors | ASX Screener',
@@ -28,6 +29,7 @@ export default function ROICExplainedPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="ROIC Explained: Return on Invested Capital for ASX Investors" description="What is Return on Invested Capital (ROIC), how to calculate it, why it beats ROE for comparing companies, and how to screen for high-ROIC ASX stocks." url="https://asxscreener.com.au/learn/roic-explained" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'ROIC Explained', href: '/learn/roic-explained' }]} />
 
       <div>

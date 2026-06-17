@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, BarChart2, BookOpen, ArrowRight, AlertTriangle, Zap } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
   title: 'Key Financial Ratios for ASX Investors | ASX Screener Education',
@@ -103,6 +104,7 @@ export default function KeyFinancialRatiosPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-8 space-y-10">
 
+      <ArticleSchema headline="Key Financial Ratios for ASX Investors" description="P/E, P/B, ROE, EV/EBITDA, D/E — the essential financial ratios for evaluating ASX stocks explained with formulas, benchmarks, and Australian examples." url="https://asxscreener.com.au/learn/key-financial-ratios" />
       <Breadcrumb crumbs={[{ label: 'Education Hub', href: '/learn' }, { label: 'Key Financial Ratios', href: '/learn/key-financial-ratios' }]} />
 
       {/* Header */}

@@ -33,8 +33,8 @@ export const metadata: Metadata = {
     description: 'Screen ASX stocks with franking credits, mining & REIT depth, and AI insights. Free for Australian investors.',
     images:      ['/og-image.png'],
   },
-  verification: {
-    google: '42Vl_6jkLmVW1klkNqSSjfse1wxr0sNN8NkUXaiqGwQ',
+  other: {
+    'google-site-verification': '42Vl_6jkLmVW1klkNqSSjfse1wxr0sNN8NkUXaiqGwQ',
   },
 }
 

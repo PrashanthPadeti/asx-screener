@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Price Alerts',
-  description: 'Set price and volume alerts for ASX stocks. Get notified by email or SMS when your targets are hit.',
+  title: 'ASX Price Alerts | Monitor Australian Stocks Automatically | ASX Screener',
+  description: 'Set price alerts for ASX stocks and get notified when important price levels are reached. Stay on top of your watchlist without watching the market all day.',
   alternates: { canonical: 'https://asxscreener.com.au/alerts' },
   robots: { index: false, follow: false },
 }

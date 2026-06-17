@@ -185,8 +185,9 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
       },
       {
         title: 'Building a Dividend Portfolio on the ASX',
-        description: 'How to construct a diversified income portfolio using the ASX\'s high-yield dividend payers.',
-        readTime: '15 min', level: 'Intermediate', comingSoon: true,
+        description: 'Sector allocation, stock selection criteria, franking credits, reinvestment, and common mistakes — how to construct a diversified ASX income portfolio.',
+        readTime: '12 min', level: 'Intermediate',
+        href: '/learn/building-an-asx-dividend-portfolio', buttonLabel: 'Read guide',
       },
       {
         title: 'Understanding the ASX Dividend Calendar',

@@ -30,6 +30,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/learn/how-to-find-asx-growth-stocks`,          lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-use-asx-volume-and-momentum`,     lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-check-asx-dividend-sustainability`, lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${base}/learn/building-an-asx-dividend-portfolio`,       lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // ── Sector pages ──────────────────────────────────────────────────────────
     { url: `${base}/sectors/materials`,   lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
     { url: `${base}/sectors/financials`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
+    { url: `${base}/sectors/healthcare`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
 
     // ── Trust & transparency ──────────────────────────────────────────────────
     { url: `${base}/disclaimer`,              lastModified: now, changeFrequency: 'monthly', priority: 0.5 },

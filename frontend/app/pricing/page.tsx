@@ -6,6 +6,26 @@ import { Check, X, Zap, Shield, Building2, ArrowRight, Star, Users } from 'lucid
 import { useAuth } from '@/lib/auth'
 import { createCheckoutSession, api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import FAQSchema from '@/components/FAQSchema'
+
+const PRICING_FAQ = [
+  {
+    question: 'Can I cancel anytime?',
+    answer: 'Yes. Cancel at any time from your account page — you keep access until the end of your billing period.',
+  },
+  {
+    question: 'Is there a free trial?',
+    answer: 'The Free plan is free forever. Pro and Premium have no trial, but you can start on Free and upgrade any time.',
+  },
+  {
+    question: 'What payment methods are accepted?',
+    answer: 'Visa, Mastercard, and American Express via Stripe\'s secure checkout. All prices are in AUD.',
+  },
+  {
+    question: 'What happens to my data if I downgrade?',
+    answer: 'Your data is preserved for 12 months after downgrading. You can upgrade again to regain access.',
+  },
+]
 
 // ── Static plan data (matches backend plans.py) ───────────────────────────────
 
@@ -146,6 +166,7 @@ export default function PricingPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <FAQSchema url="https://asxscreener.com.au/pricing" items={PRICING_FAQ} />
 
       {/* Header */}
       <div className="bg-white border-b border-gray-200">

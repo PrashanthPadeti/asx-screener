@@ -4106,9 +4106,24 @@ function GlossaryContent() {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
+const glossarySchema = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  '@id': 'https://asxscreener.com.au/glossary#collection',
+  name: 'ASX Metrics Glossary',
+  url: 'https://asxscreener.com.au/glossary',
+  description: 'Plain-English definitions of ASX financial metrics — valuation ratios, profitability measures, dividend metrics, balance sheet ratios, and technical indicators used by Australian investors.',
+  isPartOf: { '@id': 'https://asxscreener.com.au/#website' },
+  publisher: { '@id': 'https://asxscreener.com.au/#organization' },
+}
+
 export default function GlossaryPage() {
   return (
     <div className="min-h-screen bg-gray-50">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(glossarySchema) }}
+      />
       {/* Header */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">

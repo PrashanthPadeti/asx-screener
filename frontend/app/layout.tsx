@@ -43,6 +43,12 @@ const siteSchema = {
       '@id': 'https://asxscreener.com.au/#organization',
       name: 'ASX Screener',
       url: 'https://asxscreener.com.au',
+      logo: {
+        '@type': 'ImageObject',
+        url: 'https://asxscreener.com.au/og-image.png',
+        width: 1200,
+        height: 630,
+      },
       description: 'Australian stock screening and research platform with franking credits, mining & REIT depth, and AI insights.',
       foundingLocation: { '@type': 'Country', name: 'Australia' },
     },

@@ -509,8 +509,23 @@ export default function LearnPage() {
   const liveCount   = GUIDES.flatMap(c => c.guides).filter(g => !g.comingSoon).length
   const comingCount = GUIDES.flatMap(c => c.guides).filter(g =>  g.comingSoon).length
 
+  const collectionSchema = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    '@id': 'https://asxscreener.com.au/learn#collection',
+    name: 'ASX Investing Education Hub',
+    url: 'https://asxscreener.com.au/learn',
+    description: 'Free ASX investing guides covering stock screening, fundamental analysis, dividend investing, franking credits, multibagger stocks, and ASX Screener product guides for Australian investors.',
+    isPartOf: { '@id': 'https://asxscreener.com.au/#website' },
+    publisher: { '@id': 'https://asxscreener.com.au/#organization' },
+  }
+
   return (
     <div className="max-w-5xl mx-auto space-y-10 pb-8 px-4 sm:px-6 lg:px-0">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionSchema) }}
+      />
 
       {/* ── Hero ──────────────────────────────────────────────────────────── */}
       <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-6 sm:p-8 text-white">

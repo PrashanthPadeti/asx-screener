@@ -8,8 +8,15 @@ import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, Log
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
-  { href: '/screener', label: 'Screener',      icon: BarChart2 },
-  { href: '/scans',    label: 'Alpha Screens', icon: ScanLine  },
+  { href: '/screener', label: 'Screener', icon: BarChart2 },
+]
+
+const SCANS_LINKS = [
+  { href: '/scans#premium-screens',   label: 'Premium Screens',   badge: 'Premium', badgeClass: 'bg-purple-100 text-purple-700' },
+  { href: '/scans#pro-strategies',    label: 'Pro Screens',        badge: 'Pro',     badgeClass: 'bg-blue-100 text-blue-700'   },
+  { href: '/scans#quick-screens',     label: 'Quick Screens',      badge: null,      badgeClass: ''                             },
+  { href: '/scans#sector-screens',    label: 'Sector Screens',     badge: null,      badgeClass: ''                             },
+  { href: '/scans#community-screens', label: 'Community Screens',  badge: null,      badgeClass: ''                             },
 ]
 
 const MARKET_LINKS = [
@@ -69,10 +76,12 @@ export default function Navbar() {
   const [menuOpen,         setMenuOpen]         = useState(false)
   const [userDropOpen,     setUserDropOpen]     = useState(false)
   const [marketDropOpen,   setMarketDropOpen]   = useState(false)
+  const [scansDropOpen,    setScansDropOpen]    = useState(false)
   const [resourceDropOpen, setResourceDropOpen] = useState(false)
   const [adminDropOpen,    setAdminDropOpen]    = useState(false)
   const dropRef         = useRef<HTMLDivElement>(null)
   const marketDropRef   = useRef<HTMLDivElement>(null)
+  const scansDropRef    = useRef<HTMLDivElement>(null)
   const resourceDropRef = useRef<HTMLDivElement>(null)
   const adminDropRef    = useRef<HTMLDivElement>(null)
 
@@ -80,6 +89,7 @@ export default function Navbar() {
     function handle(e: MouseEvent) {
       if (dropRef.current         && !dropRef.current.contains(e.target as Node))         setUserDropOpen(false)
       if (marketDropRef.current   && !marketDropRef.current.contains(e.target as Node))   setMarketDropOpen(false)
+      if (scansDropRef.current    && !scansDropRef.current.contains(e.target as Node))    setScansDropOpen(false)
       if (resourceDropRef.current && !resourceDropRef.current.contains(e.target as Node)) setResourceDropOpen(false)
       if (adminDropRef.current    && !adminDropRef.current.contains(e.target as Node))    setAdminDropOpen(false)
     }
@@ -141,6 +151,44 @@ export default function Navbar() {
                 </Link>
               )
             })}
+
+            {/* Alpha Screens dropdown */}
+            <div className="relative" ref={scansDropRef}>
+              <button
+                onClick={() => setScansDropOpen(v => !v)}
+                className={dropBtn(pathname === '/scans' || pathname.startsWith('/scans/'))}
+              >
+                <ScanLine className="w-3.5 h-3.5 shrink-0" />
+                Alpha Screens
+                <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', scansDropOpen && 'rotate-180')} />
+              </button>
+              {scansDropOpen && (
+                <div className="absolute left-0 mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {SCANS_LINKS.map(({ href, label, badge, badgeClass }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setScansDropOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors"
+                    >
+                      <ScanLine className="w-3.5 h-3.5 shrink-0 text-gray-400" />
+                      <span className="text-sm flex-1 text-gray-700">{label}</span>
+                      {badge && <span className={cn('text-[9px] font-bold px-1 py-0.5 rounded', badgeClass)}>{badge}</span>}
+                    </Link>
+                  ))}
+                  <div className="border-t border-gray-100 mt-1 pt-1">
+                    <Link
+                      href="/scans"
+                      onClick={() => setScansDropOpen(false)}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === '/scans' && 'bg-blue-50')}
+                    >
+                      <ScanLine className={cn('w-3.5 h-3.5 shrink-0', pathname === '/scans' ? 'text-blue-500' : 'text-gray-400')} />
+                      <span className={cn('text-sm font-medium', pathname === '/scans' ? 'text-blue-700' : 'text-gray-700')}>All Screens</span>
+                    </Link>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Market dropdown */}
             <div className="relative" ref={marketDropRef}>
@@ -339,6 +387,15 @@ export default function Navbar() {
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
+            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Alpha Screens</div>
+            {SCANS_LINKS.map(({ href, label }) => (
+              <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700')}>
+                <ScanLine className="w-4 h-4" />{label}
+              </Link>
+            ))}
+            <Link href="/scans" onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm font-medium', pathname === '/scans' ? 'text-blue-700 bg-blue-50' : 'text-gray-700')}>
+              <ScanLine className="w-4 h-4" />All Screens
+            </Link>
             <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Market</div>
             {MARKET_LINKS.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>

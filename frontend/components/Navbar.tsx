@@ -14,13 +14,13 @@ const NAV_LINKS = [
 
 const MARKET_LINKS = [
   { href: '/market',         label: 'Market Overview', icon: Globe,      desc: 'ASX market summary and movers',            premium: false },
-  { href: '/news',           label: 'News',            icon: Newspaper,  desc: 'ASX announcements and market news',        premium: false },
   { href: '/indices',        label: 'ASX Indices',     icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices',       premium: true  },
   { href: '/funds',          label: 'ETFs & Funds',    icon: Layers,     desc: 'ETFs, LICs & managed funds',               premium: true  },
   { href: '/commodities',    label: 'Commodities',     icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more',       premium: true  },
   { href: '/global-markets', label: 'Global Markets',  icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',       premium: true  },
   { href: '/top5',           label: 'AlphaFive',       icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',    premium: true  },
   { href: '/market/heatmap', label: 'Perf. Heatmap',   icon: LayoutGrid, desc: 'Rolling 5-day & 5-week price performance', premium: true  },
+  { href: '/news',           label: 'News',            icon: Newspaper,  desc: 'ASX announcements and market news',        premium: false },
 ]
 
 // Pro+ items — shown at top of Resources dropdown

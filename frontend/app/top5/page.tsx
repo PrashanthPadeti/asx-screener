@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { PlanGate } from '@/components/PlanGate'
 import { api } from '@/lib/api'
+import Breadcrumb from '@/components/Breadcrumb'
 import { cn } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -757,6 +758,9 @@ export default function Top5Page() {
       {/* Page header */}
       <div className="bg-white border-b border-gray-200">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+          <div className="mb-4">
+            <Breadcrumb crumbs={[{ label: 'Market', href: '/market' }, { label: 'AlphaFive', href: '/top5' }]} />
+          </div>
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500
                             flex items-center justify-center shadow-sm flex-shrink-0">

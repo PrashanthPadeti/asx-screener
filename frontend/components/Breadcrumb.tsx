@@ -8,10 +8,12 @@ interface Crumb {
 
 interface BreadcrumbProps {
   crumbs: Crumb[]
+  theme?: 'light' | 'dark'
 }
 
-export default function Breadcrumb({ crumbs }: BreadcrumbProps) {
+export default function Breadcrumb({ crumbs, theme = 'light' }: BreadcrumbProps) {
   const all = [{ label: 'Home', href: '/' }, ...crumbs]
+  const isDark = theme === 'dark'
 
   const schema = {
     '@context': 'https://schema.org',
@@ -36,11 +38,11 @@ export default function Breadcrumb({ crumbs }: BreadcrumbProps) {
             const isLast = i === all.length - 1
             return (
               <li key={crumb.href} className="flex items-center gap-1">
-                {i > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
+                {i > 0 && <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${isDark ? 'text-slate-600' : 'text-slate-300'}`} />}
                 {isLast ? (
-                  <span className="text-slate-700 font-medium" aria-current="page">{crumb.label}</span>
+                  <span className={`font-medium ${isDark ? 'text-slate-200' : 'text-slate-700'}`} aria-current="page">{crumb.label}</span>
                 ) : (
-                  <Link href={crumb.href} className="hover:text-blue-600 transition-colors">
+                  <Link href={crumb.href} className={`transition-colors ${isDark ? 'hover:text-blue-400' : 'hover:text-blue-600'}`}>
                     {crumb.label}
                   </Link>
                 )}

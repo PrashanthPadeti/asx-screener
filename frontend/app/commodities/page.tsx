@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { RefreshCw, TrendingUp, TrendingDown, Minus, ArrowLeft, Info, Bell, Star } from 'lucide-react'
 import { getCommodities, CommoditiesResponse, CommodityPrice } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
+import Breadcrumb from '@/components/Breadcrumb'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -306,6 +307,11 @@ export default function CommoditiesPage() {
       {/* ── Hero ─────────────────────────────────────────────────────────────── */}
       <div className="bg-gradient-to-b from-slate-800 to-slate-900 border-b border-slate-700/50">
         <div className="max-w-screen-xl mx-auto px-4 sm:px-6 xl:px-10 py-8">
+
+          {/* Breadcrumb */}
+          <div className="mb-4">
+            <Breadcrumb theme="dark" crumbs={[{ label: 'Market', href: '/market' }, { label: 'Commodities', href: '/commodities' }]} />
+          </div>
 
           {/* Top bar */}
           <div className="flex items-center justify-between mb-6">

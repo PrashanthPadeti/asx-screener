@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { TrendingUp, TrendingDown, Filter, RefreshCw, Info, Search, X } from 'lucide-react'
 import { getFunds, FundsResponse, FundRow } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
+import Breadcrumb from '@/components/Breadcrumb'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -182,6 +183,9 @@ function FundsContent() {
       {/* Hero */}
       <div className="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="mb-4">
+            <Breadcrumb theme="dark" crumbs={[{ label: 'Market', href: '/market' }, { label: 'ETFs & Funds', href: '/funds' }]} />
+          </div>
           <div className="flex items-start justify-between">
             <div>
               <h1 className="text-2xl font-bold text-white flex items-center gap-3">

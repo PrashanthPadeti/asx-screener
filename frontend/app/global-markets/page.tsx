@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Globe, RefreshCw, ArrowLeft } from 'lucide-react'
 import { getGlobalMarkets, GlobalMarketsResponse, GlobalIndexPrice, GlobalFxRate } from '@/lib/api'
 import { PlanGate } from '@/components/PlanGate'
+import Breadcrumb from '@/components/Breadcrumb'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -226,6 +227,9 @@ export default function GlobalMarketsPage() {
       {/* ── Hero ─────────────────────────────────────────────────────────────── */}
       <div className="bg-gradient-to-b from-slate-800 to-slate-900 border-b border-slate-700/50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
+          <div className="mb-4">
+            <Breadcrumb theme="dark" crumbs={[{ label: 'Market', href: '/market' }, { label: 'Global Markets', href: '/global-markets' }]} />
+          </div>
           <div className="flex items-center justify-between mb-5">
             <Link href="/market" className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-sm transition-colors">
               <ArrowLeft className="w-4 h-4" /> Market Overview

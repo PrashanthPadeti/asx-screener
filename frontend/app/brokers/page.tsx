@@ -6,6 +6,7 @@ import {
   ChevronUp, ChevronDown, ChevronsUpDown,
 } from 'lucide-react'
 import { PlanGate } from '@/components/PlanGate'
+import Breadcrumb from '@/components/Breadcrumb'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -367,6 +368,8 @@ export default function BrokersPage() {
   return (
     <PlanGate required="pro" feature="Broker Compare">
     <div className="max-w-6xl mx-auto space-y-10 pb-10 px-4 sm:px-6 lg:px-0">
+
+      <Breadcrumb crumbs={[{ label: 'Broker Compare', href: '/brokers' }]} />
 
       {/* ── 1. Hero ──────────────────────────────────────────────────────── */}
       <div className="bg-gradient-to-br from-blue-600 to-blue-800 rounded-2xl p-6 sm:p-8 text-white">

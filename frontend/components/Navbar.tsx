@@ -34,9 +34,6 @@ const RESOURCES_LINKS_FREE = [
   { href: '/news', label: 'News', icon: Newspaper, plan: null },
 ]
 
-// Contact Support — always at the bottom
-const RESOURCES_LINK_SUPPORT = { href: '/contact', label: 'Contact Support', icon: LifeBuoy, plan: null }
-
 // Extra links shown only to guests so they discover personal features
 const RESOURCES_LINKS_GUEST_EXTRA = [
   { href: '/watchlist', label: 'Watchlist', icon: Star,     plan: null },
@@ -62,7 +59,7 @@ const ADMIN_LINKS = [
 // Prefixes that activate the Premium Data dropdown as "active"
 const PREMIUM_DATA_PREFIXES = ['/market/heatmap', '/indices', '/funds', '/global-markets', '/commodities', '/top5']
 // Prefixes that activate the Resources dropdown as "active"
-const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/contact', '/pricing']
+const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/pricing']
 
 // Helper: true if pathname matches any prefix (exact or sub-path)
 const matchesPrefix = (pathname: string, prefixes: string[]) =>
@@ -188,15 +185,6 @@ export default function Navbar() {
                     </Link>
                   ))}
 
-                  {/* Support — always last */}
-                  <div className="border-t border-gray-100 mt-1 pt-1">
-                    <Link href={RESOURCES_LINK_SUPPORT.href} onClick={() => setResourceDropOpen(false)}
-                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === RESOURCES_LINK_SUPPORT.href && 'bg-blue-50')}>
-                      <RESOURCES_LINK_SUPPORT.icon className={cn('w-3.5 h-3.5 shrink-0', pathname === RESOURCES_LINK_SUPPORT.href ? 'text-blue-500' : 'text-gray-400')} />
-                      <span className={cn('text-sm', pathname === RESOURCES_LINK_SUPPORT.href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{RESOURCES_LINK_SUPPORT.label}</span>
-                    </Link>
-                  </div>
-
                 </div>
               )}
             </div>
@@ -302,6 +290,7 @@ export default function Navbar() {
                     <Link href="/account"       onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><User className="w-4 h-4" />Account settings</Link>
                     <Link href="/pricing"        onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Zap className="w-4 h-4" />Plans &amp; Pricing</Link>
                     <Link href="/notifications"  onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><Settings className="w-4 h-4" />Notifications</Link>
+                    <Link href="/contact"        onClick={() => setUserDropOpen(false)} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"><LifeBuoy className="w-4 h-4" />Contact Support</Link>
                     {user.is_admin && (
                       <div className="border-t border-gray-100 mt-1 pt-1">
                         <div className="px-3 py-1"><p className="text-[10px] font-bold text-red-400 uppercase tracking-wider">Admin</p></div>
@@ -363,9 +352,6 @@ export default function Navbar() {
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
-            <Link href={RESOURCES_LINK_SUPPORT.href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === RESOURCES_LINK_SUPPORT.href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
-              <RESOURCES_LINK_SUPPORT.icon className="w-4 h-4" />{RESOURCES_LINK_SUPPORT.label}
-            </Link>
             <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Premium Data</div>
             {MARKET_DATA_LINKS.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
@@ -398,6 +384,7 @@ export default function Navbar() {
                   </div>
                   <Link href="/account"      onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700"><User className="w-4 h-4" />Account settings</Link>
                   <Link href="/pricing"      onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700"><Zap className="w-4 h-4" />Plans &amp; Pricing</Link>
+                  <Link href="/contact"      onClick={() => setMenuOpen(false)} className="flex items-center gap-2 px-4 py-2.5 text-sm text-gray-700"><LifeBuoy className="w-4 h-4" />Contact Support</Link>
                   <button onClick={() => { setMenuOpen(false); handleLogout() }} className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-600">
                     <LogOut className="w-4 h-4" />Sign out
                   </button>

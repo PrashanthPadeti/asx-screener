@@ -5,12 +5,55 @@ function CookieSettingsButton() {
   return (
     <button
       onClick={() => window.dispatchEvent(new Event('open-cookie-settings'))}
-      className="hover:text-slate-600 transition-colors cursor-pointer"
+      className="hover:text-slate-300 transition-colors text-left"
     >
       Cookie Settings
     </button>
   )
 }
+
+const FOOTER_COLUMNS = [
+  {
+    heading: 'Product',
+    links: [
+      { href: '/screener',  label: 'Screener' },
+      { href: '/scans',     label: 'Alpha Screens' },
+      { href: '/watchlist', label: 'Watchlist' },
+      { href: '/portfolio', label: 'Portfolio' },
+      { href: '/alerts',    label: 'Alerts' },
+      { href: '/pricing',   label: 'Pricing' },
+    ],
+  },
+  {
+    heading: 'Market Data',
+    links: [
+      { href: '/market',          label: 'Market Overview' },
+      { href: '/news',            label: 'News' },
+      { href: '/indices',         label: 'ASX Indices' },
+      { href: '/funds',           label: 'ETFs & Funds' },
+      { href: '/commodities',     label: 'Commodities' },
+      { href: '/global-markets',  label: 'Global Markets' },
+      { href: '/sectors',         label: 'Sectors' },
+    ],
+  },
+  {
+    heading: 'Education',
+    links: [
+      { href: '/learn',     label: 'Education Hub' },
+      { href: '/glossary',  label: 'Glossary' },
+      { href: '/resources', label: 'Resources' },
+      { href: '/brokers',   label: 'Broker Compare' },
+    ],
+  },
+  {
+    heading: 'Trust',
+    links: [
+      { href: '/data-freshness',          label: 'Data Freshness' },
+      { href: '/ai-insights-limitations', label: 'AI Insights Limitations' },
+      { href: '/disclaimer',              label: 'Disclaimer' },
+    ],
+  },
+]
 
 export default function Footer() {
   const year = new Date().getFullYear()
@@ -30,38 +73,45 @@ export default function Footer() {
         </p>
       </div>
 
-      {/* Footer links */}
-      <div className="max-w-screen-2xl mx-auto px-4 py-5">
-        {/* Top row */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-          <div className="flex items-center gap-1.5 font-medium text-slate-500">
-            <span className="text-blue-600 font-bold">ASX Screener</span>
-            <span>·</span>
-            <span>Australian Stock Analysis</span>
-          </div>
-
-          {/* Product links */}
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <Link href="/market"    className="hover:text-slate-600 transition-colors">Market</Link>
-            <Link href="/screener"  className="hover:text-slate-600 transition-colors">Screener</Link>
-            <Link href="/watchlist" className="hover:text-slate-600 transition-colors">Watchlist</Link>
-            <Link href="/portfolio" className="hover:text-slate-600 transition-colors">Portfolio</Link>
-            <Link href="/alerts"    className="hover:text-slate-600 transition-colors">Alerts</Link>
-          </div>
-
-          <span>© {year} ASX Screener. Data for informational use only.</span>
+      {/* Main footer columns */}
+      <div className="max-w-screen-2xl mx-auto px-4 py-10">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-8">
+          {FOOTER_COLUMNS.map(({ heading, links }) => (
+            <div key={heading}>
+              <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">
+                {heading}
+              </h3>
+              <ul className="space-y-2">
+                {links.map(({ href, label }) => (
+                  <li key={href}>
+                    <Link
+                      href={href}
+                      className="text-sm text-slate-500 hover:text-slate-800 transition-colors"
+                    >
+                      {label}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
 
-        {/* Bottom row — legal links */}
-        <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-xs text-slate-400">
-          <Link href="/terms"   className="hover:text-slate-600 transition-colors">Terms of Service</Link>
-          <Link href="/privacy" className="hover:text-slate-600 transition-colors">Privacy Policy</Link>
-          <CookieSettingsButton />
-          <Link href="/learn"   className="hover:text-slate-600 transition-colors">Education Hub</Link>
-          <Link href="/brokers" className="hover:text-slate-600 transition-colors">Broker Compare</Link>
-          <Link href="/glossary" className="hover:text-slate-600 transition-colors">Glossary</Link>
-          <Link href="/contact" className="hover:text-slate-600 transition-colors">Contact Support</Link>
-          <Link href="/pricing" className="hover:text-slate-600 transition-colors">Pricing</Link>
+        {/* Bottom bar */}
+        <div className="mt-10 pt-6 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="text-blue-600 font-bold text-sm">ASX Screener</span>
+            <span className="text-slate-300">·</span>
+            <span className="text-xs text-slate-400">Australian Stock Analysis</span>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1 text-xs text-slate-400">
+            <Link href="/terms"   className="hover:text-slate-600 transition-colors">Terms of Service</Link>
+            <Link href="/privacy" className="hover:text-slate-600 transition-colors">Privacy Policy</Link>
+            <CookieSettingsButton />
+          </div>
+
+          <span className="text-xs text-slate-400">© {year} ASX Screener. Data for informational use only.</span>
         </div>
       </div>
     </footer>

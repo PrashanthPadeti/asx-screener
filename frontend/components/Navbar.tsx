@@ -16,7 +16,7 @@ const SCANS_LINKS = [
   { href: '/scans#pro-strategies',    label: 'Pro Screens',        badge: 'Pro',     badgeClass: 'bg-blue-100 text-blue-700'   },
   { href: '/scans#quick-screens',     label: 'Quick Screens',      badge: null,      badgeClass: ''                             },
   { href: '/scans#sector-screens',    label: 'Sector Screens',     badge: null,      badgeClass: ''                             },
-  { href: '/scans#community-screens', label: 'Community Screens',  badge: null,      badgeClass: ''                             },
+  { href: '/scans#community-picks',   label: 'Community Screens',  badge: null,      badgeClass: ''                             },
 ]
 
 const MARKET_LINKS = [

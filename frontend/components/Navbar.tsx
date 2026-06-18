@@ -8,18 +8,19 @@ import { BarChart2, Star, TrendingUp, Menu, X, LogIn, UserPlus, ChevronDown, Log
 import { useAuth } from '@/lib/auth'
 
 const NAV_LINKS = [
-  { href: '/screener', label: 'Screener', icon: BarChart2 },
-  { href: '/market',   label: 'Market',   icon: Globe },
-  { href: '/scans',    label: 'Alpha Screens',    icon: ScanLine },
+  { href: '/screener', label: 'Screener',      icon: BarChart2 },
+  { href: '/scans',    label: 'Alpha Screens', icon: ScanLine  },
 ]
 
-const MARKET_DATA_LINKS = [
-  { href: '/market/heatmap', label: 'Perf. Heatmap',  icon: LayoutGrid, desc: 'Rolling 5-day & 5-week price performance', premium: true },
-  { href: '/indices',        label: 'ASX Indices',    icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices',       premium: true },
-  { href: '/funds',          label: 'ETFs & Funds',   icon: Layers,     desc: 'ETFs, LICs & managed funds',               premium: true },
-  { href: '/global-markets', label: 'Global Markets', icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',       premium: true },
-  { href: '/commodities',    label: 'Commodities',    icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more',       premium: true },
-  { href: '/top5',           label: 'AlphaFive',      icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',    premium: true },
+const MARKET_LINKS = [
+  { href: '/market',         label: 'Market Overview', icon: Globe,      desc: 'ASX market summary and movers',            premium: false },
+  { href: '/news',           label: 'News',            icon: Newspaper,  desc: 'ASX announcements and market news',        premium: false },
+  { href: '/indices',        label: 'ASX Indices',     icon: TrendingUp, desc: 'S&P/ASX benchmark & sector indices',       premium: true  },
+  { href: '/funds',          label: 'ETFs & Funds',    icon: Layers,     desc: 'ETFs, LICs & managed funds',               premium: true  },
+  { href: '/commodities',    label: 'Commodities',     icon: Pickaxe,    desc: 'Gold, oil, copper, iron ore & more',       premium: true  },
+  { href: '/global-markets', label: 'Global Markets',  icon: Globe,      desc: 'US, Europe & Asia indices + AUD FX',       premium: true  },
+  { href: '/top5',           label: 'AlphaFive',       icon: Trophy,     desc: 'Weekly algo-ranked top 5 from ASX 200',    premium: true  },
+  { href: '/market/heatmap', label: 'Perf. Heatmap',   icon: LayoutGrid, desc: 'Rolling 5-day & 5-week price performance', premium: true  },
 ]
 
 // Pro+ items — shown at top of Resources dropdown
@@ -27,11 +28,6 @@ const RESOURCES_LINKS_PRO = [
   { href: '/glossary', label: 'Metrics Glossary', icon: BookOpen,   plan: 'pro' },
   { href: '/learn',    label: 'Education Hub',    icon: BookOpen,   plan: 'pro' },
   { href: '/brokers',  label: 'Broker Compare',   icon: DollarSign, plan: 'pro' },
-]
-
-// Free items — shown after Pro+ section
-const RESOURCES_LINKS_FREE = [
-  { href: '/news', label: 'News', icon: Newspaper, plan: null },
 ]
 
 // Extra links shown only to guests so they discover personal features
@@ -56,10 +52,10 @@ const ADMIN_LINKS = [
   { href: '/admin/support',  label: 'Support Tickets',  icon: LifeBuoy,        desc: 'User support requests & inquiries' },
 ]
 
-// Prefixes that activate the Premium Data dropdown as "active"
-const PREMIUM_DATA_PREFIXES = ['/market/heatmap', '/indices', '/funds', '/global-markets', '/commodities', '/top5']
+// Prefixes that activate the Market dropdown as "active"
+const MARKET_PREFIXES = ['/market', '/news', '/indices', '/funds', '/global-markets', '/commodities', '/top5']
 // Prefixes that activate the Resources dropdown as "active"
-const RESOURCES_PREFIXES = ['/news', '/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/pricing']
+const RESOURCES_PREFIXES = ['/watchlist', '/portfolio', '/alerts', '/learn', '/brokers', '/glossary', '/pricing']
 
 // Helper: true if pathname matches any prefix (exact or sub-path)
 const matchesPrefix = (pathname: string, prefixes: string[]) =>
@@ -139,13 +135,40 @@ export default function Navbar() {
                   </Link>
                 )
               }
-              /* All other links — light active pill on current page */
               return (
                 <Link key={href} href={href} className={navItem(pathname === href)}>
                   {label}
                 </Link>
               )
             })}
+
+            {/* Market dropdown */}
+            <div className="relative" ref={marketDropRef}>
+              <button
+                onClick={() => setMarketDropOpen(v => !v)}
+                className={dropBtn(matchesPrefix(pathname, MARKET_PREFIXES))}
+              >
+                <Globe className="w-3.5 h-3.5 shrink-0" />
+                Market
+                <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', marketDropOpen && 'rotate-180')} />
+              </button>
+              {marketDropOpen && (
+                <div className="absolute left-0 mt-1 w-52 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
+                  {MARKET_LINKS.map(({ href, label, icon: Icon, premium }) => (
+                    <Link
+                      key={href}
+                      href={href}
+                      onClick={() => setMarketDropOpen(false)}
+                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
+                    >
+                      <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
+                      <span className={cn('text-sm flex-1', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
+                      {premium && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700">Prem</span>}
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Resources dropdown */}
             <div className="relative" ref={resourceDropRef}>
@@ -173,46 +196,22 @@ export default function Navbar() {
                     </Link>
                   ))}
 
-                  {/* Free section */}
-                  <div className="border-t border-gray-100 mt-1 pt-1.5 pb-1 px-3">
-                    <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Free</span>
-                  </div>
-                  {[...RESOURCES_LINKS_FREE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon }) => (
-                    <Link key={href} href={href} onClick={() => setResourceDropOpen(false)}
-                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}>
-                      <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
-                      <span className={cn('text-sm', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
-                    </Link>
-                  ))}
+                  {/* Guest-only: surface personal features */}
+                  {!user && (
+                    <>
+                      <div className="border-t border-gray-100 mt-1 pt-1.5 pb-1 px-3">
+                        <span className="text-[9px] font-bold text-gray-400 uppercase tracking-wider">Free</span>
+                      </div>
+                      {RESOURCES_LINKS_GUEST_EXTRA.map(({ href, label, icon: Icon }) => (
+                        <Link key={href} href={href} onClick={() => setResourceDropOpen(false)}
+                          className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}>
+                          <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
+                          <span className={cn('text-sm', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
+                        </Link>
+                      ))}
+                    </>
+                  )}
 
-                </div>
-              )}
-            </div>
-
-            {/* Premium Data dropdown */}
-            <div className="relative" ref={marketDropRef}>
-              <button
-                onClick={() => setMarketDropOpen(v => !v)}
-                className={dropBtn(matchesPrefix(pathname, PREMIUM_DATA_PREFIXES))}
-              >
-                <Building2 className="w-3.5 h-3.5 shrink-0" />
-                Premium Data
-                <ChevronDown className={cn('w-3.5 h-3.5 shrink-0 transition-transform', marketDropOpen && 'rotate-180')} />
-              </button>
-              {marketDropOpen && (
-                <div className="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-xl shadow-lg py-1 z-50">
-                  {MARKET_DATA_LINKS.map(({ href, label, icon: Icon, premium }) => (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={() => setMarketDropOpen(false)}
-                      className={cn('flex items-center gap-2.5 px-3 py-2 hover:bg-gray-50 transition-colors', pathname === href && 'bg-blue-50')}
-                    >
-                      <Icon className={cn('w-3.5 h-3.5 shrink-0', pathname === href ? 'text-blue-500' : 'text-gray-400')} />
-                      <span className={cn('text-sm flex-1', pathname === href ? 'text-blue-700 font-medium' : 'text-gray-700')}>{label}</span>
-                      {premium && <span className="text-[9px] font-bold px-1 py-0.5 rounded bg-purple-100 text-purple-700">Prem</span>}
-                    </Link>
-                  ))}
                 </div>
               )}
             </div>
@@ -340,24 +339,28 @@ export default function Navbar() {
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
+            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Market</div>
+            {MARKET_LINKS.map(({ href, label, icon: Icon }) => (
+              <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
+                <Icon className="w-4 h-4" />{label}
+              </Link>
+            ))}
             <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Resources — Pro+</div>
             {RESOURCES_LINKS_PRO.map(({ href, label, icon: Icon }) => (
               <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
                 <Icon className="w-4 h-4" />{label}
               </Link>
             ))}
-            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Resources — Free</div>
-            {[...RESOURCES_LINKS_FREE, ...(user ? [] : RESOURCES_LINKS_GUEST_EXTRA)].map(({ href, label, icon: Icon }) => (
-              <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
-                <Icon className="w-4 h-4" />{label}
-              </Link>
-            ))}
-            <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-2">Premium Data</div>
-            {MARKET_DATA_LINKS.map(({ href, label, icon: Icon }) => (
-              <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
-                <Icon className="w-4 h-4" />{label}
-              </Link>
-            ))}
+            {!user && (
+              <>
+                <div className="px-4 py-1 text-[10px] font-bold text-gray-400 uppercase tracking-wider mt-1">Resources — Free</div>
+                {RESOURCES_LINKS_GUEST_EXTRA.map(({ href, label, icon: Icon }) => (
+                  <Link key={href} href={href} onClick={() => setMenuOpen(false)} className={cn('flex items-center gap-2 px-4 py-2.5 text-sm', pathname === href ? 'text-blue-700 font-semibold bg-blue-50' : 'text-gray-700')}>
+                    <Icon className="w-4 h-4" />{label}
+                  </Link>
+                ))}
+              </>
+            )}
             {user?.is_admin && (
               <>
                 <div className="px-4 py-1 text-[10px] font-bold text-red-400 uppercase tracking-wider mt-2">Admin</div>

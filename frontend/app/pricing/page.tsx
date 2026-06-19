@@ -222,11 +222,11 @@ export default function PricingPage() {
                 <div className="flex-1 min-w-0">
                   {founding.available ? (
                     <>
-                      <p className="font-bold text-amber-900 text-sm">Founding Members — {founding.remaining} of {founding.limit} spots remaining</p>
+                      <p className="font-bold text-amber-900 text-sm">Founding Members — offer ends September 2026</p>
                       <p className="text-amber-700 text-xs mt-0.5">Monthly → 6 months &nbsp;·&nbsp; Annual → 3 years. No extra charge.</p>
                     </>
                   ) : (
-                    <p className="font-bold text-gray-600 text-sm">Founding Members — all {founding.limit} spots claimed. Standard pricing applies.</p>
+                    <p className="font-bold text-gray-600 text-sm">Founding Members — offer has ended. Standard pricing applies.</p>
                   )}
                 </div>
               </div>
@@ -462,22 +462,12 @@ export default function PricingPage() {
                   </div>
                 </div>
 
-                {/* Scarcity bar */}
+                {/* Expiry notice */}
                 <div className="mb-4">
-                  <div className="flex justify-between text-[10px] mb-1.5">
-                    <span className="text-slate-500">Spots claimed</span>
-                    <span className="text-amber-400 font-semibold">{founding.claimed} / {founding.limit}</span>
-                  </div>
-                  <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-amber-400 rounded-full transition-all"
-                      style={{ width: `${Math.round((founding.claimed / founding.limit) * 100)}%` }}
-                    />
-                  </div>
                   {founding.available ? (
-                    <p className="text-[10px] text-slate-500 mt-1">{founding.remaining} spots left</p>
+                    <p className="text-[10px] text-amber-500 font-semibold">Offer ends September 2026</p>
                   ) : (
-                    <p className="text-[10px] text-slate-500 mt-1">All spots claimed</p>
+                    <p className="text-[10px] text-slate-500">Offer has ended</p>
                   )}
                 </div>
 
@@ -496,7 +486,7 @@ export default function PricingPage() {
                 )}
 
                 <p className="text-[10px] text-slate-600 text-center mt-3 leading-relaxed">
-                  First {founding.limit} paying subscribers only. No extra charge.
+                  Founding member offer. No extra charge.
                 </p>
               </div>
             </div>

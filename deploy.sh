@@ -9,7 +9,7 @@
 #   ./deploy.sh --status   # show status of both services
 #
 # Architecture:
-#   Backend  → systemd  (asx-api.service)   — FastAPI/uvicorn on port 8000
+#   Backend  → systemd  (asx-backend.service) — FastAPI/uvicorn on port 8000
 #   Frontend → PM2      (asx-frontend)      — Next.js standalone
 #
 # IMPORTANT: Backend must NEVER be added to PM2.
@@ -34,7 +34,7 @@ err()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 show_status() {
     echo ""
     log "=== Backend (systemd) ==="
-    systemctl status asx-api --no-pager | head -8
+    systemctl status asx-backend --no-pager | head -8
 
     echo ""
     log "=== Frontend (PM2) ==="
@@ -55,12 +55,12 @@ pull_code() {
 
 # ── Backend Python dependencies ───────────────────────────────────────────────
 install_backend_deps() {
-    VENV_PIP="/opt/asx-venv/bin/pip"
+    VENV_PIP="/opt/asx-screener/asx-venv/bin/pip"
     REQUIREMENTS="$REPO_DIR/backend/requirements.txt"
     HASH_FILE="$REPO_DIR/.requirements_hash"
 
     if [ ! -f "$VENV_PIP" ]; then
-        err "Python venv not found at /opt/asx-venv — run setup first"
+        err "Python venv not found at /opt/asx-screener/asx-venv — run setup first"
     fi
     if [ ! -f "$REQUIREMENTS" ]; then
         warn "requirements.txt not found — skipping pip install"
@@ -85,14 +85,14 @@ install_backend_deps() {
 restart_backend() {
     log "Restarting backend (systemd)..."
 
-    sudo systemctl reset-failed asx-api 2>/dev/null || true
-    sudo systemctl restart asx-api
+    sudo systemctl reset-failed asx-backend 2>/dev/null || true
+    sudo systemctl restart asx-backend
     sleep 5
 
-    if systemctl is-active --quiet asx-api; then
-        log "Backend running ✓  (PID: $(systemctl show asx-api -p MainPID --value))"
+    if systemctl is-active --quiet asx-backend; then
+        log "Backend running ✓  (PID: $(systemctl show asx-backend -p MainPID --value))"
     else
-        err "Backend failed — check: sudo journalctl -u asx-api -n 30"
+        err "Backend failed — check: sudo journalctl -u asx-backend -n 30"
     fi
 }
 

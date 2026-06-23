@@ -94,9 +94,13 @@ def transform_one(cur, row: dict) -> str:
         "status":                "active",        # staging doesn't have status; default active
         "fiscal_year_end_month": _fiscal_month(row.get("fiscal_year_end")),
         "is_reit":               "reit" in (sn(row.get("gic_industry")) or "").lower()
+                                  or "reit" in (sn(row.get("gic_sub_industry")) or "").lower()
                                   or "reit" in (sn(row.get("type")) or "").lower(),
         "is_miner":              any(k in (sn(row.get("gic_industry")) or "").lower()
-                                     for k in ("mining", "gold", "metals", "coal")),
+                                     for k in ("mining", "gold", "metals", "coal", "steel", "silver", "copper", "uranium"))
+                                  or any(k in (sn(row.get("gic_sub_industry")) or "").lower()
+                                         for k in ("mining", "gold", "metals", "coal", "steel", "silver", "copper", "uranium"))
+                                  or (sn(row.get("gic_sector")) or "").lower() == "materials",
         # Non-tracked
         "company_name":          sn(row.get("name")),
         "isin":                  sn(row.get("isin")),

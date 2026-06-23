@@ -99,7 +99,11 @@ async def lifespan(app: FastAPI):
     from app.workers.cleanup_worker import purge_expired_sessions, run_data_deletion
     from app.workers.mining_reit_worker import sync_mining_reit_metrics
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(job_defaults={
+        "misfire_grace_time": 3600,  # fire missed jobs if up to 1 hour late (survives restarts/deploys)
+        "coalesce": True,            # if multiple firings missed, run only once (no catch-up storm)
+        "max_instances": 1,          # never overlap with a still-running instance
+    })
 
     # Price alerts — every 15 min
     scheduler.add_job(check_alerts, trigger="interval", minutes=15,

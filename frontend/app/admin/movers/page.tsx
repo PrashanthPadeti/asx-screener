@@ -40,8 +40,10 @@ const PERIODS: { value: AdminMoverPeriod; label: string }[] = [
   { value: '6m',  label: '6M'  },
   { value: '1y',  label: '1Y'  },
   { value: 'ytd', label: 'YTD' },
+  { value: '2y',  label: '2Y'  },
   { value: '3y',  label: '3Y'  },
   { value: '5y',  label: '5Y'  },
+  { value: '10y', label: '10Y' },
 ]
 
 const CAP_TIERS: { value: AdminCapTier | 'all'; label: string }[] = [

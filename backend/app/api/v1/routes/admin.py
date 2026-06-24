@@ -1597,7 +1597,7 @@ async def send_verification_reminders(
 
 @router.get("/movers")
 async def admin_movers(
-    period:   str      = Query("1w", pattern="^(1d|1w|1m|3m|6m|1y|ytd|3y|5y)$"),
+    period:   str      = Query("1w", pattern="^(1d|1w|1m|3m|6m|1y|ytd|2y|3y|5y|10y)$"),
     cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
     limit:    int      = Query(50, ge=5, le=100),
     db: AsyncSession = Depends(get_db),
@@ -1611,7 +1611,8 @@ async def admin_movers(
     col_map = {
         "1d": "return_1d", "1w": "return_1w", "1m": "return_1m",
         "3m": "return_3m", "6m": "return_6m", "1y": "return_1y",
-        "ytd": "return_ytd", "3y": "return_3y", "5y": "return_5y",
+        "ytd": "return_ytd", "2y": "return_2y", "3y": "return_3y",
+        "5y": "return_5y", "10y": "return_10y",
     }
     ret_col = col_map[period]
 

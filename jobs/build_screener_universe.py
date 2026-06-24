@@ -104,6 +104,20 @@ def load_latest_price(cur, asx_code: str) -> dict:
     return cur.fetchone() or {}
 
 
+def load_price_n_years_ago(cur, asx_code: str, years: int) -> float | None:
+    """Get the most recent adjusted_close on or before N years ago."""
+    cur.execute("""
+        SELECT adjusted_close
+        FROM market.daily_prices
+        WHERE asx_code = %s
+          AND adjusted_close IS NOT NULL
+          AND time <= CURRENT_DATE - (%s || ' years')::interval
+        ORDER BY time DESC LIMIT 1
+    """, (asx_code, str(years)))
+    row = cur.fetchone()
+    return float(row["adjusted_close"]) if row else None
+
+
 def load_yearly(cur, asx_code: str) -> tuple[dict, dict, dict]:
     """Returns (fy0, fy1, fy2) dicts — current, prior, two-prior fiscal year rows."""
     cur.execute("""
@@ -301,6 +315,14 @@ def build_row(asx_code: str, cur) -> dict:
 
     # Current price — prefer daily_metrics, fall back to daily_prices
     close = g(dm, "close") or g(dp, "close")
+
+    # Prices N years ago for long-period CAGRs
+    price_2y_ago  = load_price_n_years_ago(cur, asx_code, 2)
+
+    def price_cagr(current, past, years):
+        if current and past and past > 0:
+            return round((current / past) ** (1 / years) - 1, 6)
+        return None
 
     # Latest fiscal year
     latest_fy = g(fy0, "fiscal_year")
@@ -627,8 +649,10 @@ def build_row(asx_code: str, cur) -> dict:
         "return_6m":            g(mo, "return_6m"),
         "return_1y":            g(mo, "return_12m"),
         "return_ytd":           g(mo, "return_ytd"),
+        "return_2y":            price_cagr(close, price_2y_ago, 2),
         "return_3y":            g(fy0, "price_cagr_3y"),
         "return_5y":            g(fy0, "price_cagr_5y"),
+        "return_10y":           g(fy0, "price_cagr_10y"),
 
         # ── 52w / ATH levels ─────────────────────────────────
         "high_52w":             g(dm, "high_52w"),

@@ -462,6 +462,50 @@ const ALL_COLUMNS: ColDef[] = [
       ? <span className="text-gray-700">${r.sma_200 < 1 ? r.sma_200.toFixed(3) : r.sma_200.toFixed(2)}</span>
       : <span className="text-gray-300">—</span>,
   },
+
+  // ── Factor Scores (percentile 0–100) ─────────────────────────────────────
+  {
+    key: 'composite_score', label: 'Score', sortKey: 'composite_score',
+    default: false, align: 'right',
+    render: r => r.composite_score != null
+      ? <span className={r.composite_score >= 70 ? 'text-green-600 font-semibold' : r.composite_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.composite_score}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'value_score', label: 'Value Sc.', sortKey: 'value_score',
+    default: false, align: 'right',
+    render: r => r.value_score != null
+      ? <span className={r.value_score >= 70 ? 'text-green-600' : r.value_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.value_score}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'quality_score', label: 'Quality Sc.', sortKey: 'quality_score',
+    default: false, align: 'right',
+    render: r => r.quality_score != null
+      ? <span className={r.quality_score >= 70 ? 'text-green-600' : r.quality_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.quality_score}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'growth_score', label: 'Growth Sc.', sortKey: 'growth_score',
+    default: false, align: 'right',
+    render: r => r.growth_score != null
+      ? <span className={r.growth_score >= 70 ? 'text-green-600' : r.growth_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.growth_score}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'momentum_score', label: 'Momentum Sc.', sortKey: 'momentum_score',
+    default: false, align: 'right',
+    render: r => r.momentum_score != null
+      ? <span className={r.momentum_score >= 70 ? 'text-green-600' : r.momentum_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.momentum_score}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'income_score', label: 'Income Sc.', sortKey: 'income_score',
+    default: false, align: 'right',
+    render: r => r.income_score != null
+      ? <span className={r.income_score >= 70 ? 'text-green-600' : r.income_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.income_score}</span>
+      : <span className="text-gray-300">—</span>,
+  },
 ]
 
 // ── Market Cap tier quick-filter ──────────────────────────────────────────────

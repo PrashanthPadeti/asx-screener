@@ -162,6 +162,14 @@ export interface ScreenerRow {
   fcf_fy0: number | null                   // AUD millions
   cfo_fy0: number | null                   // AUD millions
 
+  // Factor Scores (percentile 0–100)
+  composite_score: number | null
+  value_score: number | null
+  quality_score: number | null
+  growth_score: number | null
+  momentum_score: number | null
+  income_score: number | null
+
   // Quality Scores
   piotroski_f_score: number | null         // 0–9
   altman_z_score: number | null

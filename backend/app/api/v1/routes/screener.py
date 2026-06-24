@@ -183,6 +183,14 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "cash":                  {"col": "u.cash",                 "scale": 1,    "type": "number", "label": "Cash & Equivalents (AUD M)",  "unit": "AUD M","cat": "Financial Health"},
     "capital_employed":      {"col": "(u.total_equity + u.total_debt)", "scale": 1, "type": "number", "label": "Capital Employed (AUD M)",  "unit": "AUD M","cat": "Financial Health"},  # equity + total debt
 
+    # ── Factor Scores (percentile 0–100) ─────────────────────────────────────
+    "composite_score":         {"col": "u.composite_score",          "scale": 1,    "type": "number", "label": "Composite Score",            "unit": "",    "cat": "Factor Scores"},
+    "value_score":             {"col": "u.value_score",              "scale": 1,    "type": "number", "label": "Value Score",                "unit": "",    "cat": "Factor Scores"},
+    "quality_score":           {"col": "u.quality_score",            "scale": 1,    "type": "number", "label": "Quality Score",              "unit": "",    "cat": "Factor Scores"},
+    "growth_score":            {"col": "u.growth_score",             "scale": 1,    "type": "number", "label": "Growth Score",               "unit": "",    "cat": "Factor Scores"},
+    "momentum_score":          {"col": "u.momentum_score",           "scale": 1,    "type": "number", "label": "Momentum Score",             "unit": "",    "cat": "Factor Scores"},
+    "income_score":            {"col": "u.income_score",             "scale": 1,    "type": "number", "label": "Income Score",               "unit": "",    "cat": "Factor Scores"},
+
     # ── Quality Scores ────────────────────────────────────────────────────────
     "piotroski_f_score":       {"col": "u.piotroski_f_score",        "scale": 1,    "type": "number", "label": "Piotroski F-Score",          "unit": "",    "cat": "Quality"},
     "altman_z_score":          {"col": "u.altman_z_score",           "scale": 1,    "type": "number", "label": "Altman Z-Score",             "unit": "",    "cat": "Quality"},   # TODO: compute in yearly_metrics
@@ -555,6 +563,13 @@ SORTABLE_COLS: dict[str, str] = {
     "ocf_per_share":      "u.ocf_per_share",
     "revenue_per_share":  "u.revenue_per_share",
     "working_capital":    "u.working_capital",
+    # Factor Scores
+    "composite_score":    "u.composite_score",
+    "value_score":        "u.value_score",
+    "quality_score":      "u.quality_score",
+    "growth_score":       "u.growth_score",
+    "momentum_score":     "u.momentum_score",
+    "income_score":       "u.income_score",
     # Quality
     "piotroski_f_score":  "u.piotroski_f_score",
     "altman_z_score":     "u.altman_z_score",
@@ -738,6 +753,10 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
             u.debt_to_equity, u.current_ratio, u.net_debt, u.total_debt,
             u.book_value_per_share, u.total_assets, u.total_equity,
             u.fcf_fy0, u.cfo_fy0,
+
+            -- Factor Scores
+            u.composite_score, u.value_score, u.quality_score,
+            u.growth_score, u.momentum_score, u.income_score,
 
             -- Quality Scores & rolling averages
             u.piotroski_f_score, u.altman_z_score,

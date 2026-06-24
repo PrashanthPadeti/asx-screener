@@ -722,9 +722,15 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
             u.gross_margin, u.ebitda_margin, u.net_margin, u.operating_margin,
             u.roe, u.roa, u.roce, u.avg_roe_3y,
 
+            -- Per-share
+            u.eps_fy0,
+
             -- Growth
             u.revenue_growth_1y, u.revenue_growth_3y_cagr, u.revenue_cagr_5y,
-            u.earnings_growth_1y, u.eps_growth_3y_cagr,
+            u.revenue_cagr_7y, u.revenue_cagr_10y,
+            u.earnings_growth_1y, u.earnings_growth_3y_cagr,
+            u.eps_growth_1y, u.eps_growth_3y_cagr, u.eps_cagr_5y,
+            u.ebitda_growth_1y, u.fcf_growth_1y, u.net_income_cagr_5y,
             u.revenue_growth_yoy_q, u.eps_growth_yoy_q,
             u.revenue_growth_hoh, u.net_income_growth_hoh, u.eps_growth_hoh,
 
@@ -733,8 +739,12 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
             u.book_value_per_share, u.total_assets, u.total_equity,
             u.fcf_fy0, u.cfo_fy0,
 
-            -- Quality Scores
+            -- Quality Scores & rolling averages
             u.piotroski_f_score, u.altman_z_score,
+            u.avg_roe_5y, u.avg_roa_3y, u.avg_roa_5y,
+            u.avg_roce_3y, u.avg_roce_5y,
+            u.avg_roic_3y, u.avg_roic_5y,
+            u.roic,
             u.percent_insiders, u.percent_institutions, u.short_pct,
 
             -- Technicals
@@ -745,7 +755,9 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
 
             -- Returns
             u.return_1w, u.return_1m, u.return_3m, u.return_6m,
-            u.return_1y, u.return_ytd, u.return_3y, u.return_5y,
+            u.return_1y, u.return_ytd,
+            u.return_2y, u.return_3y, u.return_4y, u.return_5y,
+            u.return_6y, u.return_7y, u.return_8y, u.return_9y, u.return_10y,
             u.drawdown_from_ath,
 
             -- Metadata

@@ -286,6 +286,182 @@ const ALL_COLUMNS: ColDef[] = [
     default: false, align: 'right',
     render: r => <span className="text-gray-600">{formatVolume(r.volume)}</span>,
   },
+
+  // ── Additional Returns ────────────────────────────────────────────────────
+  {
+    key: 'return_1w', label: '1W Return', sortKey: 'return_1w',
+    default: false, align: 'right',
+    render: r => r.return_1w != null
+      ? <span className={r.return_1w >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_1w)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_6m', label: '6M Return', sortKey: 'return_6m',
+    default: false, align: 'right',
+    render: r => r.return_6m != null
+      ? <span className={r.return_6m >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_6m)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_2y', label: '2Y Return', sortKey: 'return_2y',
+    default: false, align: 'right',
+    render: r => r.return_2y != null
+      ? <span className={r.return_2y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_2y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_3y', label: '3Y Return', sortKey: 'return_3y',
+    default: false, align: 'right',
+    render: r => r.return_3y != null
+      ? <span className={r.return_3y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_3y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_5y', label: '5Y Return', sortKey: 'return_5y',
+    default: false, align: 'right',
+    render: r => r.return_5y != null
+      ? <span className={r.return_5y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_5y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_7y', label: '7Y Return', sortKey: 'return_7y',
+    default: false, align: 'right',
+    render: r => r.return_7y != null
+      ? <span className={r.return_7y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_7y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_10y', label: '10Y Return', sortKey: 'return_10y',
+    default: false, align: 'right',
+    render: r => r.return_10y != null
+      ? <span className={r.return_10y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_10y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+
+  // ── Profitability & Quality ───────────────────────────────────────────────
+  {
+    key: 'roe', label: 'ROE %', sortKey: 'roe',
+    default: false, align: 'right',
+    render: r => r.roe != null
+      ? <span className={r.roe >= 0.15 ? 'text-green-600' : r.roe < 0 ? 'text-red-500' : 'text-gray-700'}>{formatRatio(r.roe)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'roa', label: 'ROA %', sortKey: 'roa',
+    default: false, align: 'right',
+    render: r => r.roa != null
+      ? <span className={r.roa >= 0 ? 'text-gray-700' : 'text-red-500'}>{formatRatio(r.roa)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'roce', label: 'ROCE %', sortKey: 'roce',
+    default: false, align: 'right',
+    render: r => r.roce != null
+      ? <span className={r.roce >= 0.15 ? 'text-green-600' : r.roce < 0 ? 'text-red-500' : 'text-gray-700'}>{formatRatio(r.roce)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'roic', label: 'ROIC %', sortKey: 'roic',
+    default: false, align: 'right',
+    render: r => r.roic != null
+      ? <span className={r.roic >= 0.15 ? 'text-green-600' : r.roic < 0 ? 'text-red-500' : 'text-gray-700'}>{formatRatio(r.roic)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'operating_margin', label: 'Op Margin', sortKey: 'operating_margin',
+    default: false, align: 'right',
+    render: r => r.operating_margin != null
+      ? <span className={r.operating_margin >= 0 ? 'text-gray-700' : 'text-red-500'}>{formatRatio(r.operating_margin)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'eps_fy0', label: 'EPS', sortKey: 'eps_fy0',
+    default: false, align: 'right',
+    render: r => r.eps_fy0 != null
+      ? <span className={r.eps_fy0 >= 0 ? 'text-gray-700' : 'text-red-500'}>${r.eps_fy0.toFixed(3)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'avg_roe_3y', label: 'Avg ROE 3Y', sortKey: 'avg_roe_3y',
+    default: false, align: 'right',
+    render: r => r.avg_roe_3y != null
+      ? <span className={r.avg_roe_3y >= 0.15 ? 'text-green-600' : 'text-gray-700'}>{formatRatio(r.avg_roe_3y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'avg_roce_3y', label: 'Avg ROCE 3Y', sortKey: 'avg_roce_3y',
+    default: false, align: 'right',
+    render: r => r.avg_roce_3y != null
+      ? <span className={r.avg_roce_3y >= 0.15 ? 'text-green-600' : 'text-gray-700'}>{formatRatio(r.avg_roce_3y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+
+  // ── Growth ────────────────────────────────────────────────────────────────
+  {
+    key: 'earnings_growth_1y', label: 'Profit Gr 1Y', sortKey: 'earnings_growth_1y',
+    default: false, align: 'right',
+    render: r => r.earnings_growth_1y != null
+      ? <span className={r.earnings_growth_1y >= 0 ? 'text-green-600' : 'text-red-500'}>{formatRatioChange(r.earnings_growth_1y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'eps_growth_1y', label: 'EPS Gr 1Y', sortKey: 'eps_growth_1y',
+    default: false, align: 'right',
+    render: r => r.eps_growth_1y != null
+      ? <span className={r.eps_growth_1y >= 0 ? 'text-green-600' : 'text-red-500'}>{formatRatioChange(r.eps_growth_1y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'revenue_growth_3y_cagr', label: 'Rev CAGR 3Y', sortKey: 'revenue_growth_3y_cagr',
+    default: false, align: 'right',
+    render: r => r.revenue_growth_3y_cagr != null
+      ? <span className={r.revenue_growth_3y_cagr >= 0 ? 'text-green-600' : 'text-red-500'}>{formatRatioChange(r.revenue_growth_3y_cagr)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'revenue_cagr_5y', label: 'Rev CAGR 5Y', sortKey: 'revenue_cagr_5y',
+    default: false, align: 'right',
+    render: r => r.revenue_cagr_5y != null
+      ? <span className={r.revenue_cagr_5y >= 0 ? 'text-green-600' : 'text-red-500'}>{formatRatioChange(r.revenue_cagr_5y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'eps_growth_3y_cagr', label: 'EPS CAGR 3Y', sortKey: 'eps_growth_3y_cagr',
+    default: false, align: 'right',
+    render: r => r.eps_growth_3y_cagr != null
+      ? <span className={r.eps_growth_3y_cagr >= 0 ? 'text-green-600' : 'text-red-500'}>{formatRatioChange(r.eps_growth_3y_cagr)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'eps_cagr_5y', label: 'EPS CAGR 5Y', sortKey: 'eps_cagr_5y',
+    default: false, align: 'right',
+    render: r => r.eps_cagr_5y != null
+      ? <span className={r.eps_cagr_5y >= 0 ? 'text-green-600' : 'text-red-500'}>{formatRatioChange(r.eps_cagr_5y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+
+  // ── Technicals ────────────────────────────────────────────────────────────
+  {
+    key: 'beta_1y', label: 'Beta', sortKey: 'beta_1y',
+    default: false, align: 'right',
+    render: r => r.beta_1y != null
+      ? <span className="text-gray-700">{r.beta_1y.toFixed(2)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'volatility_20d', label: 'Vol 20D', sortKey: 'volatility_20d',
+    default: false, align: 'right',
+    render: r => r.volatility_20d != null
+      ? <span className="text-gray-700">{formatRatio(r.volatility_20d)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'sma_200', label: '200D MA', sortKey: 'sma_200',
+    default: false, align: 'right',
+    render: r => r.sma_200 != null
+      ? <span className="text-gray-700">${r.sma_200 < 1 ? r.sma_200.toFixed(3) : r.sma_200.toFixed(2)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
 ]
 
 // ── Market Cap tier quick-filter ──────────────────────────────────────────────

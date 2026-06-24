@@ -761,6 +761,31 @@ export const getMarketMovers = async (
   return data
 }
 
+export type AdminMoverPeriod = '1d' | '1w' | '1m' | '3m' | '6m' | '1y' | 'ytd' | '3y' | '5y'
+export type AdminCapTier = 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
+
+export interface AdminMoverStock {
+  asx_code: string
+  company_name: string
+  sector: string | null
+  price: number | null
+  market_cap: number | null
+  period_return: number | null
+  period_high: number | null
+  period_low: number | null
+}
+
+export const getAdminMovers = async (
+  period: AdminMoverPeriod = '1w',
+  limit = 50,
+  cap_tier?: AdminCapTier,
+): Promise<{ gainers: AdminMoverStock[]; losers: AdminMoverStock[]; period: string }> => {
+  const { data } = await api.get('/api/v1/admin/movers', {
+    params: { period, limit, ...(cap_tier ? { cap_tier } : {}) },
+  })
+  return data
+}
+
 export const getMarketSignals = async (period: '1d' | '1w' | '1m' | '3m' | '52w' = '1w'): Promise<MarketSignals> => {
   const { data } = await api.get('/api/v1/market/signals', { params: { period } })
   return data

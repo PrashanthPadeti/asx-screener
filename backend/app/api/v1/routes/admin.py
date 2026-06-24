@@ -1591,3 +1591,96 @@ async def send_verification_reminders(
         "failed":  0,   # actual send results are async — check server logs
         "message": f"Sending {len(user_data)} reminder(s) in background. {skipped} skipped (recently reminded).",
     }
+
+
+# ── Admin Extended Movers ─────────────────────────────────────────────────────
+
+@router.get("/movers")
+async def admin_movers(
+    period:   str      = Query("1w", pattern="^(1d|1w|1m|3m|6m|1y|ytd|3y|5y)$"),
+    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
+    limit:    int      = Query(50, ge=5, le=100),
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """
+    Extended top movers for admin use.
+    Supports all available return periods and up to 100 stocks per side.
+    Queries screener.universe directly (no snapshot dependency).
+    """
+    col_map = {
+        "1d": "return_1d", "1w": "return_1w", "1m": "return_1m",
+        "3m": "return_3m", "6m": "return_6m", "1y": "return_1y",
+        "ytd": "return_ytd", "3y": "return_3y", "5y": "return_5y",
+    }
+    ret_col = col_map[period]
+
+    # Period high/low only stored for short periods
+    ph_map = {"1d": "high_1d", "1w": "high_1w", "1m": "high_1m", "3m": "high_3m"}
+    pl_map = {"1d": "low_1d",  "1w": "low_1w",  "1m": "low_1m",  "3m": "low_3m"}
+
+    if period in ph_map:
+        pm_subq   = "(SELECT MAX(computed_date) FROM market.period_metrics)"
+        pm_join   = f"LEFT JOIN market.period_metrics pm ON pm.asx_code = u.asx_code AND pm.computed_date = {pm_subq}"
+        pm_select = f"pm.{ph_map[period]} AS period_high, pm.{pl_map[period]} AS period_low"
+    else:
+        pm_join   = ""
+        pm_select = "NULL::numeric AS period_high, NULL::numeric AS period_low"
+
+    cap_filter = ""
+    cap_flag_map = {
+        "mega": "is_mega = TRUE", "large": "is_large = TRUE", "mid": "is_mid = TRUE",
+        "small": "is_small = TRUE", "micro": "is_micro = TRUE", "nano": "is_nano = TRUE",
+    }
+    if cap_tier and cap_tier in cap_flag_map:
+        cap_filter = f"AND {cap_flag_map[cap_tier]}"
+
+    base_where = f"""
+        WHERE u.{ret_col} IS NOT NULL
+          AND u.price > 0.01
+          AND u.status = 'active'
+          {cap_filter}
+    """
+
+    g_rows = (await db.execute(text(f"""
+        SELECT u.asx_code, u.company_name, u.sector,
+               u.price, u.market_cap,
+               u.{ret_col} AS period_return,
+               {pm_select}
+        FROM screener.universe u
+        {pm_join}
+        {base_where}
+        ORDER BY u.{ret_col} DESC NULLS LAST
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    l_rows = (await db.execute(text(f"""
+        SELECT u.asx_code, u.company_name, u.sector,
+               u.price, u.market_cap,
+               u.{ret_col} AS period_return,
+               {pm_select}
+        FROM screener.universe u
+        {pm_join}
+        {base_where}
+        ORDER BY u.{ret_col} ASC NULLS LAST
+        LIMIT :lim
+    """), {"lim": limit})).mappings().all()
+
+    def to_row(r):
+        return {
+            "asx_code":    r["asx_code"],
+            "company_name": r["company_name"],
+            "sector":      r["sector"],
+            "price":       float(r["price"]) if r["price"] is not None else None,
+            "market_cap":  float(r["market_cap"]) if r["market_cap"] is not None else None,
+            "period_return": float(r["period_return"]) if r["period_return"] is not None else None,
+            "period_high": float(r["period_high"]) if r["period_high"] is not None else None,
+            "period_low":  float(r["period_low"])  if r["period_low"]  is not None else None,
+        }
+
+    return {
+        "gainers": [to_row(r) for r in g_rows],
+        "losers":  [to_row(r) for r in l_rows],
+        "period":  period,
+        "ret_col": ret_col,
+    }

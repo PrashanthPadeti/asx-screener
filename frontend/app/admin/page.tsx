@@ -266,6 +266,7 @@ export default function AdminDashboard() {
               {[
                 { href: '/admin/users',    label: 'Manage Users',    desc: 'Search, filter and update user plans',  icon: Users,     color: 'bg-blue-50 border-blue-200 text-blue-700' },
                 { href: '/admin/pipeline', label: 'Pipeline Health', desc: 'Check daily job execution status',     icon: Activity,  color: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
+                { href: '/admin/movers',   label: 'Top Movers (Extended)', desc: '100 stocks, 9 periods — admin deep-dive', icon: TrendingUp, color: 'bg-violet-50 border-violet-200 text-violet-700' },
                 { href: '/admin/support',  label: 'Support Queue',   desc: `${stats.support.open_tickets} tickets need attention`, icon: LifeBuoy, color: stats.support.open_tickets > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-slate-50 border-slate-200 text-slate-600' },
               ].map(({ href, label, desc, icon: Icon, color }) => (
                 <Link

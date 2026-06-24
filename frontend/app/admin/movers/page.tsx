@@ -89,12 +89,12 @@ function MoverTable({
             <tr className="text-xs text-slate-400 bg-slate-50 border-b">
               <th className="py-2 px-3 text-left w-8">#</th>
               <th className="py-2 px-3 text-left">Stock</th>
-              <th className="py-2 px-3 text-left hidden lg:table-cell">Sector</th>
+              <th className="py-2 px-3 text-left">Sector</th>
               <th className="py-2 px-3 text-right">Price</th>
               {hasPeriodHiLo && (
                 <>
-                  <th className="py-2 px-3 text-right text-emerald-600 hidden md:table-cell">{pLabel} High</th>
-                  <th className="py-2 px-3 text-right text-red-500 hidden md:table-cell">{pLabel} Low</th>
+                  <th className="py-2 px-3 text-right text-emerald-600">{pLabel} High</th>
+                  <th className="py-2 px-3 text-right text-red-500">{pLabel} Low</th>
                 </>
               )}
               <th className="py-2 px-3 text-right">Mkt Cap</th>
@@ -117,16 +117,16 @@ function MoverTable({
                   </Link>
                   <div className="text-xs text-slate-500 truncate max-w-[130px]">{s.company_name}</div>
                 </td>
-                <td className="py-2 px-3 text-xs text-slate-500 hidden lg:table-cell truncate max-w-[120px]">
+                <td className="py-2 px-3 text-xs text-slate-500">
                   {s.sector ?? '—'}
                 </td>
                 <td className="py-2 px-3 text-right">{fmtPrice(s.price)}</td>
                 {hasPeriodHiLo && (
                   <>
-                    <td className="py-2 px-3 text-right text-emerald-600 hidden md:table-cell">
+                    <td className="py-2 px-3 text-right text-emerald-600">
                       {fmtPrice(s.period_high)}
                     </td>
-                    <td className="py-2 px-3 text-right text-red-500 hidden md:table-cell">
+                    <td className="py-2 px-3 text-right text-red-500">
                       {fmtPrice(s.period_low)}
                     </td>
                   </>
@@ -271,7 +271,7 @@ export default function AdminMoversPage() {
         {loading ? (
           <div className="flex justify-center py-16 text-slate-400 text-sm">Loading movers…</div>
         ) : (
-          <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex flex-col gap-4">
             <MoverTable stocks={gainers} side="gainers" period={period} />
             <MoverTable stocks={losers}  side="losers"  period={period} />
           </div>

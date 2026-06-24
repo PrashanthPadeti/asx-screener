@@ -340,13 +340,6 @@ const ALL_COLUMNS: ColDef[] = [
 
   // ── Profitability & Quality ───────────────────────────────────────────────
   {
-    key: 'roe', label: 'ROE %', sortKey: 'roe',
-    default: false, align: 'right',
-    render: r => r.roe != null
-      ? <span className={r.roe >= 0.15 ? 'text-green-600' : r.roe < 0 ? 'text-red-500' : 'text-gray-700'}>{formatRatio(r.roe)}</span>
-      : <span className="text-gray-300">—</span>,
-  },
-  {
     key: 'roa', label: 'ROA %', sortKey: 'roa',
     default: false, align: 'right',
     render: r => r.roa != null
@@ -559,10 +552,52 @@ const OPERATORS: Record<string, { value: string; label: string }[]> = {
 
 // ── Column picker popover ─────────────────────────────────────────────────────
 
+const COLUMN_GROUPS: Record<string, string> = {
+  // Identity / Price
+  sector: 'General', price: 'General', market_cap: 'General', volume: 'General',
+  // Valuation
+  pe_ratio: 'Valuation', forward_pe: 'Valuation', price_to_book: 'Valuation',
+  ev_to_ebitda: 'Valuation', peg_ratio: 'Valuation', price_to_fcf: 'Valuation',
+  // Dividends
+  dividend_yield: 'Dividends', grossed_up_yield: 'Dividends', franking_pct: 'Dividends',
+  dps_ttm: 'Dividends', payout_ratio: 'Dividends', dividend_cagr_3y: 'Dividends',
+  // Margins
+  net_margin: 'Margins', ebitda_margin: 'Margins', gross_margin: 'Margins',
+  operating_margin: 'Margins',
+  // Profitability
+  roe: 'Profitability', roa: 'Profitability', roce: 'Profitability', roic: 'Profitability',
+  eps_fy0: 'Profitability', avg_roe_3y: 'Profitability', avg_roce_3y: 'Profitability',
+  // Growth
+  revenue_growth_1y: 'Growth', revenue_growth_hoh: 'Growth', eps_growth_hoh: 'Growth',
+  earnings_growth_1y: 'Growth', eps_growth_1y: 'Growth',
+  revenue_growth_3y_cagr: 'Growth', revenue_cagr_5y: 'Growth',
+  eps_growth_3y_cagr: 'Growth', eps_cagr_5y: 'Growth',
+  // Balance Sheet
+  debt_to_equity: 'Balance Sheet', current_ratio: 'Balance Sheet',
+  // Returns
+  return_ytd: 'Returns', return_1w: 'Returns', return_3m: 'Returns', return_6m: 'Returns',
+  return_1y: 'Returns', return_2y: 'Returns', return_3y: 'Returns', return_5y: 'Returns',
+  return_7y: 'Returns', return_10y: 'Returns',
+  // Quality
+  piotroski_f_score: 'Quality', altman_z_score: 'Quality', short_pct: 'Sentiment',
+  // Technical
+  rsi_14: 'Technical', beta_1y: 'Technical', volatility_20d: 'Technical', sma_200: 'Technical',
+  // Factor Scores
+  composite_score: 'Factor Scores', value_score: 'Factor Scores', quality_score: 'Factor Scores',
+  growth_score: 'Factor Scores', momentum_score: 'Factor Scores', income_score: 'Factor Scores',
+}
+
+const COL_GROUP_ORDER = [
+  'General', 'Valuation', 'Dividends', 'Margins', 'Profitability',
+  'Growth', 'Balance Sheet', 'Returns', 'Quality', 'Sentiment',
+  'Technical', 'Factor Scores',
+]
+
 function ColumnPicker({
   visibleKeys, onChange,
 }: { visibleKeys: Set<string>; onChange: (keys: Set<string>) => void }) {
   const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -574,6 +609,8 @@ function ColumnPicker({
   }, [])
 
   const optional = ALL_COLUMNS.filter(c => !c.always)
+  const q = search.trim().toLowerCase()
+  const filtered = q ? optional.filter(c => c.label.toLowerCase().includes(q)) : optional
 
   const toggle = (key: string) => {
     const next = new Set(visibleKeys)
@@ -582,30 +619,64 @@ function ColumnPicker({
     onChange(next)
   }
 
+  const grouped: Record<string, ColDef[]> = {}
+  for (const col of filtered) {
+    const g = COLUMN_GROUPS[col.key as string] || 'Other'
+    if (!grouped[g]) grouped[g] = []
+    grouped[g].push(col)
+  }
+
   return (
     <div className="relative" ref={ref}>
-      <button onClick={() => setOpen(o => !o)}
+      <button onClick={() => { setOpen(o => !o); setSearch('') }}
         className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-300 rounded-lg
                    bg-white hover:bg-gray-50 text-gray-700 font-medium">
         <SlidersHorizontal className="w-4 h-4" /> Columns
       </button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-20 bg-white border border-gray-200
-                        rounded-xl shadow-lg p-3 w-64">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
-            Toggle Columns
-          </p>
-          <div className="space-y-1 max-h-72 overflow-y-auto">
-            {optional.map(col => (
-              <label key={col.key as string}
-                className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer
-                           hover:text-gray-900 py-0.5">
-                <input type="checkbox"
-                  checked={visibleKeys.has(col.key as string)}
-                  onChange={() => toggle(col.key as string)}
-                  className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600" />
-                {col.label}
-              </label>
+                        rounded-xl shadow-lg p-3 w-[520px]">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Toggle Columns
+            </p>
+            <div className="flex gap-3 text-xs">
+              <button onClick={() => onChange(new Set(optional.map(c => c.key as string)))}
+                className="text-blue-600 hover:underline">Select all</button>
+              <button onClick={() => onChange(new Set(
+                ALL_COLUMNS.filter(c => c.default && !c.always).map(c => c.key as string)
+              ))} className="text-gray-500 hover:underline">Reset defaults</button>
+            </div>
+          </div>
+          <input
+            type="text"
+            placeholder="Search columns..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full mb-3 px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg
+                       focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <div className="max-h-[480px] overflow-y-auto space-y-3 pr-1">
+            {(q ? Object.keys(grouped) : COL_GROUP_ORDER).filter(g => grouped[g]?.length).map(g => (
+              <div key={g}>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1 pb-0.5
+                              border-b border-gray-100">
+                  {g}
+                </p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                  {grouped[g].map(col => (
+                    <label key={col.key as string}
+                      className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer
+                                 hover:text-gray-900 py-0.5">
+                      <input type="checkbox"
+                        checked={visibleKeys.has(col.key as string)}
+                        onChange={() => toggle(col.key as string)}
+                        className="w-3.5 h-3.5 rounded border-gray-300 text-blue-600 shrink-0" />
+                      <span className="truncate">{col.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         </div>

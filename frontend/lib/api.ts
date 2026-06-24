@@ -132,14 +132,18 @@ export interface ScreenerRow {
   roe: number | null                       // ratio
   roa: number | null                       // ratio
   roce: number | null                      // ratio
+  roic: number | null                      // ratio
   avg_roe_3y: number | null                // ratio
+  avg_roce_3y: number | null               // ratio
 
   // Growth
   revenue_growth_1y: number | null         // ratio
   revenue_growth_3y_cagr: number | null    // ratio
   revenue_cagr_5y: number | null           // ratio
   earnings_growth_1y: number | null        // ratio
+  eps_growth_1y: number | null             // ratio
   eps_growth_3y_cagr: number | null        // ratio
+  eps_cagr_5y: number | null               // ratio
   revenue_growth_yoy_q: number | null      // ratio
   eps_growth_yoy_q: number | null          // ratio
   revenue_growth_hoh: number | null        // ratio ★ ASX half-yearly
@@ -154,6 +158,7 @@ export interface ScreenerRow {
   book_value_per_share: number | null
   total_assets: number | null              // AUD millions
   total_equity: number | null              // AUD millions
+  eps_fy0: number | null                   // AUD
   fcf_fy0: number | null                   // AUD millions
   cfo_fy0: number | null                   // AUD millions
 

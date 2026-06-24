@@ -1598,7 +1598,7 @@ async def send_verification_reminders(
 @router.get("/movers")
 async def admin_movers(
     period:   str      = Query("1w", pattern="^(1d|1w|1m|3m|6m|1y|ytd|2y|3y|4y|5y|6y|7y|8y|9y|10y)$"),
-    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano)$"),
+    cap_tier: list[str] | None = Query(None),
     limit:    int      = Query(50, ge=5, le=100),
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(require_admin),
@@ -1632,11 +1632,13 @@ async def admin_movers(
 
     cap_filter = ""
     cap_flag_map = {
-        "mega": "is_mega = TRUE", "large": "is_large = TRUE", "mid": "is_mid = TRUE",
-        "small": "is_small = TRUE", "micro": "is_micro = TRUE", "nano": "is_nano = TRUE",
+        "mega": "is_mega", "large": "is_large", "mid": "is_mid",
+        "small": "is_small", "micro": "is_micro", "nano": "is_nano",
     }
-    if cap_tier and cap_tier in cap_flag_map:
-        cap_filter = f"AND {cap_flag_map[cap_tier]}"
+    valid_tiers = [t for t in (cap_tier or []) if t in cap_flag_map]
+    if valid_tiers:
+        conditions = " OR ".join(f"u.{cap_flag_map[t]} = TRUE" for t in valid_tiers)
+        cap_filter = f"AND ({conditions})"
 
     base_where = f"""
         WHERE u.{ret_col} IS NOT NULL

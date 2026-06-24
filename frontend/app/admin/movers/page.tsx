@@ -162,22 +162,22 @@ export default function AdminMoversPage() {
   const { user, loading: authLoading } = useAuth()
   const router = useRouter()
 
-  const [period, setPeriod]   = useState<AdminMoverPeriod>('1w')
-  const [capTier, setCapTier] = useState<AdminCapTier | 'all'>('all')
-  const [limit, setLimit]     = useState(50)
-  const [gainers, setGainers] = useState<AdminMoverStock[]>([])
-  const [losers, setLosers]   = useState<AdminMoverStock[]>([])
-  const [loading, setLoading] = useState(false)
+  const [period, setPeriod]     = useState<AdminMoverPeriod>('1w')
+  const [capTiers, setCapTiers] = useState<Set<AdminCapTier>>(new Set())
+  const [limit, setLimit]       = useState(50)
+  const [gainers, setGainers]   = useState<AdminMoverStock[]>([])
+  const [losers, setLosers]     = useState<AdminMoverStock[]>([])
+  const [loading, setLoading]   = useState(false)
   const [lastFetch, setLastFetch] = useState<Date | null>(null)
 
   useEffect(() => {
     if (!authLoading && !user?.is_admin) router.replace('/admin')
   }, [authLoading, user, router])
 
-  const load = useCallback(async (p: AdminMoverPeriod, ct: AdminCapTier | 'all', lim: number) => {
+  const load = useCallback(async (p: AdminMoverPeriod, ct: Set<AdminCapTier>, lim: number) => {
     setLoading(true)
     try {
-      const res = await getAdminMovers(p, lim, ct === 'all' ? undefined : ct)
+      const res = await getAdminMovers(p, lim, ct.size > 0 ? Array.from(ct) : undefined)
       setGainers(res.gainers)
       setLosers(res.losers)
       setLastFetch(new Date())
@@ -189,8 +189,17 @@ export default function AdminMoversPage() {
   }, [])
 
   useEffect(() => {
-    if (user?.is_admin) load(period, capTier, limit)
-  }, [period, capTier, limit, load, user])
+    if (user?.is_admin) load(period, capTiers, limit)
+  }, [period, capTiers, limit, load, user])
+
+  const toggleCapTier = (tier: AdminCapTier) => {
+    setCapTiers(prev => {
+      const next = new Set(prev)
+      if (next.has(tier)) next.delete(tier)
+      else next.add(tier)
+      return next
+    })
+  }
 
   if (authLoading || !user?.is_admin) return null
 
@@ -248,7 +257,7 @@ export default function AdminMoversPage() {
               Export CSV
             </button>
             <button
-              onClick={() => load(period, capTier, limit)}
+              onClick={() => load(period, capTiers, limit)}
               disabled={loading}
               className="flex items-center gap-1.5 text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
             >
@@ -280,12 +289,23 @@ export default function AdminMoversPage() {
           {/* Cap tier + limit */}
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex flex-wrap gap-1">
-              {CAP_TIERS.map(ct => (
+              {/* All Sizes clears selection */}
+              <button
+                onClick={() => setCapTiers(new Set())}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  capTiers.size === 0
+                    ? 'bg-slate-700 text-white'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                All Sizes
+              </button>
+              {CAP_TIERS.filter(ct => ct.value !== 'all').map(ct => (
                 <button
                   key={ct.value}
-                  onClick={() => setCapTier(ct.value)}
+                  onClick={() => toggleCapTier(ct.value as AdminCapTier)}
                   className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                    capTier === ct.value
+                    capTiers.has(ct.value as AdminCapTier)
                       ? 'bg-slate-700 text-white'
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}

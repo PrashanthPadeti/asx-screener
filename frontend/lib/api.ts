@@ -778,11 +778,13 @@ export interface AdminMoverStock {
 export const getAdminMovers = async (
   period: AdminMoverPeriod = '1w',
   limit = 50,
-  cap_tier?: AdminCapTier,
+  cap_tiers?: AdminCapTier[],
 ): Promise<{ gainers: AdminMoverStock[]; losers: AdminMoverStock[]; period: string }> => {
-  const { data } = await api.get('/api/v1/admin/movers', {
-    params: { period, limit, ...(cap_tier ? { cap_tier } : {}) },
-  })
+  const params = new URLSearchParams()
+  params.set('period', period)
+  params.set('limit', String(limit))
+  cap_tiers?.forEach(t => params.append('cap_tier', t))
+  const { data } = await api.get('/api/v1/admin/movers', { params })
   return data
 }
 

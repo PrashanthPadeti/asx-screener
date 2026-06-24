@@ -9,7 +9,7 @@ import {
   type AdminCapTier,
   type AdminMoverStock,
 } from '@/lib/api'
-import { TrendingUp, TrendingDown, RefreshCw } from 'lucide-react'
+import { TrendingUp, TrendingDown, RefreshCw, Download } from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -189,6 +189,37 @@ export default function AdminMoversPage() {
 
   if (authLoading || !user?.is_admin) return null
 
+  const exportCSV = () => {
+    const pLabel = period.toUpperCase()
+    const hasPeriodHiLo = ['1d', '1w', '1m', '3m'].includes(period)
+    const headers = ['Side', 'Rank', 'ASX Code', 'Company', 'Sector', 'Price',
+      ...(hasPeriodHiLo ? [`${pLabel} High`, `${pLabel} Low`] : []),
+      'Mkt Cap (AUD)', `${pLabel} Return`]
+
+    const toRow = (s: AdminMoverStock, side: string, rank: number) => [
+      side, rank, s.asx_code, s.company_name ?? '', s.sector ?? '',
+      s.price ?? '',
+      ...(hasPeriodHiLo ? [s.period_high ?? '', s.period_low ?? ''] : []),
+      s.market_cap ?? '',
+      s.period_return != null ? (s.period_return * 100).toFixed(2) : '',
+    ]
+
+    const rows = [
+      headers,
+      ...gainers.map((s, i) => toRow(s, 'Gainer', i + 1)),
+      ...losers.map((s, i) => toRow(s, 'Loser', i + 1)),
+    ]
+
+    const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n')
+    const blob = new Blob([csv], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `asx-movers-${period}-${new Date().toISOString().slice(0, 10)}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
       <div className="max-w-[1600px] mx-auto space-y-4">
@@ -202,14 +233,24 @@ export default function AdminMoversPage() {
               {lastFetch && ` · last updated ${lastFetch.toLocaleTimeString()}`}
             </p>
           </div>
-          <button
-            onClick={() => load(period, capTier, limit)}
-            disabled={loading}
-            className="flex items-center gap-1.5 text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCSV}
+              disabled={loading || (gainers.length === 0 && losers.length === 0)}
+              className="flex items-center gap-1.5 text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => load(period, capTier, limit)}
+              disabled={loading}
+              className="flex items-center gap-1.5 text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* Controls */}

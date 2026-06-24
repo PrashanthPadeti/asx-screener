@@ -126,9 +126,9 @@ INSERT INTO screener.universe (
     earnings_growth_1y, earnings_growth_3y_cagr,
     ebitda_growth_1y, fcf_growth_1y, eps_growth_1y,
 
-    -- ── Returns (weekly + monthly) ───────────────────────────────────────────
+    -- ── Returns (weekly + monthly + 2Y) ─────────────────────────────────────
     return_1w,
-    return_1m, return_3m, return_6m, return_1y, return_ytd,
+    return_1m, return_3m, return_6m, return_1y, return_ytd, return_2y,
     momentum_3m, momentum_6m, momentum_12m,
 
     -- ── Volatility & risk ────────────────────────────────────────────────────
@@ -366,6 +366,10 @@ SELECT
     COALESCE(dm.return_6m,  mm.return_6m)      AS return_6m,
     COALESCE(dm.return_1y,  mm.return_12m)     AS return_1y,
     COALESCE(dm.return_ytd, mm.return_ytd)     AS return_ytd,
+    CASE
+        WHEN p2y.price_2y_ago IS NOT NULL AND p2y.price_2y_ago > 0 AND dp.close IS NOT NULL
+        THEN ROUND((dp.close / p2y.price_2y_ago) ^ 0.5 - 1, 6)
+    END                                         AS return_2y,
     mm.momentum_3m      AS momentum_3m,
     mm.momentum_6m      AS momentum_6m,
     mm.momentum_12m     AS momentum_12m,
@@ -685,6 +689,17 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) dm ON TRUE
 
+-- ── Price 2 years ago (for return_2y CAGR) ──────────────────────────────────
+LEFT JOIN LATERAL (
+    SELECT adjusted_close AS price_2y_ago
+    FROM market.daily_prices
+    WHERE asx_code = c.asx_code
+      AND adjusted_close IS NOT NULL
+      AND time <= CURRENT_DATE - INTERVAL '2 years'
+    ORDER BY time DESC
+    LIMIT 1
+) p2y ON TRUE
+
 -- ── Yearly metrics (latest FY — CAGRs, quality scores, risk) ─────────────────
 LEFT JOIN LATERAL (
     SELECT roe, roa, roce,
@@ -903,6 +918,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     return_6m               = EXCLUDED.return_6m,
     return_1y               = EXCLUDED.return_1y,
     return_ytd              = EXCLUDED.return_ytd,
+    return_2y               = EXCLUDED.return_2y,
     momentum_3m             = EXCLUDED.momentum_3m,
     momentum_6m             = EXCLUDED.momentum_6m,
     momentum_12m            = EXCLUDED.momentum_12m,

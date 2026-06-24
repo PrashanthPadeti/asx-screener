@@ -189,8 +189,15 @@ export interface ScreenerRow {
   return_6m: number | null                 // ratio
   return_1y: number | null                 // ratio
   return_ytd: number | null                // ratio
+  return_2y: number | null                 // ratio
   return_3y: number | null                 // ratio
+  return_4y: number | null                 // ratio
   return_5y: number | null                 // ratio
+  return_6y: number | null                 // ratio
+  return_7y: number | null                 // ratio
+  return_8y: number | null                 // ratio
+  return_9y: number | null                 // ratio
+  return_10y: number | null                // ratio
   drawdown_from_ath: number | null         // ratio (negative)
 
   // Metadata
@@ -500,8 +507,15 @@ export interface CompanyOverview {
   return_6m: number | null
   return_1y: number | null
   return_ytd: number | null
+  return_2y: number | null
   return_3y: number | null
+  return_4y: number | null
   return_5y: number | null
+  return_6y: number | null
+  return_7y: number | null
+  return_8y: number | null
+  return_9y: number | null
+  return_10y: number | null
   drawdown_from_ath: number | null
 
   // Technicals

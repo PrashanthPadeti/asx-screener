@@ -869,7 +869,7 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
 
       {/* Returns */}
       <Card title="Price Returns">
-        <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+        <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-9 lg:grid-cols-[repeat(17,minmax(0,1fr))] gap-2">
           {([
             ['1W',  o.return_1w],
             ['1M',  o.return_1m],
@@ -877,8 +877,15 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
             ['6M',  o.return_6m],
             ['YTD', o.return_ytd],
             ['1Y',  o.return_1y],
+            ['2Y',  o.return_2y],
             ['3Y',  o.return_3y],
+            ['4Y',  o.return_4y],
             ['5Y',  o.return_5y],
+            ['6Y',  o.return_6y],
+            ['7Y',  o.return_7y],
+            ['8Y',  o.return_8y],
+            ['9Y',  o.return_9y],
+            ['10Y', o.return_10y],
           ] as [string, number | null][]).map(([label, val]) => (
             <div key={label} className={[
               'text-center rounded-lg py-2 px-1',

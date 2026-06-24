@@ -126,9 +126,10 @@ INSERT INTO screener.universe (
     earnings_growth_1y, earnings_growth_3y_cagr,
     ebitda_growth_1y, fcf_growth_1y, eps_growth_1y,
 
-    -- ── Returns (weekly + monthly + 2Y) ─────────────────────────────────────
+    -- ── Returns (weekly + monthly + 2Y/4Y/6Y/8Y/9Y) ──────────────────────────
     return_1w,
-    return_1m, return_3m, return_6m, return_1y, return_ytd, return_2y,
+    return_1m, return_3m, return_6m, return_1y, return_ytd,
+    return_2y, return_4y, return_6y, return_8y, return_9y,
     momentum_3m, momentum_6m, momentum_12m,
 
     -- ── Volatility & risk ────────────────────────────────────────────────────
@@ -366,10 +367,11 @@ SELECT
     COALESCE(dm.return_6m,  mm.return_6m)      AS return_6m,
     COALESCE(dm.return_1y,  mm.return_12m)     AS return_1y,
     COALESCE(dm.return_ytd, mm.return_ytd)     AS return_ytd,
-    CASE
-        WHEN p2y.price_2y_ago IS NOT NULL AND p2y.price_2y_ago > 0 AND dp.close IS NOT NULL
-        THEN ROUND((dp.close / p2y.price_2y_ago) ^ 0.5 - 1, 6)
-    END                                         AS return_2y,
+    CASE WHEN p2y.price_2y_ago  > 0 AND dp.close IS NOT NULL THEN ROUND((dp.close / p2y.price_2y_ago)  ^ (1.0/2)  - 1, 6) END AS return_2y,
+    CASE WHEN p4y.price_4y_ago  > 0 AND dp.close IS NOT NULL THEN ROUND((dp.close / p4y.price_4y_ago)  ^ (1.0/4)  - 1, 6) END AS return_4y,
+    CASE WHEN p6y.price_6y_ago  > 0 AND dp.close IS NOT NULL THEN ROUND((dp.close / p6y.price_6y_ago)  ^ (1.0/6)  - 1, 6) END AS return_6y,
+    CASE WHEN p8y.price_8y_ago  > 0 AND dp.close IS NOT NULL THEN ROUND((dp.close / p8y.price_8y_ago)  ^ (1.0/8)  - 1, 6) END AS return_8y,
+    CASE WHEN p9y.price_9y_ago  > 0 AND dp.close IS NOT NULL THEN ROUND((dp.close / p9y.price_9y_ago)  ^ (1.0/9)  - 1, 6) END AS return_9y,
     mm.momentum_3m      AS momentum_3m,
     mm.momentum_6m      AS momentum_6m,
     mm.momentum_12m     AS momentum_12m,
@@ -689,16 +691,32 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) dm ON TRUE
 
--- ── Price 2 years ago (for return_2y CAGR) ──────────────────────────────────
+-- ── Historical prices for multi-year CAGR returns ───────────────────────────
 LEFT JOIN LATERAL (
-    SELECT adjusted_close AS price_2y_ago
-    FROM market.daily_prices
-    WHERE asx_code = c.asx_code
-      AND adjusted_close IS NOT NULL
-      AND time <= CURRENT_DATE - INTERVAL '2 years'
-    ORDER BY time DESC
-    LIMIT 1
+    SELECT adjusted_close AS price_2y_ago FROM market.daily_prices
+    WHERE asx_code = c.asx_code AND adjusted_close IS NOT NULL
+      AND time <= CURRENT_DATE - INTERVAL '2 years' ORDER BY time DESC LIMIT 1
 ) p2y ON TRUE
+LEFT JOIN LATERAL (
+    SELECT adjusted_close AS price_4y_ago FROM market.daily_prices
+    WHERE asx_code = c.asx_code AND adjusted_close IS NOT NULL
+      AND time <= CURRENT_DATE - INTERVAL '4 years' ORDER BY time DESC LIMIT 1
+) p4y ON TRUE
+LEFT JOIN LATERAL (
+    SELECT adjusted_close AS price_6y_ago FROM market.daily_prices
+    WHERE asx_code = c.asx_code AND adjusted_close IS NOT NULL
+      AND time <= CURRENT_DATE - INTERVAL '6 years' ORDER BY time DESC LIMIT 1
+) p6y ON TRUE
+LEFT JOIN LATERAL (
+    SELECT adjusted_close AS price_8y_ago FROM market.daily_prices
+    WHERE asx_code = c.asx_code AND adjusted_close IS NOT NULL
+      AND time <= CURRENT_DATE - INTERVAL '8 years' ORDER BY time DESC LIMIT 1
+) p8y ON TRUE
+LEFT JOIN LATERAL (
+    SELECT adjusted_close AS price_9y_ago FROM market.daily_prices
+    WHERE asx_code = c.asx_code AND adjusted_close IS NOT NULL
+      AND time <= CURRENT_DATE - INTERVAL '9 years' ORDER BY time DESC LIMIT 1
+) p9y ON TRUE
 
 -- ── Yearly metrics (latest FY — CAGRs, quality scores, risk) ─────────────────
 LEFT JOIN LATERAL (
@@ -919,6 +937,10 @@ ON CONFLICT (asx_code) DO UPDATE SET
     return_1y               = EXCLUDED.return_1y,
     return_ytd              = EXCLUDED.return_ytd,
     return_2y               = EXCLUDED.return_2y,
+    return_4y               = EXCLUDED.return_4y,
+    return_6y               = EXCLUDED.return_6y,
+    return_8y               = EXCLUDED.return_8y,
+    return_9y               = EXCLUDED.return_9y,
     momentum_3m             = EXCLUDED.momentum_3m,
     momentum_6m             = EXCLUDED.momentum_6m,
     momentum_12m            = EXCLUDED.momentum_12m,

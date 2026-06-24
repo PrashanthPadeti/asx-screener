@@ -42,7 +42,12 @@ const PERIODS: { value: AdminMoverPeriod; label: string }[] = [
   { value: 'ytd', label: 'YTD' },
   { value: '2y',  label: '2Y'  },
   { value: '3y',  label: '3Y'  },
+  { value: '4y',  label: '4Y'  },
   { value: '5y',  label: '5Y'  },
+  { value: '6y',  label: '6Y'  },
+  { value: '7y',  label: '7Y'  },
+  { value: '8y',  label: '8Y'  },
+  { value: '9y',  label: '9Y'  },
   { value: '10y', label: '10Y' },
 ]
 

@@ -761,7 +761,7 @@ export const getMarketMovers = async (
   return data
 }
 
-export type AdminMoverPeriod = '1d' | '1w' | '1m' | '3m' | '6m' | '1y' | 'ytd' | '2y' | '3y' | '5y' | '10y'
+export type AdminMoverPeriod = '1d' | '1w' | '1m' | '3m' | '6m' | '1y' | 'ytd' | '2y' | '3y' | '4y' | '5y' | '6y' | '7y' | '8y' | '9y' | '10y'
 export type AdminCapTier = 'mega' | 'large' | 'mid' | 'small' | 'micro' | 'nano'
 
 export interface AdminMoverStock {

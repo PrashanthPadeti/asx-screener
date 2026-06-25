@@ -317,6 +317,13 @@ const ALL_COLUMNS: ColDef[] = [
       : <span className="text-gray-300">—</span>,
   },
   {
+    key: 'return_4y', label: '4Y Return', sortKey: 'return_4y',
+    default: false, align: 'right',
+    render: r => r.return_4y != null
+      ? <span className={r.return_4y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_4y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
     key: 'return_5y', label: '5Y Return', sortKey: 'return_5y',
     default: false, align: 'right',
     render: r => r.return_5y != null
@@ -324,10 +331,31 @@ const ALL_COLUMNS: ColDef[] = [
       : <span className="text-gray-300">—</span>,
   },
   {
+    key: 'return_6y', label: '6Y Return', sortKey: 'return_6y',
+    default: false, align: 'right',
+    render: r => r.return_6y != null
+      ? <span className={r.return_6y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_6y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
     key: 'return_7y', label: '7Y Return', sortKey: 'return_7y',
     default: false, align: 'right',
     render: r => r.return_7y != null
       ? <span className={r.return_7y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_7y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_8y', label: '8Y Return', sortKey: 'return_8y',
+    default: false, align: 'right',
+    render: r => r.return_8y != null
+      ? <span className={r.return_8y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_8y)}</span>
+      : <span className="text-gray-300">—</span>,
+  },
+  {
+    key: 'return_9y', label: '9Y Return', sortKey: 'return_9y',
+    default: false, align: 'right',
+    render: r => r.return_9y != null
+      ? <span className={r.return_9y >= 0 ? 'text-green-600' : 'text-red-600'}>{formatRatioChange(r.return_9y)}</span>
       : <span className="text-gray-300">—</span>,
   },
   {
@@ -576,8 +604,9 @@ const COLUMN_GROUPS: Record<string, string> = {
   debt_to_equity: 'Balance Sheet', current_ratio: 'Balance Sheet',
   // Returns
   return_ytd: 'Returns', return_1w: 'Returns', return_3m: 'Returns', return_6m: 'Returns',
-  return_1y: 'Returns', return_2y: 'Returns', return_3y: 'Returns', return_5y: 'Returns',
-  return_7y: 'Returns', return_10y: 'Returns',
+  return_1y: 'Returns', return_2y: 'Returns', return_3y: 'Returns', return_4y: 'Returns',
+  return_5y: 'Returns', return_6y: 'Returns', return_7y: 'Returns', return_8y: 'Returns',
+  return_9y: 'Returns', return_10y: 'Returns',
   // Quality
   piotroski_f_score: 'Quality', altman_z_score: 'Quality', short_pct: 'Sentiment',
   // Technical

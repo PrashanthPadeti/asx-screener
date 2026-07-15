@@ -27,6 +27,7 @@ BACKUP_PATH="$BACKUP_ROOT/v${VERSION}_${DATE}"
 
 DB_NAME="asx_screener"
 DB_USER="asx_user"
+DB_PASS=$(grep DATABASE_URL_SYNC "$REPO_DIR/backend/.env" 2>/dev/null | sed 's/.*:\/\/[^:]*:\([^@]*\)@.*/\1/')
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -71,7 +72,7 @@ mkdir -p "$BACKUP_PATH"
 
 # 1. Database
 log "Dumping PostgreSQL database '${DB_NAME}'..."
-pg_dump -U "$DB_USER" -Fc "$DB_NAME" > "$BACKUP_PATH/database.dump"
+PGPASSWORD="$DB_PASS" pg_dump -U "$DB_USER" -h localhost -Fc "$DB_NAME" > "$BACKUP_PATH/database.dump"
 DB_SIZE=$(du -sh "$BACKUP_PATH/database.dump" | cut -f1)
 log "Database dump complete  (${DB_SIZE}) ✓"
 

@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "0.1.0"
+    APP_VERSION: str = "9.0.0"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 

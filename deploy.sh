@@ -50,7 +50,9 @@ pull_code() {
     log "Pulling latest code..."
     cd "$REPO_DIR"
     git pull
-    log "Code updated ✓"
+    VERSION=$(cat "$REPO_DIR/VERSION" 2>/dev/null || git describe --tags --always)
+    COMMIT=$(git rev-parse --short HEAD)
+    log "Code updated ✓  →  v${VERSION}  (${COMMIT})"
 }
 
 # ── Backend Python dependencies ───────────────────────────────────────────────

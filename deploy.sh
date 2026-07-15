@@ -116,12 +116,15 @@ restart_frontend() {
     cd "$FRONTEND_DIR"
 
     log "Restarting frontend (PM2)..."
+    # Use standalone server.js — required when next.config has output: 'standalone'
+    # 'next start' does NOT work with standalone output
     if pm2 describe asx-frontend > /dev/null 2>&1; then
-        pm2 restart asx-frontend
-    else
-        log "asx-frontend not in PM2 — starting fresh..."
-        pm2 start npm --name "asx-frontend" -- start
+        pm2 delete asx-frontend
     fi
+    pm2 start .next/standalone/server.js \
+        --name "asx-frontend" \
+        --interpreter node \
+        --env production
 
     pm2 save --force
     sleep 3

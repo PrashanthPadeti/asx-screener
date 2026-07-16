@@ -131,7 +131,7 @@ log "Restoring database '${DB_NAME}' (this may take several minutes)..."
 sudo -u postgres psql -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
 sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" 2>/dev/null || true
 
-pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --role="$DB_USER" \
+sudo -u postgres pg_restore -d "$DB_NAME" --no-owner --role="$DB_USER" \
     "$BACKUP_PATH/database.dump"
 log "Database restored ✓"
 

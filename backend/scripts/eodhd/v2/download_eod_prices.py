@@ -8,7 +8,7 @@ Two modes:
     Output: {EXCHANGE_DIR}/eod_prices/historical/{CODE}.AU_{DATE}.json.gz
 
   Incremental (bulk daily):
-    GET /eod/bulk-download/AU?date={DATE}
+    GET /eod-bulk-last-day/AU?date={DATE}
     Output: {EXCHANGE_DIR}/eod_prices/incremental/{DATE}.json.gz
 
 Usage:
@@ -197,7 +197,8 @@ def run_incremental(dates: list[str], force: bool) -> None:
             auditor.record(target_date, out_path.name, "skip", reason="file_exists")
             continue
 
-        url    = f"{EODHD_BASE}/eod/bulk-download/AU"
+        # EODHD retired /eod/bulk-download/ — current endpoint is /eod-bulk-last-day/
+        url    = f"{EODHD_BASE}/eod-bulk-last-day/AU"
         params = {"api_token": EODHD_KEY, "fmt": "json", "date": target_date}
 
         try:

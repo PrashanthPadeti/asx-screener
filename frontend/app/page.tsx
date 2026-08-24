@@ -63,13 +63,15 @@ const FEATURES = [
   },
 ]
 
+// NOTE: `preset` must match an id returned by GET /api/v1/screener/presets —
+// an unknown id silently loads the screener with no filters applied.
 const QUICK_SCREENS = [
-  { label: 'High Franking Yield',    href: '/screener?preset=high_franking',    color: 'bg-green-50 text-green-700 border-green-200' },
-  { label: 'ASX200 Value Stocks',    href: '/screener?preset=asx200_value',     color: 'bg-blue-50 text-blue-700 border-blue-200' },
-  { label: 'High Piotroski Score',   href: '/screener?preset=piotroski',        color: 'bg-purple-50 text-purple-700 border-purple-200' },
-  { label: 'Materials > $1',         href: '/screener?preset=materials',        color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
-  { label: 'Low Debt, High ROE',     href: '/screener?preset=quality',          color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
-  { label: 'A-REITs',                href: '/screener?preset=reits',            color: 'bg-pink-50 text-pink-700 border-pink-200' },
+  { label: 'Value + Fully Franked',  href: '/screener?preset=value_franked',    color: 'bg-green-50 text-green-700 border-green-200' },
+  { label: 'Price Momentum',         href: '/screener?preset=momentum',         color: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { label: 'High Piotroski Score',   href: '/screener?preset=piotroski_strong', color: 'bg-purple-50 text-purple-700 border-purple-200' },
+  { label: 'Potential Turnaround',   href: '/screener?preset=turnaround',       color: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  { label: 'Dividend Income',        href: '/screener?preset=dividend_income',  color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+  { label: 'A-REIT Income',          href: '/screener?preset=areit_income',     color: 'bg-pink-50 text-pink-700 border-pink-200' },
 ]
 
 // ── Sample preview table rows (real-looking ASX data) ─────────

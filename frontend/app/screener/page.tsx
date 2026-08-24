@@ -869,6 +869,7 @@ export default function ScreenerPage() {
       if (presetId) {
         const found = d.presets.find((p: ScreenerPreset) => p.id === presetId)
         if (found) applyPresetDirect(found)
+        else console.warn(`Unknown preset id in URL: "${presetId}" — no filters applied`)
       }
     }).catch(console.error)
 

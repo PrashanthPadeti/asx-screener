@@ -5,6 +5,7 @@ Thin wrapper around the Resend SDK.
 Falls back to a no-op log if RESEND_API_KEY is not configured.
 """
 import logging
+from html import escape as html_escape
 from typing import Optional
 
 from app.core.config import settings
@@ -235,6 +236,63 @@ def send_support_confirmation(
         return True
     except Exception as e:
         log.error(f"Failed to send support confirmation to {email}: {e}")
+        return False
+
+
+def send_support_resolution(
+    ticket_number: int,
+    name: str,
+    email: str,
+    subject: str,
+    resolution_notes: str,
+    status: str = "resolved",
+) -> bool:
+    """Send the support team's resolution to the user when a ticket is resolved/closed."""
+    resend = _client()
+    greeting = f"Hi {name}," if name else "Hi,"
+    heading  = "✅ Your support request has been resolved" if status == "resolved" \
+               else "Your support request has been closed"
+
+    # resolution_notes is plain text typed by an admin — escape it and keep line breaks.
+    notes_html = html_escape(resolution_notes or "").replace("\n", "<br/>")
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:24px">
+      <h2 style="color:#1d4ed8;margin-bottom:4px">{heading}</h2>
+      <p style="color:#374151">{greeting}</p>
+      <p style="color:#374151">
+        We've updated your support request <strong>#{ticket_number}</strong>
+        ({html_escape(subject)}).
+      </p>
+      <div style="margin:20px 0;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb">
+        <p style="margin:0 0 6px;color:#6b7280;font-size:13px">Resolution</p>
+        <p style="margin:0;color:#111827;line-height:1.5">{notes_html}</p>
+      </div>
+      <p style="color:#374151">
+        If this doesn't fully answer your question, just reply to this email and we'll pick it
+        up again — please keep <strong>#{ticket_number}</strong> in the subject line.
+      </p>
+      <hr style="margin-top:32px;border-color:#e5e7eb"/>
+      <p style="font-size:12px;color:#9ca3af">
+        ASX Screener ·
+        <a href="https://asxscreener.com.au" style="color:#9ca3af">asxscreener.com.au</a>
+      </p>
+    </div>
+    """
+    if resend is None:
+        log.info(f"[email no-op] Support resolution #{ticket_number} to {email}")
+        return False
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [email],
+            "subject": f"[Ticket #{ticket_number}] {subject} — resolved",
+            "html":    html,
+        })
+        log.info(f"Support resolution sent to {email} for ticket #{ticket_number}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send support resolution to {email}: {e}")
         return False
 
 

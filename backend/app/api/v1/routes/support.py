@@ -23,7 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_optional_user, require_admin
 from app.db.session import get_db
-from app.services.email import send_support_confirmation, send_support_notification
+from app.services.email import (
+    send_support_confirmation,
+    send_support_notification,
+    send_support_resolution,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -244,6 +248,16 @@ async def update_ticket(
     if not updates:
         raise HTTPException(status_code=400, detail="Nothing to update")
 
+    # Previous status — so the resolution email fires on the transition into
+    # resolved/closed, not on every later edit of an already-resolved ticket.
+    prev = await db.execute(
+        text("SELECT status FROM support.tickets WHERE id = :id"), {"id": str(ticket_id)}
+    )
+    prev_row = prev.fetchone()
+    if not prev_row:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    was_closed = prev_row.status in ("resolved", "closed")
+
     # Auto-set resolved_at and resolved_by
     extra_sql = ""
     if body.status in ("resolved", "closed"):
@@ -264,7 +278,32 @@ async def update_ticket(
                resolved_by, created_at, updated_at, resolved_at
         FROM support.tickets WHERE id = :id
     """), {"id": str(ticket_id)})
-    return _ticket_row_to_dict(result.fetchone())
+    row = result.fetchone()
+
+    # Email the resolution to the user on the transition into resolved/closed.
+    # Best-effort — a mail failure must not fail the admin's update.
+    if body.status in ("resolved", "closed") and not was_closed:
+        if row.resolution_notes:
+            try:
+                send_support_resolution(
+                    ticket_number=row.ticket_number,
+                    name=row.name,
+                    email=row.email,
+                    subject=row.subject,
+                    resolution_notes=row.resolution_notes,
+                    status=body.status,
+                )
+            except Exception as exc:
+                log.warning(
+                    f"Could not send resolution email for ticket #{row.ticket_number}: {exc}"
+                )
+        else:
+            log.info(
+                f"Ticket #{row.ticket_number} set to {body.status} with no resolution_notes — "
+                f"no email sent to {row.email}"
+            )
+
+    return _ticket_row_to_dict(row)
 
 
 # ── Serve attachment (admin) ──────────────────────────────────────────────────

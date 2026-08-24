@@ -304,8 +304,19 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         price_map = _build_price_plan_map()
         plan_info = price_map.get(price_id)
 
-        if sub_status in ("active", "trialing") and plan_info:
+        is_active = sub_status in ("active", "trialing")
+
+        if is_active and plan_info:
             plan, seat_limit, billing_period = plan_info
+        elif is_active:
+            # Active subscription, but the price ID isn't in our map — almost always a
+            # missing or stale STRIPE_* price ID in .env.  Never downgrade a paying
+            # customer because of a config gap: leave the plan alone and log loudly.
+            plan = seat_limit = billing_period = None
+            log.error(
+                f"Stripe price_id '{price_id}' not found in price map — leaving plan "
+                f"unchanged for customer {cid}. Check STRIPE_* price IDs in .env."
+            )
         else:
             plan, seat_limit, billing_period = "free", 1, "monthly"
 
@@ -315,35 +326,59 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         )
         user_row = result.fetchone()
 
-        await db.execute(
-            text("""
-                UPDATE users.users
-                SET plan                      = :plan,
-                    subscription_status       = :status,
-                    subscription_ends_at      = to_timestamp(:ends),
-                    billing_period            = :bp,
-                    seat_limit                = :seats,
-                    stripe_subscription_id    = :sub_id,
-                    subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
-                    data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
-                WHERE stripe_customer_id = :cid
-            """),
-            {"plan": plan, "status": sub_status, "ends": ends,
-             "bp": billing_period, "seats": seat_limit, "sub_id": sub_id, "cid": cid},
-        )
+        if not user_row:
+            log.error(
+                f"Stripe {event_type}: no user found with stripe_customer_id={cid} — "
+                f"subscription {sub_id} not applied to any account."
+            )
+
+        if plan is None:
+            # Unrecognised price ID: refresh the subscription bookkeeping but never
+            # touch the plan tier, billing_period or seat_limit.
+            await db.execute(
+                text("""
+                    UPDATE users.users
+                    SET subscription_status       = :status,
+                        subscription_ends_at      = to_timestamp(:ends),
+                        stripe_subscription_id    = :sub_id,
+                        subscription_inactive_since = NULL,
+                        data_deletion_scheduled_at  = NULL
+                    WHERE stripe_customer_id = :cid
+                """),
+                {"status": sub_status, "ends": ends, "sub_id": sub_id, "cid": cid},
+            )
+        else:
+            await db.execute(
+                text("""
+                    UPDATE users.users
+                    SET plan                      = :plan,
+                        subscription_status       = :status,
+                        subscription_ends_at      = to_timestamp(:ends),
+                        billing_period            = :bp,
+                        seat_limit                = :seats,
+                        stripe_subscription_id    = :sub_id,
+                        subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
+                        data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
+                    WHERE stripe_customer_id = :cid
+                """),
+                {"plan": plan, "status": sub_status, "ends": ends,
+                 "bp": billing_period, "seats": seat_limit, "sub_id": sub_id, "cid": cid},
+            )
         await db.commit()
+        effective_plan = plan if plan is not None else (user_row.plan if user_row else None)
         if user_row:
-            await _log_event(str(user_row.id), event_type, user_row.plan, plan, event["id"])
+            await _log_event(str(user_row.id), event_type, user_row.plan, effective_plan, event["id"])
             await db.commit()
         log.info(
-            f"Subscription {sub_id} updated: plan='{plan}' status='{sub_status}' "
-            f"interval='{billing_period}' for customer {cid}"
+            f"Subscription {sub_id} updated: plan='{effective_plan}'"
+            f"{' (unchanged — unknown price)' if plan is None else ''} "
+            f"status='{sub_status}' interval='{billing_period}' for customer {cid}"
         )
 
         # ── Founding Member bonus (new subscriptions only, active plan only) ──
         founding_limit = getattr(settings, "FOUNDING_MEMBER_LIMIT", 100)
         is_new_sub     = event_type == "customer.subscription.created"
-        is_paid_plan   = plan not in ("free",)
+        is_paid_plan   = plan not in (None, "free")
         already_member = getattr(user_row, "is_founding_member", False) if user_row else False
 
         if (founding_limit > 0 and is_new_sub and is_paid_plan

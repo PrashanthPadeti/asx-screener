@@ -354,7 +354,11 @@ SELECT
     END AS graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
-    vs.dividend_yield,
+    -- Yields are ratios (dps / price) held in NUMERIC(8,6), so anything >= 100
+    -- (a 10,000% yield) both overflows the column and is meaningless.  It arises
+    -- when a stock's price collapses after a large capital return, leaving
+    -- trailing dividends divided by a near-zero price.  NULL is the honest value.
+    CASE WHEN ABS(vs.dividend_yield) < 100 THEN vs.dividend_yield END AS dividend_yield,
     vs.dividend_per_share   AS dps_ttm,
     div_latest.ex_date,
     div_latest.franking_pct,
@@ -387,7 +391,8 @@ SELECT
     ym.ocf_margin                                            AS ocf_margin,
     ym.fcf_margin                                            AS fcf_margin,
     ym.capex_intensity                                       AS capex_intensity,
-    COALESCE(cm.grossed_up_yield, ym.franked_yield)          AS grossed_up_yield,
+    CASE WHEN ABS(COALESCE(cm.grossed_up_yield, ym.franked_yield)) < 100
+         THEN COALESCE(cm.grossed_up_yield, ym.franked_yield) END AS grossed_up_yield,
     COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield,
 
     -- ── EPS ──────────────────────────────────────────────────────────────────

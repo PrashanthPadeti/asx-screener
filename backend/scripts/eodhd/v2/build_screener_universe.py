@@ -354,10 +354,12 @@ SELECT
     END AS graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
-    -- Yields are ratios (dps / price) held in NUMERIC(8,6), so anything >= 100
-    -- (a 10,000% yield) both overflows the column and is meaningless.  It arises
-    -- when a stock's price collapses after a large capital return, leaving
+    -- Yields are ratios (dps / price) held in NUMERIC(8,6), so a value >= 100
+    -- (i.e. 100x, a nonsense yield) both overflows the column and is meaningless.
+    -- It arises when a price collapses after a large capital return, leaving
     -- trailing dividends divided by a near-zero price.  NULL is the honest value.
+    -- NB: no literal percent sign in this comment — psycopg2 reads it as a
+    -- parameter placeholder and the query is executed via cur.execute(sql, params).
     CASE WHEN ABS(vs.dividend_yield) < 100 THEN vs.dividend_yield END AS dividend_yield,
     vs.dividend_per_share   AS dps_ttm,
     div_latest.ex_date,

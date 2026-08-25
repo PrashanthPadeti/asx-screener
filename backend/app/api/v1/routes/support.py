@@ -2,6 +2,7 @@
 Support Tickets
 ================
 POST /api/v1/support/tickets           — create ticket (public)
+GET  /api/v1/support/my-tickets        — my tickets (authenticated user)
 GET  /api/v1/support/tickets           — list all tickets (admin)
 GET  /api/v1/support/tickets/{id}      — ticket detail (admin)
 PUT  /api/v1/support/tickets/{id}      — update status/notes (admin)
@@ -21,7 +22,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_optional_user, require_admin
+from app.core.deps import get_current_user, get_optional_user, require_admin
 from app.db.session import get_db
 from app.services.email import (
     send_support_confirmation,
@@ -202,6 +203,49 @@ async def list_tickets(
     return {
         "tickets": [_ticket_row_to_dict(r) for r in result.fetchall()],
         "total":   total,
+    }
+
+
+# ── List my tickets (authenticated user) ──────────────────────────────────────
+
+@router.get("/my-tickets")
+async def list_my_tickets(
+    limit: int = 20,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Tickets belonging to the logged-in user, newest first.
+
+    Matched on user_id OR email, so tickets raised before signing in (or while
+    logged out) still show up.  Returns only user-facing fields — internal
+    columns such as priority and resolved_by are deliberately omitted.
+    """
+    limit = max(1, min(limit, 100))
+    result = await db.execute(text("""
+        SELECT ticket_number, category, subject, description,
+               status, resolution_notes, created_at, resolved_at
+        FROM support.tickets
+        WHERE user_id = CAST(:uid AS uuid) OR LOWER(email) = :email
+        ORDER BY created_at DESC
+        LIMIT :limit
+    """), {
+        "uid":   current_user["id"],
+        "email": current_user["email"].lower(),
+        "limit": limit,
+    })
+
+    return {
+        "tickets": [{
+            "ticket_number":    r.ticket_number,
+            "category":         r.category,
+            "subject":          r.subject,
+            "description":      r.description,
+            "status":           r.status,
+            "resolution_notes": r.resolution_notes,
+            "created_at":       r.created_at.isoformat()  if r.created_at  else None,
+            "resolved_at":      r.resolved_at.isoformat() if r.resolved_at else None,
+        } for r in result.fetchall()]
     }
 
 

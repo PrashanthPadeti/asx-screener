@@ -9,6 +9,24 @@ import { api } from '@/lib/api'
 
 // ── Support categories ────────────────────────────────────────────────────────
 
+type MyTicket = {
+  ticket_number:    number
+  category:         string
+  subject:          string
+  description:      string
+  status:           string
+  resolution_notes: string | null
+  created_at:       string | null
+  resolved_at:      string | null
+}
+
+const STATUS_STYLES: Record<string, string> = {
+  open:        'bg-blue-50 text-blue-700 border-blue-200',
+  in_progress: 'bg-amber-50 text-amber-700 border-amber-200',
+  resolved:    'bg-green-50 text-green-700 border-green-200',
+  closed:      'bg-slate-100 text-slate-600 border-slate-200',
+}
+
 const CATEGORIES = [
   { value: 'general',        label: 'General Question'            },
   { value: 'bug',            label: 'Bug / Technical Issue'       },
@@ -124,6 +142,11 @@ export default function ContactPage() {
   const [ticketNum,  setTicketNum]  = useState<number | null>(null)
   const [error,      setError]      = useState<string | null>(null)
 
+  // My tickets (logged-in users only)
+  const [myTickets,      setMyTickets]      = useState<MyTicket[]>([])
+  const [ticketsLoading, setTicketsLoading] = useState(false)
+  const [expanded,       setExpanded]       = useState<number | null>(null)
+
   // Pre-fill from auth on mount / auth change
   useEffect(() => {
     if (user) {
@@ -131,6 +154,21 @@ export default function ContactPage() {
       if (user.email) setEmail(user.email)
     }
   }, [user])
+
+  const loadMyTickets = useCallback(async () => {
+    if (!user) { setMyTickets([]); return }
+    setTicketsLoading(true)
+    try {
+      const res = await api.get('/api/v1/support/my-tickets')
+      setMyTickets(res.data.tickets || [])
+    } catch {
+      setMyTickets([])   // non-critical — the form still works
+    } finally {
+      setTicketsLoading(false)
+    }
+  }, [user])
+
+  useEffect(() => { loadMyTickets() }, [loadMyTickets])
 
   // ── Submit guard ────────────────────────────────────────────────────────────
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
@@ -217,6 +255,7 @@ export default function ContactPage() {
 
       setTicketNum(res.data.ticket.ticket_number)
       setDone(true)
+      loadMyTickets()   // show the new ticket in the list straight away
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
@@ -547,6 +586,77 @@ export default function ContactPage() {
             ))}
           </ol>
         </div>
+
+        {/* ── My tickets ────────────────────────────────────────────────── */}
+        {user && (myTickets.length > 0 || ticketsLoading) && (
+          <div className="bg-white border border-slate-200 rounded-xl p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+              <h3 className="text-sm font-semibold text-slate-700">Your support requests</h3>
+            </div>
+
+            {ticketsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-500 py-3">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading your tickets…
+              </div>
+            ) : (
+              <ul className="divide-y divide-slate-100">
+                {myTickets.map(t => {
+                  const isOpen = expanded === t.ticket_number
+                  return (
+                    <li key={t.ticket_number} className="py-3">
+                      <button
+                        type="button"
+                        onClick={() => setExpanded(isOpen ? null : t.ticket_number)}
+                        className="w-full flex items-start justify-between gap-3 text-left"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-mono text-slate-400">#{t.ticket_number}</span>
+                            <span className="text-sm font-medium text-slate-800 truncate">{t.subject}</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {t.created_at ? new Date(t.created_at).toLocaleDateString('en-AU', {
+                              day: 'numeric', month: 'short', year: 'numeric',
+                            }) : '—'}
+                          </p>
+                        </div>
+                        <span className={`text-xs px-2 py-0.5 rounded-full border shrink-0 ${
+                          STATUS_STYLES[t.status] || STATUS_STYLES.open
+                        }`}>
+                          {t.status.replace('_', ' ')}
+                        </span>
+                      </button>
+
+                      {isOpen && (
+                        <div className="mt-3 pl-1 space-y-3">
+                          <div>
+                            <p className="text-xs text-gray-500 mb-1">Your message</p>
+                            <p className="text-sm text-slate-700 whitespace-pre-wrap">{t.description}</p>
+                          </div>
+                          {t.resolution_notes ? (
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                              <p className="text-xs text-green-800 font-medium mb-1">
+                                Resolution{t.resolved_at ? ` · ${new Date(t.resolved_at).toLocaleDateString('en-AU', {
+                                  day: 'numeric', month: 'short', year: 'numeric',
+                                })}` : ''}
+                              </p>
+                              <p className="text-sm text-green-900 whitespace-pre-wrap">{t.resolution_notes}</p>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-gray-500 italic">
+                              Our team is still working on this — we&apos;ll email you when it&apos;s resolved.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* ── Backup contact ────────────────────────────────────────────── */}
         <div className="flex items-center justify-center gap-2 text-sm text-gray-500 py-2">

@@ -41,6 +41,14 @@ router = APIRouter()
 # label : human-readable name for frontend
 # unit  : display unit hint for frontend ("%", "AUD", "AUD M", "x", "")
 # cat   : category group for UI rendering
+#
+# Every entry MUST map to a column that exists in screener.universe — an entry
+# whose column is missing crashes the whole query with a 500 the moment a user
+# selects it.  These were removed for that reason and should only be re-added
+# once the metric is actually computed into the table:
+#   aisc_per_oz, beneish_m_score, beta_3y, gearing_ratio,
+#   management_expense_ratio, max_drawdown_1y, nta_discount_premium,
+#   nta_per_share, relative_strength_xjo, sharpe_3y, sortino_1y, wale_years
 
 ALLOWED_FIELDS: dict[str, dict] = {
 
@@ -117,7 +125,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "ocf_margin":               {"col": "u.ocf_margin",               "scale": 0.01, "type": "number", "label": "OCF Margin %",              "unit": "%",   "cat": "Profitability"},
     "fcf_margin":               {"col": "u.fcf_margin",               "scale": 0.01, "type": "number", "label": "FCF Margin %",              "unit": "%",   "cat": "Profitability"},
     "capex_intensity":          {"col": "u.capex_intensity",          "scale": 0.01, "type": "number",  "label": "Capex Intensity %",              "unit": "%",   "cat": "Profitability"},
-    "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number",  "label": "Inventory Turnover",             "unit": "x",   "cat": "Profitability"},  # TODO: add to screener.universe schema
+    "inventory_turnover":       {"col": "u.inventory_turnover",       "scale": 1,    "type": "number",  "label": "Inventory Turnover",             "unit": "x",   "cat": "Profitability"},
     "operating_margin_expanding":{"col": "u.operating_margin_expanding","scale": 1,  "type": "boolean", "label": "Operating Margin Expanding",     "unit": "",    "cat": "Profitability"},
     "gross_margin_expanding":   {"col": "u.gross_margin_expanding",   "scale": 1,    "type": "boolean", "label": "Gross Margin Expanding",         "unit": "",    "cat": "Profitability"},
     "fcf_conversion":           {"col": "u.fcf_conversion",           "scale": 1,    "type": "number",  "label": "FCF Conversion (ratio)",         "unit": "x",   "cat": "Profitability"},
@@ -167,15 +175,15 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── Financial Health ──────────────────────────────────────────────────────
     "debt_to_equity":        {"col": "u.debt_to_equity",       "scale": 1,    "type": "number", "label": "Debt / Equity",               "unit": "x",    "cat": "Financial Strength"},
     "current_ratio":         {"col": "u.current_ratio",        "scale": 1,    "type": "number", "label": "Current Ratio",               "unit": "x",    "cat": "Financial Strength"},
-    "quick_ratio":           {"col": "u.quick_ratio",          "scale": 1,    "type": "number", "label": "Quick Ratio",                 "unit": "x",    "cat": "Financial Strength"},  # TODO: add to screener.universe schema
+    "quick_ratio":           {"col": "u.quick_ratio",          "scale": 1,    "type": "number", "label": "Quick Ratio",                 "unit": "x",    "cat": "Financial Strength"},
     "interest_coverage":     {"col": "u.interest_coverage",    "scale": 1,    "type": "number", "label": "Interest Coverage",           "unit": "x",    "cat": "Financial Strength"},
     "debt_to_assets":        {"col": "u.debt_to_assets",       "scale": 1,    "type": "number", "label": "Debt / Assets",               "unit": "x",    "cat": "Financial Strength"},
     "lt_debt_to_capital":    {"col": "u.lt_debt_to_capital",   "scale": 1,    "type": "number", "label": "LT Debt / Capital",           "unit": "x",    "cat": "Financial Strength"},
     "net_debt":              {"col": "u.net_debt",             "scale": 1,    "type": "number", "label": "Net Debt (AUD M)",            "unit": "AUD M","cat": "Financial Health"},
     "total_debt":            {"col": "u.total_debt",           "scale": 1,    "type": "number", "label": "Total Debt (AUD M)",          "unit": "AUD M","cat": "Financial Health"},
-    "debt_to_ebitda":        {"col": "u.debt_to_ebitda",       "scale": 1,    "type": "number", "label": "Debt / EBITDA",               "unit": "x",    "cat": "Financial Strength"},  # TODO: add to screener.universe schema
+    "debt_to_ebitda":        {"col": "u.debt_to_ebitda",       "scale": 1,    "type": "number", "label": "Debt / EBITDA",               "unit": "x",    "cat": "Financial Strength"},
     "net_debt_to_ebitda":    {"col": "u.net_debt_to_ebitda",   "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",           "unit": "x",    "cat": "Financial Strength"},
-    "cash_conversion_cycle": {"col": "u.cash_conversion_cycle","scale": 1,    "type": "number", "label": "Cash Conversion Cycle (days)","unit": "days", "cat": "Financial Health"},  # TODO: add to screener.universe schema
+    "cash_conversion_cycle": {"col": "u.cash_conversion_cycle","scale": 1,    "type": "number", "label": "Cash Conversion Cycle (days)","unit": "days", "cat": "Financial Health"},
     "fcf_fy0":               {"col": "u.fcf_fy0",              "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)",      "unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":               {"col": "u.cfo_fy0",              "scale": 1,    "type": "number", "label": "Operating CF (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
     "total_assets":          {"col": "u.total_assets",         "scale": 1,    "type": "number", "label": "Total Assets (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
@@ -194,7 +202,6 @@ ALLOWED_FIELDS: dict[str, dict] = {
     # ── Quality Scores ────────────────────────────────────────────────────────
     "piotroski_f_score":       {"col": "u.piotroski_f_score",        "scale": 1,    "type": "number", "label": "Piotroski F-Score",          "unit": "",    "cat": "Quality"},
     "altman_z_score":          {"col": "u.altman_z_score",           "scale": 1,    "type": "number", "label": "Altman Z-Score",             "unit": "",    "cat": "Quality"},   # TODO: compute in yearly_metrics
-    "beneish_m_score":         {"col": "u.beneish_m_score",          "scale": 1,    "type": "number", "label": "Beneish M-Score",            "unit": "",    "cat": "Quality"},   # TODO: add to screener.universe schema
     "ocf_to_net_profit":       {"col": "u.ocf_to_net_profit",        "scale": 1,    "type": "number", "label": "CFO / Net Profit",           "unit": "x",   "cat": "Quality"},
     "fcf_payout_ratio":        {"col": "u.fcf_payout_ratio",         "scale": 0.01, "type": "number", "label": "FCF Payout Ratio %",         "unit": "%",   "cat": "Quality"},
     "eps_volatility_5y":       {"col": "u.eps_volatility_5y",        "scale": 1,    "type": "number", "label": "EPS Volatility 5Y",          "unit": "",    "cat": "Quality"},
@@ -260,12 +267,7 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "volatility_20d":      {"col": "u.volatility_20d","scale": 0.01, "type": "number",  "label": "Volatility 20D %",        "unit": "%",   "cat": "Technicals"},
     "volatility_60d":      {"col": "u.volatility_60d","scale": 0.01, "type": "number",  "label": "Volatility 60D %",        "unit": "%",   "cat": "Technicals"},
     "beta_1y":             {"col": "u.beta_1y",       "scale": 1,    "type": "number",  "label": "Beta (1Y)",               "unit": "",    "cat": "Technicals"},  # TODO: compute in yearly_metrics
-    "beta_3y":             {"col": "u.beta_3y",       "scale": 1,    "type": "number",  "label": "Beta (3Y)",               "unit": "",    "cat": "Technicals"},  # TODO: add to screener.universe schema
     "sharpe_1y":           {"col": "u.sharpe_1y",     "scale": 1,    "type": "number",  "label": "Sharpe Ratio (1Y)",       "unit": "",    "cat": "Technicals"},
-    "sharpe_3y":           {"col": "u.sharpe_3y",     "scale": 1,    "type": "number",  "label": "Sharpe Ratio (3Y)",       "unit": "",    "cat": "Technicals"},  # TODO: add to screener.universe schema
-    "sortino_1y":          {"col": "u.sortino_1y",    "scale": 1,    "type": "number",  "label": "Sortino Ratio (1Y)",      "unit": "",    "cat": "Technicals"},  # TODO: add to screener.universe schema
-    "max_drawdown_1y":     {"col": "u.max_drawdown_1y","scale": 0.01,"type": "number",  "label": "Max Drawdown 1Y %",       "unit": "%",   "cat": "Technicals"},  # TODO: add to screener.universe schema
-    "relative_strength_xjo":{"col": "u.relative_strength_xjo","scale": 0.01,"type": "number", "label": "Relative Strength vs XJO %","unit": "%", "cat": "Technicals"},  # TODO: add to screener.universe schema
     "drawdown_from_ath":   {"col": "u.drawdown_from_ath","scale": 0.01,"type": "number", "label": "Drawdown from ATH %",    "unit": "%",   "cat": "Technicals"},
 
     # ── Price Returns ─────────────────────────────────────────────────────────
@@ -315,14 +317,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
 
     # ── ASX REIT-Specific ★ ───────────────────────────────────────────────────
     # (★ = ASX-unique field not common on US screeners)
-    "nta_per_share":            {"col": "u.nta_per_share",            "scale": 1,    "type": "number", "label": "NTA per Share (AUD) ★",       "unit": "AUD",  "cat": "REIT"},   # TODO: add to screener.universe schema
-    "nta_discount_premium":     {"col": "u.nta_discount_premium",     "scale": 0.01, "type": "number", "label": "NTA Discount/Premium % ★",    "unit": "%",    "cat": "REIT"},   # TODO: add to screener.universe schema
-    "gearing_ratio":            {"col": "u.gearing_ratio",            "scale": 0.01, "type": "number", "label": "Gearing Ratio % ★",           "unit": "%",    "cat": "REIT"},   # TODO: add to screener.universe schema
-    "wale_years":               {"col": "u.wale_years",               "scale": 1,    "type": "number", "label": "WALE (years) ★",              "unit": "yrs",  "cat": "REIT"},   # TODO: add to screener.universe schema
-    "management_expense_ratio": {"col": "u.management_expense_ratio", "scale": 0.01, "type": "number", "label": "MER % ★",                     "unit": "%",    "cat": "REIT"},   # TODO: add to screener.universe schema
 
     # ── ASX Mining-Specific ★ ─────────────────────────────────────────────────
-    "aisc_per_oz":              {"col": "u.aisc_per_oz",              "scale": 1,    "type": "number", "label": "AISC per oz (USD) ★",         "unit": "USD",  "cat": "Mining"}, # TODO: add to screener.universe schema
 
     # ── Quick-win fields ─────────────────────────────────────────────────────────
     "revenue_fy2": {"col": "u.revenue_fy2", "scale": 1, "type": "number", "label": "Sales (2Y ago) (AUD M)", "unit": "AUD M", "cat": "Income Statement"},

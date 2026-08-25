@@ -643,6 +643,11 @@ export default function ContactPage() {
                               </p>
                               <p className="text-sm text-green-900 whitespace-pre-wrap">{t.resolution_notes}</p>
                             </div>
+                          ) : t.status === 'resolved' || t.status === 'closed' ? (
+                            <p className="text-sm text-gray-500 italic">
+                              This request was {t.status} without written notes. If you still need
+                              help, reply to your confirmation email and we&apos;ll reopen it.
+                            </p>
                           ) : (
                             <p className="text-sm text-gray-500 italic">
                               Our team is still working on this — we&apos;ll email you when it&apos;s resolved.

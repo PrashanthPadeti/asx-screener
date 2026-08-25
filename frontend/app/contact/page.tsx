@@ -24,7 +24,7 @@ const STATUS_STYLES: Record<string, string> = {
   open:        'bg-blue-50 text-blue-700 border-blue-200',
   in_progress: 'bg-amber-50 text-amber-700 border-amber-200',
   resolved:    'bg-green-50 text-green-700 border-green-200',
-  closed:      'bg-slate-100 text-slate-600 border-slate-200',
+  closed:      'bg-green-50 text-green-700 border-green-200',
 }
 
 const CATEGORIES = [
@@ -645,8 +645,8 @@ export default function ContactPage() {
                             </div>
                           ) : t.status === 'resolved' || t.status === 'closed' ? (
                             <p className="text-sm text-gray-500 italic">
-                              This request was {t.status} without written notes. If you still need
-                              help, reply to your confirmation email and we&apos;ll reopen it.
+                              This request was {t.status}{' '}without written notes. If you still
+                              need help, reply to your confirmation email and we&apos;ll reopen it.
                             </p>
                           ) : (
                             <p className="text-sm text-gray-500 italic">

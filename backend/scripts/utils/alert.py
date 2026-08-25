@@ -118,12 +118,12 @@ def send_failure_alert(
     </table>
 
     <p style="margin-top:20px;font-size:14px;">Check the logs on the server:</p>
-    <code>pm2 logs asx-backend --lines 100
-tail -100 /opt/asx-screener/logs/{pipeline}_pipeline.log</code>
+    <code>tail -100 /opt/asx-screener/logs/{pipeline}_pipeline.log
+journalctl -u asx-backend -n 100 --no-pager</code>
 
     <p style="font-size:14px;">Or SSH in and re-run manually:</p>
-    <code>cd /opt/asx-screener
-asx-venv/bin/python scripts/eodhd/v2/jobs/{pipeline}_pipeline.py</code>
+    <code>cd /opt/asx-screener &amp;&amp; . backend/.env
+asx-venv/bin/python backend/scripts/eodhd/v2/jobs/{pipeline}_pipeline.py</code>
 
     <div class="footer">
       This alert was sent automatically by the ASX Screener pipeline monitor.<br>

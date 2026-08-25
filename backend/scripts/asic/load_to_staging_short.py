@@ -11,14 +11,18 @@ staging_au.short_positions schema:
     total_issued  BIGINT         (total product / shares in issue)
     short_pct     NUMERIC(10,6)  (% of total product in issue, e.g. 1.23 = 1.23%)
 
-ASIC CSV format (one row example):
-    Date,Product,Headline Stock Description,Short Position,Total Product in Issue,% of Total Product in Issue
-    29/04/2026,BHP,BHP GROUP LIMITED,"1234567","3000000000","0.0412"
+ASIC CSV format (current — RR{YYYYMMDD}-001-SSDailyAggShortPos.csv):
+    Product,Product Code,Reported Short Positions,Total Product in Issue,% of Total Product in Issue Reported as Short Positions
+    3D ENERGI LTD ORDINARY,TDO,181029,524226804,.03453257
+
+Note there is NO date column — the report date comes from the filename
+(YYYYMMDD.csv.gz), which is how the downloader names each file.
 
 Usage:
     python scripts/asic/load_to_staging_short.py
     python scripts/asic/load_to_staging_short.py --date 2026-04-29
     python scripts/asic/load_to_staging_short.py --file /path/to/file.csv.gz
+    python scripts/asic/load_to_staging_short.py --all      # load every cached file
 """
 
 import argparse
@@ -67,13 +71,30 @@ def find_latest_file() -> Path | None:
     return files[0] if files else None
 
 
-def parse_asic_date(s: str) -> date:
-    return datetime.strptime(s.strip(), "%d/%m/%Y").date()
+def date_from_filename(filepath: Path) -> date:
+    """ASIC files are named YYYYMMDD.csv.gz — the report date is the stem."""
+    stem = filepath.name.split(".")[0]
+    return datetime.strptime(stem, "%Y%m%d").date()
+
+
+def _first(row: dict, *names: str) -> str:
+    """Return the first non-empty value among `names` (tolerates header changes)."""
+    for n in names:
+        v = row.get(n)
+        if v:
+            return v
+    return ""
 
 
 def load_file(filepath: Path, conn) -> int:
     """Parse the ASIC CSV and upsert into staging_au.short_positions. Returns row count."""
     log.info(f"Loading {filepath.name} → staging_au.short_positions …")
+
+    try:
+        report_date = date_from_filename(filepath)
+    except ValueError:
+        log.error(f"  Cannot derive report date from filename: {filepath.name}")
+        return 0
 
     with gzip.open(filepath, "rt", encoding="utf-8-sig") as f:
         content = f.read()
@@ -85,21 +106,30 @@ def load_file(filepath: Path, conn) -> int:
     rows, skipped = [], 0
 
     for raw in reader:
-        row = {k.strip().strip('"'): v.strip().strip('"') for k, v in raw.items()}
+        row = {k.strip().strip('"'): v.strip().strip('"')
+               for k, v in raw.items() if k is not None}
 
-        asx_code = row.get("Product", "").strip().upper()
-        if not asx_code or len(asx_code) > 5:
+        # Current ASIC format puts the ticker in "Product Code"; "Product" is the
+        # full company name.  Older exports used "Product" for the code.
+        asx_code = _first(row, "Product Code", "ASX Code", "Product").upper()
+        if not asx_code or len(asx_code) > 10:
             skipped += 1
             continue
 
         try:
-            report_date   = parse_asic_date(row["Date"])
-            short_shares  = int(row["Short Position"].replace(",", "")) \
-                            if row.get("Short Position") else None
-            total_issued_s = row.get("Total Product in Issue", "").replace(",", "")
-            total_issued  = int(total_issued_s) if total_issued_s else None
-            short_pct_s   = row.get("% of Total Product in Issue", "").replace(",", "")
-            short_pct     = float(short_pct_s) if short_pct_s else None
+            short_shares_s = _first(row, "Reported Short Positions", "Short Position",
+                                    "Short Positions").replace(",", "")
+            short_shares   = int(short_shares_s) if short_shares_s else None
+
+            total_issued_s = _first(row, "Total Product in Issue").replace(",", "")
+            total_issued   = int(total_issued_s) if total_issued_s else None
+
+            short_pct_s = _first(
+                row,
+                "% of Total Product in Issue Reported as Short Positions",
+                "% of Total Product in Issue",
+            ).replace(",", "").replace("%", "")
+            short_pct = float(short_pct_s) if short_pct_s else None
         except (ValueError, KeyError) as e:
             log.debug(f"  Skip {asx_code}: {e}")
             skipped += 1
@@ -126,31 +156,47 @@ def main():
     )
     parser.add_argument("--date", help="Load file for YYYY-MM-DD (default: most recent)")
     parser.add_argument("--file", help="Load a specific file path (overrides --date)")
+    parser.add_argument("--all",  action="store_true",
+                        help="Load every cached file (use after a backfill)")
     args = parser.parse_args()
 
-    if args.file:
-        filepath = Path(args.file)
+    if args.all:
+        filepaths = sorted(OUT_DIR.glob("*.csv.gz"))
+        if not filepaths:
+            log.error(f"No files found in {OUT_DIR}")
+            raise SystemExit(1)
+    elif args.file:
+        filepaths = [Path(args.file)]
     elif args.date:
         d = date.fromisoformat(args.date)
-        filepath = OUT_DIR / f"{d.strftime('%Y%m%d')}.csv.gz"
+        filepaths = [OUT_DIR / f"{d.strftime('%Y%m%d')}.csv.gz"]
     else:
-        filepath = find_latest_file()
+        latest = find_latest_file()
+        filepaths = [latest] if latest else []
 
-    if filepath is None or not filepath.exists():
-        log.error(f"No file found: {filepath}")
+    filepaths = [p for p in filepaths if p and p.exists()]
+    if not filepaths:
+        log.error("No file found to load")
         raise SystemExit(1)
 
+    total, failed = 0, 0
     conn = psycopg2.connect(DB_URL)
     try:
-        n = load_file(filepath, conn)
+        for fp in filepaths:
+            n = load_file(fp, conn)
+            total += n
+            if n == 0:
+                failed += 1
     finally:
         conn.close()
 
-    if n == 0:
+    if total == 0:
         log.error("No rows loaded — check CSV format")
         raise SystemExit(1)
 
-    log.info("Staging load complete.")
+    if failed:
+        log.warning(f"{failed} of {len(filepaths)} file(s) produced no rows")
+    log.info(f"Staging load complete — {total:,} rows from {len(filepaths)} file(s).")
 
 
 if __name__ == "__main__":

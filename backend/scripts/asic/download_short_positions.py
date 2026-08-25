@@ -34,6 +34,13 @@ load_dotenv()
 RAW_BASE  = Path(os.getenv("RAW_DATA_DIR", "/opt/asx-screener/data/raw"))
 OUT_DIR   = RAW_BASE / "asic" / "short_positions"
 ASIC_BASE = "https://asic.gov.au"
+# Direct, predictable download URL — the reports table page is JS-rendered and
+# no longer exposes links in the HTML, so scraping it finds nothing.
+# ASIC publishes at T+4, so the newest available report is ~4 business days back.
+DIRECT_URL_TMPL = (
+    "https://download.asic.gov.au/short-selling/"
+    "RR{yyyymmdd}-001-SSDailyAggShortPos.csv"
+)
 TABLE_URL = (
     "https://asic.gov.au/regulatory-resources/markets/short-selling/"
     "short-position-reports-table/"
@@ -131,6 +138,11 @@ def local_path(d: date) -> Path:
     return OUT_DIR / f"{d.strftime('%Y%m%d')}.csv.gz"
 
 
+def direct_url(d: date) -> str:
+    """Build ASIC's direct download URL for a given report date."""
+    return DIRECT_URL_TMPL.format(yyyymmdd=d.strftime("%Y%m%d"))
+
+
 def download_csv(report_date: date, url: str, force: bool = False) -> bool:
     """Download the CSV at `url`, save gzipped. Returns True on success."""
     dest = local_path(report_date)
@@ -217,7 +229,9 @@ def main():
     parser = argparse.ArgumentParser(description="Download ASIC Aggregate Short Position Reports")
     parser.add_argument("--force",      action="store_true", help="Re-download even if already cached")
     parser.add_argument("--list",       action="store_true", help="List available reports without downloading")
-    parser.add_argument("--url",        help="Provide the direct CSV URL to download (bypass scraping)")
+    parser.add_argument("--url",        help="Provide the direct CSV URL to download (bypass discovery)")
+    parser.add_argument("--backfill-from", help="Backfill from YYYY-MM-DD (weekdays only)")
+    parser.add_argument("--backfill-to",   help="Backfill end date YYYY-MM-DD (default: today)")
     parser.add_argument("--dump-html",  action="store_true", help="Dump first 3000 chars of ASIC page HTML (for debugging)")
     parser.add_argument("--dump-hrefs", action="store_true", help="Dump ALL hrefs found on ASIC page (for debugging)")
     args = parser.parse_args()
@@ -235,7 +249,44 @@ def main():
         log.info("ASIC download complete (direct URL).")
         return
 
-    # ── Step 1: Fetch the ASIC reports table page ──────────────────────────────
+    # ── Backfill mode: walk a date range using the direct URL ─────────────────
+    if args.backfill_from:
+        start = date.fromisoformat(args.backfill_from)
+        end   = date.fromisoformat(args.backfill_to) if args.backfill_to else date.today()
+        got, missing = 0, 0
+        d = start
+        while d <= end:
+            if d.weekday() < 5:                     # weekdays only
+                if local_path(d).exists() and not args.force:
+                    log.info(f"  {d.isoformat()}: already cached")
+                    got += 1
+                elif download_csv(d, direct_url(d), force=args.force):
+                    got += 1
+                else:
+                    missing += 1
+            d += timedelta(days=1)
+        log.info(f"Backfill complete — {got} file(s) present, {missing} unavailable.")
+        if got == 0:
+            raise SystemExit(1)
+        return
+
+    # ── Step 1: Try ASIC's direct download URL (newest first) ─────────────────
+    # T+4 publication lag, so start ~4 business days back and walk older.
+    log.info("Trying ASIC direct download URLs …")
+    for d in business_days_back(12):
+        dest = local_path(d)
+        if dest.exists() and not args.force:
+            log.info(f"Most recent already cached: {d.isoformat()} ({dest.name})")
+            log.info("ASIC download complete (cached).")
+            return
+        if download_csv(d, direct_url(d), force=args.force):
+            log.info("ASIC download complete (direct URL).")
+            return
+        log.debug(f"  {d.isoformat()} not available yet — trying older")
+
+    log.warning("No report available via direct URL — falling back to page scrape …")
+
+    # ── Step 1b: Fetch the ASIC reports table page ─────────────────────────────
     log.info(f"Fetching ASIC reports index: {TABLE_URL}")
     resp_text = ""
     try:
@@ -270,19 +321,13 @@ def main():
         links = scrape_links_via_json_api()
 
     if not links:
-        log.warning(
-            "JSON API also returned no links. "
-            "Use --url <direct_csv_url> to manually specify the download URL.\n"
-            f"  Find the latest report at: {TABLE_URL}"
+        # Deliberately fail here.  This used to fall back to the newest cached file
+        # and exit 0, which silently served a months-old report as if it were fresh.
+        log.error(
+            "Could not download any ASIC short position report.\n"
+            "  Direct URL, HTML scrape and JSON API all failed.\n"
+            f"  Use --url <direct_csv_url> to specify it manually, or check {TABLE_URL}"
         )
-        # Still exit 0 (not 1) so the pipeline continues if data was already cached.
-        # If no cached file exists, the next step (load_to_staging) will fail clearly.
-        if not args.force:
-            latest = max(OUT_DIR.glob("*.csv.gz"), default=None, key=lambda p: p.name)
-            if latest:
-                log.info(f"Using cached file: {latest.name} — pipeline will proceed.")
-                return
-        log.error("No cached file and no download possible — pipeline cannot continue.")
         raise SystemExit(1)
 
     log.info(f"Found {len(links)} report link(s)")

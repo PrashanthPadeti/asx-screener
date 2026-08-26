@@ -251,9 +251,31 @@ class ScreenerRow(BaseModel):
     return_6m:         Optional[float] = None   # decimal ratio
     return_1y:         Optional[float] = None   # decimal ratio
     return_ytd:        Optional[float] = None   # decimal ratio
+    return_2y:         Optional[float] = None   # decimal ratio
     return_3y:         Optional[float] = None   # decimal ratio
+    return_4y:         Optional[float] = None   # decimal ratio
     return_5y:         Optional[float] = None   # decimal ratio
+    return_6y:         Optional[float] = None   # decimal ratio
+    return_7y:         Optional[float] = None   # decimal ratio
+    return_8y:         Optional[float] = None   # decimal ratio
+    return_9y:         Optional[float] = None   # decimal ratio
+    return_10y:        Optional[float] = None   # decimal ratio
     drawdown_from_ath: Optional[float] = None   # decimal ratio (negative)
+
+    # ── Selected by the query but previously absent here, so dropped in the
+    #    response and rendered as "—" in the UI ────────────────────────────────
+    avg_roic_3y:            Optional[float] = None   # decimal ratio
+    avg_roic_5y:            Optional[float] = None   # decimal ratio
+    earnings_growth_3y_cagr: Optional[float] = None  # decimal ratio
+    eps_fy0:                Optional[float] = None   # AUD
+
+    # ── Factor Scores (percentile 0–100, NOT decimal ratios) ─────────────────
+    composite_score:   Optional[float] = None
+    value_score:       Optional[float] = None
+    quality_score:     Optional[float] = None
+    growth_score:      Optional[float] = None
+    momentum_score:    Optional[float] = None
+    income_score:      Optional[float] = None
 
     # ── Metadata ─────────────────────────────────────────────────────────────
     price_date:         Optional[date]     = None

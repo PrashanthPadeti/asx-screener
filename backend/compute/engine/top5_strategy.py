@@ -67,7 +67,20 @@ async def run(
                 {"m": pick_month},
             )).scalar() or 0
             if existing > 0:
-                log.info("Picks already exist for week of %s (%d rows) — skipping. Use --force to overwrite.", pick_month, existing)
+                # Still point is_active at this week before leaving: the job runs
+                # twice weekly (Sun 10pm + Mon 7am) and the second run lands here,
+                # so skipping without setting the flag leaves the page on an older
+                # week even though the picks themselves are present and correct.
+                await session.execute(
+                    text("UPDATE strategy.monthly_picks "
+                         "SET is_active = (pick_month = :m) "
+                         "WHERE is_active IS DISTINCT FROM (pick_month = :m)"),
+                    {"m": pick_month},
+                )
+                await session.commit()
+                log.info("Picks already exist for week of %s (%d rows) — skipping "
+                         "compute; marked that week active. Use --force to overwrite.",
+                         pick_month, existing)
                 return
 
         # ── Query top N stocks from screener.universe ────────────────────────

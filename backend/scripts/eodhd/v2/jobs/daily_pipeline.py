@@ -58,6 +58,10 @@ PYTHON    = sys.executable
 TODAY     = date.today().isoformat()
 YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
 
+# Shared alert utility — path: backend/scripts/utils/alert.py (as weekly_pipeline)
+sys.path.insert(0, str(BASE_DIR / "scripts"))
+from utils.alert import send_failure_alert  # noqa: E402
+
 
 # ── Pipeline Tracker ──────────────────────────────────────────────────────────
 
@@ -239,6 +243,18 @@ def run(label: str, cmd: list[str],
                 error_msg=f"Step {step} '{label}' failed with exit code {result.returncode}",
             )
             tracker.close()
+        # Email the failure.  The tracker only records it in the database, which
+        # nobody sees unless they open the Pipeline Monitor — step 13 failed six
+        # nights running (19-25 Aug 2026) and went unnoticed for that reason.
+        try:
+            send_failure_alert(
+                pipeline="daily",
+                step=label,
+                target_date=TODAY,
+                exit_code=result.returncode,
+            )
+        except Exception as exc:                       # never mask the real failure
+            log.error(f"Could not send failure alert: {exc}")
         sys.exit(result.returncode)
     log.info(f"✓  {label} done in {elapsed:.1f}s")
     if tracker and step:

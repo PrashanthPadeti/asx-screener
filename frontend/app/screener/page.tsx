@@ -895,6 +895,14 @@ export default function ScreenerPage() {
       setPendingIndexParam(indexParam.toUpperCase())
     }
 
+    // Sort from URL (?sort=composite_score&dir=desc) — lets a page link through
+    // to the screener showing the same ranking the user was already looking at.
+    const sortParam = searchParams.get('sort')
+    if (sortParam) {
+      setSortBy(sortParam)
+      setSortDir(searchParams.get('dir') === 'asc' ? 'asc' : 'desc')
+    }
+
     // Auto-load community screen from URL ?screen=id
     const screenId = searchParams.get('screen')
     if (screenId) {

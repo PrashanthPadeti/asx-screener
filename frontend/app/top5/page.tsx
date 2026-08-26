@@ -723,7 +723,7 @@ function Top5Content() {
               Highest composite-scored ASX 200 stocks across all 5 factors
             </p>
           </div>
-          <Link href="/screener" className="hidden sm:flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium">
+          <Link href="/screener?index=ASX200&sort=composite_score&dir=desc&autorun=true" className="hidden sm:flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 font-medium">
             Full Screener <ChevronRight className="w-4 h-4" />
           </Link>
         </div>

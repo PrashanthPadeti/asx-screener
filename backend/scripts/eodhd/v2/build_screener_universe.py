@@ -1644,19 +1644,42 @@ def main():
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
 
+    # Hybrids, capital notes and preference shares are not ordinary equities and
+    # do not belong in a stock screener.  They also distort the composite score:
+    # having no momentum or growth data, they are averaged over their remaining
+    # (income/quality) factors only, which floats them to the top of the ranking.
+    EXCLUDED_TYPES = ("notes", "preferred_stock")
+    base_filter = ("WHERE COALESCE(c.company_type, '') NOT IN "
+                   f"({', '.join(['%s'] * len(EXCLUDED_TYPES))})")
+    base_params = list(EXCLUDED_TYPES)
+
     if args.codes:
         placeholders = ",".join(["%s"] * len(args.codes))
-        code_filter = f"WHERE c.asx_code IN ({placeholders})"
-        params = [c.upper() for c in args.codes]
+        code_filter = f"{base_filter} AND c.asx_code IN ({placeholders})"
+        params = base_params + [c.upper() for c in args.codes]
     else:
-        code_filter = ""
-        params = []
+        code_filter = base_filter
+        params = base_params
 
     sql = UPSERT_SQL.format(code_filter=code_filter)
 
     log.info(f"Building screener.universe {'for ' + str(args.codes) if args.codes else '(all stocks)'}…")
     cur.execute(sql, params)
     n = cur.rowcount
+    conn.commit()
+
+    # The upsert can only add or update — it never removes.  Clear out any
+    # excluded securities already present from a previous build.
+    cur.execute("""
+        DELETE FROM screener.universe
+        WHERE asx_code IN (
+            SELECT asx_code FROM market.companies_current
+            WHERE COALESCE(company_type, '') IN %s
+        )
+    """, (EXCLUDED_TYPES,))
+    if cur.rowcount:
+        log.info(f"Removed {cur.rowcount} non-equity securities "
+                 f"({', '.join(EXCLUDED_TYPES)}) from screener.universe")
     conn.commit()
 
     # Post-processing: revenue_above_sector_median

@@ -177,8 +177,18 @@ async def run(
                 "piotroski_f_score": r["piotroski_f_score"],
             })
 
+        # GET /top5/current selects on is_active, not on the newest date, so the
+        # flag has to be moved or the page keeps showing the previous week.
+        await session.execute(
+            text("UPDATE strategy.monthly_picks "
+                 "SET is_active = (pick_month = :m) "
+                 "WHERE is_active IS DISTINCT FROM (pick_month = :m)"),
+            {"m": pick_month},
+        )
+
         await session.commit()
-        log.info("Committed %d picks for week of %s", len(rows), pick_month)
+        log.info("Committed %d picks for week of %s (now the active week)",
+                 len(rows), pick_month)
 
 
 # ── CLI entry point ────────────────────────────────────────────────────────────

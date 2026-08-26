@@ -487,7 +487,7 @@ const ALL_COLUMNS: ColDef[] = [
   // ── Factor Scores (percentile 0–100) ─────────────────────────────────────
   {
     key: 'composite_score', label: 'Score', sortKey: 'composite_score',
-    default: false, align: 'right',
+    default: true, align: 'right',
     render: r => r.composite_score != null
       ? <span className={r.composite_score >= 70 ? 'text-green-600 font-semibold' : r.composite_score < 40 ? 'text-red-500' : 'text-gray-700'}>{r.composite_score}</span>
       : <span className="text-gray-300">—</span>,
@@ -901,6 +901,13 @@ export default function ScreenerPage() {
     if (sortParam) {
       setSortBy(sortParam)
       setSortDir(searchParams.get('dir') === 'asc' ? 'asc' : 'desc')
+      // Reveal the column being sorted on, otherwise the deep link arrives ordered
+      // by something the user can't see.  Needed for anyone with saved column
+      // preferences, who won't pick up a newly-defaulted column.  Not persisted —
+      // this is for the current visit, not a permanent change to their layout.
+      if (ALL_COLUMNS.some(c => c.key === sortParam)) {
+        setVisibleKeysState(prev => new Set([...prev, sortParam]))
+      }
     }
 
     // Auto-load community screen from URL ?screen=id

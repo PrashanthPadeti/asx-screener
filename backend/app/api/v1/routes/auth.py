@@ -35,7 +35,12 @@ from app.schemas.auth import (
     UserProfile,
     UpdateProfileRequest,
 )
-from app.services.email import send_password_reset_email, send_verification_reminder_email
+from app.services.email import (
+    send_login_failure_alert,
+    send_password_reset_email,
+    send_verification_reminder_email,
+    send_welcome_email,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -120,7 +125,46 @@ async def register(
     await _store_session(db, user_id, refresh, request)
 
     log.info(f"New user registered: {body.email}")
+
+    # Welcome email (and a copy to the support inbox).  Best-effort — a mail
+    # failure must never stop someone from creating an account.
+    try:
+        send_welcome_email(body.email.lower(), body.name)
+    except Exception as exc:
+        log.warning(f"Could not send welcome email to {body.email}: {exc}")
+
     return token_resp
+
+
+# ── Failed-login tracking ─────────────────────────────────────────────────────
+# In-process counters. Deliberately not persisted: this only decides whether to
+# send a courtesy alert, so losing the count on restart costs nothing, and it
+# keeps a hot path off the database. Entries expire so the dict cannot grow
+# without bound.
+_LOGIN_FAILURE_ALERT_THRESHOLD = 5
+_LOGIN_FAILURE_WINDOW_SEC      = 1800     # count resets after 30 min of quiet
+_failed_logins: dict[str, tuple[int, float]] = {}
+
+
+def _record_failed_login(email: str) -> int:
+    """Increment and return the consecutive failure count for an account."""
+    import time
+    now = time.time()
+    count, first_seen = _failed_logins.get(email, (0, now))
+    if now - first_seen > _LOGIN_FAILURE_WINDOW_SEC:
+        count, first_seen = 0, now
+    count += 1
+    _failed_logins[email] = (count, first_seen)
+
+    if len(_failed_logins) > 5000:        # drop entries older than the window
+        for k, (_, seen) in list(_failed_logins.items()):
+            if now - seen > _LOGIN_FAILURE_WINDOW_SEC:
+                _failed_logins.pop(k, None)
+    return count
+
+
+def _clear_failed_logins(email: str) -> None:
+    _failed_logins.pop(email, None)
 
 
 # ── Login ─────────────────────────────────────────────────────────────────────
@@ -133,21 +177,53 @@ async def login(
     db: AsyncSession = Depends(get_db),
 ):
     """Authenticate with email + password. Returns access + refresh tokens."""
-    result = await db.execute(
-        text("""
-            SELECT id, email, password_hash, plan, email_verified, subscription_status
-            FROM users.users
-            WHERE email = :email
-        """),
-        {"email": body.email.lower()},
-    )
-    user = result.fetchone()
+    email_lc = body.email.lower()
+
+    try:
+        result = await db.execute(
+            text("""
+                SELECT id, email, password_hash, plan, email_verified, subscription_status
+                FROM users.users
+                WHERE email = :email
+            """),
+            {"email": email_lc},
+        )
+        user = result.fetchone()
+    except Exception as exc:
+        # Login is broken rather than refused — e.g. the database is down, which
+        # is what users saw as "Request failed". Alert, then surface a 503 so the
+        # cause isn't mistaken for bad credentials.
+        log.error(f"Login failed with a system error for {email_lc}: {exc}")
+        try:
+            send_login_failure_alert("system", email_lc, f"{type(exc).__name__}: {exc}")
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sign-in is temporarily unavailable. Please try again shortly.",
+        )
 
     if user is None or not verify_password(body.password, user.password_hash or ""):
+        # A single wrong password is normal and is not worth an email. Only alert
+        # once an account has failed enough times that the person is clearly stuck.
+        attempts = _record_failed_login(email_lc)
+        if attempts == _LOGIN_FAILURE_ALERT_THRESHOLD:
+            try:
+                send_login_failure_alert(
+                    "repeated", email_lc,
+                    "Account exists but the password did not match"
+                    if user is not None else
+                    "No account found with this email address",
+                    attempts=attempts,
+                )
+            except Exception as exc:
+                log.warning(f"Could not send login failure alert: {exc}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+
+    _clear_failed_logins(email_lc)
 
     await db.execute(
         text("UPDATE users.users SET last_login_at = NOW() WHERE id = :id"),

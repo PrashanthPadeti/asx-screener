@@ -384,30 +384,94 @@ def send_verification_reminder_email(to_email: str, verify_url: str, name: Optio
 
 
 def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
-    """Send a welcome email to a new user."""
+    """
+    Welcome a new user, and copy the same email to the support inbox so signups
+    are visible without checking the database.
+    """
     resend = _client()
+    greeting = f"Hi {html_escape(name)}," if name else "Hi,"
+
+    def _section(title: str, blurb: str, items: list[str]) -> str:
+        lis = "".join(
+            f'<li style="margin:4px 0;color:#374151">{i}</li>' for i in items
+        )
+        return f"""
+        <div style="margin:22px 0">
+          <h3 style="margin:0 0 4px;font-size:15px;color:#111827">{title}</h3>
+          <p style="margin:0 0 8px;font-size:13px;color:#6b7280">{blurb}</p>
+          <ul style="margin:0;padding-left:18px;font-size:14px">{lis}</ul>
+        </div>
+        """
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
+      <h2 style="color:#1d4ed8;margin-bottom:4px">Welcome to ASX Screener</h2>
+      <p style="color:#374151">{greeting}</p>
+      <p style="color:#374151">
+        Thanks for joining. ASX Screener is built specifically for the Australian
+        market &mdash; franking credits, mining and A-REIT metrics, and ASIC short
+        data you won't find in a tool adapted from the US. Here's what you can do.
+      </p>
+
+      {_section(
+        "Screen",
+        "Find the companies worth a closer look.",
+        [
+          "Filter 2,100+ ASX-listed companies across 300+ metrics in 15 categories",
+          "30+ ready-made screens &mdash; value, quality, momentum, dividend income and more",
+          "Grossed-up yields with full franking credit calculations",
+          "Save any screen and re-run it whenever you like",
+        ])}
+
+      {_section(
+        "Analyse",
+        "Understand a company before you commit.",
+        [
+          "Company pages with fundamentals, ratios, financials and charts",
+          "Piotroski F-Score and Altman Z-Score on every stock",
+          "Mining depth (AISC, reserve life) and A-REIT metrics (NTA, WALE, occupancy)",
+          "ASIC daily short positions, updated with the market",
+        ])}
+
+      {_section(
+        "Search &amp; track",
+        "Stay across the names you care about.",
+        [
+          "Search any ASX code or company name from anywhere in the app",
+          "Watchlists synced across your devices",
+          "Price and percentage-change alerts delivered by email",
+          "AlphaFive &mdash; our weekly algo-ranked top 5 from the ASX 200",
+        ])}
+
+      <a href="https://asxscreener.com.au/screener"
+         style="display:inline-block;margin-top:8px;padding:11px 22px;
+                background:#2563eb;color:white;border-radius:8px;
+                text-decoration:none;font-weight:600">
+        Start screening
+      </a>
+
+      <p style="margin-top:24px;font-size:13px;color:#6b7280">
+        Not sure where to begin? Open the screener and pick a Quick Screen &mdash;
+        it fills in the filters for you. Any questions, just reply to this email
+        or use the <a href="https://asxscreener.com.au/contact"
+        style="color:#2563eb">contact form</a>.
+      </p>
+
+      <hr style="margin-top:28px;border:none;border-top:1px solid #e5e7eb"/>
+      <p style="font-size:11px;color:#9ca3af;line-height:1.5">
+        ASX Screener provides information and educational tools only. Nothing here
+        is financial advice or a recommendation to buy or sell any security.
+        Always do your own research.<br/>
+        <a href="https://asxscreener.com.au" style="color:#9ca3af">asxscreener.com.au</a>
+      </p>
+    </div>
+    """
+
     if resend is None:
         log.info(f"[email no-op] Welcome email for {to_email}")
         return False
 
-    greeting = f"Hi {name}," if name else "Hi,"
-    html = f"""
-    <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:24px">
-      <h2 style="color:#1d4ed8">Welcome to ASX Screener 🇦🇺</h2>
-      <p>{greeting}</p>
-      <p>Thanks for signing up. You can now:</p>
-      <ul>
-        <li>Screen all ~1,800 ASX companies with 80+ filters</li>
-        <li>Save watchlists synced across devices</li>
-        <li>Set price alerts with email notifications</li>
-      </ul>
-      <a href="http://asxscreener.com.au/screener"
-         style="display:inline-block;margin-top:16px;padding:10px 20px;
-                background:#2563eb;color:white;border-radius:8px;text-decoration:none">
-        Start Screening
-      </a>
-    </div>
-    """
+    sent = False
     try:
         resend.Emails.send({
             "from":    settings.EMAIL_FROM,
@@ -415,7 +479,111 @@ def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
             "subject": "Welcome to ASX Screener",
             "html":    html,
         })
+        log.info(f"Welcome email sent to {to_email}")
+        sent = True
+    except Exception as e:
+        log.error(f"Failed to send welcome email to {to_email}: {e}")
+
+    # Copy to the support inbox — doubles as the new-signup notification.
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [settings.SUPPORT_EMAIL],
+            "subject": f"New signup: {to_email}",
+            "html": (
+                f'<p style="font-family:sans-serif;font-size:13px;color:#6b7280">'
+                f'New account created &mdash; <strong>{html_escape(name or "(no name)")}'
+                f'</strong> &lt;{html_escape(to_email)}&gt;. '
+                f'Copy of the welcome email below.</p><hr/>' + html
+            ),
+        })
+    except Exception as e:
+        log.error(f"Failed to copy welcome email to support inbox: {e}")
+
+    return sent
+
+
+# ── Login failure alert ───────────────────────────────────────────────────────
+# Deliberately does NOT fire on an ordinary wrong password — users mistype
+# constantly and that would bury the inbox.  It fires when logins are actually
+# broken (the endpoint raised) or when one account fails repeatedly enough that
+# the person is plainly stuck.
+_LOGIN_ALERT_LAST_SENT: dict[str, float] = {}
+_LOGIN_ALERT_COOLDOWN_SEC = 900          # at most one alert per key per 15 min
+
+
+def _utcnow() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def send_login_failure_alert(
+    kind: str,                # "system" | "repeated"
+    email: Optional[str],
+    detail: str,
+    attempts: Optional[int] = None,
+) -> bool:
+    """Notify the support inbox that a user could not log in."""
+    import time
+
+    key = f"{kind}:{email or '-'}"
+    now = time.time()
+    last = _LOGIN_ALERT_LAST_SENT.get(key, 0.0)
+    if now - last < _LOGIN_ALERT_COOLDOWN_SEC:
+        log.debug(f"Login alert suppressed (cooldown): {key}")
+        return False
+    _LOGIN_ALERT_LAST_SENT[key] = now
+
+    if kind == "system":
+        heading = "Login is failing"
+        summary = ("A login attempt raised an unexpected error. This usually means "
+                   "the database or a dependency is unavailable, so <strong>no one "
+                   "can sign in</strong>.")
+        colour = "#b91c1c"
+    else:
+        heading = "A user cannot log in"
+        summary = (f"{attempts} consecutive failed attempts for this account. "
+                   "Likely a forgotten password, an unverified email, or an account "
+                   "problem worth looking at.")
+        colour = "#b45309"
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:24px">
+      <span style="background:{colour};color:#fff;font-size:11px;font-weight:700;
+                   padding:3px 9px;border-radius:99px">LOGIN ISSUE</span>
+      <h2 style="margin:12px 0 4px;color:#111827">{heading}</h2>
+      <p style="color:#374151;font-size:14px">{summary}</p>
+      <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px">
+        <tr><td style="padding:5px 0;color:#6b7280;width:110px">Account</td>
+            <td style="padding:5px 0;color:#111827">{html_escape(email or 'unknown')}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280">Detail</td>
+            <td style="padding:5px 0;color:#111827">{html_escape(detail)}</td></tr>
+        <tr><td style="padding:5px 0;color:#6b7280">Detected</td>
+            <td style="padding:5px 0;color:#111827">{_utcnow()}</td></tr>
+      </table>
+      <p style="font-size:13px;color:#6b7280">Check the backend:</p>
+      <pre style="background:#111827;color:#e5e7eb;padding:12px;border-radius:8px;
+                  font-size:12px;overflow-x:auto">systemctl status asx-backend
+journalctl -u asx-backend -n 100 --no-pager</pre>
+      <p style="font-size:12px;color:#9ca3af">
+        Further alerts for this issue are suppressed for 15 minutes.
+      </p>
+    </div>
+    """
+
+    resend = _client()
+    if resend is None:
+        log.info(f"[email no-op] Login failure alert ({kind}) for {email}")
+        return False
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [settings.SUPPORT_EMAIL],
+            "subject": f"[ASX Screener] {heading} — {email or 'unknown'}",
+            "html":    html,
+        })
+        log.info(f"Login failure alert sent ({kind}) for {email}")
         return True
     except Exception as e:
-        log.error(f"Failed to send welcome email: {e}")
+        log.error(f"Failed to send login failure alert: {e}")
         return False

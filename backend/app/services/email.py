@@ -581,3 +581,104 @@ journalctl -u asx-backend -n 100 --no-pager</pre>
     except Exception as e:
         log.error(f"Failed to send login failure alert: {e}")
         return False
+
+
+# ── Founding member offer reminder (marketing) ────────────────────────────────
+# Commercial message under the Spam Act 2003 (Cth): every send must identify the
+# sender and carry a working unsubscribe link, and only users with
+# marketing_emails_enabled = TRUE may receive it.
+def send_founding_offer_email(
+    to_email: str,
+    name: Optional[str],
+    unsubscribe_url: str,
+    deadline: str = "30 September 2026",
+) -> bool:
+    """Remind a free user that the founding member offer is closing."""
+    resend = _client()
+    greeting = f"Hi {html_escape(name)}," if name else "Hi,"
+
+    html = f"""
+    <div style="font-family:sans-serif;max-width:540px;margin:auto;padding:24px">
+      <p style="margin:0 0 6px;font-size:12px;letter-spacing:.08em;
+                text-transform:uppercase;color:#b45309;font-weight:700">
+        Founding member offer
+      </p>
+      <h2 style="margin:0 0 14px;color:#111827;font-size:22px;line-height:1.25">
+        Closing {html_escape(deadline)}
+      </h2>
+
+      <p style="color:#374151;font-size:15px;margin:0 0 8px">{greeting}</p>
+      <p style="color:#374151;font-size:15px;margin:0 0 18px">
+        You've been using the free version of ASX Screener. Before the founding
+        member offer closes, it's worth knowing what it gives you &mdash; because
+        it won't be repeated.
+      </p>
+
+      <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;margin:0 0 20px">
+        <div style="padding:16px 18px;border-bottom:1px solid #e5e7eb">
+          <p style="margin:0 0 3px;font-size:15px;color:#111827">
+            <strong>Pay for 1 year</strong> &rarr; get <strong>3 years</strong> of access
+          </p>
+          <p style="margin:0;font-size:13px;color:#6b7280">
+            Our best value &mdash; two extra years at no additional charge.
+          </p>
+        </div>
+        <div style="padding:16px 18px">
+          <p style="margin:0 0 3px;font-size:15px;color:#111827">
+            <strong>Pay for 1 month</strong> &rarr; get <strong>6 months</strong> of access
+          </p>
+          <p style="margin:0;font-size:13px;color:#6b7280">
+            Prefer to start small? Five extra months, same idea.
+          </p>
+        </div>
+      </div>
+
+      <p style="color:#374151;font-size:14px;margin:0 0 8px">What that unlocks:</p>
+      <ul style="margin:0 0 22px;padding-left:18px;font-size:14px">
+        <li style="margin:5px 0;color:#374151">The full screener &mdash; 300+ metrics, no result caps</li>
+        <li style="margin:5px 0;color:#374151">Alpha Screens, including AlphaFive, our weekly ranked top 5 from the ASX 200</li>
+        <li style="margin:5px 0;color:#374151">AI Query &mdash; ask for a screen in plain English</li>
+        <li style="margin:5px 0;color:#374151">Unlimited saved screens, watchlists and price alerts</li>
+        <li style="margin:5px 0;color:#374151">Franking, mining and A-REIT depth built for the ASX</li>
+      </ul>
+
+      <a href="https://asxscreener.com.au/pricing"
+         style="display:inline-block;padding:12px 24px;background:#f59e0b;color:#111827;
+                border-radius:8px;text-decoration:none;font-weight:700;font-size:15px">
+        Claim my spot
+      </a>
+
+      <p style="margin-top:20px;font-size:13px;color:#6b7280">
+        After {html_escape(deadline)} the founding member terms end and plans move to
+        standard pricing. Existing founding members keep their access.
+      </p>
+
+      <hr style="margin-top:28px;border:none;border-top:1px solid #e5e7eb"/>
+      <p style="font-size:11px;color:#9ca3af;line-height:1.6">
+        ASX Screener &middot; Australian stock analysis &middot;
+        <a href="https://asxscreener.com.au" style="color:#9ca3af">asxscreener.com.au</a><br/>
+        Information and educational tools only &mdash; not financial advice or a
+        recommendation to buy or sell any security. Always do your own research.<br/>
+        You're receiving this because you have an ASX Screener account.
+        <a href="{html_escape(unsubscribe_url)}" style="color:#6b7280;text-decoration:underline">
+          Unsubscribe from offers</a> &mdash; takes one click, and won't affect your
+        price alerts.
+      </p>
+    </div>
+    """
+
+    if resend is None:
+        log.info(f"[email no-op] Founding offer reminder for {to_email}")
+        return False
+    try:
+        resend.Emails.send({
+            "from":    settings.EMAIL_FROM,
+            "to":      [to_email],
+            "subject": f"Your founding member offer closes {deadline}",
+            "html":    html,
+        })
+        log.info(f"Founding offer reminder sent to {to_email}")
+        return True
+    except Exception as e:
+        log.error(f"Failed to send founding offer reminder to {to_email}: {e}")
+        return False

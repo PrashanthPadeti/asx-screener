@@ -518,71 +518,65 @@ def _utcnow() -> str:
 
 
 def send_login_failure_alert(
-    kind: str,                # "system" | "repeated"
     email: Optional[str],
     detail: str,
-    attempts: Optional[int] = None,
 ) -> bool:
-    """Notify the support inbox that a user could not log in."""
+    """
+    Tell the support inbox that the site could not sign someone in.
+
+    Only for site faults — a wrong email or password never reaches here, since
+    that is the user's own credential problem and alerting on it would bury the
+    inbox in noise from ordinary typos.
+    """
     import time
 
-    key = f"{kind}:{email or '-'}"
+    key = email or "-"
     now = time.time()
-    last = _LOGIN_ALERT_LAST_SENT.get(key, 0.0)
-    if now - last < _LOGIN_ALERT_COOLDOWN_SEC:
+    if now - _LOGIN_ALERT_LAST_SENT.get(key, 0.0) < _LOGIN_ALERT_COOLDOWN_SEC:
         log.debug(f"Login alert suppressed (cooldown): {key}")
         return False
     _LOGIN_ALERT_LAST_SENT[key] = now
 
-    if kind == "system":
-        heading = "Login is failing"
-        summary = ("A login attempt raised an unexpected error. This usually means "
-                   "the database or a dependency is unavailable, so <strong>no one "
-                   "can sign in</strong>.")
-        colour = "#b91c1c"
-    else:
-        heading = "A user cannot log in"
-        summary = (f"{attempts} consecutive failed attempts for this account. "
-                   "Likely a forgotten password, an unverified email, or an account "
-                   "problem worth looking at.")
-        colour = "#b45309"
-
     html = f"""
     <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:24px">
-      <span style="background:{colour};color:#fff;font-size:11px;font-weight:700;
-                   padding:3px 9px;border-radius:99px">LOGIN ISSUE</span>
-      <h2 style="margin:12px 0 4px;color:#111827">{heading}</h2>
-      <p style="color:#374151;font-size:14px">{summary}</p>
+      <span style="background:#b91c1c;color:#fff;font-size:11px;font-weight:700;
+                   padding:3px 9px;border-radius:99px">LOGIN FAILURE</span>
+      <h2 style="margin:12px 0 4px;color:#111827">Sign-in is failing</h2>
+      <p style="color:#374151;font-size:14px">
+        A login attempt failed with a server error, not bad credentials. This
+        usually means the database or another dependency is unavailable, so
+        <strong>users cannot sign in</strong>.
+      </p>
       <table style="width:100%;border-collapse:collapse;margin:18px 0;font-size:14px">
         <tr><td style="padding:5px 0;color:#6b7280;width:110px">Account</td>
             <td style="padding:5px 0;color:#111827">{html_escape(email or 'unknown')}</td></tr>
-        <tr><td style="padding:5px 0;color:#6b7280">Detail</td>
+        <tr><td style="padding:5px 0;color:#6b7280">Error</td>
             <td style="padding:5px 0;color:#111827">{html_escape(detail)}</td></tr>
         <tr><td style="padding:5px 0;color:#6b7280">Detected</td>
             <td style="padding:5px 0;color:#111827">{_utcnow()}</td></tr>
       </table>
-      <p style="font-size:13px;color:#6b7280">Check the backend:</p>
+      <p style="font-size:13px;color:#6b7280">Check the server:</p>
       <pre style="background:#111827;color:#e5e7eb;padding:12px;border-radius:8px;
-                  font-size:12px;overflow-x:auto">systemctl status asx-backend
+                  font-size:12px;overflow-x:auto">systemctl status asx-backend postgresql@16-main
 journalctl -u asx-backend -n 100 --no-pager</pre>
       <p style="font-size:12px;color:#9ca3af">
-        Further alerts for this issue are suppressed for 15 minutes.
+        Further alerts for this account are suppressed for 15 minutes.
       </p>
     </div>
     """
 
     resend = _client()
     if resend is None:
-        log.info(f"[email no-op] Login failure alert ({kind}) for {email}")
+        log.info(f"[email no-op] Login failure alert for {email}")
         return False
     try:
         resend.Emails.send({
             "from":    settings.EMAIL_FROM,
             "to":      [settings.SUPPORT_EMAIL],
-            "subject": f"[ASX Screener] {heading} — {email or 'unknown'}",
+            "subject": "[ASX Screener] Sign-in is failing",
             "html":    html,
         })
-        log.info(f"Login failure alert sent ({kind}) for {email}")
+        log.info(f"Login failure alert sent for {email}")
         return True
     except Exception as e:
         log.error(f"Failed to send login failure alert: {e}")

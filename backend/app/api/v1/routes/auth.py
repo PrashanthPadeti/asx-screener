@@ -136,37 +136,6 @@ async def register(
     return token_resp
 
 
-# ── Failed-login tracking ─────────────────────────────────────────────────────
-# In-process counters. Deliberately not persisted: this only decides whether to
-# send a courtesy alert, so losing the count on restart costs nothing, and it
-# keeps a hot path off the database. Entries expire so the dict cannot grow
-# without bound.
-_LOGIN_FAILURE_ALERT_THRESHOLD = 5
-_LOGIN_FAILURE_WINDOW_SEC      = 1800     # count resets after 30 min of quiet
-_failed_logins: dict[str, tuple[int, float]] = {}
-
-
-def _record_failed_login(email: str) -> int:
-    """Increment and return the consecutive failure count for an account."""
-    import time
-    now = time.time()
-    count, first_seen = _failed_logins.get(email, (0, now))
-    if now - first_seen > _LOGIN_FAILURE_WINDOW_SEC:
-        count, first_seen = 0, now
-    count += 1
-    _failed_logins[email] = (count, first_seen)
-
-    if len(_failed_logins) > 5000:        # drop entries older than the window
-        for k, (_, seen) in list(_failed_logins.items()):
-            if now - seen > _LOGIN_FAILURE_WINDOW_SEC:
-                _failed_logins.pop(k, None)
-    return count
-
-
-def _clear_failed_logins(email: str) -> None:
-    _failed_logins.pop(email, None)
-
-
 # ── Login ─────────────────────────────────────────────────────────────────────
 
 @limiter.limit("5/minute")
@@ -195,7 +164,7 @@ async def login(
         # cause isn't mistaken for bad credentials.
         log.error(f"Login failed with a system error for {email_lc}: {exc}")
         try:
-            send_login_failure_alert("system", email_lc, f"{type(exc).__name__}: {exc}")
+            send_login_failure_alert(email_lc, f"{type(exc).__name__}: {exc}")
         except Exception:
             pass
         raise HTTPException(
@@ -203,38 +172,37 @@ async def login(
             detail="Sign-in is temporarily unavailable. Please try again shortly.",
         )
 
+    # Wrong email or password is the user's own credential problem, not a site
+    # fault — no alert, by design.
     if user is None or not verify_password(body.password, user.password_hash or ""):
-        # A single wrong password is normal and is not worth an email. Only alert
-        # once an account has failed enough times that the person is clearly stuck.
-        attempts = _record_failed_login(email_lc)
-        if attempts == _LOGIN_FAILURE_ALERT_THRESHOLD:
-            try:
-                send_login_failure_alert(
-                    "repeated", email_lc,
-                    "Account exists but the password did not match"
-                    if user is not None else
-                    "No account found with this email address",
-                    attempts=attempts,
-                )
-            except Exception as exc:
-                log.warning(f"Could not send login failure alert: {exc}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
 
-    _clear_failed_logins(email_lc)
+    # Credentials are valid from here on, so anything that fails below is a site
+    # fault keeping a legitimate user out — alert on it.
+    try:
+        await db.execute(
+            text("UPDATE users.users SET last_login_at = NOW() WHERE id = :id"),
+            {"id": user.id},
+        )
+        await db.commit()
 
-    await db.execute(
-        text("UPDATE users.users SET last_login_at = NOW() WHERE id = :id"),
-        {"id": user.id},
-    )
-    await db.commit()
-
-    user_id             = str(user.id)
-    subscription_status = user.subscription_status or "inactive"
-    token_resp, refresh = _token_response(user_id, user.email, user.plan, subscription_status)
-    await _store_session(db, user_id, refresh, request)
+        user_id             = str(user.id)
+        subscription_status = user.subscription_status or "inactive"
+        token_resp, refresh = _token_response(user_id, user.email, user.plan, subscription_status)
+        await _store_session(db, user_id, refresh, request)
+    except Exception as exc:
+        log.error(f"Login failed after valid credentials for {email_lc}: {exc}")
+        try:
+            send_login_failure_alert(email_lc, f"{type(exc).__name__}: {exc}")
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sign-in is temporarily unavailable. Please try again shortly.",
+        )
 
     log.info(f"User logged in: {user.email}")
     return token_resp

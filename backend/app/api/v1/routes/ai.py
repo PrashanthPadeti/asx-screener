@@ -45,6 +45,33 @@ def _build_field_reference() -> str:
 
 _FIELD_REF = _build_field_reference()
 
+# Sector names are read from the database rather than hardcoded. They are not the
+# GICS spellings — the data has "Healthcare" and "Technology" where GICS says
+# "Health Care" and "Information Technology" — and a hardcoded list silently
+# produced filters that matched zero rows.
+_SECTOR_CACHE: dict[str, object] = {"at": 0.0, "values": []}
+_SECTOR_TTL_SEC = 3600
+
+
+async def _get_sector_values(db: AsyncSession) -> list[str]:
+    """Distinct sector names as actually stored, cached for an hour."""
+    import time
+    now = time.time()
+    if _SECTOR_CACHE["values"] and now - float(_SECTOR_CACHE["at"]) < _SECTOR_TTL_SEC:
+        return list(_SECTOR_CACHE["values"])  # type: ignore[arg-type]
+    try:
+        result = await db.execute(text("""
+            SELECT DISTINCT sector FROM screener.universe
+            WHERE sector IS NOT NULL AND sector <> '' ORDER BY sector
+        """))
+        values = [r[0] for r in result.fetchall()]
+        if values:
+            _SECTOR_CACHE.update({"at": now, "values": values})
+        return values
+    except Exception as exc:
+        log.warning(f"Could not load sector values for the AI prompt: {exc}")
+        return list(_SECTOR_CACHE["values"])  # type: ignore[arg-type]
+
 _NL_SYSTEM = """You are an expert Australian equities analyst assistant. Convert natural language stock screening queries into structured filter objects for the ASX screener."""
 
 _NL_PROMPT = """Convert this query into ASX screener filters.
@@ -58,7 +85,9 @@ Operator options: gte (>=), lte (<=), gt (>), lt (<), eq (=), neq (!=), in (IN l
 Boolean fields: operator must be "eq", value true or false
 Text fields (sector, industry): operator "eq" or "in"
 
-Common sector values: "Materials", "Financials", "Energy", "Health Care", "Consumer Discretionary", "Consumer Staples", "Industrials", "Information Technology", "Communication Services", "Real Estate", "Utilities"
+Sector values — use EXACTLY one of these strings, they are the only values that
+exist in the database. Do not substitute the GICS spelling of a sector name:
+{sectors}
 
 Interpretation rules:
 - "miners" → is_miner eq true
@@ -116,7 +145,9 @@ async def nl_screener(
         raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
     # Call Claude Haiku to parse the query
-    prompt = _NL_PROMPT.format(query=query, fields=_FIELD_REF)
+    sectors = await _get_sector_values(db)
+    sector_ref = "\n".join(f'  "{s}"' for s in sectors) or "  (none available)"
+    prompt = _NL_PROMPT.format(query=query, fields=_FIELD_REF, sectors=sector_ref)
 
     try:
         import anthropic

@@ -21,7 +21,7 @@ Supported syntax:
 
   Value types (determined by the field):
     number   →  operators >  >=  <  <=  =  !=  <>   value: 10, 15.5, -5
-    text     →  operators =  !=                     value: 'Materials', "Health Care"
+    text     →  operators =  !=                     value: 'Materials', "Healthcare"
     boolean  →  operators =  !=                     value: true / false (or 1 / 0)
                 bare boolean field also means "= true", e.g.  is_reit AND roe > 10
 
@@ -603,7 +603,7 @@ TT_OP     = "OP"      # >=, <=, !=, <>, >, <, =
 TT_LPAREN = "LPAREN"  # (
 TT_RPAREN = "RPAREN"  # )
 TT_NUMBER = "NUMBER"  # integer or decimal (may be negative)
-TT_STRING = "STRING"  # quoted text value, e.g. 'Materials' or "Health Care"
+TT_STRING = "STRING"  # quoted text value, e.g. 'Materials' or "Healthcare"
 TT_WORD   = "WORD"    # identifier / keyword token
 
 _TOKEN_RE = re.compile(
@@ -930,7 +930,7 @@ class _Parser:
             raise QueryParseError(
                 f"Expected a text value after '{raw_phrase} {op_tok.value}', "
                 f"got '{got}'. Put multi-word values in quotes, "
-                "e.g. sector = 'Health Care'"
+                "e.g. sector = 'Healthcare'"
             )
         value = self._consume().value
         return _ConditionNode(col, sql_op, value, kind="text")

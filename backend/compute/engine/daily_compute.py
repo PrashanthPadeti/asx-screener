@@ -306,6 +306,17 @@ def compute_metrics(asx_code: str, price: dict, fin: dict, company: dict, divs: 
         grossed_up_dps = float(ttm_dps) * (1 + (avg_franking / 100) * (corp_tax / (1 - corp_tax)))
         m["grossed_up_dividend"] = round(grossed_up_dps, 4)
         m["grossed_up_yield"]    = round(grossed_up_dps / close, 6)
+    else:
+        # No trailing dividend, or no usable price. These must be written as NULL
+        # rather than left unset: upsert_metrics builds its UPDATE clause from the
+        # keys present in this dict, so an omitted field keeps whatever the last
+        # run wrote. A company that stopped paying therefore kept its old yield
+        # forever — OEL carried a 480% grossed-up yield against a zero dividend.
+        m["dividend_per_share"]  = None
+        m["dividend_yield"]      = None
+        m["franking_pct"]        = None
+        m["grossed_up_dividend"] = None
+        m["grossed_up_yield"]    = None
 
     # Payout ratio
     net_profit = p0.get("net_profit")

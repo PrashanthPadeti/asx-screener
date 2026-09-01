@@ -77,26 +77,19 @@ async def community_screens(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Return public screens the requesting user is allowed to see:
-    - Admin: all public screens
-    - Premium (rank 2+): all public screens
-    - Pro (rank 1): screens created by free or pro users only
-    - Free (rank 0): 403
+    Return public screens. Premium subscribers (and admins) only — a shared
+    screen is a premium benefit, so Free and Pro get 403 rather than a partial
+    list. Everyone who is allowed in sees the same set.
     """
     user_rank = _PLAN_RANK.get(current_user["plan"], 0)
 
-    if not _is_admin(current_user["email"]) and user_rank < 1:
+    if not _is_admin(current_user["email"]) and user_rank < 2:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Community screens are available to Pro and Premium subscribers.",
+            detail="Shared screens are available on the Premium plan.",
         )
 
-    # Admins and Premium users (rank >= 2) see everything.
-    # Pro users (rank 1) see screens where creator_plan rank <= 1 (free/pro).
-    if _is_admin(current_user["email"]) or user_rank >= 2:
-        rank_filter = 999  # no upper cap
-    else:
-        rank_filter = 1  # pro cap: exclude premium-created screens
+    rank_filter = 999  # premium and admin see every public screen
 
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,

@@ -809,6 +809,16 @@ export default function ScreenerPage() {
   const [nlTotal, setNlTotal]               = useState(0)
   const [nlRows, setNlRows]                 = useState<ScreenerRow[]>([])
 
+  // Saving an AI query keeps both halves: the question as the name, and the
+  // filters it produced, so it re-runs without another AI call and can still be
+  // opened and edited in Filter Screen mode.
+  const [showAiSaveModal, setShowAiSaveModal] = useState(false)
+  const [aiSaveName, setAiSaveName]           = useState('')
+  const [aiSaveDesc, setAiSaveDesc]           = useState('')
+  const [aiPublic, setAiPublic]               = useState(false)
+  const [aiSaving, setAiSaving]               = useState(false)
+  const [showAiMyScreens, setShowAiMyScreens] = useState(false)
+
   // Saved screens state
   const [myScreens, setMyScreens]           = useState<SavedScreen[]>([])
   const [showSaveModal, setShowSaveModal]   = useState(false)
@@ -1084,6 +1094,41 @@ export default function ScreenerPage() {
     } catch { /* ignore */ } finally {
       setSaving(false)
     }
+  }
+
+  const handleSaveAiQuery = async () => {
+    if (!aiSaveName.trim() || !nlResult) return
+    setAiSaving(true)
+    try {
+      const screen = await saveScreen({
+        name:        aiSaveName.trim(),
+        description: aiSaveDesc.trim() || nlResult.interpretation || undefined,
+        filters:     nlResult.filters,
+        sort_by:     nlResult.sort_by || sortBy,
+        sort_dir:    sortDir,
+        is_public:   aiPublic,
+        query_text:  nlQuery.trim(),
+      })
+      setMyScreens(s => [screen, ...s])
+      setShowAiSaveModal(false)
+      setAiSaveDesc('')
+      setAiPublic(false)
+    } catch { /* ignore */ } finally {
+      setAiSaving(false)
+    }
+  }
+
+  // Re-run a saved AI screen from its stored filters — no second AI call, so the
+  // results are identical every time.
+  const loadSavedAiScreen = (s: SavedScreen) => {
+    if (s.query_text) setNlQuery(s.query_text)
+    setFilters(s.filters.map(f => ({
+      id: nextId++, field: f.field, operator: f.operator, value: String(f.value),
+    })))
+    setSortBy(s.sort_by)
+    setSortDir(s.sort_dir as 'asc' | 'desc')
+    setScreenerMode('manual')
+    setShowAiMyScreens(false)
   }
 
   const handleUpdateScreen = async (id: string, patch: { is_public?: boolean; name?: string; description?: string }) => {
@@ -1561,6 +1606,71 @@ export default function ScreenerPage() {
                     <p className="text-xs text-amber-400/80 border-t border-white/10 pt-2 mt-1">
                       Results are filtered data only — not investment advice. Always verify independently before acting.
                     </p>
+                  </div>
+                )}
+
+                {/* Save / browse — mirrors Filter Screen and Query Mode */}
+                {user && (
+                  <div className="flex flex-wrap items-center gap-2 mt-4">
+                    {nlResult && !nlLoading && (
+                      <button
+                        onClick={() => { setAiSaveName(nlQuery.trim().slice(0, 120)); setShowAiSaveModal(true) }}
+                        className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg font-medium
+                                   bg-white/10 border border-white/15 text-white
+                                   hover:bg-white/15 transition-colors"
+                      >
+                        <Bookmark className="w-3.5 h-3.5" /> Save Screen
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowAiMyScreens(v => !v); if (!showAiMyScreens) loadMyScreens() }}
+                      className={cn(
+                        'flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg font-medium border transition-colors',
+                        showAiMyScreens
+                          ? 'bg-blue-500/20 border-blue-400/40 text-blue-200'
+                          : 'bg-white/10 border-white/15 text-white hover:bg-white/15'
+                      )}
+                    >
+                      <Eye className="w-3.5 h-3.5" /> My Screens
+                    </button>
+                  </div>
+                )}
+
+                {/* My Screens panel */}
+                {showAiMyScreens && user && (
+                  <div className="border-t border-white/10 pt-3 mt-3">
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Saved Screens</p>
+                    {myScreens.length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No saved screens yet. Run a query and click &quot;Save Screen&quot;.
+                      </p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {myScreens.map(s => (
+                          <div key={s.id} className="flex items-center gap-2 group">
+                            <button
+                              onClick={() => loadSavedAiScreen(s)}
+                              className="flex-1 text-left px-3 py-2 rounded-lg border border-white/10
+                                         hover:border-blue-400/40 hover:bg-white/5 transition-colors"
+                            >
+                              <span className="text-sm font-medium text-slate-100">{s.name}</span>
+                              {s.query_text && (
+                                <span className="ml-2 text-[10px] uppercase tracking-wide text-blue-300/70">AI</span>
+                              )}
+                              {s.description && <p className="text-xs text-slate-500 mt-0.5">{s.description}</p>}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteScreen(s.id)}
+                              title="Delete"
+                              className="p-1.5 text-slate-500 hover:text-red-400 opacity-0
+                                         group-hover:opacity-100 transition-opacity"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2262,7 +2372,7 @@ export default function ScreenerPage() {
                       : 'bg-gray-50 border-gray-300 text-gray-600'
                   )}>
                   {savePublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                  {savePublic ? 'Public — visible to all' : 'Private — only you'}
+                  {savePublic ? 'Public — visible to Premium members' : 'Private — only you'}
                 </button>
               </div>
               <p className="text-xs text-gray-400">
@@ -2425,6 +2535,81 @@ export default function ScreenerPage() {
       )}
 
       {/* Save Query modal — outside all hidden divs so it renders in query mode */}
+      {/* Save AI screen modal */}
+      {showAiSaveModal && nlResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-blue-500" />
+                <h2 className="text-lg font-bold text-gray-900">Save Screen</h2>
+              </div>
+              <button onClick={() => setShowAiSaveModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Name *</label>
+                <input
+                  value={aiSaveName}
+                  onChange={e => setAiSaveName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveAiQuery() }}
+                  placeholder="e.g. Profitable miners under $1B"
+                  autoFocus
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1">Description (optional)</label>
+                <textarea
+                  value={aiSaveDesc}
+                  onChange={e => setAiSaveDesc(e.target.value)}
+                  placeholder={nlResult.interpretation || 'What does this screen look for?'}
+                  rows={2}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm
+                             focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setAiPublic(v => !v)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors',
+                    aiPublic
+                      ? 'bg-green-50 border-green-300 text-green-700'
+                      : 'bg-gray-50 border-gray-300 text-gray-600'
+                  )}>
+                  {aiPublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
+                  {aiPublic ? 'Public — visible to Premium members' : 'Private — only you'}
+                </button>
+              </div>
+              <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+                <p className="text-xs text-blue-700">
+                  Saves the {nlResult.filters.length} filter{nlResult.filters.length !== 1 ? 's' : ''} the
+                  AI produced, so it re-runs instantly and always returns the same screen.
+                </p>
+                <p className="text-[10px] text-blue-400 mt-0.5 font-mono truncate">{nlQuery.trim()}</p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setShowAiSaveModal(false)}
+                className="flex-1 px-4 py-2 text-sm border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAiQuery}
+                disabled={!aiSaveName.trim() || aiSaving}
+                className="flex-1 px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-medium
+                           hover:bg-blue-700 disabled:opacity-50">
+                {aiSaving ? 'Saving…' : 'Save Screen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showQuerySaveModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
@@ -2471,7 +2656,7 @@ export default function ScreenerPage() {
                       : 'bg-gray-50 border-gray-300 text-gray-600'
                   )}>
                   {queryPublic ? <Globe className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />}
-                  {queryPublic ? 'Public — visible to all' : 'Private — only you'}
+                  {queryPublic ? 'Public — visible to Premium members' : 'Private — only you'}
                 </button>
               </div>
               <div className="bg-orange-50 border border-orange-100 rounded-lg px-3 py-2">

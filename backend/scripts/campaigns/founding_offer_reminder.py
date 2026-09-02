@@ -120,11 +120,28 @@ def main() -> None:
     ap.add_argument("--send-id", default=date.today().isoformat(),
                     help="Identifies this instalment (default: today). Re-running "
                          "the same id skips anyone already sent it.")
-    ap.add_argument("--only", help="Send to this one address only (for a test send)")
+    ap.add_argument("--only", help="Send to this one address only (must be an eligible recipient)")
+    ap.add_argument("--test-to",
+                    help="Send a single preview to any address, ignoring eligibility. "
+                         "Nothing is logged and no token is minted — the unsubscribe "
+                         "link is a placeholder. Use this to check the email itself.")
     ap.add_argument("--limit", type=int, help="Cap the number of recipients")
     ap.add_argument("--deadline", default="30 September 2026",
                     help="Offer end date as it appears in the email")
     args = ap.parse_args()
+
+    # Preview — deliberately bypasses the recipient list so you can see the email
+    # regardless of plan. Touches no database state.
+    if args.test_to:
+        log.info(f"Preview to {args.test_to} — not logged, not counted, placeholder unsubscribe link")
+        ok = send_founding_offer_email(
+            to_email=args.test_to,
+            name="ASX Screener Admin Team",
+            unsubscribe_url=f"{FRONTEND}/unsubscribe?token=PREVIEW&type=all_marketing",
+            deadline=args.deadline,
+        )
+        log.info("Sent." if ok else "Not sent — check RESEND_API_KEY and the log above.")
+        return
 
     conn = psycopg2.connect(DB_URL)
     conn.autocommit = False

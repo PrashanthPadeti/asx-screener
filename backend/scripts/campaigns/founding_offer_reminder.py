@@ -75,11 +75,14 @@ RECIPIENT_SQL = """
     FROM users.users u
     WHERE u.plan = 'free'
       AND u.email IS NOT NULL AND u.email <> ''
-      -- Anyone who actively opted out, by either signal
+      -- Anyone who actively opted out, plus addresses known to bounce. Resend
+      -- suppresses repeat bounces anyway, but skipping them here keeps the
+      -- bounce rate off our sending reputation and out of the sent count.
       AND NOT EXISTS (
             SELECT 1 FROM users.audit_log a
             WHERE a.user_id = u.id
-              AND a.action IN ('prefs.unsubscribed', 'prefs.marketing_toggled')
+              AND a.action IN ('prefs.unsubscribed', 'prefs.marketing_toggled',
+                               'email.bounced')
       )
       AND NOT EXISTS (
             SELECT 1 FROM users.unsubscribe_tokens t

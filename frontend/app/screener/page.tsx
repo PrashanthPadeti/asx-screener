@@ -1677,10 +1677,13 @@ export default function ScreenerPage() {
 
               {/* AI Results table */}
               {nlRows.length > 0 && (
-                <div className="border-t border-white/10">
+                /* Light surface: the column renderers are shared with Filter Screen
+                   and use light-theme text colours, which were unreadable on the
+                   dark panel. */
+                <div className="bg-white">
                   {/* Table header */}
-                  <div className="flex items-center justify-between px-6 py-3 bg-white/5">
-                    <span className="text-sm font-semibold text-white">
+                  <div className="flex items-center justify-between px-6 py-3 bg-gray-50 border-b border-gray-200">
+                    <span className="text-sm font-semibold text-gray-900">
                       {nlTotal.toLocaleString()} results
                     </span>
                     <div className="flex items-center gap-2">
@@ -1689,7 +1692,7 @@ export default function ScreenerPage() {
                         disabled={nlExporting}
                         title="Download AI query results as CSV"
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg border
-                                   border-white/20 text-slate-300 hover:bg-white/10 hover:text-white
+                                   border-gray-300 text-gray-700 hover:bg-gray-100
                                    disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium">
                         <Download className="w-3.5 h-3.5" />
                         {nlExporting ? 'Exporting…' : 'Export CSV'}
@@ -1700,12 +1703,12 @@ export default function ScreenerPage() {
 
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
-                      <thead className="bg-white/5 border-b border-white/10">
+                      <thead className="bg-gray-50 border-b border-gray-200">
                         <tr>
                           {visibleCols.map(col => (
                             <th key={col.key as string}
                               className={cn(
-                                'px-3 py-2.5 text-xs font-semibold text-slate-400 uppercase tracking-wide whitespace-nowrap',
+                                'px-3 py-2.5 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap',
                                 col.align === 'right' ? 'text-right' : 'text-left',
                               )}>
                               {col.label}
@@ -1713,9 +1716,9 @@ export default function ScreenerPage() {
                           ))}
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5">
+                      <tbody className="divide-y divide-gray-100">
                         {nlRows.map(r => (
-                          <tr key={r.asx_code} className="hover:bg-white/5 transition-colors">
+                          <tr key={r.asx_code} className="hover:bg-blue-50/50 transition-colors">
                             {visibleCols.map(col => (
                               <td key={col.key as string}
                                 className={cn('px-3 py-2.5',
@@ -1731,19 +1734,19 @@ export default function ScreenerPage() {
 
                   {/* Pagination */}
                   {nlTotalPages > 1 && (
-                    <div className="flex items-center justify-between px-6 py-3 border-t border-white/10">
-                      <span className="text-sm text-slate-400">
+                    <div className="flex items-center justify-between px-6 py-3 border-t border-gray-200 bg-white">
+                      <span className="text-sm text-gray-500">
                         Page {nlPage} of {nlTotalPages}
                       </span>
                       <div className="flex gap-2">
                         <button onClick={() => runNLScreen(nlPage - 1)} disabled={nlPage <= 1 || nlLoading}
-                          className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-white/20
-                                     disabled:opacity-40 hover:bg-white/10 font-medium text-slate-300">
+                          className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300
+                                     disabled:opacity-40 hover:bg-gray-100 font-medium text-gray-700">
                           <ChevronLeft className="w-4 h-4" /> Prev
                         </button>
                         <button onClick={() => runNLScreen(nlPage + 1)} disabled={nlPage >= nlTotalPages || nlLoading}
-                          className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-white/20
-                                     disabled:opacity-40 hover:bg-white/10 font-medium text-slate-300">
+                          className="flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border border-gray-300
+                                     disabled:opacity-40 hover:bg-gray-100 font-medium text-gray-700">
                           Next <ChevronRight className="w-4 h-4" />
                         </button>
                       </div>

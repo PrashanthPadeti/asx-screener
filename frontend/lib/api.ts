@@ -1005,10 +1005,21 @@ export const getAISummary = async (
 export interface NLScreenerResponse {
   query:          string
   interpretation: string
+  /** Criteria that actually restricted the universe (mandatory + exclusions) */
   filters:        ScreenerFilter[]
+  mandatory?:     ScreenerFilter[]
+  exclusions?:    ScreenerFilter[]
+  /** Desirable but not disqualifying — these rank rather than filter */
+  preferred?:     ScreenerFilter[]
+  ranking?:       { field: string; direction: string }[]
+  /** Anything the dataset could not express, stated plainly */
+  notes?:         string[]
   sort_by:        string
   sort_dir:       string
   total:          number
+  /** Rows matching the hard filters, before the candidate cap */
+  total_candidates?: number
+  candidate_cap?: number
   total_pages:    number
   data:           ScreenerRow[]
 }

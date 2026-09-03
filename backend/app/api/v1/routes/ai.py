@@ -20,6 +20,7 @@ from app.core.deps import get_current_user
 from app.core.plans import get_limits
 from app.schemas.screener import ScreenerRequest, ScreenerFilter
 from app.api.v1.routes.screener import ALLOWED_FIELDS, build_screener_sql, SORTABLE_COLS
+from app.core.market_taxonomy import describe_bands
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,7 +75,7 @@ async def _get_sector_values(db: AsyncSession) -> list[str]:
 
 _NL_SYSTEM = """You are an expert Australian equities analyst assistant. Convert natural language stock screening queries into structured filter objects for the ASX screener."""
 
-_NL_PROMPT = """Convert this query into ASX screener filters.
+_NL_PROMPT = """Convert this query into an ASX screener plan.
 
 Query: "{query}"
 
@@ -89,33 +90,73 @@ Sector values — use EXACTLY one of these strings, they are the only values tha
 exist in the database. Do not substitute the GICS spelling of a sector name:
 {sectors}
 
+Market capitalisation bands — use these for vague size words:
+{cap_bands}
+
+CLASSIFY EVERY CRITERION. This is the most important part of the task.
+Putting everything in "mandatory" is the commonest failure: ten ANDed
+conditions return zero stocks, which is useless to the investor.
+
+  mandatory  — explicit, checkable constraints the user actually stated.
+               Numbers, ranges, named sizes, sectors, yes/no facts.
+               "under $500M", "ASX200 only", "profitable", "pays a dividend".
+  exclusions — things to rule out. "avoid highly indebted", "no miners",
+               "exclude loss-making". Express as a filter that removes them.
+  preferred  — desirable but not disqualifying. A stock failing one of these
+               should still appear, just lower down.
+  ranking    — how to order the survivors. Each entry is a field and a
+               direction. This is where vague praise belongs.
+
+The governing rule:
+  Nouns, numbers and explicit constraints define the candidate universe.
+  Adjectives mostly define preference and ranking.
+
+So "great fundamentals", "high quality", "strong growth", "best", "potential
+multibagger" are PREFERRED and RANKING — never mandatory. Only turn an
+adjective into a mandatory filter when the user gave a number.
+
+Be honest about what the data supports. If the query asks for something the
+fields cannot express — "futuristic", "disruptive", "good management", a
+specific theme like AI or defence — do NOT substitute a loosely related field
+and pretend it means the same thing. Say so in "notes" instead. Translating
+"futuristic" into growth_score is exactly the kind of silent substitution to
+avoid; growth is not the same as innovation.
+
+Aim for 1-3 mandatory criteria, 3-8 preferred, and 3-8 ranking signals. A
+mandatory list longer than about four is nearly always a misclassification.
+
 Interpretation rules:
-- "miners" → is_miner eq true
-- "REITs" → is_reit eq true
-- "ASX200" → is_asx200 eq true
-- "profitable" → net_margin gte 5, roe gte 10
-- "low debt" → debt_to_equity lte 0.5
-- "high dividends" → dividend_yield gte 4
-- "franked" → franking_pct gte 70
-- "growth stocks" → revenue_growth_1y gte 15, earnings_growth_1y gte 10
-- "value/cheap" → pe_ratio lte 15
-- "quality" → piotroski_f_score gte 7
-- "small cap" → market_cap lte 300 (AUD M)
-- "large cap" → market_cap gte 2000 (AUD M)
-- "oversold" → rsi_14 lte 35
-- "momentum" → return_3m gte 10, above_sma50 eq true
+- "miners" -> is_miner eq true            (mandatory)
+- "REITs" -> is_reit eq true              (mandatory)
+- "ASX200" -> is_asx200 eq true           (mandatory)
+- "profitable" -> net_margin gte 0        (mandatory)
+- "no debt" -> debt_to_equity lte 0.1     (mandatory)
+- "low debt" -> debt_to_equity lte 0.5    (preferred unless user insisted)
+- "high dividends" -> dividend_yield gte 4 (mandatory if a number was given)
+- "franked" -> franking_pct gte 70
+- "quality" -> piotroski_f_score, quality_score, roe   (preferred + ranking)
+- "great fundamentals" -> roe, net_margin, piotroski_f_score, quality_score,
+                          ocf_positive   (preferred + ranking, NOT mandatory)
+- "growth" -> revenue_growth_3y_cagr, earnings_growth_3y_cagr (preferred + ranking)
+- "potential multibagger" -> RANKING ONLY across growth, quality, capital
+                             efficiency, margin expansion, earnings stability,
+                             low dilution, momentum. Never a hard filter.
+- "value/cheap" -> pe_ratio lte 15        (preferred)
+- "oversold" -> rsi_14 lte 35             (mandatory)
+- "momentum" -> return_3m, above_sma50    (preferred + ranking)
 
 Return ONLY valid JSON — no markdown, no explanation:
 {{
-  "interpretation": "Plain English description of what this screen finds, including key thresholds",
-  "filters": [
-    {{"field": "field_name", "operator": "operator", "value": value}}
-  ],
-  "sort_by": "field_name",
-  "sort_dir": "desc"
+  "interpretation": "Plain English description of what this screen finds and how it is ranked",
+  "mandatory":  [{{"field": "field_name", "operator": "operator", "value": value}}],
+  "exclusions": [{{"field": "field_name", "operator": "operator", "value": value}}],
+  "preferred":  [{{"field": "field_name", "operator": "operator", "value": value}}],
+  "ranking":    [{{"field": "field_name", "direction": "desc"}}],
+  "notes":      ["Anything the data could not express, stated plainly"]
 }}
 
-Use correct JSON types: numbers as numbers (not strings), booleans as true/false."""
+Use correct JSON types: numbers as numbers (not strings), booleans as true/false.
+Every field name must come from the Available fields list above."""
 
 
 # ── Week 11: Natural Language Screener ───────────────────────────────────────
@@ -147,7 +188,8 @@ async def nl_screener(
     # Call Claude Haiku to parse the query
     sectors = await _get_sector_values(db)
     sector_ref = "\n".join(f'  "{s}"' for s in sectors) or "  (none available)"
-    prompt = _NL_PROMPT.format(query=query, fields=_FIELD_REF, sectors=sector_ref)
+    prompt = _NL_PROMPT.format(query=query, fields=_FIELD_REF, sectors=sector_ref,
+                               cap_bands=describe_bands())
 
     try:
         import anthropic
@@ -177,62 +219,150 @@ async def nl_screener(
             detail="AI returned an unreadable response. Try rephrasing your query.",
         )
 
-    # Validate filters — drop anything Claude hallucinated
-    valid: list[ScreenerFilter] = []
-    for f in parsed.get("filters", []):
-        field    = f.get("field", "")
-        operator = f.get("operator", "")
-        value    = f.get("value")
+    # ── Validate each class separately ───────────────────────────────────────
+    # Claude classifies criteria; we enforce the classes. Mandatory and exclusion
+    # become SQL. Preferred and ranking never filter — they only order results,
+    # which is what stops a reasonable request collapsing to zero rows.
+    OPS = ("gt", "gte", "lt", "lte", "eq", "neq", "in")
 
-        if field not in ALLOWED_FIELDS:
-            log.warning("nl-screener: unknown field '%s' — dropped", field)
-            continue
-        if operator not in ("gt", "gte", "lt", "lte", "eq", "neq", "in"):
-            log.warning("nl-screener: invalid operator '%s' — dropped", operator)
-            continue
-        valid.append(ScreenerFilter(field=field, operator=operator, value=value))
+    def _clean(bucket: str) -> list[ScreenerFilter]:
+        out: list[ScreenerFilter] = []
+        for f in parsed.get(bucket) or []:
+            if not isinstance(f, dict):
+                continue
+            field, op, value = f.get("field", ""), f.get("operator", ""), f.get("value")
+            if field not in ALLOWED_FIELDS:
+                log.warning("nl-screener: unknown field '%s' in %s — dropped", field, bucket)
+                continue
+            if op not in OPS:
+                log.warning("nl-screener: invalid operator '%s' in %s — dropped", op, bucket)
+                continue
+            out.append(ScreenerFilter(field=field, operator=op, value=value))
+        return out
 
-    if not valid:
+    mandatory  = _clean("mandatory")
+    exclusions = _clean("exclusions")
+    preferred  = _clean("preferred")
+
+    # Legacy shape: older prompt returned a flat "filters" list. Treat those as
+    # mandatory so an unexpected response still works.
+    if not mandatory and not exclusions and not preferred:
+        mandatory = _clean("filters")
+
+    ranking: list[tuple[str, str]] = []
+    for r in parsed.get("ranking") or []:
+        if not isinstance(r, dict):
+            continue
+        field = r.get("field", "")
+        direction = (r.get("direction") or "desc").lower()
+        if field in SORTABLE_COLS and direction in ("asc", "desc"):
+            ranking.append((field, direction))
+
+    notes = [str(n) for n in (parsed.get("notes") or []) if n]
+
+    hard = mandatory + exclusions
+    if not hard and not preferred and not ranking:
         raise HTTPException(
             status_code=422,
             detail="Could not interpret that query. Try something like 'profitable miners with low debt and high dividends'.",
         )
 
-    # Resolve sort
-    sort_by  = parsed.get("sort_by", "market_cap")
-    sort_dir = parsed.get("sort_dir", "desc")
-    if sort_by not in SORTABLE_COLS:
-        sort_by = "market_cap"
-    if sort_dir not in ("asc", "desc"):
-        sort_dir = "desc"
+    # Ordering for the SQL fetch — the first ranking signal, or market cap.
+    sort_by, sort_dir = (ranking[0] if ranking else ("market_cap", "desc"))
 
-    # Run the screener
+    # ── Fetch the candidate universe ─────────────────────────────────────────
+    # Hard filters only. We pull a wider slab than one page so preferences can
+    # reorder across the whole candidate set rather than within a single page.
+    CANDIDATE_CAP = 400
     req = ScreenerRequest(
-        filters=valid,
+        filters=hard,
         sort_by=sort_by,
         sort_dir=sort_dir,
-        page=max(1, body.page),
-        page_size=50,
+        page=1,
+        page_size=CANDIDATE_CAP,
     )
     try:
         count_sql, data_sql, params = build_screener_sql(req)
-        total  = (await db.execute(text(count_sql), params)).scalar() or 0
-        params["_limit"]  = req.page_size
-        params["_offset"] = (req.page - 1) * req.page_size
-        rows   = (await db.execute(text(data_sql),  params)).mappings().all()
+        total_candidates = (await db.execute(text(count_sql), params)).scalar() or 0
+        params["_limit"]  = CANDIDATE_CAP
+        params["_offset"] = 0
+        candidates = [dict(r) for r in (await db.execute(text(data_sql), params)).mappings().all()]
     except Exception as e:
         log.error("nl-screener DB error: %s", e)
         raise HTTPException(status_code=500, detail="Database error running the screen.")
 
+    # ── Score and rank ───────────────────────────────────────────────────────
+    # Both components are normalised to 0-1 and blended. Counting preferred
+    # criteria as the dominant term was wrong: a mediocre stock meeting 6 of 6
+    # preferences beat an outstanding one meeting 5 of 6, which reintroduces the
+    # binary behaviour we set out to remove. Ranking carries the larger weight so
+    # magnitude of quality outranks box-ticking.
+    W_PREFERRED, W_RANKING = 0.4, 0.6
+    def _meets(row: dict, f: ScreenerFilter) -> bool:
+        v = row.get(f.field)
+        if v is None:
+            return False
+        try:
+            if f.operator == "eq":   return v == f.value
+            if f.operator == "neq":  return v != f.value
+            if f.operator == "in":   return v in (f.value or [])
+            scale = ALLOWED_FIELDS[f.field].get("scale", 1) or 1
+            threshold = float(f.value) * scale
+            v = float(v)
+            if f.operator == "gte":  return v >= threshold
+            if f.operator == "lte":  return v <= threshold
+            if f.operator == "gt":   return v >  threshold
+            if f.operator == "lt":   return v <  threshold
+        except (TypeError, ValueError):
+            return False
+        return False
+
+    percentiles: dict[str, dict[str, float]] = {}
+    for field, direction in ranking:
+        vals = [(r["asx_code"], r.get(field)) for r in candidates]
+        present = sorted(((c, float(v)) for c, v in vals if v is not None),
+                         key=lambda cv: cv[1], reverse=(direction == "desc"))
+        n = len(present)
+        percentiles[field] = {c: 1.0 - (i / (n - 1)) if n > 1 else 1.0
+                              for i, (c, _) in enumerate(present)}
+
+    for row in candidates:
+        met = [f.field for f in preferred if _meets(row, f)]
+        rank_scores = [percentiles[f].get(row["asx_code"], 0.0) for f in percentiles]
+        pref_ratio = (len(met) / len(preferred)) if preferred else 0.0
+        rank_ratio = (sum(rank_scores) / len(rank_scores)) if rank_scores else 0.0
+        row["_preferred_met"]    = len(met)
+        row["_preferred_total"]  = len(preferred)
+        row["_preferred_missed"] = [f.field for f in preferred if f.field not in met]
+        row["_match_score"]      = round(
+            W_PREFERRED * pref_ratio + W_RANKING * rank_ratio, 4
+        )
+
+    candidates.sort(key=lambda r: r["_match_score"], reverse=True)
+
+    page      = max(1, body.page)
+    page_size = 50
+    start_i   = (page - 1) * page_size
+    rows      = candidates[start_i:start_i + page_size]
+    total     = len(candidates)
+
     return {
         "query":          query,
         "interpretation": parsed.get("interpretation", ""),
-        "filters":        [{"field": f.field, "operator": f.operator, "value": f.value} for f in valid],
+        # Chips in the UI: the criteria that actually restricted the universe.
+        "filters":        [{"field": f.field, "operator": f.operator, "value": f.value} for f in hard],
+        "mandatory":      [{"field": f.field, "operator": f.operator, "value": f.value} for f in mandatory],
+        "exclusions":     [{"field": f.field, "operator": f.operator, "value": f.value} for f in exclusions],
+        "preferred":      [{"field": f.field, "operator": f.operator, "value": f.value} for f in preferred],
+        "ranking":        [{"field": f, "direction": d} for f, d in ranking],
+        "notes":          notes,
         "sort_by":        sort_by,
         "sort_dir":       sort_dir,
         "total":          total,
-        "total_pages":    math.ceil(total / 50) if total else 0,
-        "data":           [dict(r) for r in rows],
+        "total_candidates": total_candidates,
+        "candidate_cap":  CANDIDATE_CAP,
+        "total_pages":    math.ceil(total / page_size) if total else 0,
+        "data":           rows,
     }
 
 

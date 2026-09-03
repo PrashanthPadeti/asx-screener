@@ -1606,15 +1606,70 @@ export default function ScreenerPage() {
                     <p className="text-sm text-blue-300 leading-snug">
                       <span className="font-semibold text-white">Interpreted as:</span> {nlResult.interpretation}
                     </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {nlResult.filters.map((f, i) => (
-                        <span key={i} className="text-xs bg-white/10 text-slate-300 border border-white/10
-                                                  px-2 py-0.5 rounded-full font-mono">
-                          {f.field} {f.operator} {String(f.value)}
-                        </span>
-                      ))}
-                    </div>
-                    <p className="text-xs text-slate-500">{nlTotal.toLocaleString()} stocks matched</p>
+                    {/* Criteria are shown by class: what restricted the universe,
+                        what merely influenced the order, and what was ignored. */}
+                    {nlResult.filters.length > 0 && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">
+                          Required — every result meets these
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {nlResult.filters.map((f, i) => (
+                            <span key={i} className="text-xs bg-blue-500/20 text-blue-100 border border-blue-400/30
+                                                      px-2 py-0.5 rounded-full font-mono">
+                              {f.field} {f.operator} {String(f.value)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!!nlResult.preferred?.length && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">
+                          Preferred — ranked higher, but not excluded
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {nlResult.preferred.map((f, i) => (
+                            <span key={i} className="text-xs bg-white/10 text-slate-300 border border-white/10
+                                                      px-2 py-0.5 rounded-full font-mono">
+                              {f.field} {f.operator} {String(f.value)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!!nlResult.ranking?.length && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">
+                          Ordered by
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {nlResult.ranking.map((r, i) => (
+                            <span key={i} className="text-xs bg-white/5 text-slate-400 border border-white/10
+                                                      px-2 py-0.5 rounded-full font-mono">
+                              {r.field} {r.direction === 'asc' ? '↑' : '↓'}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!!nlResult.notes?.length && (
+                      <div className="border-t border-white/10 pt-2 mt-1 space-y-1">
+                        {nlResult.notes.map((n, i) => (
+                          <p key={i} className="text-xs text-amber-300/90">{n}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    <p className="text-xs text-slate-500">
+                      {nlTotal.toLocaleString()} ranked {nlTotal === 1 ? 'match' : 'matches'}
+                      {nlResult.total_candidates != null && nlResult.candidate_cap != null
+                        && nlResult.total_candidates > nlResult.candidate_cap
+                        && ` — from ${nlResult.total_candidates.toLocaleString()} meeting the required criteria, top ${nlResult.candidate_cap} ranked`}
+                    </p>
                     <p className="text-xs text-amber-400/80 border-t border-white/10 pt-2 mt-1">
                       Results are filtered data only — not investment advice. Always verify independently before acting.
                     </p>

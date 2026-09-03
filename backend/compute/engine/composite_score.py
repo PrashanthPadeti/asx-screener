@@ -280,10 +280,14 @@ def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
         out["earnings_stability"] = np.nan
 
     # Margin expansion - booleans, mean of whichever are present
+    # These arrive as booleans but ALL_COLS runs every column through
+    # pd.to_numeric first, so by now they are 1.0/0.0 floats. Compare
+    # numerically and preserve NaN rather than relying on a True/False mapping.
     mflags = []
     for c in ("gross_margin_expanding", "operating_margin_expanding"):
         if c in df.columns:
-            mflags.append(df[c].map({True: 100.0, False: 0.0}))
+            v = pd.to_numeric(df[c], errors="coerce")
+            mflags.append(v.where(v.isna(), (v > 0) * 100.0))
     out["margin_expansion"] = (pd.concat(mflags, axis=1).mean(axis=1, skipna=True)
                                if mflags else np.nan)
 

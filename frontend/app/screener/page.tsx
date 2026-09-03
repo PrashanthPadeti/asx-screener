@@ -828,6 +828,7 @@ export default function ScreenerPage() {
   const [saving, setSaving]                 = useState(false)
   const [showMyScreens, setShowMyScreens]   = useState(false)
   const [editingScreen, setEditingScreen]   = useState<SavedScreen | null>(null)
+  const [screenError, setScreenError]       = useState<string | null>(null)
 
   // Column visibility — persisted to localStorage
   const STORAGE_KEY = 'screener_visible_columns_v1'
@@ -966,6 +967,7 @@ export default function ScreenerPage() {
     const firstValue = firstType === 'boolean' ? 'true' : ''
     setFilters(f => [...f, { id: nextId++, field: firstField, operator: firstOp, value: firstValue }])
     setActivePreset(null)
+    setScreenError(null)
     if (ran) setResultsStale(true)
   }
 
@@ -1005,6 +1007,7 @@ export default function ScreenerPage() {
     setSortBy(preset.sort_by)
     setSortDir(preset.sort_dir as 'asc' | 'desc')
     setActivePreset(preset.id)
+    setScreenError(null)
   }
 
   const applyPreset = (preset: ScreenerPreset) => {
@@ -1044,6 +1047,7 @@ export default function ScreenerPage() {
       return [...withoutMcap, ...newRows]
     })
     setActivePreset(null)
+    if (tier !== 'all') setScreenError(null)
   }
 
   const clearAll = () => {
@@ -1210,7 +1214,15 @@ export default function ScreenerPage() {
 
   // Run screen (button click)
   const runScreen = useCallback((p = 1) => {
-    fetchResults(p, sortBy, sortDir, buildApiFilters())
+    const apiFilters = buildApiFilters()
+    // Running with nothing set returns the entire universe, which is a listing
+    // rather than a screen — and an expensive one. Ask for a criterion instead.
+    if (apiFilters.length === 0) {
+      setScreenError('Add at least one filter before running a screen.')
+      return
+    }
+    setScreenError(null)
+    fetchResults(p, sortBy, sortDir, apiFilters)
   }, [fetchResults, sortBy, sortDir, buildApiFilters])
 
   // Sort header click — update state AND immediately re-fetch with new sort
@@ -2230,12 +2242,25 @@ export default function ScreenerPage() {
               <Eye className="w-4 h-4" /> My Screens
             </button>
           )}
-          {ran && !loading && (
+          {ran && !loading && !screenError && (
             <span className="text-sm text-gray-500">
               {total.toLocaleString()} stocks matched
             </span>
           )}
         </div>
+
+        {screenError && (
+          <div className="mt-3 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+            <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-amber-800">{screenError}</p>
+              <p className="text-xs text-amber-600 mt-0.5">
+                Use <span className="font-semibold">Add Filter</span>, pick a Market Cap band,
+                or choose a Quick Screen below.
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* My Screens panel */}
         {showMyScreens && user && (

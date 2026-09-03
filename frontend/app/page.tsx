@@ -303,7 +303,7 @@ export default async function HomePage() {
               <Link href="/screener" className="px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
                 Open Screener
               </Link>
-              <Link href="/screener?preset=asx200" className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg border-2 border-blue-200 hover:bg-blue-50 transition-colors">
+              <Link href="/screener?index=ASX200&autorun=true" className="px-6 py-3 bg-white text-blue-700 font-semibold rounded-lg border-2 border-blue-200 hover:bg-blue-50 transition-colors">
                 Explore ASX 200
               </Link>
               <Link href="/company/BHP" className="px-6 py-3 bg-white text-gray-700 font-semibold rounded-lg border border-gray-300 hover:bg-gray-50 transition-colors">

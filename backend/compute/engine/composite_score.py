@@ -200,6 +200,10 @@ MB_WEIGHTS: dict[str, float] = {
 
 MB_MIN_VALID_WEIGHT = 0.70      # below this the score is not published
 
+# yearly_compute stores earnings_stability_score as a 0-3 proxy. Keep the
+# rescaling explicit so a future change to that range is a one-line edit.
+EARNINGS_STABILITY_MAX = 3.0
+
 MB_GROWTH_SIGNALS = [
     ("revenue_growth_3y_cagr",  +1),
     ("eps_growth_3y_cagr",      +1),
@@ -263,9 +267,17 @@ def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
         (roic_r.fillna(0) * w_roic + roce_r.fillna(0) * w_roce) / w_sum.replace(0, np.nan)
     )
 
-    # Earnings stability - already a 0-100 score upstream, used as-is
-    out["earnings_stability"] = (df["earnings_stability_score"]
-                                 if "earnings_stability_score" in df.columns else np.nan)
+    # Earnings stability - the upstream value is a 0-3 proxy (low EPS volatility,
+    # consecutive positive FCF, growing revenue), NOT a 0-100 score. Consuming it
+    # raw made a perfect 3 contribute 3/100 and dragged every composite down by
+    # roughly 8 points. Rescale to 0-100 so a 3 means 100.
+    if "earnings_stability_score" in df.columns:
+        out["earnings_stability"] = (
+            pd.to_numeric(df["earnings_stability_score"], errors="coerce")
+            / EARNINGS_STABILITY_MAX * 100.0
+        ).clip(0, 100)
+    else:
+        out["earnings_stability"] = np.nan
 
     # Margin expansion - booleans, mean of whichever are present
     mflags = []
@@ -275,9 +287,12 @@ def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
     out["margin_expansion"] = (pd.concat(mflags, axis=1).mean(axis=1, skipna=True)
                                if mflags else np.nan)
 
-    # Dilution - asymmetric curve
+    # Dilution - asymmetric curve. The column holds a RATIO (0.05 = 5% p.a.),
+    # so convert to percent first; feeding the ratio straight in would read 5%
+    # annual dilution as 0.05% and score it "stable".
     if "shares_dilution_3y" in df.columns:
-        out["dilution"] = df["shares_dilution_3y"].apply(
+        dil_pct = pd.to_numeric(df["shares_dilution_3y"], errors="coerce") * 100.0
+        out["dilution"] = dil_pct.apply(
             lambda v: np.nan if pd.isna(v) else _dilution_curve(float(v)))
     else:
         out["dilution"] = np.nan

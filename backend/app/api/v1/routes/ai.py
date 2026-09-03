@@ -242,6 +242,11 @@ async def nl_screener(
             if op not in OPS:
                 log.warning("nl-screener: invalid operator '%s' in %s — dropped", op, bucket)
                 continue
+            # A null value can never match, so the criterion is dead weight: it
+            # inflates the preferred count and dilutes the score denominator.
+            if value is None:
+                log.warning("nl-screener: null value for '%s' in %s — dropped", field, bucket)
+                continue
             out.append(ScreenerFilter(field=field, operator=op, value=value))
         return out
 

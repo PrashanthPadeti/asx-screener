@@ -273,7 +273,11 @@ async def nl_screener(
     # ── Fetch the candidate universe ─────────────────────────────────────────
     # Hard filters only. We pull a wider slab than one page so preferences can
     # reorder across the whole candidate set rather than within a single page.
-    CANDIDATE_CAP = 400
+    # Bounded by ScreenerRequest.page_size (le=200). Ranking happens over this
+    # slab, so a query whose hard filters match more than this ranks the top
+    # CANDIDATE_CAP by the first ranking field rather than the true best.
+    # total_candidates is returned so the UI can say when that happened.
+    CANDIDATE_CAP = 200
     req = ScreenerRequest(
         filters=hard,
         sort_by=sort_by,

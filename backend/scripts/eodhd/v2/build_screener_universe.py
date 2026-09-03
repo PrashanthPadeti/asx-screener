@@ -766,9 +766,10 @@ SELECT
     -- Deriving from yearly_metrics alone shortens the dependency chain to
     -- yearly history -> averages -> magnitude -> flag.
     --
-    -- The magnitude is kept because a boolean cannot distinguish 19.9%->20.0%
-    -- from 12%->20%. NULL propagates: a missing average must not become 0, which
-    -- would read as a genuine "no expansion" signal.
+    -- The magnitude is kept because a boolean cannot distinguish a tenth of a
+    -- point of margin improvement from eight points. NULL propagates: a missing
+    -- average must not become 0, which would read as a genuine no-expansion
+    -- signal.  (No literal percent sign here: psycopg2 reads it as a placeholder.)
     ROUND((ym.avg_operating_margin_3y - ym.avg_operating_margin_5y)::numeric, 4)
         AS operating_margin_expansion,
     ROUND((ym.avg_gross_margin_3y - ym.avg_gross_margin_5y)::numeric, 4)

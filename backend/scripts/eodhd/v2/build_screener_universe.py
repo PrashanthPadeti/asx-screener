@@ -246,6 +246,7 @@ INSERT INTO screener.universe (
     revenue_fy2, net_profit_ttm, price_to_cash_flow,
 
     -- ── Profit-based signals ─────────────────────────────────────────────────
+    operating_margin_expansion, gross_margin_expansion,
     operating_margin_expanding, gross_margin_expanding, fcf_conversion,
     eps_beats_revenue_growth, operating_leverage,
 
@@ -758,13 +759,27 @@ SELECT
          THEN ROUND((vs.market_cap / (cf0.cfo * 1000000.0))::numeric, 4) END AS price_to_cash_flow,
 
     -- ── Profit-based signals ─────────────────────────────────────────────────
-    -- Margin expansion: current margin above 3Y average?
-    CASE WHEN COALESCE(cm.opm, vs.operating_margin) IS NOT NULL
-          AND ym.avg_operating_margin_3y IS NOT NULL
-         THEN COALESCE(cm.opm, vs.operating_margin) > ym.avg_operating_margin_3y
+    -- Margin expansion: 3Y average against the 5Y average, in percentage points.
+    -- Previously this compared computed_metrics.gpm/opm (current period) with the
+    -- yearly average, and those current-period columns are unpopulated, so both
+    -- flags were NULL for every stock while the yearly averages sat there unused.
+    -- Deriving from yearly_metrics alone shortens the dependency chain to
+    -- yearly history -> averages -> magnitude -> flag.
+    --
+    -- The magnitude is kept because a boolean cannot distinguish 19.9%->20.0%
+    -- from 12%->20%. NULL propagates: a missing average must not become 0, which
+    -- would read as a genuine "no expansion" signal.
+    ROUND((ym.avg_operating_margin_3y - ym.avg_operating_margin_5y)::numeric, 4)
+        AS operating_margin_expansion,
+    ROUND((ym.avg_gross_margin_3y - ym.avg_gross_margin_5y)::numeric, 4)
+        AS gross_margin_expansion,
+    CASE WHEN ym.avg_operating_margin_3y IS NOT NULL
+          AND ym.avg_operating_margin_5y IS NOT NULL
+         THEN (ym.avg_operating_margin_3y - ym.avg_operating_margin_5y) > 0
          END AS operating_margin_expanding,
-    CASE WHEN cm.gpm IS NOT NULL AND ym.avg_gross_margin_3y IS NOT NULL
-         THEN cm.gpm > ym.avg_gross_margin_3y
+    CASE WHEN ym.avg_gross_margin_3y IS NOT NULL
+          AND ym.avg_gross_margin_5y IS NOT NULL
+         THEN (ym.avg_gross_margin_3y - ym.avg_gross_margin_5y) > 0
          END AS gross_margin_expanding,
     -- FCF Conversion: how much of net profit turns into free cash flow (ratio)?
     CASE WHEN pnl0.net_profit IS NOT NULL AND pnl0.net_profit > 0 AND cf0.fcf IS NOT NULL
@@ -1598,6 +1613,8 @@ ON CONFLICT (asx_code) DO UPDATE SET
     net_profit_ttm          = EXCLUDED.net_profit_ttm,
     price_to_cash_flow      = EXCLUDED.price_to_cash_flow,
     -- Profit-based signals
+    operating_margin_expansion  = EXCLUDED.operating_margin_expansion,
+    gross_margin_expansion      = EXCLUDED.gross_margin_expansion,
     operating_margin_expanding  = EXCLUDED.operating_margin_expanding,
     gross_margin_expanding      = EXCLUDED.gross_margin_expanding,
     fcf_conversion              = EXCLUDED.fcf_conversion,

@@ -101,7 +101,12 @@ conditions return zero stocks, which is useless to the investor.
                Numbers, ranges, named sizes, sectors, yes/no facts.
                "under $500M", "ASX200 only", "profitable", "pays a dividend".
   exclusions — things to rule out. "avoid highly indebted", "no miners",
-               "exclude loss-making". Express as a filter that removes them.
+               "exclude loss-making".
+               State the UNWANTED condition, not its opposite. To exclude
+               loss-making companies write net_margin lt 0. To exclude heavily
+               indebted ones write debt_to_equity gt 1.5. The system inverts
+               these itself — do NOT pre-invert them or the screen returns
+               exactly what the user asked to avoid.
   preferred  — desirable but not disqualifying. A stock failing one of these
                should still appear, just lower down.
   ranking    — how to order the survivors. Each entry is a field and a
@@ -260,7 +265,23 @@ async def nl_screener(
 
     notes = [str(n) for n in (parsed.get("notes") or []) if n]
 
-    hard = mandatory + exclusions
+    # An exclusion names the UNWANTED condition ("net_margin lt 0" = loss-making),
+    # so it must be inverted before it becomes SQL. Applied as-is it does the
+    # exact opposite: a screen for great fundamentals returned only loss-making,
+    # highly indebted companies. Inverting here rather than asking the model to
+    # phrase it backwards keeps it correct however the model words it.
+    _NEGATE = {"lt": "gte", "lte": "gt", "gt": "lte", "gte": "lt",
+               "eq": "neq", "neq": "eq"}
+    excl_applied: list[ScreenerFilter] = []
+    for f in exclusions:
+        inv = _NEGATE.get(f.operator)
+        if inv is None:                      # "in" has no negation in ALLOWED ops
+            log.warning("nl-screener: cannot invert exclusion operator '%s' on %s — dropped",
+                        f.operator, f.field)
+            continue
+        excl_applied.append(ScreenerFilter(field=f.field, operator=inv, value=f.value))
+
+    hard = mandatory + excl_applied
     if not hard and not preferred and not ranking:
         raise HTTPException(
             status_code=422,
@@ -356,6 +377,8 @@ async def nl_screener(
         # Chips in the UI: the criteria that actually restricted the universe.
         "filters":        [{"field": f.field, "operator": f.operator, "value": f.value} for f in hard],
         "mandatory":      [{"field": f.field, "operator": f.operator, "value": f.value} for f in mandatory],
+        # The unwanted condition, as the user would read it ("net_margin lt 0"),
+        # not the inverted form that went into the query.
         "exclusions":     [{"field": f.field, "operator": f.operator, "value": f.value} for f in exclusions],
         "preferred":      [{"field": f.field, "operator": f.operator, "value": f.value} for f in preferred],
         "ranking":        [{"field": f, "direction": d} for f, d in ranking],

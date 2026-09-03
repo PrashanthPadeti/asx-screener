@@ -1608,15 +1608,31 @@ export default function ScreenerPage() {
                     </p>
                     {/* Criteria are shown by class: what restricted the universe,
                         what merely influenced the order, and what was ignored. */}
-                    {nlResult.filters.length > 0 && (
+                    {(nlResult.mandatory ?? nlResult.filters).length > 0 && (
                       <div>
                         <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">
                           Required — every result meets these
                         </p>
                         <div className="flex flex-wrap gap-1.5">
-                          {nlResult.filters.map((f, i) => (
+                          {(nlResult.mandatory ?? nlResult.filters).map((f, i) => (
                             <span key={i} className="text-xs bg-blue-500/20 text-blue-100 border border-blue-400/30
                                                       px-2 py-0.5 rounded-full font-mono">
+                              {f.field} {f.operator} {String(f.value)}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!!nlResult.exclusions?.length && (
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wide text-slate-400 mb-1">
+                          Excluded — results never match these
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {nlResult.exclusions.map((f, i) => (
+                            <span key={i} className="text-xs bg-red-500/15 text-red-200 border border-red-400/30
+                                                      px-2 py-0.5 rounded-full font-mono line-through decoration-red-400/50">
                               {f.field} {f.operator} {String(f.value)}
                             </span>
                           ))}

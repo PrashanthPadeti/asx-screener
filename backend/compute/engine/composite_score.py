@@ -103,12 +103,20 @@ FACTOR_SIGNALS: dict[str, list[tuple[str, int]]] = {
     ],
 }
 
+# Extra columns this engine needs beyond the five factor signals
+MB_EXTRA_COLS = [
+    "roic", "roce", "earnings_stability_score",
+    "gross_margin_expanding", "operating_margin_expanding",
+    "shares_dilution_3y", "percent_insiders",
+    "revenue_growth_3y_cagr", "eps_growth_3y_cagr",
+    "revenue_cagr_5y", "earnings_growth_3y_cagr",
+]
+
 # Columns to pull from screener.universe
-ALL_COLS = ["asx_code"] + sorted({
-    col
-    for signals in FACTOR_SIGNALS.values()
-    for col, _ in signals
-})
+ALL_COLS = ["asx_code"] + sorted(
+    {col for signals in FACTOR_SIGNALS.values() for col, _ in signals}
+    | set(MB_EXTRA_COLS)
+)
 
 
 def pct_rank(series: pd.Series, direction: int) -> pd.Series:
@@ -156,6 +164,173 @@ def compute_composite(df_scores: pd.DataFrame) -> pd.Series:
     return composite
 
 
+
+# -- Multibagger potential (MULTIBAGGER_POTENTIAL_V1) -------------------------
+# A CHARACTERISTICS score, not a return prediction. It measures how strongly a
+# business currently exhibits traits associated with long-term compounders. It
+# does not estimate whether the stock will return 2x, 5x or 10x, and every
+# surface that exposes it must say so.
+#
+# Deliberate design choices:
+#   * quality_score is NOT a component. It already blends Piotroski, ROE, ROCE,
+#     margins and leverage, all of which appear here - including it would count
+#     the same evidence twice.
+#   * ROIC and ROCE form ONE component (60/40), not two, so capital efficiency
+#     cannot pick up accidental double weighting.
+#   * Momentum is capped at 10%. This identifies compounding businesses, not
+#     stocks that have already run; an extraordinary company with temporarily
+#     weak price action should still score well.
+#   * Insider alignment is 5% and uses a saturating curve rather than a
+#     percentile. Ownership varies with company maturity: 25% in a founder-led
+#     small cap is excellent alignment, 2% in a mature company is not damning.
+#   * Dilution is asymmetric - heavy issuance is punished hard, but buybacks
+#     earn only a capped benefit, so this cannot become a buyback score.
+
+MULTIBAGGER_VERSION = "MULTIBAGGER_POTENTIAL_V1"
+
+MB_WEIGHTS: dict[str, float] = {
+    "growth":             0.25,
+    "capital_efficiency": 0.20,
+    "earnings_stability": 0.15,
+    "margin_expansion":   0.15,
+    "dilution":           0.10,
+    "momentum":           0.10,
+    "insider_alignment":  0.05,
+}
+
+MB_MIN_VALID_WEIGHT = 0.70      # below this the score is not published
+
+MB_GROWTH_SIGNALS = [
+    ("revenue_growth_3y_cagr",  +1),
+    ("eps_growth_3y_cagr",      +1),
+    ("revenue_cagr_5y",         +1),
+    ("earnings_growth_3y_cagr", +1),
+]
+
+
+def _dilution_curve(d: float) -> float:
+    """
+    Share-count change over 3 years (percent; positive = dilution) -> 0-100.
+
+    Asymmetric on purpose. Heavy issuance is a strong negative signal because it
+    means growth was bought with shareholder money. Buybacks are mildly positive
+    and capped, so a shrinking share count alone cannot carry the score.
+    """
+    if d >= 25:   return 0.0                       # heavy dilution
+    if d >= 10:   return 40.0 * (25 - d) / 15      # 10-25%  -> 40..0
+    if d >= 3:    return 40 + 35.0 * (10 - d) / 7  # 3-10%   -> 75..40
+    if d >= 0:    return 75 + 15.0 * (3 - d) / 3   # 0-3%    -> 90..75
+    if d >= -10:  return 90 + 10.0 * (-d) / 10     # buyback -> 90..100
+    return 100.0                                   # capped
+
+
+def _insider_curve(pct: float) -> float:
+    """
+    Insider ownership (percent) -> 0-100, saturating.
+
+    Low ownership is treated as neutral rather than bad, and the benefit
+    flattens out: going from 30% to 60% says little more about alignment.
+    """
+    if pct <= 0:   return 40.0
+    if pct <= 5:   return 40 + 20.0 * pct / 5         # 0-5%   -> 40..60
+    if pct <= 15:  return 60 + 20.0 * (pct - 5) / 10  # 5-15%  -> 60..80
+    if pct <= 25:  return 80 + 15.0 * (pct - 15) / 10
+    return 95.0
+
+
+def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns the seven components, the valid-weight percentage and the composite
+    score. Components are 0-100, NaN where the data is unusable.
+    """
+    out = pd.DataFrame(index=df.index)
+
+    # Growth - mean percentile across whichever growth signals are present
+    ranks = [pct_rank(df[c], d).clip(0, 100)
+             for c, d in MB_GROWTH_SIGNALS if c in df.columns]
+    out["growth"] = (pd.concat(ranks, axis=1).mean(axis=1, skipna=True)
+                     if ranks else np.nan)
+
+    # Capital efficiency - ONE component, ROIC 60 / ROCE 40, renormalised when
+    # only one is present so a missing ROIC does not halve the score.
+    nan_series = pd.Series(np.nan, index=df.index)
+    roic_r = pct_rank(df["roic"], +1).clip(0, 100) if "roic" in df.columns else nan_series
+    roce_r = pct_rank(df["roce"], +1).clip(0, 100) if "roce" in df.columns else nan_series
+    w_roic = roic_r.notna() * 0.6
+    w_roce = roce_r.notna() * 0.4
+    w_sum = w_roic + w_roce
+    out["capital_efficiency"] = (
+        (roic_r.fillna(0) * w_roic + roce_r.fillna(0) * w_roce) / w_sum.replace(0, np.nan)
+    )
+
+    # Earnings stability - already a 0-100 score upstream, used as-is
+    out["earnings_stability"] = (df["earnings_stability_score"]
+                                 if "earnings_stability_score" in df.columns else np.nan)
+
+    # Margin expansion - booleans, mean of whichever are present
+    mflags = []
+    for c in ("gross_margin_expanding", "operating_margin_expanding"):
+        if c in df.columns:
+            mflags.append(df[c].map({True: 100.0, False: 0.0}))
+    out["margin_expansion"] = (pd.concat(mflags, axis=1).mean(axis=1, skipna=True)
+                               if mflags else np.nan)
+
+    # Dilution - asymmetric curve
+    if "shares_dilution_3y" in df.columns:
+        out["dilution"] = df["shares_dilution_3y"].apply(
+            lambda v: np.nan if pd.isna(v) else _dilution_curve(float(v)))
+    else:
+        out["dilution"] = np.nan
+
+    # Momentum - reuse the factor score computed earlier in this run
+    out["momentum"] = df["momentum_score"] if "momentum_score" in df.columns else np.nan
+
+    # Insider alignment - saturating curve
+    if "percent_insiders" in df.columns:
+        out["insider_alignment"] = df["percent_insiders"].apply(
+            lambda v: np.nan if pd.isna(v) else _insider_curve(float(v)))
+    else:
+        out["insider_alignment"] = np.nan
+
+    # -- Eligibility ---------------------------------------------------------
+    # Growth is required, plus at least one capital-quality component, plus 70%
+    # of the total component weight. Without these, a stock with only momentum,
+    # dilution and insider data could score 85 on almost no evidence.
+    valid_weight = sum(out[k].notna() * w for k, w in MB_WEIGHTS.items())
+    eligible = (
+        out["growth"].notna()
+        & (out["capital_efficiency"].notna() | out["earnings_stability"].notna())
+        & (valid_weight >= MB_MIN_VALID_WEIGHT)
+    )
+
+    # Weighted mean over the valid components only, renormalised
+    weighted = sum(out[k].fillna(0) * w for k, w in MB_WEIGHTS.items())
+    score = (weighted / valid_weight.replace(0, np.nan)).where(eligible)
+
+    out["valid_weight_pct"] = (valid_weight * 100).round(1)
+    out["score"] = score.round(1).clip(0, 100)
+    return out
+
+
+MB_BANDS = [
+    (85, "Exceptional compounding characteristics"),
+    (75, "Strong"),
+    (65, "Above Average"),
+    (50, "Moderate"),
+    (35, "Weak"),
+    (0,  "Very Weak"),
+]
+
+
+def multibagger_band(score: Optional[float]) -> Optional[str]:
+    """Characteristics-based label. Deliberately avoids predictive language."""
+    if score is None or (isinstance(score, float) and np.isnan(score)):
+        return None
+    for floor, label in MB_BANDS:
+        if score >= floor:
+            return label
+    return MB_BANDS[-1][1]
+
 def run(conn, dry_run: bool = False) -> int:
     """Load universe, compute scores, upsert. Returns number of rows updated."""
     log.info("Loading screener.universe for scoring…")
@@ -195,6 +370,29 @@ def run(conn, dry_run: bool = False) -> int:
     df["momentum_score"] = compute_factor(df, "momentum")
     df["income_score"]   = compute_factor(df, "income")
     df["composite_score"]= compute_composite(df)
+
+    # Multibagger potential — computed after momentum_score, which it consumes.
+    mb = compute_multibagger(df)
+    df["mb_score"]              = mb["score"]
+    df["mb_growth"]             = mb["growth"].round(1)
+    df["mb_capital_efficiency"] = mb["capital_efficiency"].round(1)
+    df["mb_earnings_stability"] = mb["earnings_stability"].round(1)
+    df["mb_margin_expansion"]   = mb["margin_expansion"].round(1)
+    df["mb_dilution"]           = mb["dilution"].round(1)
+    df["mb_momentum"]           = mb["momentum"].round(1)
+    df["mb_insider_alignment"]  = mb["insider_alignment"].round(1)
+    df["mb_valid_weight_pct"]   = mb["valid_weight_pct"]
+
+    scored = int(df["mb_score"].notna().sum())
+    log.info(f"  Multibagger potential ({MULTIBAGGER_VERSION}): "
+             f"{scored:,} of {len(df):,} stocks met the eligibility rules")
+    if scored:
+        log.info("    Top 5 by multibagger potential:")
+        for _, r in df.nlargest(5, "mb_score")[
+                ["asx_code", "mb_score", "mb_valid_weight_pct"]].iterrows():
+            log.info(f"      {r['asx_code']:6s}  {r['mb_score']:5.1f}  "
+                     f"({multibagger_band(r['mb_score'])}, "
+                     f"{r['mb_valid_weight_pct']:.0f}% of weight valid)")
 
     # Convert float scores → nullable int (NaN → None)
     score_cols = ["value_score", "quality_score", "growth_score",
@@ -245,6 +443,60 @@ def run(conn, dry_run: bool = False) -> int:
     execute_values(
         cur, UPDATE_SQL, update_rows,
         template="(%s, %s::SMALLINT, %s::SMALLINT, %s::SMALLINT, %s::SMALLINT, %s::SMALLINT, %s::SMALLINT)",
+        page_size=500,
+    )
+    conn.commit()
+    cur.close()
+
+    # Multibagger score + components, written separately so a problem here
+    # cannot undo the five factor scores above.
+    MB_UPDATE_SQL = """
+        UPDATE screener.universe
+        SET
+            multibagger_potential_score     = data.score,
+            multibagger_version             = data.version,
+            mb_growth_component             = data.growth,
+            mb_capital_efficiency_component = data.capeff,
+            mb_earnings_stability_component = data.earnstab,
+            mb_margin_expansion_component   = data.marginexp,
+            mb_dilution_component           = data.dilution,
+            mb_momentum_component           = data.momentum,
+            mb_insider_alignment_component  = data.insider,
+            mb_valid_weight_pct             = data.validw
+        FROM (VALUES %s) AS data(
+            asx_code, score, version, growth, capeff, earnstab,
+            marginexp, dilution, momentum, insider, validw
+        )
+        WHERE screener.universe.asx_code = data.asx_code
+    """
+
+    def _num(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return None
+        return round(float(v), 1)
+
+    mb_rows = [
+        (
+            row["asx_code"],
+            _num(row["mb_score"]),
+            MULTIBAGGER_VERSION,
+            _num(row["mb_growth"]),
+            _num(row["mb_capital_efficiency"]),
+            _num(row["mb_earnings_stability"]),
+            _num(row["mb_margin_expansion"]),
+            _num(row["mb_dilution"]),
+            _num(row["mb_momentum"]),
+            _num(row["mb_insider_alignment"]),
+            _num(row["mb_valid_weight_pct"]),
+        )
+        for _, row in df.iterrows()
+    ]
+
+    cur = conn.cursor()
+    execute_values(
+        cur, MB_UPDATE_SQL, mb_rows,
+        template=("(%s, %s::NUMERIC, %s::VARCHAR, %s::NUMERIC, %s::NUMERIC, %s::NUMERIC, "
+                  "%s::NUMERIC, %s::NUMERIC, %s::NUMERIC, %s::NUMERIC, %s::NUMERIC)"),
         page_size=500,
     )
     conn.commit()

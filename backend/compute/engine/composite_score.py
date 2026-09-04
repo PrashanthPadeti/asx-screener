@@ -108,6 +108,7 @@ MB_EXTRA_COLS = [
     "roic", "roce", "earnings_stability_score",
     "gross_margin_expanding", "operating_margin_expanding",
     "shares_dilution_3y", "percent_insiders",
+    "gross_margin_expansion", "operating_margin_expansion",
     "revenue_growth_3y_cagr", "eps_growth_3y_cagr",
     "revenue_cagr_5y", "earnings_growth_3y_cagr",
 ]
@@ -280,13 +281,18 @@ def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
         out["earnings_stability"] = np.nan
 
     # Margin expansion - booleans, mean of whichever are present
-    # These arrive as booleans but ALL_COLS runs every column through
-    # pd.to_numeric first, so by now they are 1.0/0.0 floats. Compare
-    # numerically and preserve NaN rather than relying on a True/False mapping.
+    # Rank the MAGNITUDE, not the boolean. A flag cannot separate a tenth of a
+    # point of margin improvement from eight points, and with the flag every one
+    # of the top 20 scored exactly 100 here. Percentile-ranking the percentage
+    # point change restores the gradient. Falls back to the flags only where the
+    # magnitude is unavailable.
     mflags = []
-    for c in ("gross_margin_expanding", "operating_margin_expanding"):
-        if c in df.columns:
-            v = pd.to_numeric(df[c], errors="coerce")
+    for mag, flag in (("gross_margin_expansion",     "gross_margin_expanding"),
+                      ("operating_margin_expansion", "operating_margin_expanding")):
+        if mag in df.columns and pd.to_numeric(df[mag], errors="coerce").notna().any():
+            mflags.append(pct_rank(pd.to_numeric(df[mag], errors="coerce"), +1).clip(0, 100))
+        elif flag in df.columns:
+            v = pd.to_numeric(df[flag], errors="coerce")
             mflags.append(v.where(v.isna(), (v > 0) * 100.0))
     out["margin_expansion"] = (pd.concat(mflags, axis=1).mean(axis=1, skipna=True)
                                if mflags else np.nan)

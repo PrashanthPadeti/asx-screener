@@ -332,13 +332,62 @@ async def nl_screener(
     # Ordering for the SQL fetch — the first ranking signal, or market cap.
     sort_by, sort_dir = (ranking[0] if ranking else ("market_cap", "desc"))
 
-    # ── Fetch the candidate universe ─────────────────────────────────────────
+    # ── Choose a ranking mode ────────────────────────────────────────────────
+    # When the ordering is a plain sort on persisted, sortable columns and there
+    # are no preferred criteria to blend, Postgres can rank the ENTIRE eligible
+    # universe and return just the requested page. That removes the case where
+    # the response claimed to rank eligible stocks while ranking only the first
+    # 200 fetched.
+    #
+    # Preferred criteria still force the Python path: blending them needs
+    # consistent normalisation, missing-value handling and weighting, none of
+    # which is safe to express in SQL yet. Deliberately staged — a single
+    # persisted ranking field first, weighted blends much later.
+    page      = max(1, body.page)
+    page_size = 50
+    use_sql_ranking = bool(ranking) and not preferred
+
+    if use_sql_ranking:
+        req = ScreenerRequest(
+            filters=hard, sort_by=sort_by, sort_dir=sort_dir,
+            page=page, page_size=page_size,
+        )
+        try:
+            count_sql, data_sql, params = build_screener_sql(req)
+            total = (await db.execute(text(count_sql), params)).scalar() or 0
+            params["_limit"]  = page_size
+            params["_offset"] = (page - 1) * page_size
+            rows = [dict(r) for r in (await db.execute(text(data_sql), params)).mappings().all()]
+        except Exception as e:
+            log.error("nl-screener DB error (sql ranking): %s", e)
+            raise HTTPException(status_code=500, detail="Database error running the screen.")
+
+        return {
+            "query":            query,
+            "interpretation":   parsed.get("interpretation", ""),
+            "filters":          [{"field": f.field, "operator": f.operator, "value": f.value} for f in hard],
+            "mandatory":        [{"field": f.field, "operator": f.operator, "value": f.value} for f in mandatory],
+            "exclusions":       [{"field": f.field, "operator": f.operator, "value": f.value} for f in exclusions],
+            "preferred":        [],
+            "ranking":          [{"field": f, "direction": d} for f, d in ranking],
+            "notes":            notes,
+            "sort_by":          sort_by,
+            "sort_dir":         sort_dir,
+            "total":            total,
+            "total_candidates": total,
+            "ranked_universe":  total,     # every eligible row was ordered
+            "candidate_cap":    None,
+            "ranking_mode":     "sql_full_universe",
+            "total_pages":      math.ceil(total / page_size) if total else 0,
+            "data":             rows,
+        }
+
+    # ── Fetch the candidate universe (Python blend) ──────────────────────────
     # Hard filters only. We pull a wider slab than one page so preferences can
     # reorder across the whole candidate set rather than within a single page.
-    # Bounded by ScreenerRequest.page_size (le=200). Ranking happens over this
-    # slab, so a query whose hard filters match more than this ranks the top
-    # CANDIDATE_CAP by the first ranking field rather than the true best.
-    # total_candidates is returned so the UI can say when that happened.
+    # Bounded by ScreenerRequest.page_size (le=200), so a query matching more
+    # than this ranks the top CANDIDATE_CAP by the first ranking field rather
+    # than the true best. ranked_universe reports what was actually ordered.
     CANDIDATE_CAP = 200
     req = ScreenerRequest(
         filters=hard,
@@ -406,8 +455,6 @@ async def nl_screener(
 
     candidates.sort(key=lambda r: r["_match_score"], reverse=True)
 
-    page      = max(1, body.page)
-    page_size = 50
     start_i   = (page - 1) * page_size
     rows      = candidates[start_i:start_i + page_size]
     total     = len(candidates)
@@ -428,7 +475,9 @@ async def nl_screener(
         "sort_dir":       sort_dir,
         "total":          total,
         "total_candidates": total_candidates,
+        "ranked_universe": len(candidates),   # what was actually ordered
         "candidate_cap":  CANDIDATE_CAP,
+        "ranking_mode":   "python_candidate_slab",
         "total_pages":    math.ceil(total / page_size) if total else 0,
         "data":           rows,
     }

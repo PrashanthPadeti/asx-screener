@@ -790,7 +790,7 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
 
         FROM screener.universe u
         WHERE {where}
-        ORDER BY {sort_expr} {sort_dir} NULLS LAST
+        ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
         LIMIT :_limit OFFSET :_offset
     """
 
@@ -1839,7 +1839,7 @@ async def query_screener(
             u.price_date, u.universe_built_at
         FROM screener.universe u
         WHERE {where}
-        ORDER BY {sort_expr} {sort_dir} NULLS LAST
+        ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
         LIMIT :_limit OFFSET :_offset
     """
 
@@ -1899,7 +1899,7 @@ async def export_query_screener(
         SELECT {', '.join(f'u.{c}' for c in _EXPORT_COLS)}
         FROM screener.universe u
         WHERE {where}
-        ORDER BY {sort_expr} {sort_dir} NULLS LAST
+        ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
         LIMIT {_EXPORT_MAX_ROWS}
     """
     result = await db.execute(text(export_sql), params)

@@ -1023,9 +1023,14 @@ export interface NLScreenerResponse {
   sort_by:        string
   sort_dir:       string
   total:          number
-  /** Rows matching the hard filters, before the candidate cap */
+  /** Rows matching the hard filters, before any candidate cap */
   total_candidates?: number
-  candidate_cap?: number
+  /** How many rows were actually ordered — equals total_candidates in SQL mode */
+  ranked_universe?: number
+  candidate_cap?: number | null
+  /** sql_full_universe = Postgres ranked every eligible row.
+   *  python_candidate_slab = preferences blended over a capped slab. */
+  ranking_mode?: 'sql_full_universe' | 'python_candidate_slab'
   total_pages:    number
   data:           ScreenerRow[]
 }

@@ -1735,10 +1735,21 @@ export default function ScreenerPage() {
                     )}
 
                     <p className="text-xs text-slate-500">
-                      {nlTotal.toLocaleString()} ranked {nlTotal === 1 ? 'match' : 'matches'}
-                      {nlResult.total_candidates != null && nlResult.candidate_cap != null
-                        && nlResult.total_candidates > nlResult.candidate_cap
-                        && ` — from ${nlResult.total_candidates.toLocaleString()} meeting the required criteria, top ${nlResult.candidate_cap} ranked`}
+                      {(() => {
+                        const shown = Math.min(nlRows.length, nlTotal)
+                        const ranked = nlResult.ranked_universe ?? nlTotal
+                        // Say what was actually ranked. Claiming to rank the
+                        // eligible universe while ordering a capped slab was the
+                        // wording this replaces.
+                        if (nlResult.ranking_mode === 'sql_full_universe') {
+                          return `${shown.toLocaleString()} shown — ranked across all ${ranked.toLocaleString()} eligible ${ranked === 1 ? 'stock' : 'stocks'}`
+                        }
+                        if (nlResult.total_candidates != null && nlResult.candidate_cap != null
+                            && nlResult.total_candidates > nlResult.candidate_cap) {
+                          return `${shown.toLocaleString()} shown — ${nlResult.total_candidates.toLocaleString()} met the required criteria, top ${nlResult.candidate_cap} ranked by preference`
+                        }
+                        return `${nlTotal.toLocaleString()} ranked ${nlTotal === 1 ? 'match' : 'matches'}`
+                      })()}
                     </p>
                     <p className="text-xs text-amber-400/80 border-t border-white/10 pt-2 mt-1">
                       Results are filtered data only — not investment advice. Always verify independently before acting.

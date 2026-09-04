@@ -192,6 +192,8 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "capital_employed":      {"col": "(u.total_equity + u.total_debt)", "scale": 1, "type": "number", "label": "Capital Employed (AUD M)",  "unit": "AUD M","cat": "Financial Health"},  # equity + total debt
 
     # ── Factor Scores (percentile 0–100) ─────────────────────────────────────
+    "multibagger_potential_score": {"col": "u.multibagger_potential_score", "scale": 1,    "type": "number", "label": "Multibagger Potential Score", "unit": "",    "cat": "Factor Scores"},
+    "mb_valid_weight_pct":      {"col": "u.mb_valid_weight_pct",      "scale": 1,    "type": "number", "label": "Multibagger Data Coverage",   "unit": "%",   "cat": "Factor Scores"},
     "composite_score":         {"col": "u.composite_score",          "scale": 1,    "type": "number", "label": "Composite Score",            "unit": "",    "cat": "Factor Scores"},
     "value_score":             {"col": "u.value_score",              "scale": 1,    "type": "number", "label": "Value Score",                "unit": "",    "cat": "Factor Scores"},
     "quality_score":           {"col": "u.quality_score",            "scale": 1,    "type": "number", "label": "Quality Score",              "unit": "",    "cat": "Factor Scores"},
@@ -560,6 +562,8 @@ SORTABLE_COLS: dict[str, str] = {
     "revenue_per_share":  "u.revenue_per_share",
     "working_capital":    "u.working_capital",
     # Factor Scores
+    "multibagger_potential_score": "u.multibagger_potential_score",
+    "mb_valid_weight_pct": "u.mb_valid_weight_pct",
     "composite_score":    "u.composite_score",
     "value_score":        "u.value_score",
     "quality_score":      "u.quality_score",
@@ -753,6 +757,12 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
             -- Factor Scores
             u.composite_score, u.value_score, u.quality_score,
             u.growth_score, u.momentum_score, u.income_score,
+
+            -- Multibagger potential, plus the two audit fields. Coverage and
+            -- version are not filterable; they travel with the row so a support
+            -- question about a specific score can be answered without a query.
+            u.multibagger_potential_score, u.mb_valid_weight_pct,
+            u.multibagger_version,
 
             -- Quality Scores & rolling averages
             u.piotroski_f_score, u.altman_z_score,

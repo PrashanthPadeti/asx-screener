@@ -125,7 +125,9 @@ fields cannot express — "futuristic", "disruptive", "good management", a
 specific theme like AI or defence — do NOT substitute a loosely related field
 and pretend it means the same thing. Say so in "notes" instead. Translating
 "futuristic" into growth_score is exactly the kind of silent substitution to
-avoid; growth is not the same as innovation.
+avoid; growth is not the same as innovation. The same applies to
+multibagger_potential_score: it is not a proxy for innovation or theme
+exposure either. Report the limitation in "notes".
 
 Aim for 1-3 mandatory criteria, 3-8 preferred, and 3-8 ranking signals. A
 mandatory list longer than about four is nearly always a misclassification.
@@ -142,10 +144,35 @@ Interpretation rules:
 - "quality" -> piotroski_f_score, quality_score, roe   (preferred + ranking)
 - "great fundamentals" -> roe, net_margin, piotroski_f_score, quality_score,
                           ocf_positive   (preferred + ranking, NOT mandatory)
+  Keep this separate from multibagger language. "Great fundamentals" is about
+  current business quality; multibagger potential is a composite about
+  compounding characteristics. A query naming both gets both: quality criteria
+  as preferred, and multibagger_potential_score as a ranking signal.
 - "growth" -> revenue_growth_3y_cagr, earnings_growth_3y_cagr (preferred + ranking)
-- "potential multibagger" -> RANKING ONLY across growth, quality, capital
-                             efficiency, margin expansion, earnings stability,
-                             low dilution, momentum. Never a hard filter.
+- "potential multibagger" and its family -> RANKING on multibagger_potential_score
+  DESC. Never a hard filter unless the user states a number.
+      potential multibagger            -> rank multibagger_potential_score desc
+      multibagger candidates           -> rank multibagger_potential_score desc
+      stocks with multibagger potential-> rank multibagger_potential_score desc
+      potential long-term compounders  -> rank multibagger_potential_score desc
+      highest multibagger potential    -> rank multibagger_potential_score desc
+      best multibagger stocks          -> rank multibagger_potential_score desc
+      multibagger score above 75       -> MANDATORY multibagger_potential_score gte 75
+      score between 60 and 80          -> MANDATORY gte 60 and lte 80
+  Do NOT invent a threshold when the user gave none. "Highest multibagger
+  potential" means order by the score, not filter on it.
+
+  Do NOT reconstruct multibagger potential from its parts when
+  multibagger_potential_score exists. It already combines growth, capital
+  efficiency, earnings stability, margin expansion, shareholder dilution,
+  momentum and an ownership proxy, each validated. Emitting roe, roic,
+  piotroski_f_score, quality_score and growth_score instead duplicates what the
+  composite measures, and stacking them as filters returns nothing — which is
+  exactly the failure this design removed.
+
+  The score measures characteristics associated with long-term compounders. It
+  does not predict returns, so never describe results as stocks that will
+  multiply in value.
 - "value/cheap" -> pe_ratio lte 15        (preferred)
 - "oversold" -> rsi_14 lte 35             (mandatory)
 - "momentum" -> return_3m, above_sma50    (preferred + ranking)

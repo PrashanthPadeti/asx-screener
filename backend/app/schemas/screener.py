@@ -269,6 +269,14 @@ class ScreenerRow(BaseModel):
     earnings_growth_3y_cagr: Optional[float] = None  # decimal ratio
     eps_fy0:                Optional[float] = None   # AUD
 
+    # ── Multibagger potential (MULTIBAGGER_POTENTIAL_V1) ─────────────────────
+    # Strength of compounding CHARACTERISTICS, never a prediction of returns.
+    # Nullable on purpose: roughly a quarter of the universe lacks the history
+    # to earn a score, and a manufactured value would be worse than none.
+    multibagger_potential_score: Optional[float] = None
+    mb_valid_weight_pct:         Optional[float] = None   # data coverage, 0-100
+    multibagger_version:         Optional[str]   = None   # e.g. MULTIBAGGER_POTENTIAL_V1
+
     # ── Factor Scores (percentile 0–100, NOT decimal ratios) ─────────────────
     composite_score:   Optional[float] = None
     value_score:       Optional[float] = None

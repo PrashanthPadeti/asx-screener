@@ -162,6 +162,15 @@ Interpretation rules:
   Do NOT invent a threshold when the user gave none. "Highest multibagger
   potential" means order by the score, not filter on it.
 
+  multibagger_potential_score must appear in EXACTLY ONE role per query:
+      ranking    - the default, for any qualitative multibagger language
+      mandatory  - only when the user gives a number or a range
+      preferred  - NEVER
+  Preferred and ranking both feed the final ordering, so emitting the score in
+  both counts the same signal twice and inflates it beyond its intended weight.
+  Emitting "multibagger_potential_score gte 60" as preferred when the user asked
+  for none is the specific mistake to avoid.
+
   Do NOT reconstruct multibagger potential from its parts when
   multibagger_potential_score exists. It already combines growth, capital
   efficiency, earnings stability, margin expansion, shareholder dilution,

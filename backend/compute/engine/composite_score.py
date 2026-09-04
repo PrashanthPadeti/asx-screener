@@ -188,6 +188,8 @@ def compute_composite(df_scores: pd.DataFrame) -> pd.Series:
 #     earn only a capped benefit, so this cannot become a buyback score.
 
 MULTIBAGGER_VERSION = "MULTIBAGGER_POTENTIAL_V1"
+# The ownership curve is versioned separately so it can be recalibrated
+# without implying the whole composite changed definition.
 
 MB_WEIGHTS: dict[str, float] = {
     "growth":             0.25,
@@ -229,18 +231,35 @@ def _dilution_curve(d: float) -> float:
     return 100.0                                   # capped
 
 
-def _insider_curve(pct: float) -> float:
-    """
-    Insider ownership (percent) -> 0-100, saturating.
+OWNERSHIP_ALIGNMENT_VERSION = "OWNERSHIP_ALIGNMENT_V1"
 
-    Low ownership is treated as neutral rather than bad, and the benefit
-    flattens out: going from 30% to 60% says little more about alignment.
+# Knee points for the ownership curve, interpolated linearly between them.
+# The first calibration saturated at 25 percent, which put 1,079 of 1,657
+# stocks on the ceiling at exactly 95 - effectively a constant, and therefore
+# useless as a ranking signal. Observed mean ownership is 36 percent, so the
+# knees were moved out to spread the component across the real distribution.
+_OWNERSHIP_KNEES = [(0, 40.0), (10, 60.0), (30, 75.0), (60, 90.0), (85, 95.0)]
+
+
+def _ownership_curve(pct: float) -> float:
     """
-    if pct <= 0:   return 40.0
-    if pct <= 5:   return 40 + 20.0 * pct / 5         # 0-5%   -> 40..60
-    if pct <= 15:  return 60 + 20.0 * (pct - 5) / 10  # 5-15%  -> 60..80
-    if pct <= 25:  return 80 + 15.0 * (pct - 15) / 10
-    return 95.0
+    Ownership concentration (percent of shares held per percent_insiders)
+    -> 0-100, monotonic and saturating.
+
+    Named "ownership alignment", not "insider alignment", deliberately. What
+    EODHD encodes in this field is not established: ERA scores 98.7 on it, which
+    is Rio Tinto's controlling parent stake, not directors buying shares. A
+    controlling parent and a founder-operator are not the same economic signal,
+    and until the dataset lets us separate founder, management, parent,
+    institutional and government holdings, this is a proxy rather than a
+    governance measure. It is held at 5 percent weight for that reason.
+    """
+    if pct <= _OWNERSHIP_KNEES[0][0]:
+        return _OWNERSHIP_KNEES[0][1]
+    for (x0, y0), (x1, y1) in zip(_OWNERSHIP_KNEES, _OWNERSHIP_KNEES[1:]):
+        if pct <= x1:
+            return y0 + (y1 - y0) * (pct - x0) / (x1 - x0)
+    return _OWNERSHIP_KNEES[-1][1]
 
 
 def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
@@ -310,10 +329,10 @@ def compute_multibagger(df: pd.DataFrame) -> pd.DataFrame:
     # Momentum - reuse the factor score computed earlier in this run
     out["momentum"] = df["momentum_score"] if "momentum_score" in df.columns else np.nan
 
-    # Insider alignment - saturating curve
+    # Ownership alignment - saturating curve, OWNERSHIP_ALIGNMENT_V1
     if "percent_insiders" in df.columns:
         out["insider_alignment"] = df["percent_insiders"].apply(
-            lambda v: np.nan if pd.isna(v) else _insider_curve(float(v)))
+            lambda v: np.nan if pd.isna(v) else _ownership_curve(float(v)))
     else:
         out["insider_alignment"] = np.nan
 

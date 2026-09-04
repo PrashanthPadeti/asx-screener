@@ -770,16 +770,27 @@ SELECT
     -- point of margin improvement from eight points. NULL propagates: a missing
     -- average must not become 0, which would read as a genuine no-expansion
     -- signal.  (No literal percent sign here: psycopg2 reads it as a placeholder.)
-    ROUND((ym.avg_operating_margin_3y - ym.avg_operating_margin_5y)::numeric, 4)
-        AS operating_margin_expansion,
-    ROUND((ym.avg_gross_margin_3y - ym.avg_gross_margin_5y)::numeric, 4)
-        AS gross_margin_expansion,
-    CASE WHEN ym.avg_operating_margin_3y IS NOT NULL
-          AND ym.avg_operating_margin_5y IS NOT NULL
+    -- Both averages must be within a plausible band before a change between
+    -- them means anything. TLG averaged minus 421 points of gross margin over
+    -- five years and minus 156 over three; the resulting "improvement" of 266
+    -- points is not operating leverage, it is a company with negligible revenue
+    -- losing less money than before. Ranking that as the strongest margin
+    -- expansion in the market pushes the wrong companies up a compounding score.
+    -- Outside the band the value is NULL, never a fabricated number.
+    CASE WHEN ym.avg_operating_margin_3y BETWEEN -100 AND 100
+          AND ym.avg_operating_margin_5y BETWEEN -100 AND 100
+         THEN ROUND((ym.avg_operating_margin_3y - ym.avg_operating_margin_5y)::numeric, 4)
+         END AS operating_margin_expansion,
+    CASE WHEN ym.avg_gross_margin_3y BETWEEN -100 AND 100
+          AND ym.avg_gross_margin_5y BETWEEN -100 AND 100
+         THEN ROUND((ym.avg_gross_margin_3y - ym.avg_gross_margin_5y)::numeric, 4)
+         END AS gross_margin_expansion,
+    CASE WHEN ym.avg_operating_margin_3y BETWEEN -100 AND 100
+          AND ym.avg_operating_margin_5y BETWEEN -100 AND 100
          THEN (ym.avg_operating_margin_3y - ym.avg_operating_margin_5y) > 0
          END AS operating_margin_expanding,
-    CASE WHEN ym.avg_gross_margin_3y IS NOT NULL
-          AND ym.avg_gross_margin_5y IS NOT NULL
+    CASE WHEN ym.avg_gross_margin_3y BETWEEN -100 AND 100
+          AND ym.avg_gross_margin_5y BETWEEN -100 AND 100
          THEN (ym.avg_gross_margin_3y - ym.avg_gross_margin_5y) > 0
          END AS gross_margin_expanding,
     -- FCF Conversion: how much of net profit turns into free cash flow (ratio)?

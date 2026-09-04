@@ -215,20 +215,48 @@ MB_GROWTH_SIGNALS = [
 ]
 
 
-def _dilution_curve(d: float) -> float:
-    """
-    Share-count change over 3 years (percent; positive = dilution) -> 0-100.
+DILUTION_QUALITY_VERSION = "DILUTION_QUALITY_V1"
 
-    Asymmetric on purpose. Heavy issuance is a strong negative signal because it
-    means growth was bought with shareholder money. Buybacks are mildly positive
-    and capped, so a shrinking share count alone cannot carry the score.
-    """
-    if d >= 25:   return 0.0                       # heavy dilution
-    if d >= 10:   return 40.0 * (25 - d) / 15      # 10-25%  -> 40..0
-    if d >= 3:    return 40 + 35.0 * (10 - d) / 7  # 3-10%   -> 75..40
-    if d >= 0:    return 75 + 15.0 * (3 - d) / 3   # 0-3%    -> 90..75
-    if d >= -10:  return 90 + 10.0 * (-d) / 10     # buyback -> 90..100
-    return 100.0                                   # capped
+# Annualised share-count change (percent, positive = dilution) -> score.
+# Interpolated linearly between knees.
+#
+# Calibrated against the observed ASX distribution rather than fitted to it.
+# Median annual dilution here is 6.2 percent, p75 is 20.6 and 26 percent of the
+# market exceeds 20 percent a year — far more dilutive than a developed-market
+# baseline. That is an argument for absolute economic anchors, NOT percentile
+# ranking: rank-normalising would make a 20 percent diluter merely average,
+# grading on a curve where the curve is itself the problem. Twenty percent a
+# year destroys per-share compounding however many peers do the same.
+#
+# The floor sits at 60 rather than 25 percent. Saturating at 25 would collapse a
+# quarter of the market to a flat zero and lose all ordering inside the worst
+# group — the same defect as the ownership curve saturating at 25 percent
+# ownership. Beyond about 60 there is little value separating one extreme from
+# another for a compounding measure.
+#
+# Buybacks are capped at 100 and worth at most 10 points above a stable
+# register, so a shrinking share count can improve this component but never
+# compensate for weak growth, returns or stability.
+_DILUTION_KNEES = [
+    (-20.0, 100.0),   # sustained buyback, capped
+    (  0.0,  90.0),   # stable register
+    (  2.0,  80.0),
+    (  5.0,  65.0),
+    ( 10.0,  45.0),
+    ( 20.0,  20.0),
+    ( 40.0,   5.0),
+    ( 60.0,   0.0),   # floor
+]
+
+
+def _dilution_curve(d: float) -> float:
+    """Share-count change over the window (percent, positive = dilution) -> 0-100."""
+    if d <= _DILUTION_KNEES[0][0]:
+        return _DILUTION_KNEES[0][1]
+    for (x0, y0), (x1, y1) in zip(_DILUTION_KNEES, _DILUTION_KNEES[1:]):
+        if d <= x1:
+            return y0 + (y1 - y0) * (d - x0) / (x1 - x0)
+    return _DILUTION_KNEES[-1][1]
 
 
 OWNERSHIP_ALIGNMENT_VERSION = "OWNERSHIP_ALIGNMENT_V1"

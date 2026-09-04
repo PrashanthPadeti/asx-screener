@@ -163,6 +163,12 @@ export interface ScreenerRow {
   cfo_fy0: number | null                   // AUD millions
 
   // Factor Scores (percentile 0–100)
+  /** MULTIBAGGER_POTENTIAL_V1 — compounding CHARACTERISTICS, not a return forecast.
+   *  Null where the stock lacks the history to earn a score; never treat as 0. */
+  multibagger_potential_score: number | null
+  /** Share of component weight backed by real data, 0-100 */
+  mb_valid_weight_pct: number | null
+  multibagger_version: string | null
   composite_score: number | null
   value_score: number | null
   quality_score: number | null

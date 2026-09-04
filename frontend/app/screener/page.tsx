@@ -41,6 +41,30 @@ interface ColDef {
   render:  (r: ScreenerRow) => React.ReactNode
 }
 
+
+// ── Multibagger potential presentation ───────────────────────────────────────
+// The score measures characteristics associated with long-term compounders. It
+// is NOT a prediction of returns, and the wording here is deliberate: sorting is
+// labelled by the score, never "best multibaggers".
+const MB_TOOLTIP =
+  'Measures characteristics associated with potential long-term compounders, using ' +
+  'growth, capital efficiency, earnings stability, margin expansion, shareholder ' +
+  'dilution, momentum and an ownership-alignment proxy. It is a screening score, ' +
+  'not a prediction of future returns.'
+
+const MB_BANDS: { min: number; label: string; cls: string }[] = [
+  { min: 85, label: 'Exceptional',   cls: 'text-emerald-700' },
+  { min: 75, label: 'Strong',        cls: 'text-green-600'   },
+  { min: 65, label: 'Above Average', cls: 'text-lime-600'    },
+  { min: 50, label: 'Moderate',      cls: 'text-amber-600'   },
+  { min: 35, label: 'Weak',          cls: 'text-orange-500'  },
+  { min: 0,  label: 'Very Weak',     cls: 'text-red-500'     },
+]
+
+function mbBand(score: number) {
+  return MB_BANDS.find(b => score >= b.min) ?? MB_BANDS[MB_BANDS.length - 1]
+}
+
 const ALL_COLUMNS: ColDef[] = [
   // Always visible
   {
@@ -486,6 +510,35 @@ const ALL_COLUMNS: ColDef[] = [
 
   // ── Factor Scores (percentile 0–100) ─────────────────────────────────────
   {
+    key: 'multibagger_potential_score', label: 'MB Potential',
+    sortKey: 'multibagger_potential_score',
+    default: false, align: 'right',
+    render: r => {
+      const v = r.multibagger_potential_score
+      // Null is not zero. A stock with no history must never look like one that
+      // scored badly, so it says so rather than showing a number or a dash.
+      if (v == null) {
+        return (
+          <span className="text-[11px] text-gray-400 italic"
+                title={`Insufficient data to score. ${MB_TOOLTIP}`}>
+            Insufficient data
+          </span>
+        )
+      }
+      const band = mbBand(v)
+      const coverage = r.mb_valid_weight_pct != null
+        ? `\n\nData coverage: ${r.mb_valid_weight_pct.toFixed(1)}%` : ''
+      const version = r.multibagger_version ? `\nVersion: ${r.multibagger_version}` : ''
+      return (
+        <span className="inline-flex flex-col items-end leading-tight"
+              title={`${MB_TOOLTIP}${coverage}${version}`}>
+          <span className={cn('font-semibold', band.cls)}>{v.toFixed(1)}</span>
+          <span className="text-[10px] text-gray-400">{band.label}</span>
+        </span>
+      )
+    },
+  },
+  {
     key: 'composite_score', label: 'Score', sortKey: 'composite_score',
     default: true, align: 'right',
     render: r => r.composite_score != null
@@ -612,6 +665,7 @@ const COLUMN_GROUPS: Record<string, string> = {
   // Technical
   rsi_14: 'Technical', beta_1y: 'Technical', volatility_20d: 'Technical', sma_200: 'Technical',
   // Factor Scores
+  multibagger_potential_score: 'Factor Scores',
   composite_score: 'Factor Scores', value_score: 'Factor Scores', quality_score: 'Factor Scores',
   growth_score: 'Factor Scores', momentum_score: 'Factor Scores', income_score: 'Factor Scores',
 }

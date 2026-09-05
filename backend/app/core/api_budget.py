@@ -21,8 +21,11 @@ ASX Screener is an end-of-day product. Nothing here needs intraday freshness,
 so jobs should be scheduled daily and priced against this budget rather than
 polled.
 """
+import json
 import logging
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -172,6 +175,49 @@ async def can_spend(cost: int, job: str, critical: bool = False) -> bool:
 # which costs the same whatever the plan allows.
 CRITICAL_RESERVE = 5_000
 
+# ── Own-spend accounting ─────────────────────────────────────────────────────
+# The EODHD key is shared with the US Stock Screener, so the account's usage
+# counter is both screeners combined. Rationing this screener against that
+# total is wrong in a way that fails silently: when the US Screener has spent
+# 44,000 of the account, this screener computes 30,000 - 44,000 and defers
+# every non-critical job, permanently, while reporting it as correct.
+#
+# The 30% share is a claim on the account, not a cap on what others may use, so
+# it has to be measured against what THIS screener has spent. That number is
+# recorded here as jobs complete.
+SPEND_STATE = Path(__file__).resolve().parents[2] / "logs" / "eodhd_asx_spend.json"
+
+
+def _usage_day(usage: Optional[dict] = None) -> str:
+    """EODHD's own reset day, so local midnight cannot disagree with theirs."""
+    if usage and usage.get("date"):
+        return str(usage["date"])[:10]
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def asx_spent_today(usage: Optional[dict] = None) -> int:
+    """Calls this screener has spent on EODHD's current day. 0 when unknown."""
+    try:
+        d = json.loads(SPEND_STATE.read_text())
+    except Exception:
+        return 0
+    return int(d.get("spent", 0)) if d.get("date") == _usage_day(usage) else 0
+
+
+def record_spend(calls: int, job: str, usage: Optional[dict] = None) -> None:
+    """Add `calls` to today's total. Best effort — never breaks a running job."""
+    if calls <= 0:
+        return
+    try:
+        day = _usage_day(usage)
+        total = asx_spent_today(usage) + calls
+        SPEND_STATE.parent.mkdir(parents=True, exist_ok=True)
+        SPEND_STATE.write_text(json.dumps(
+            {"date": day, "spent": total, "last_job": job}, indent=2))
+        log.info(f"{job}: ASX spend today now {total:,} of {ASX_BUDGET:,}")
+    except Exception as exc:
+        log.warning(f"{job}: could not record spend: {exc}")
+
 
 def fetch_usage_sync(timeout: float = 10.0) -> Optional[dict]:
     """Blocking version of fetch_usage for the download scripts."""
@@ -219,17 +265,27 @@ def may_start_sync(estimated_cost: int, job: str, critical: bool = False) -> boo
             return False
         return True
 
+    # Account-level scarcity: at this point the shortage is real for everyone.
+    if pct >= CRITICAL_PCT or estimated_cost > remaining:
+        log.warning(f"{job}: account at {pct:.0%} with {remaining:,} left, "
+                    f"job needs {estimated_cost:,} — deferring")
+        return False
     if pct >= HIGH_PCT:
-        log.warning(f"{job}: account at {pct:.0%} — deferring non-critical job")
-        return False
+        log.warning(f"{job}: account at {pct:.0%} of {limit:,} — the shared key "
+                    f"is under pressure, proceeding within this screener's share")
+
+    # Share-level: measured against what THIS screener has spent, not the
+    # account total, which includes the US Screener.
     budget = asx_budget(limit)
-    budget_left = budget - used
-    if estimated_cost > (budget_left - CRITICAL_RESERVE):
-        log.warning(f"{job}: needs {estimated_cost:,} but only "
-                    f"{max(budget_left - CRITICAL_RESERVE, 0):,} is spendable "
-                    f"(ASX budget {budget:,}, used {used:,}, "
-                    f"reserve {CRITICAL_RESERVE:,}) — deferring")
+    spent = asx_spent_today(usage)
+    spendable = budget - spent - CRITICAL_RESERVE
+    if estimated_cost > spendable:
+        log.warning(f"{job}: needs {estimated_cost:,} but only {max(spendable, 0):,} "
+                    f"is spendable (ASX share {budget:,}, this screener has spent "
+                    f"{spent:,}, reserve {CRITICAL_RESERVE:,}) — deferring")
         return False
+    log.info(f"{job}: proceeding — ASX spent {spent:,}/{budget:,} today, "
+             f"{spendable:,} spendable, job needs {estimated_cost:,}")
     return True
 
 
@@ -259,6 +315,9 @@ class measure:
             return False
         billed = u["used"] - self.before
         log.info(f"{self.job}: usage after = {u['used']:,}  measured billed cost = {billed:,}")
+        # Attribute it to this screener's share. Measured, not estimated — the
+        # gap between the two is what the whole guard exists to close.
+        record_spend(billed, self.job, u)
         if self.expected:
             delta = billed - self.expected
             if abs(delta) > max(50, self.expected * 0.1):

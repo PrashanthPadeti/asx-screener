@@ -23,6 +23,20 @@ PROJECT_DIR="/opt/asx-screener"
 VENV_PYTHON="${PROJECT_DIR}/asx-venv/bin/python"
 LOG_DIR="${PROJECT_DIR}/logs"
 
+# Every scheduled process is defined by four things together — working
+# directory, source tree, environment source and Python environment. Treat them
+# as one contract; changing any one of them alone is how drift starts.
+#
+# Source tree: backend/. Copies of these scripts also exist at the repository
+# root, last updated in April. Cron pointed at those for months, so fixes that
+# were correct in git were not what the server executed.
+#
+# Environment: `. backend/.env` alone sets shell variables without exporting
+# them, so a Python child sees none of them unless the file uses `export`.
+# `set -a` around the source is what actually makes them inherited.
+ENV_PREFIX="set -a && . ${PROJECT_DIR}/backend/.env && set +a"
+SCRIPTS_REL="backend/scripts/eodhd/v2/jobs"
+
 # ── Verify ────────────────────────────────────────────────────────────────────
 if [ ! -f "$VENV_PYTHON" ]; then
     echo "ERROR: Python not found at $VENV_PYTHON"
@@ -30,20 +44,27 @@ if [ ! -f "$VENV_PYTHON" ]; then
     exit 1
 fi
 
-if [ ! -f "${PROJECT_DIR}/.env" ]; then
-    echo "ERROR: .env not found at ${PROJECT_DIR}/.env"
+if [ ! -f "${PROJECT_DIR}/backend/.env" ]; then
+    echo "ERROR: .env not found at ${PROJECT_DIR}/backend/.env"
     echo "  Make sure EODHD_API_KEY and RAW_DATA_DIR are set."
+    exit 1
+fi
+
+if ! grep -q "EODHD_API_KEY" "${PROJECT_DIR}/backend/.env"; then
+    echo "ERROR: EODHD_API_KEY not found in ${PROJECT_DIR}/backend/.env"
+    echo "  The budget guard cannot price jobs without it and they will defer."
     exit 1
 fi
 
 mkdir -p "$LOG_DIR"
 
 # ── Build the new cron lines ──────────────────────────────────────────────────
-DAILY_CMD="30 8 * * 1-5  cd ${PROJECT_DIR} && ${VENV_PYTHON} scripts/eodhd/v2/jobs/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
-WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${VENV_PYTHON} scripts/eodhd/v2/jobs/weekly_refresh.py >> ${LOG_DIR}/weekly_refresh.log 2>&1"
-WEEKLY_COMPUTE_CMD="0 21 * * 0   cd ${PROJECT_DIR} && ${VENV_PYTHON} scripts/eodhd/v2/jobs/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
-# AlphaFive: runs Monday 8am AEST (22:00 UTC Sunday), after weekly pipeline completes
-ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
+# Times are UTC — the server clock is UTC, so 12:00 here is 22:00 AEST.
+DAILY_CMD="30 8 * * 1-5  cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
+WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_refresh.py >> ${LOG_DIR}/weekly_refresh.log 2>&1"
+WEEKLY_COMPUTE_CMD="0 21 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
+# AlphaFive: 22:00 UTC Sunday = Monday 8am AEST, after the weekly pipeline.
+ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR}/backend && ${ENV_PREFIX} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
 
 # ── Install (append only if not already present) ─────────────────────────────
 TMPFILE=$(mktemp)

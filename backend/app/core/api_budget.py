@@ -22,13 +22,35 @@ so jobs should be scheduled daily and priced against this budget rather than
 polled.
 """
 import logging
+import os
 from typing import Optional
 
 import httpx
 
-from app.core.config import settings
-
 log = logging.getLogger(__name__)
+
+
+def _api_key() -> str:
+    """
+    The EODHD key, without importing app settings.
+
+    app.core.config instantiates Settings() at import and JWT_SECRET has no
+    default, so importing it makes every consumer depend on the whole
+    application config being present. The download scripts run from cron with
+    a different working directory to the API, where that dependency turns a
+    missing unrelated variable into an import-time crash. This module needs
+    one key, so it reads one key, and falls back to settings only if the
+    environment does not carry it.
+    """
+    key = os.getenv("EODHD_API_KEY")
+    if key:
+        return key
+    try:
+        from app.core.config import settings
+        return getattr(settings, "EODHD_API_KEY", "") or ""
+    except Exception:
+        return ""
+
 
 # Fallback only. The real limit is whatever EODHD reports as dailyRateLimit,
 # which is read on every usage check — so raising the plan raises this
@@ -70,12 +92,13 @@ async def fetch_usage(timeout: float = 10.0) -> Optional[dict]:
     Current usage from EODHD. Returns None when unavailable — callers must treat
     that as "unknown", never as "plenty left".
     """
-    if not settings.EODHD_API_KEY:
+    key = _api_key()
+    if not key:
         return None
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             r = await client.get("https://eodhd.com/api/user",
-                                 params={"api_token": settings.EODHD_API_KEY, "fmt": "json"})
+                                 params={"api_token": key, "fmt": "json"})
             if r.status_code != 200:
                 log.warning(f"EODHD usage check returned HTTP {r.status_code}")
                 return None
@@ -152,8 +175,7 @@ CRITICAL_RESERVE = 5_000
 
 def fetch_usage_sync(timeout: float = 10.0) -> Optional[dict]:
     """Blocking version of fetch_usage for the download scripts."""
-    import os
-    key = os.getenv("EODHD_API_KEY") or getattr(settings, "EODHD_API_KEY", "")
+    key = _api_key()
     if not key:
         return None
     try:

@@ -119,8 +119,16 @@ async def lifespan(app: FastAPI):
                                   timezone="Australia/Sydney"),
                       id="weekly_portfolio_summary", replace_existing=True)
 
-    # ASX announcements fetch — every 10 min
-    scheduler.add_job(fetch_announcements, trigger="interval", minutes=10,
+    # ASX announcements — once daily at 7:10pm AEST, after market close.
+    #
+    # Was every 10 minutes. At 200 symbols per run and 5 EODHD calls per news
+    # request, that billed 144,000 calls a day against a 100,000 account limit —
+    # the entire quota consumed by one job, starving price and fundamentals
+    # ingestion and the US Screener that shares the key. Daily costs 1,000.
+    #
+    # ASX Screener is an end-of-day product: nothing here needs intraday polling.
+    scheduler.add_job(fetch_announcements,
+                      CronTrigger(hour=19, minute=10, timezone="Australia/Sydney"),
                       id="announcement_fetcher", replace_existing=True)
 
     # Watchlist daily digest — 7:30am AEST

@@ -207,6 +207,15 @@ async def _run(db) -> None:
     if not companies:
         return
 
+    # Price the run before making it. News costs 5 EODHD calls per symbol, so
+    # this is 1,000 calls for 200 symbols. Non-critical: announcements can wait a
+    # day, price ingestion cannot.
+    from app.core.api_budget import can_spend, cost_of
+    planned = cost_of("news", len(companies))
+    if not await can_spend(planned, job="announcement_fetcher", critical=False):
+        log.warning(f"Announcement fetch skipped — {planned:,} EODHD calls unavailable")
+        return
+
     inserted  = 0
     skipped   = 0
     sensitive_new: list[dict] = []

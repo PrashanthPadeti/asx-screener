@@ -47,7 +47,12 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
+
+# Budget guard — see app/core/api_budget.py. Every EODHD job prices itself
+# against the ASX share before running, and measures what it was billed.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from app.core.api_budget import may_start_sync, measure, cost_of  # noqa: E402
+
 from scripts.eodhd.utils.quality_checks import check_http_status, check_splits
 from scripts.eodhd.utils.audit_logger import AuditLogger, load_known_checksums
 from scripts.eodhd.utils.error_handler import ErrorHandler
@@ -134,63 +139,71 @@ def main():
 
     done = errors = retried = skipped = duplicates = has_splits = 0
 
-    for i, code in enumerate(codes, 1):
-        existing = list(OUT_DIR.glob(f"{code}.AU_{RUN_DATE}.json.gz"))
-        if existing and not args.force_recheck:
-            skipped += 1
-            auditor.record(code, existing[0].name, "skip", reason="file_exists")
-            continue
+    # One call per symbol. Deferrable, so it yields to the reserve held
+    # back for price ingestion.
+    est = cost_of("splits", total)
+    if not may_start_sync(est, job="splits_snapshot", critical=False):
+        log.error("Deferred — insufficient EODHD budget.")
+        raise SystemExit(2)
 
-        try:
-            raw = fetch_with_retry(code, handler)
-        except _NonRetryable as e:
-            errors += 1
-            handler.write_error(code, e.reason, e.data)
-            auditor.record(code, "", "error", reason=e.reason)
+    with measure("splits_snapshot", expected=est):
+        for i, code in enumerate(codes, 1):
+            existing = list(OUT_DIR.glob(f"{code}.AU_{RUN_DATE}.json.gz"))
+            if existing and not args.force_recheck:
+                skipped += 1
+                auditor.record(code, existing[0].name, "skip", reason="file_exists")
+                continue
+
+            try:
+                raw = fetch_with_retry(code, handler)
+            except _NonRetryable as e:
+                errors += 1
+                handler.write_error(code, e.reason, e.data)
+                auditor.record(code, "", "error", reason=e.reason)
+                time.sleep(SLEEP_SEC)
+                continue
+            except _MaxRetriesExceeded as e:
+                retried += 1
+                auditor.record(code, "", "retry", reason=e.reason)
+                time.sleep(SLEEP_SEC)
+                continue
+
+            result = check_splits(raw, known_checksums)
             time.sleep(SLEEP_SEC)
-            continue
-        except _MaxRetriesExceeded as e:
-            retried += 1
-            auditor.record(code, "", "retry", reason=e.reason)
-            time.sleep(SLEEP_SEC)
-            continue
 
-        result = check_splits(raw, known_checksums)
-        time.sleep(SLEEP_SEC)
+            if result.destination == "skip":
+                duplicates += 1
+                auditor.record(code, "", "duplicate", reason=result.reason)
+                continue
 
-        if result.destination == "skip":
-            duplicates += 1
-            auditor.record(code, "", "duplicate", reason=result.reason)
-            continue
+            if result.destination in ("errors", "quarantine"):
+                errors += 1
+                handler.write_error(code, result.reason, raw)
+                auditor.record(code, "", result.destination, reason=result.reason)
+                continue
 
-        if result.destination in ("errors", "quarantine"):
-            errors += 1
-            handler.write_error(code, result.reason, raw)
-            auditor.record(code, "", result.destination, reason=result.reason)
-            continue
+            filename = f"{code}.AU_{RUN_DATE}.json.gz"
+            out_path = OUT_DIR / filename
+            with gzip.open(out_path, "wb") as f:
+                f.write(raw)
 
-        filename = f"{code}.AU_{RUN_DATE}.json.gz"
-        out_path = OUT_DIR / filename
-        with gzip.open(out_path, "wb") as f:
-            f.write(raw)
+            size = out_path.stat().st_size
+            known_checksums.add(result.checksum)
+            done += 1
 
-        size = out_path.stat().st_size
-        known_checksums.add(result.checksum)
-        done += 1
+            if result.data and len(result.data) > 0:
+                has_splits += 1
 
-        if result.data and len(result.data) > 0:
-            has_splits += 1
+            auditor.record(code, filename, "ok", size_bytes=size, checksum=result.checksum)
 
-        auditor.record(code, filename, "ok", size_bytes=size, checksum=result.checksum)
+            if i % 200 == 0:
+                log.info(f"  [{i:4d}/{total}]  ok={done} ({has_splits} with splits)  "
+                         f"err={errors}  skip={skipped}")
 
-        if i % 200 == 0:
-            log.info(f"  [{i:4d}/{total}]  ok={done} ({has_splits} with splits)  "
-                     f"err={errors}  skip={skipped}")
-
-    auditor.finish(total=total, success=done, errors=errors, quarantine=0,
-                   retried=retried, skipped=skipped, duplicates=duplicates)
-    log.info(f"DONE — ok={done} ({has_splits} with splits)  "
-             f"errors={errors}  skipped={skipped}")
+        auditor.finish(total=total, success=done, errors=errors, quarantine=0,
+                       retried=retried, skipped=skipped, duplicates=duplicates)
+        log.info(f"DONE — ok={done} ({has_splits} with splits)  "
+                 f"errors={errors}  skipped={skipped}")
 
 
 if __name__ == "__main__":

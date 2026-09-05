@@ -61,7 +61,13 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
+
+# Budget guard — see app/core/api_budget.py. Announcements once billed 144,000
+# calls a day against a 100,000 limit, so every EODHD job now prices itself
+# first and measures what it was actually billed.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from app.core.api_budget import may_start_sync, measure, cost_of  # noqa: E402
+
 from scripts.eodhd.utils.quality_checks import (
     check_http_status, check_prices_historical, check_prices_bulk,
 )
@@ -275,7 +281,14 @@ def main():
         if args.limit:
             codes = codes[:args.limit]
 
-        run_historical(codes, force=args.force_recheck, from_date=args.from_date)
+        # Per-symbol backfill: one call each, and deferrable. It must not eat
+        # the reserve the nightly bulk ingestion depends on.
+        est = cost_of("eod", len(codes))
+        if not may_start_sync(est, job="eod_prices_historical", critical=False):
+            log.error("Deferred — insufficient EODHD budget for a full historical backfill.")
+            raise SystemExit(2)
+        with measure("eod_prices_historical", expected=est):
+            run_historical(codes, force=args.force_recheck, from_date=args.from_date)
 
     else:  # incremental
         if args.date:
@@ -285,7 +298,14 @@ def main():
             dates = [(today - timedelta(days=i)).strftime("%Y-%m-%d")
                      for i in range(args.backfill_days)]
 
-        run_incremental(dates, force=args.force_recheck)
+        # Critical: this is the nightly price ingestion. One bulk request per
+        # date, and it proceeds unless the account is genuinely exhausted.
+        est = cost_of("eod-bulk", len(dates))
+        if not may_start_sync(est, job="eod_prices_incremental", critical=True):
+            log.error("Deferred — EODHD account exhausted, prices cannot be ingested.")
+            raise SystemExit(2)
+        with measure("eod_prices_incremental", expected=est):
+            run_incremental(dates, force=args.force_recheck)
 
     log.info("Next step: python scripts/eodhd/v2/load_to_staging_prices.py")
 

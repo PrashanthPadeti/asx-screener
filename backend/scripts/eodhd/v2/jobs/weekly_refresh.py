@@ -1,10 +1,16 @@
 """
 Weekly Refresh Download Job
 ============================
-Re-downloads fundamentals, dividends, splits, and exchange symbol list
-for all stocks. Checksum deduplication skips files whose content hasn't
-changed — so running this weekly adds a new file only when EODHD data
-actually changed.
+Re-downloads dividends, splits and the exchange symbol list for all stocks,
+and fundamentals for one quarter of the universe. Checksum deduplication skips
+files whose content hasn't changed — so running this weekly adds a new file
+only when EODHD data actually changed.
+
+Fundamentals are sharded four ways because EODHD bills them at 10 calls per
+symbol: a full refresh is ~21,000 calls against the 30,000 allocated to this
+screener, which left nothing for the dividends and splits jobs behind it. One
+shard is ~5,250, and each company is still refreshed roughly monthly.
+Use --full-fundamentals for a deliberate complete rebuild.
 
 Run once per week (Sunday night or Monday morning before trading opens).
 
@@ -44,7 +50,7 @@ SCRIPTS = {
 
 ESTIMATES = {
     "exchange_symbols": "~3 sec",
-    "fundamentals":     "~10 min",
+    "fundamentals":     "~3 min (weekly shard)",
     "dividends":        "~7 min",
     "splits":           "~7 min",
 }
@@ -70,6 +76,10 @@ def main():
     parser.add_argument("--skip-fundamentals",     action="store_true")
     parser.add_argument("--skip-dividends",        action="store_true")
     parser.add_argument("--skip-splits",           action="store_true")
+    parser.add_argument("--full-fundamentals", action="store_true",
+                        help="Refresh every stock instead of this week's shard. "
+                             "Costs ~21,000 EODHD calls, so the budget guard may "
+                             "defer it — use only for a deliberate full rebuild.")
     args = parser.parse_args()
 
     per_stock = []
@@ -90,8 +100,14 @@ def main():
             "exchange_symbols", SCRIPTS["exchange_symbols"], [])
 
     if not args.skip_fundamentals:
+        # A quarter of the universe each Sunday. Every company still gets
+        # refreshed roughly monthly, but the ~21,000-call spike that pushed
+        # dividends and splits into the reserve is spread over four weeks.
+        fundamentals_args = list(per_stock)
+        if not args.codes and not args.full_fundamentals:
+            fundamentals_args.append("--shard-this-week")
         results["fundamentals"] = run(
-            "fundamentals", SCRIPTS["fundamentals"], per_stock)
+            "fundamentals", SCRIPTS["fundamentals"], fundamentals_args)
 
     if not args.skip_dividends:
         results["dividends"] = run(

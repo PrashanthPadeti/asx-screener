@@ -47,7 +47,12 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
+
+# Budget guard — see app/core/api_budget.py. Every EODHD job prices itself
+# against the ASX share before running, and measures what it was billed.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from app.core.api_budget import may_start_sync, measure, cost_of  # noqa: E402
+
 from scripts.eodhd.utils.quality_checks import check_http_status, check_dividends
 from scripts.eodhd.utils.audit_logger import AuditLogger, load_known_checksums
 from scripts.eodhd.utils.error_handler import ErrorHandler
@@ -142,73 +147,81 @@ def main():
 
     done = errors = quarantined = retried = skipped = duplicates = has_divs = 0
 
-    for i, code in enumerate(codes, 1):
-        existing = list(OUT_DIR.glob(f"{code}.AU_{RUN_DATE}.json.gz"))
-        if existing and not args.force_recheck:
-            skipped += 1
-            auditor.record(code, existing[0].name, "skip", reason="file_exists")
-            continue
+    # One call per symbol. Deferrable, so it yields to the reserve held
+    # back for price ingestion.
+    est = cost_of("div", total)
+    if not may_start_sync(est, job="dividends_snapshot", critical=False):
+        log.error("Deferred — insufficient EODHD budget.")
+        raise SystemExit(2)
 
-        try:
-            raw_bytes = fetch_with_retry(code, handler)
-        except _NonRetryable as e:
-            errors += 1
-            handler.write_error(code, e.reason, e.data)
-            auditor.record(code, "", "error", reason=e.reason)
-            time.sleep(SLEEP_SEC)
-            continue
-        except _MaxRetriesExceeded as e:
-            retried += 1
-            auditor.record(code, "", "retry", reason=e.reason)
-            time.sleep(SLEEP_SEC)
-            continue
+    with measure("dividends_snapshot", expected=est):
+        for i, code in enumerate(codes, 1):
+            existing = list(OUT_DIR.glob(f"{code}.AU_{RUN_DATE}.json.gz"))
+            if existing and not args.force_recheck:
+                skipped += 1
+                auditor.record(code, existing[0].name, "skip", reason="file_exists")
+                continue
 
-        result = check_dividends(raw_bytes, code, known_checksums)
-        time.sleep(SLEEP_SEC)
-
-        if result.destination == "skip":
-            duplicates += 1
-            auditor.record(code, "", "duplicate", reason=result.reason)
-            continue
-
-        if result.destination in ("errors", "quarantine"):
-            if result.destination == "errors":
+            try:
+                raw_bytes = fetch_with_retry(code, handler)
+            except _NonRetryable as e:
                 errors += 1
-                handler.write_error(code, result.reason, raw_bytes)
-            else:
-                quarantined += 1
-                handler.write_quarantine(code, result.reason, raw_bytes)
-            auditor.record(code, "", result.destination, reason=result.reason)
-            continue
+                handler.write_error(code, e.reason, e.data)
+                auditor.record(code, "", "error", reason=e.reason)
+                time.sleep(SLEEP_SEC)
+                continue
+            except _MaxRetriesExceeded as e:
+                retried += 1
+                auditor.record(code, "", "retry", reason=e.reason)
+                time.sleep(SLEEP_SEC)
+                continue
 
-        filename = f"{code}.AU_{RUN_DATE}.json.gz"
-        out_path = OUT_DIR / filename
-        with gzip.open(out_path, "wb") as f:
-            f.write(raw_bytes)
+            result = check_dividends(raw_bytes, code, known_checksums)
+            time.sleep(SLEEP_SEC)
 
-        size = out_path.stat().st_size
-        known_checksums.add(result.checksum)
-        done += 1
+            if result.destination == "skip":
+                duplicates += 1
+                auditor.record(code, "", "duplicate", reason=result.reason)
+                continue
 
-        # Count non-empty (stock actually pays dividends)
-        try:
-            payload = json.loads(raw_bytes)
-            if payload:
-                has_divs += 1
-        except Exception:
-            pass
+            if result.destination in ("errors", "quarantine"):
+                if result.destination == "errors":
+                    errors += 1
+                    handler.write_error(code, result.reason, raw_bytes)
+                else:
+                    quarantined += 1
+                    handler.write_quarantine(code, result.reason, raw_bytes)
+                auditor.record(code, "", result.destination, reason=result.reason)
+                continue
 
-        auditor.record(code, filename, "ok", size_bytes=size, checksum=result.checksum)
+            filename = f"{code}.AU_{RUN_DATE}.json.gz"
+            out_path = OUT_DIR / filename
+            with gzip.open(out_path, "wb") as f:
+                f.write(raw_bytes)
 
-        if i % 200 == 0:
-            log.info(f"  [{i:4d}/{total}]  ok={done} ({has_divs} with divs)  "
-                     f"err={errors}  skip={skipped}")
+            size = out_path.stat().st_size
+            known_checksums.add(result.checksum)
+            done += 1
 
-    auditor.finish(total=total, success=done, errors=errors, quarantine=quarantined,
-                   retried=retried, skipped=skipped, duplicates=duplicates)
-    log.info(f"DONE — ok={done} ({has_divs} with divs)  errors={errors}  "
-             f"quarantine={quarantined}  skipped={skipped}")
-    log.info("Next step: python scripts/eodhd/v2/load_to_staging_dividends.py")
+            # Count non-empty (stock actually pays dividends)
+            try:
+                payload = json.loads(raw_bytes)
+                if payload:
+                    has_divs += 1
+            except Exception:
+                pass
+
+            auditor.record(code, filename, "ok", size_bytes=size, checksum=result.checksum)
+
+            if i % 200 == 0:
+                log.info(f"  [{i:4d}/{total}]  ok={done} ({has_divs} with divs)  "
+                         f"err={errors}  skip={skipped}")
+
+        auditor.finish(total=total, success=done, errors=errors, quarantine=quarantined,
+                       retried=retried, skipped=skipped, duplicates=duplicates)
+        log.info(f"DONE — ok={done} ({has_divs} with divs)  errors={errors}  "
+                 f"quarantine={quarantined}  skipped={skipped}")
+        log.info("Next step: python scripts/eodhd/v2/load_to_staging_dividends.py")
 
 
 if __name__ == "__main__":

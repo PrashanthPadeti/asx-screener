@@ -82,3 +82,12 @@ asx-venv/
 
 # Local Claude settings — contains machine-specific paths and credentials
 .claude/settings.local.json
+
+# Local-only, never in this public repository.
+# TEAM_ONBOARDING.md carries operational and security architecture (server
+# specs, secret inventory, unfixed-issue list); the drafts are unpublished
+# campaign content. Both were swept in by `git add -A` and caught at the
+# pre-push diff. Ignored so the next sweep cannot recreate that.
+TEAM_ONBOARDING.md
+medium-drafts/
+social-media-drafts/

@@ -57,13 +57,17 @@ import psycopg2.extras
 from app.services.email import send_founding_offer_email          # noqa: E402
 from app.core.config import settings                              # noqa: E402
 
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
+
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s  %(levelname)-7s %(message)s",
                     datefmt="%H:%M:%S")
 log = logging.getLogger("founding_offer")
 
-DB_URL = os.getenv("DATABASE_URL_SYNC",
-                   "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener")
+DB_URL = get_database_url_sync()
 
 CAMPAIGN   = "campaign.founding_offer"
 FRONTEND   = (getattr(settings, "FRONTEND_URL", "") or "https://asxscreener.com.au").rstrip("/")

@@ -37,11 +37,16 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
+import sys
+
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
 
 load_dotenv()
 
-DB_URL   = os.getenv("DATABASE_URL_SYNC",
-             "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener")
+DB_URL = get_database_url_sync()
 RAW_BASE = Path(os.getenv("RAW_DATA_DIR", "/opt/asx-screener/data/raw"))
 OUT_DIR  = RAW_BASE / "asic" / "short_positions"
 

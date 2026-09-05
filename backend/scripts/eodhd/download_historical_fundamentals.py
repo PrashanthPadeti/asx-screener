@@ -34,10 +34,14 @@ import psycopg2
 import requests
 from dotenv import load_dotenv
 
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
+
 load_dotenv()
 
-DB_URL     = os.getenv("DATABASE_URL_SYNC",
-                "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener")
+DB_URL = get_database_url_sync()
 EODHD_KEY  = os.getenv("EODHD_API_KEY", "")
 EODHD_BASE = "https://eodhd.com/api"
 RAW_BASE   = Path(os.getenv("RAW_DATA_DIR", "/opt/asx-screener/data/raw"))

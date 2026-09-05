@@ -20,6 +20,12 @@ import psycopg2
 from psycopg2.extras import execute_values
 from dotenv import load_dotenv
 from io import StringIO
+from pathlib import Path
+
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
 
 load_dotenv()
 
@@ -27,10 +33,7 @@ load_dotenv()
 
 ASX_CSV_URL = "https://www.asx.com.au/asx/research/ASXListedCompanies.csv"
 
-DB_URL = os.getenv(
-    "DATABASE_URL_SYNC",
-    "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener"
-)
+DB_URL = get_database_url_sync()
 
 # ── GICS industry group → sector mapping ─────────────────────
 # The ASX CSV provides GICS industry group (not sector), so we map at that level.

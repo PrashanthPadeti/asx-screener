@@ -23,13 +23,17 @@ from psycopg2.extras import execute_values
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
+import sys
+from pathlib import Path
+
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
 
 load_dotenv()
 
-DB_URL = os.getenv(
-    "DATABASE_URL_SYNC",
-    "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener"
-)
+DB_URL = get_database_url_sync()
 
 logging.basicConfig(
     level=logging.INFO,

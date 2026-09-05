@@ -30,8 +30,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DB_URL      = os.getenv("DATABASE_URL_SYNC",
-                "postgresql://asx_user:asx_secure_2024@localhost:5432/asx_screener")
+DB_URL = get_database_url_sync()
 EODHD_KEY   = os.getenv("EODHD_API_KEY", "")
 EODHD_BASE  = "https://eodhd.com/api"
 RAW_BASE    = Path(os.getenv("RAW_DATA_DIR", "/opt/asx-screener/data/raw"))
@@ -56,6 +55,11 @@ from app.core.api_budget import may_start_sync, measure, cost_of  # noqa: E402
 from scripts.eodhd.utils.quality_checks import check_http_status, check_dividends
 from scripts.eodhd.utils.audit_logger import AuditLogger, load_known_checksums
 from scripts.eodhd.utils.error_handler import ErrorHandler
+
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
 
 
 def fetch_raw(asx_code: str) -> tuple[int, bytes]:

@@ -91,3 +91,6 @@ asx-venv/
 TEAM_ONBOARDING.md
 medium-drafts/
 social-media-drafts/
+
+# Source archives belong in releases, not in the tree.
+*.zip

@@ -79,3 +79,6 @@ ehthumbs.db
 Desktop.ini
 asx-venv/
 .claude/worktrees/
+
+# Local Claude settings — contains machine-specific paths and credentials
+.claude/settings.local.json

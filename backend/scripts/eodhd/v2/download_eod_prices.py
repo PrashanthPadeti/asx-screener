@@ -272,7 +272,7 @@ def main():
             conn = psycopg2.connect(DB_URL)
             cur  = conn.cursor()
             cur.execute("SELECT asx_code FROM market.companies "
-                        "WHERE status='active' ORDER BY asx_code")
+                        "WHERE is_current AND status='active' ORDER BY asx_code")
             codes = [r[0] for r in cur.fetchall()]
             cur.close(); conn.close()
 

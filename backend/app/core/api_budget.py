@@ -299,13 +299,17 @@ class measure:
             ...
     """
     def __init__(self, job: str, expected: Optional[int] = None):
-        self.job, self.expected, self.before = job, expected, None
+        self.job, self.expected = job, expected
+        self.before = None
+        self.before_day = None
 
     def __enter__(self):
         u = fetch_usage_sync()
         self.before = u["used"] if u else None
+        self.before_day = _usage_day(u) if u else None
         if self.before is not None:
-            log.info(f"{self.job}: EODHD usage before = {self.before:,}")
+            log.info(f"{self.job}: EODHD usage before = {self.before:,} "
+                     f"({self.before_day})")
         return self
 
     def __exit__(self, *exc):
@@ -313,6 +317,19 @@ class measure:
         if u is None or self.before is None:
             log.warning(f"{self.job}: could not measure billed cost")
             return False
+        # EODHD resets apiRequests at the start of its own day. A job running
+        # across that boundary sees the counter go backwards, and the
+        # subtraction produces a large negative number that looks exactly like
+        # a wrong ENDPOINT_COST weight. Observed once as -18,163 on a job that
+        # had in fact billed correctly.
+        after_day = _usage_day(u)
+        if self.before_day and after_day != self.before_day:
+            log.warning(f"{self.job}: EODHD day rolled over mid-job "
+                        f"({self.before_day} to {after_day}) — billed cost is "
+                        f"not measurable across the reset. Counter now at "
+                        f"{u['used']:,}.")
+            return False
+
         billed = u["used"] - self.before
         log.info(f"{self.job}: usage after = {u['used']:,}  measured billed cost = {billed:,}")
         # Attribute it to this screener's share. Measured, not estimated — the

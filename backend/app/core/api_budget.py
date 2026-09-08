@@ -11,6 +11,17 @@ The split is proportional, not fixed: the denominator is whatever EODHD reports
 as dailyRateLimit. On a 100,000/day plan this screener gets 30,000; double the
 plan and it gets 60,000, with nothing to edit.
 
+That share is advisory, not a cap. The account also carries a pool of extra
+calls (extraLimit), and while any remain a job that would exceed the nominal
+share proceeds and says so, rather than deferring work the account can plainly
+afford. The share becomes a hard limit again only when the extras run out.
+
+So the guard's job is no longer rationing. It is catching a runaway: the
+original incident was one worker quietly issuing 28,800 requests a day, and
+with a million spare calls that would burn for a week instead of failing in a
+day. measure() comparing billed cost against ENDPOINT_COST is what catches
+that, and it costs nothing.
+
 Endpoint weights are not uniform — the news endpoint costs 5 calls per request
 and fundamentals 10 — so "calls" here means EODHD's own accounting, not HTTP
 requests. That distinction is what made the overrun invisible: the announcement
@@ -112,10 +123,13 @@ async def fetch_usage(timeout: float = 10.0) -> Optional[dict]:
 
     used  = int(d.get("apiRequests") or 0)
     limit = int(d.get("dailyRateLimit") or EODHD_DAILY_LIMIT)
+    extra = int(d.get("extraLimit") or 0)
     return {
         "used":            used,
         "limit":           limit,
+        "extra":           extra,
         "remaining":       max(limit - used, 0),
+        "headroom":        max(limit - used, 0) + extra,
         "pct_of_account":  round(used / limit * 100, 1) if limit else None,
         "asx_budget":      asx_budget(limit),
         "date":            d.get("apiRequestsDate"),
@@ -126,9 +140,8 @@ async def can_spend(cost: int, job: str, critical: bool = False) -> bool:
     """
     Whether a job should spend `cost` calls now.
 
-    Critical jobs (price and fundamentals ingestion) proceed unless the account
-    is genuinely exhausted. Everything else stops at the ASX share so it cannot
-    consume budget the US Screener is relying on.
+    Nothing is deferred while the account can afford it. The only hard stop is
+    genuine exhaustion — the daily allowance plus whatever extra calls remain.
 
     Unknown usage allows critical work and blocks the rest: failing closed on a
     non-essential job is cheap, failing closed on price ingestion is not.
@@ -140,29 +153,55 @@ async def can_spend(cost: int, job: str, critical: bool = False) -> bool:
             return True
         log.warning(f"{job}: EODHD usage unknown — deferring non-critical job")
         return False
+    return _decide(cost, job, critical, usage)
 
-    used, limit, remaining = usage["used"], usage["limit"], usage["remaining"]
-    pct = used / limit if limit else 1.0
 
-    if pct >= CRITICAL_PCT:
-        log.error(f"{job}: EODHD at {pct:.0%} of {limit:,} — deferring "
-                  f"({remaining:,} calls left, needed {cost:,})")
+def _decide(cost: int, job: str, critical: bool, usage: dict) -> bool:
+    """
+    Shared decision for the async and sync guards.
+
+    The account carries extraLimit on top of the daily allowance, so the ASX
+    share is a budgeting signal rather than a ceiling. Crossing it is logged and
+    allowed; only running out of real capacity stops a job.
+    """
+    used, limit  = usage["used"], usage["limit"]
+    extra        = usage.get("extra", 0)
+    remaining    = usage["remaining"]
+    headroom     = usage.get("headroom", remaining)
+    pct          = used / limit if limit else 1.0
+
+    # Genuine exhaustion — daily allowance and extras both gone.
+    if cost > headroom:
+        log.error(f"{job}: needs {cost:,} calls, only {headroom:,} available "
+                  f"({remaining:,} of today's allowance + {extra:,} extra) — deferring")
         return False
-    if pct >= HIGH_PCT and not critical:
-        log.warning(f"{job}: EODHD at {pct:.0%} — deferring non-critical job")
-        return False
-    if pct >= WARN_PCT:
-        log.warning(f"{job}: EODHD at {pct:.0%} of daily limit, {remaining:,} calls left")
 
     budget = asx_budget(limit)
-    if not critical and used + cost > budget:
-        log.warning(f"{job}: would take ASX usage to {used + cost:,}, over the "
-                    f"{budget:,} share reserved from the US Screener — deferring")
-        return False
+    over_share = not critical and used + cost > budget
 
-    if cost > remaining:
-        log.error(f"{job}: needs {cost:,} calls, only {remaining:,} left — deferring")
-        return False
+    if extra <= 0:
+        # No spare pool: the old rationing applies, so this screener cannot
+        # consume what the US Screener is relying on.
+        if pct >= CRITICAL_PCT:
+            log.error(f"{job}: EODHD at {pct:.0%} of {limit:,} with no extra calls "
+                      f"— deferring ({remaining:,} left, needed {cost:,})")
+            return False
+        if pct >= HIGH_PCT and not critical:
+            log.warning(f"{job}: EODHD at {pct:.0%} and no extra calls — deferring "
+                        f"non-critical job")
+            return False
+        if over_share:
+            log.warning(f"{job}: would take account usage to {used + cost:,}, over the "
+                        f"{budget:,} ASX share, with no extra calls — deferring")
+            return False
+    elif over_share:
+        log.info(f"{job}: past the {budget:,} nominal ASX share "
+                 f"({used:,} used, job needs {cost:,}) — proceeding on the "
+                 f"{extra:,} extra calls available")
+    elif pct >= WARN_PCT:
+        log.info(f"{job}: EODHD at {pct:.0%} of today's {limit:,}, "
+                 f"{extra:,} extra calls in reserve")
+
     return True
 
 
@@ -236,7 +275,10 @@ def fetch_usage_sync(timeout: float = 10.0) -> Optional[dict]:
         return None
     used  = int(d.get("apiRequests") or 0)
     limit = int(d.get("dailyRateLimit") or EODHD_DAILY_LIMIT)
-    return {"used": used, "limit": limit, "remaining": max(limit - used, 0),
+    extra = int(d.get("extraLimit") or 0)
+    return {"used": used, "limit": limit, "extra": extra,
+            "remaining": max(limit - used, 0),
+            "headroom": max(limit - used, 0) + extra,
             "date": d.get("apiRequestsDate")}
 
 
@@ -254,14 +296,21 @@ def may_start_sync(estimated_cost: int, job: str, critical: bool = False) -> boo
                     f"{'proceeding (critical)' if critical else 'deferring'}")
         return critical
 
-    used, limit, remaining = usage["used"], usage["limit"], usage["remaining"]
-    pct = used / limit if limit else 1.0
-    log.info(f"{job}: EODHD at {used:,}/{limit:,} ({pct:.0%}), "
-             f"{remaining:,} left, this job needs about {estimated_cost:,}")
+    used, limit = usage["used"], usage["limit"]
+    extra       = usage.get("extra", 0)
+    remaining   = usage["remaining"]
+    headroom    = usage.get("headroom", remaining)
+    pct         = used / limit if limit else 1.0
+    log.info(f"{job}: EODHD at {used:,}/{limit:,} ({pct:.0%}), {remaining:,} left "
+             f"today plus {extra:,} extra, this job needs about {estimated_cost:,}")
+
+    if extra > 0:
+        # Spare capacity exists; the reserve only guards a genuinely scarce day.
+        return _decide(estimated_cost, job, critical, usage)
 
     if critical:
-        if estimated_cost > remaining:
-            log.error(f"{job}: needs {estimated_cost:,}, only {remaining:,} left")
+        if estimated_cost > headroom:
+            log.error(f"{job}: needs {estimated_cost:,}, only {headroom:,} left")
             return False
         return True
 

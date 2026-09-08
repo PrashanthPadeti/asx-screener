@@ -42,6 +42,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# The database credential lives in the environment, never in source.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from app.core.db import get_database_url_sync  # noqa: E402
+
 DB_URL = get_database_url_sync()
 EODHD_KEY   = os.getenv("EODHD_API_KEY", "")
 EODHD_BASE  = "https://eodhd.com/api"
@@ -73,9 +77,6 @@ from scripts.eodhd.utils.quality_checks import (
 from scripts.eodhd.utils.audit_logger import AuditLogger, load_known_checksums
 from scripts.eodhd.utils.error_handler import ErrorHandler
 
-# The database credential lives in the environment, never in source.
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from app.core.db import get_database_url_sync  # noqa: E402
 
 
 

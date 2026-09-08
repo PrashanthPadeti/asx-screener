@@ -313,32 +313,72 @@ class measure:
         return self
 
     def __exit__(self, *exc):
-        u = fetch_usage_sync()
-        if u is None or self.before is None:
-            log.warning(f"{self.job}: could not measure billed cost")
-            return False
-        # EODHD resets apiRequests at the start of its own day. A job running
-        # across that boundary sees the counter go backwards, and the
-        # subtraction produces a large negative number that looks exactly like
-        # a wrong ENDPOINT_COST weight. Observed once as -18,163 on a job that
-        # had in fact billed correctly.
-        after_day = _usage_day(u)
-        if self.before_day and after_day != self.before_day:
-            log.warning(f"{self.job}: EODHD day rolled over mid-job "
-                        f"({self.before_day} to {after_day}) — billed cost is "
-                        f"not measurable across the reset. Counter now at "
-                        f"{u['used']:,}.")
-            return False
+        _finish_measure(self.job, self.expected, self.before, self.before_day,
+                        fetch_usage_sync())
+        return False
 
-        billed = u["used"] - self.before
-        log.info(f"{self.job}: usage after = {u['used']:,}  measured billed cost = {billed:,}")
-        # Attribute it to this screener's share. Measured, not estimated — the
-        # gap between the two is what the whole guard exists to close.
-        record_spend(billed, self.job, u)
-        if self.expected:
-            delta = billed - self.expected
-            if abs(delta) > max(50, self.expected * 0.1):
-                log.warning(f"{self.job}: expected about {self.expected:,} calls but was "
-                            f"billed {billed:,} ({delta:+,}). The per-endpoint cost in "
-                            f"ENDPOINT_COST is probably wrong for this job.")
+
+def _finish_measure(job: str, expected: Optional[int], before: Optional[int],
+                    before_day: Optional[str], after: Optional[dict]) -> None:
+    """Shared tail for measure and measure_async, so the two cannot drift."""
+    if after is None or before is None:
+        log.warning(f"{job}: could not measure billed cost")
+        return
+
+    # EODHD resets apiRequests at the start of its own day. A job running across
+    # that boundary sees the counter go backwards, and the subtraction produces
+    # a large negative number that looks exactly like a wrong ENDPOINT_COST
+    # weight. Observed once as -18,163 on a job that had in fact billed
+    # correctly.
+    after_day = _usage_day(after)
+    if before_day and after_day != before_day:
+        log.warning(f"{job}: EODHD day rolled over mid-job ({before_day} to "
+                    f"{after_day}) — billed cost is not measurable across the "
+                    f"reset. Counter now at {after['used']:,}.")
+        return
+
+    billed = after["used"] - before
+    log.info(f"{job}: usage after = {after['used']:,}  measured billed cost = {billed:,}")
+    # Attribute it to this screener's share. Measured, not estimated — the gap
+    # between the two is what the whole guard exists to close.
+    record_spend(billed, job, after)
+    if expected:
+        delta = billed - expected
+        if abs(delta) > max(50, expected * 0.1):
+            log.warning(f"{job}: expected about {expected:,} calls but was billed "
+                        f"{billed:,} ({delta:+,}). The per-endpoint cost in "
+                        f"ENDPOINT_COST is probably wrong for this job.")
+
+
+class measure_async:
+    """
+    Async twin of measure, for the in-process workers.
+
+    measure() blocks on requests. Used inside the FastAPI event loop it would
+    stall every other request for the length of the job, so the announcement
+    worker needs this instead.
+
+    `expected` may be set after entry, for a job that only knows its planned
+    cost once it has queried the universe:
+
+        async with measure_async("announcement_fetcher") as m:
+            m.expected = await run_the_job()
+    """
+    def __init__(self, job: str, expected: Optional[int] = None):
+        self.job, self.expected = job, expected
+        self.before = None
+        self.before_day = None
+
+    async def __aenter__(self):
+        u = await fetch_usage()
+        self.before = u["used"] if u else None
+        self.before_day = _usage_day(u) if u else None
+        if self.before is not None:
+            log.info(f"{self.job}: EODHD usage before = {self.before:,} "
+                     f"({self.before_day})")
+        return self
+
+    async def __aexit__(self, *exc):
+        _finish_measure(self.job, self.expected, self.before, self.before_day,
+                        await fetch_usage())
         return False

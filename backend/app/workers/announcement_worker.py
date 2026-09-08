@@ -169,9 +169,17 @@ def _is_sensitive(doc_type: str, title: str) -> bool:
 # ── Main worker ───────────────────────────────────────────────────────────────
 
 async def fetch_announcements() -> None:
+    from app.core.api_budget import measure_async
+
     async with AsyncSessionLocal() as db:
         try:
-            await _run(db)
+            # /news is the endpoint that caused the original overrun — 5 billed
+            # calls per request, which nobody had measured. Measure it on the
+            # real scheduled run rather than inferring the weight, and record
+            # the spend so the daily ~1,000 counts against the ASX share
+            # instead of being invisible to the guard.
+            async with measure_async("announcement_fetcher") as m:
+                m.expected = await _run(db)
         except Exception as e:
             log.error(f"Announcement worker error: {e}", exc_info=True)
         finally:
@@ -188,10 +196,12 @@ async def fetch_announcements() -> None:
                 log.debug(f"Heartbeat write failed: {hb_err}")
 
 
-async def _run(db) -> None:
+async def _run(db) -> int:
+    """Fetch announcements. Returns the EODHD calls this run planned to spend,
+    so the caller can compare it against what the account was actually billed."""
     if not settings.EODHD_API_KEY:
         log.debug("EODHD_API_KEY not set — skipping announcement fetch")
-        return
+        return 0
 
     # Fetch top 200 ASX codes by market cap, including company names for
     # relevance validation of market-news articles.
@@ -205,7 +215,7 @@ async def _run(db) -> None:
     companies: dict[str, str] = {r.asx_code: r.company_name for r in result.fetchall()}
 
     if not companies:
-        return
+        return 0
 
     # Price the run before making it. News costs 5 EODHD calls per symbol, so
     # this is 1,000 calls for 200 symbols. Non-critical: announcements can wait a
@@ -214,7 +224,7 @@ async def _run(db) -> None:
     planned = cost_of("news", len(companies))
     if not await can_spend(planned, job="announcement_fetcher", critical=False):
         log.warning(f"Announcement fetch skipped — {planned:,} EODHD calls unavailable")
-        return
+        return 0
 
     inserted  = 0
     skipped   = 0
@@ -322,6 +332,8 @@ async def _run(db) -> None:
 
     if sensitive_new:
         await _notify_subscribers(db, sensitive_new)
+
+    return planned
 
 
 async def _notify_subscribers(db, announcements: list[dict]) -> None:

@@ -374,7 +374,7 @@ def test_a_reconstructed_row_produces_an_identical_benchmark():
     b_after = benchmark("roe", peers_after)
 
     assert b_before.ok and b_after.ok
-    assert (b_before.n_valid, b_before.median) == (b_after.n_valid, b_after.median)
+    assert (b_before.n_valid_peers, b_before.median) == (b_after.n_valid_peers, b_after.median)
     assert (b_before.p25, b_before.p75) == (b_after.p25, b_after.p75)
 
 
@@ -385,7 +385,7 @@ def test_a_suppressed_metric_stays_out_of_the_population_after_persistence():
     restored = [decode_all(v, s, Domain.BANK)["debt_to_equity"] for v, s in rows]
 
     b = benchmark("debt_to_equity", restored)
-    assert b.n_valid == 0 and b.median is None, \
+    assert b.n_valid_peers == 0 and b.median is None, \
         "a suppressed value must not become a peer observation on reload"
 
 

@@ -39,12 +39,17 @@ from typing import Iterable, Mapping, Optional, Sequence
 
 from compute.engine.applicability import Applicability, Assessment, Cause
 
+# These two are an OPERATIONAL SUFFICIENCY POLICY, not a financially
+# calibrated truth. They say when this system is willing to publish a peer
+# statistic; they carry no statistical authority and are expected to be tuned
+# once there is evidence about which sectors and metrics actually behave.
+
 #: Absolute floor. Below this the quartiles describe individuals, not a peer
 #: group, whatever the coverage fraction says.
 MIN_VALID_N = 5
 
-#: And a share of the sector, so a large sector cannot pass the floor on a
-#: small unrepresentative remnant. Both must hold.
+#: And a share of the *applicable* peers, so a large sector cannot pass the
+#: floor on a small unrepresentative remnant. Both must hold.
 MIN_VALID_FRACTION = 0.30
 
 
@@ -54,8 +59,13 @@ class Benchmark:
 
     metric: str
     state: Applicability
-    n_total: int = 0
-    n_valid: int = 0
+    #: Every company in the peer group, whatever its state.
+    n_total_peers: int = 0
+    #: Those for which the metric is economically applicable at all — the
+    #: total minus the NOT_MEANINGFUL ones. This is the coverage denominator.
+    n_applicable_peers: int = 0
+    #: Those that produced a usable observation.
+    n_valid_peers: int = 0
     p25: Optional[float] = None
     median: Optional[float] = None
     p75: Optional[float] = None
@@ -67,15 +77,26 @@ class Benchmark:
         return self.state is Applicability.APPLICABLE
 
     @property
-    def coverage(self) -> float:
-        return self.n_valid / self.n_total if self.n_total else 0.0
+    def coverage_pct(self) -> float:
+        """Valid observations over *applicable* peers, not over survivors.
+
+        Dividing by the surviving sample would report 100% for a sector with
+        twenty applicable peers of which six are valid and fourteen
+        unavailable — the number would describe the sample rather than the
+        gap it was meant to expose. Out-of-domain peers are excluded from the
+        denominator instead, because a bank was never going to contribute a
+        debt-to-equity observation and its absence is not a coverage failure.
+        """
+        if not self.n_applicable_peers:
+            return 0.0
+        return 100.0 * self.n_valid_peers / self.n_applicable_peers
 
     def describe(self) -> str:
         """What a surface can show without concealing the denominator."""
         if not self.ok:
             return f"unavailable: {self.reason}"
-        return (f"{self.median:g}, {self.n_valid} of {self.n_total} "
-                f"valid observations")
+        return (f"{self.median:g}, {self.n_valid_peers} of "
+                f"{self.n_applicable_peers} valid observations")
 
 
 def _quartiles(values: Sequence[float]) -> tuple[float, float, float]:
@@ -102,36 +123,49 @@ def benchmark(metric: str, assessments: Iterable[Assessment],
     """
     peers = list(assessments)
     n_total = len(peers)
-    valid = [a for a in peers if a.ok and a.value is not None]
+
+    # Out-of-domain peers leave the denominator entirely: a bank was never
+    # going to contribute a debt-to-equity observation, and counting its
+    # absence as a coverage failure would withhold benchmarks that are fine.
+    applicable = [a for a in peers if not a.suppressed]
+    n_applicable = len(applicable)
+
+    valid = [a for a in applicable if a.ok and a.value is not None]
     n_valid = len(valid)
 
     if n_total == 0:
-        return Benchmark(metric, Applicability.UNAVAILABLE, 0, 0,
+        return Benchmark(metric, Applicability.UNAVAILABLE,
                          reason="no peer companies", cause=Cause.SOURCE_MISSING)
 
-    # If every peer failed for the same source reason, say so — the fix is a
-    # feed repair, not a wider sector.
-    if n_valid == 0 and all(a.cause is Cause.SOURCE_UNHEALTHY for a in peers):
-        return Benchmark(metric, Applicability.UNAVAILABLE, n_total, 0,
-                         reason="source unhealthy for every peer",
+    if n_applicable == 0:
+        return Benchmark(metric, Applicability.NOT_MEANINGFUL, n_total, 0, 0,
+                         reason="metric is out of domain for every peer",
+                         cause=Cause.DOMAIN)
+
+    # If every applicable peer failed for the same source reason, say so — the
+    # remedy is a feed repair, not a wider sector.
+    if n_valid == 0 and all(a.cause is Cause.SOURCE_UNHEALTHY for a in applicable):
+        return Benchmark(metric, Applicability.UNAVAILABLE, n_total, n_applicable, 0,
+                         reason="source unhealthy for every applicable peer",
                          cause=Cause.SOURCE_UNHEALTHY)
 
     if n_valid == 0:
-        return Benchmark(metric, Applicability.NOT_MEANINGFUL, n_total, 0,
-                         reason="no valid peer observations",
-                         cause=Cause.DOMAIN)
+        return Benchmark(metric, Applicability.UNAVAILABLE, n_total, n_applicable, 0,
+                         reason="no valid observations among applicable peers",
+                         cause=Cause.SOURCE_MISSING)
 
-    if n_valid < min_n or (n_valid / n_total) < min_fraction:
+    coverage = n_valid / n_applicable
+    if n_valid < min_n or coverage < min_fraction:
         return Benchmark(
-            metric, Applicability.INSUFFICIENT_DATA, n_total, n_valid,
-            reason=(f"{n_valid} of {n_total} valid "
-                    f"({n_valid / n_total:.0%}); needs at least {min_n} "
+            metric, Applicability.INSUFFICIENT_DATA, n_total, n_applicable, n_valid,
+            reason=(f"{n_valid} of {n_applicable} applicable peers valid "
+                    f"({coverage:.0%}); needs at least {min_n} "
                     f"and {min_fraction:.0%}"),
             cause=Cause.INSUFFICIENT_HISTORY)
 
     p25, median, p75 = _quartiles([a.value for a in valid])
-    return Benchmark(metric, Applicability.APPLICABLE, n_total, n_valid,
-                     p25=p25, median=median, p75=p75)
+    return Benchmark(metric, Applicability.APPLICABLE, n_total, n_applicable,
+                     n_valid, p25=p25, median=median, p75=p75)
 
 
 def benchmark_all(metrics: Iterable[str],

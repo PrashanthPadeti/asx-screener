@@ -80,8 +80,8 @@ def test_a_wholly_suppressed_population_yields_no_statistic():
     assert not b.ok
     assert b.state is Applicability.NOT_MEANINGFUL
     assert (b.median, b.p25, b.p75) == (None, None, None)
-    assert b.n_valid == 0 and b.n_total == 6
-    assert "no valid peer observations" in b.reason
+    assert b.n_valid_peers == 0 and b.n_total_peers == 6
+    assert "out of domain for every peer" in b.reason
 
 
 def test_a_wholly_source_failed_population_says_so_distinctly():
@@ -92,12 +92,12 @@ def test_a_wholly_source_failed_population_says_so_distinctly():
 
     assert b.state is Applicability.UNAVAILABLE
     assert b.cause is Cause.SOURCE_UNHEALTHY
-    assert "source unhealthy for every peer" in b.reason
+    assert "source unhealthy for every applicable peer" in b.reason
 
 
 def test_an_empty_peer_group_is_unavailable_not_zero():
     b = benchmark("roe", [])
-    assert not b.ok and b.n_total == 0 and b.median is None
+    assert not b.ok and b.n_total_peers == 0 and b.median is None
 
 
 # ── Fixture 2 · one invalid member cannot move the valid peers ────────────────
@@ -111,8 +111,10 @@ def test_a_suppressed_member_does_not_shift_the_statistic():
 
     assert clean.median == contaminated.median
     assert (clean.p25, clean.p75) == (contaminated.p25, contaminated.p75)
-    assert contaminated.n_total == clean.n_total + 1, "the denominator grows"
-    assert contaminated.n_valid == clean.n_valid, "the numerator does not"
+    assert contaminated.n_total_peers == clean.n_total_peers + 1
+    assert contaminated.n_applicable_peers == clean.n_applicable_peers, \
+        "an out-of-domain peer leaves the coverage denominator entirely"
+    assert contaminated.n_valid_peers == clean.n_valid_peers
 
 
 def test_the_denominator_travels_with_the_statistic():
@@ -120,8 +122,9 @@ def test_the_denominator_travels_with_the_statistic():
         [suppressed("roe", 0.9)]
     b = benchmark("roe", peers, min_fraction=0.5)
 
-    assert b.n_valid == 5 and b.n_total == 6
-    assert "5 of 6 valid observations" in b.describe()
+    assert b.n_valid_peers == 5 and b.n_applicable_peers == 5
+    assert b.n_total_peers == 6, "the suppressed peer is still a peer"
+    assert "5 of 5 valid observations" in b.describe()
 
 
 def test_describe_conceals_nothing_when_unavailable():
@@ -138,7 +141,7 @@ def test_suppressed_members_do_not_count_toward_the_minimum():
     b = benchmark("debt_to_equity", peers)
 
     assert b.state is Applicability.INSUFFICIENT_DATA
-    assert b.n_valid == 2 and b.n_total == 22
+    assert b.n_valid_peers == 2 and b.n_total_peers == 22
     assert b.median is None, "two companies do not have quartiles"
 
 
@@ -149,22 +152,47 @@ def test_a_mixed_unavailable_and_suppressed_population_still_fails_closed():
     b = benchmark("grossed_up_yield", peers)
 
     assert not b.ok
-    assert b.n_valid == 3, "only the genuinely valid ones count"
-    assert b.n_total == 12
+    assert b.n_valid_peers == 3, "only the genuinely valid ones count"
+    assert b.n_applicable_peers == 9, "the six unavailable stay in the denominator"
+    assert b.n_total_peers == 12
 
 
 def test_the_absolute_floor_and_the_fraction_both_bind():
-    # Passes the fraction (100%) but not the floor.
+    # Passes the fraction (100% of applicable) but not the floor.
     assert benchmark("roe", valid_many("roe", [0.1, 0.2, 0.3])).state \
         is Applicability.INSUFFICIENT_DATA
 
-    # Passes the floor but not the fraction.
+    # Passes the floor but not the fraction. The thirty must be *unavailable*
+    # rather than suppressed: an unavailable peer is one the metric applies to
+    # and we could not measure, so it stays in the denominator and the gap is
+    # real. A suppressed peer leaves the denominator entirely.
     peers = valid_many("roe", [0.1] * 6) + \
-        [suppressed("roe", 0.9) for _ in range(30)]
-    assert benchmark("roe", peers).state is Applicability.INSUFFICIENT_DATA
+        [Assessment("roe", Applicability.UNAVAILABLE, None, "no value",
+                    Domain.GENERAL_CORPORATE, cause=Cause.SOURCE_MISSING)
+         for _ in range(30)]
+    b = benchmark("roe", peers)
+    assert b.state is Applicability.INSUFFICIENT_DATA
+    assert b.n_applicable_peers == 36 and b.n_valid_peers == 6
 
     # Passes both.
     assert benchmark("roe", valid_many("roe", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6])).ok
+
+
+def test_out_of_domain_peers_do_not_depress_coverage():
+    """The other half of the denominator rule, and the reason it matters.
+
+    Six industrials with valid leverage sitting in a sector of thirty-six,
+    thirty of which are banks, is 100% coverage of the applicable population —
+    not 17% of everything. Counting the banks would withhold a benchmark that
+    is entirely sound.
+    """
+    peers = valid_many("debt_to_equity", [0.2, 0.4, 0.6, 0.8, 1.0, 1.2]) + \
+        [domain_suppressed("debt_to_equity", 4.6) for _ in range(30)]
+    b = benchmark("debt_to_equity", peers)
+
+    assert b.ok, "the six industrials are a complete applicable population"
+    assert b.coverage_pct == 100.0
+    assert b.n_total_peers == 36 and b.n_applicable_peers == 6
 
 
 def test_a_healthy_benchmark_reports_real_quartiles():
@@ -203,7 +231,7 @@ def test_a_financials_sector_is_not_uniformly_invalid():
 def test_a_bank_dividend_yield_median_is_publishable():
     """Withholding it would be the industrial-defaults error in reverse."""
     b = benchmark_all(["grossed_up_yield"], bank_peer_group())["grossed_up_yield"]
-    assert b.ok and b.median is not None and b.n_valid == 8
+    assert b.ok and b.median is not None and b.n_valid_peers == 8
 
 
 def test_thresholds_are_named_constants_not_magic():

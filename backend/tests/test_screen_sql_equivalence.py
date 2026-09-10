@@ -368,6 +368,67 @@ def test_a_legacy_row_is_not_readable_through_the_applicability_clause():
     assert "LEGACY" not in scoped, "the run scope keeps it out"
 
 
+def test_a_scope_may_only_name_runs_that_passed_validation():
+    """A positional argument prevents omission, not untrustworthiness. A route
+    could satisfy the signature while still naming a run whose recompute was
+    never verified."""
+    from compute.engine.screen_sql import ValidatedRun
+
+    good = ValidatedRun(4711, "FACTOR_MODEL_V1", (), validated=True)
+    unchecked = ValidatedRun(4712, "FACTOR_MODEL_V1", (), validated=False)
+
+    assert RunScope.from_validated_runs([good]).run_ids == (4711,)
+
+    try:
+        RunScope.from_validated_runs([good, unchecked])
+    except CompileError as e:
+        assert "4712" in str(e) and "persistence validation" in str(e)
+    else:
+        raise AssertionError("an unvalidated run must not enter a scope")
+
+
+def test_one_snapshot_is_one_contract():
+    """Several run ids only where sharding forces it, and only when every
+    shard shares a model version and a source-health state."""
+    from compute.engine.screen_sql import ValidatedRun
+
+    shard_a = ValidatedRun(1, "FACTOR_MODEL_V1", (), validated=True)
+    shard_b = ValidatedRun(2, "FACTOR_MODEL_V1", (), validated=True)
+    assert RunScope.from_validated_runs([shard_a, shard_b]).run_ids == (1, 2)
+
+    different_health = ValidatedRun(3, "FACTOR_MODEL_V1", ("dividends",),
+                                    validated=True)
+    try:
+        RunScope.from_validated_runs([shard_a, different_health])
+    except CompileError as e:
+        assert "more than one contract" in str(e)
+    else:
+        raise AssertionError(
+            "a ranking must not span runs with different source health")
+
+
+def test_a_scope_cannot_span_model_versions():
+    from compute.engine.screen_sql import ValidatedRun
+
+    v1 = ValidatedRun(1, "FACTOR_MODEL_V1", (), validated=True)
+    v2 = ValidatedRun(2, "FACTOR_MODEL_V2", (), validated=True)
+    try:
+        RunScope.from_validated_runs([v1, v2])
+    except CompileError:
+        pass
+    else:
+        raise AssertionError("two model versions are two contracts")
+
+
+def test_an_empty_validated_set_is_refused():
+    try:
+        RunScope.from_validated_runs([])
+    except CompileError as e:
+        assert "no validated compute run" in str(e)
+    else:
+        raise AssertionError("no trusted run means no screen, not every row")
+
+
 def test_rows_from_an_unvalidated_run_are_excluded():
     conn = build_db()
     conn.execute(

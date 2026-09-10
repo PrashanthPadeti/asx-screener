@@ -52,6 +52,45 @@ class CompileError(Exception):
 
 
 @dataclass(frozen=True)
+class ValidatedRun:
+    """A run the server has established is safe to read through the contract.
+
+    Constructed only from ``screener.compute_runs``, never from anything a
+    caller supplied. A route that accepted a run id as a parameter would
+    satisfy the positional requirement while still selecting an untrusted
+    run — the argument would be present and the guarantee absent.
+    """
+
+    run_id: int
+    factor_model_version: str
+    unhealthy_sources: tuple[str, ...] = ()
+    validated: bool = False
+
+    @property
+    def contract_key(self) -> tuple:
+        """What must match for two runs to be one logical snapshot.
+
+        Model version and source health both, because a ranking that spans
+        runs with different source health compares a company scored while the
+        dividend feed was up against one scored after it fell over — each
+        individually valid, jointly meaningless.
+        """
+        return (self.factor_model_version, tuple(sorted(self.unhealthy_sources)))
+
+
+#: The query a route runs to discover which runs it may read. Kept here so the
+#: route does not invent its own definition of "validated".
+VALIDATED_RUNS_SQL = """
+    SELECT id, factor_model_version, unhealthy_sources
+      FROM screener.compute_runs
+     WHERE factor_model_version = ANY(%(supported)s)
+       AND rows_written IS NOT NULL
+     ORDER BY run_at DESC
+     LIMIT %(limit)s
+"""
+
+
+@dataclass(frozen=True)
 class RunScope:
     """The runs whose rows may be read through the applicability clause.
 
@@ -83,6 +122,38 @@ class RunScope:
             column: str = "compute_run_id") -> str:
         ids = ", ".join(str(int(r)) for r in self.run_ids)
         return f"{column} IN ({ids})"
+
+    @classmethod
+    def from_validated_runs(cls, runs: Sequence[ValidatedRun]) -> "RunScope":
+        """The only sanctioned way for a route to build a scope.
+
+        Refuses a run the persistence validator has not passed, and refuses a
+        mixture of contracts:
+
+            one logical screener snapshot = one validated model/run contract
+
+        Several physical run ids are allowed only where sharding forces it and
+        every shard shares a model version and a source-health state. Anything
+        else would let a single ranking span two different sets of rules.
+        """
+        if not runs:
+            raise CompileError("no validated compute run is available to read")
+
+        unvalidated = sorted(r.run_id for r in runs if not r.validated)
+        if unvalidated:
+            raise CompileError(
+                f"runs {unvalidated} have not passed persistence validation; "
+                f"a scope may only name runs whose recompute was verified")
+
+        contracts = {r.contract_key for r in runs}
+        if len(contracts) > 1:
+            detail = " vs ".join(str(c) for c in sorted(contracts))
+            raise CompileError(
+                f"runs span more than one contract ({detail}); a ranking "
+                f"across them would compare companies scored under different "
+                f"model or source-health states")
+
+        return cls(tuple(sorted(r.run_id for r in runs)))
 
 
 @dataclass(frozen=True)

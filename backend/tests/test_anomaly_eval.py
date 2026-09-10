@@ -37,6 +37,7 @@ from compute.engine.anomaly_eval import (  # noqa: E402
     AnomalyRule,
     RuleError,
     SkipTally,
+    WithdrawalReason,
     deactivations,
     evaluate_all,
     evaluate_rule,
@@ -258,7 +259,10 @@ def test_an_active_flag_is_withdrawn_when_the_rule_stops_firing():
     active = [ActiveFlag("HIGH_GROSSED_UP_YIELD", "AAA")]
     results, _ = evaluate_all([HIGH_YIELD], {"AAA": industrial(yield_=0.05)})
 
-    assert deactivations(active, results) == active
+    out = deactivations(active, results)
+    assert [w.flag for w in out] == active
+    assert out[0].reason is WithdrawalReason.FALSE
+    assert out[0].was_resolved, "the condition genuinely stopped holding"
 
 
 def test_an_active_flag_is_withdrawn_when_the_rule_becomes_unevaluable():
@@ -270,8 +274,47 @@ def test_an_active_flag_is_withdrawn_when_the_rule_becomes_unevaluable():
     row["grossed_up_yield"] = unhealthy("grossed_up_yield", "feed incomplete")
     results, _ = evaluate_all([HIGH_YIELD], {"AAA": row})
 
-    assert deactivations(active, results) == active, \
+    out = deactivations(active, results)
+
+    assert [w.flag for w in out] == active, \
         "an unproven assertion is not a weaker assertion, it is not one"
+    assert out[0].reason is WithdrawalReason.UNAVAILABLE
+    assert not out[0].was_resolved, \
+        "a feed outage must not be recorded as a resolved anomaly"
+
+
+def test_a_domain_withdrawal_is_distinct_from_a_data_withdrawal():
+    """Three ways to leave the active surface, three different histories."""
+    active = [ActiveFlag("RSI_OVERBOUGHT_WEAK", "CBA")]
+    results, _ = evaluate_all([OVERBOUGHT_WEAK], {"CBA": bank()})
+    out = deactivations(active, results)
+
+    assert out[0].reason is WithdrawalReason.NOT_MEANINGFUL
+    assert out[0].cause is Cause.DOMAIN
+    assert not out[0].was_resolved
+
+
+def test_only_a_genuine_false_counts_as_resolved():
+    """The property an anomaly-quality metric should count."""
+    reasons = set()
+    for row, expected in (
+            (industrial(yield_=0.05), WithdrawalReason.FALSE),
+            ({"grossed_up_yield": unhealthy("grossed_up_yield", "feed")},
+             WithdrawalReason.UNAVAILABLE),
+            ({"grossed_up_yield": assess("grossed_up_yield", 0.9,
+                                         Domain.MINING_EXPLORER)},
+             None)):
+        results, _ = evaluate_all([HIGH_YIELD], {"AAA": row})
+        out = deactivations([ActiveFlag("HIGH_GROSSED_UP_YIELD", "AAA")],
+                            results)
+        if out:
+            reasons.add(out[0].reason)
+            if expected is not None:
+                assert out[0].reason is expected
+
+    resolved = {r for r in reasons if r is WithdrawalReason.FALSE}
+    assert len(resolved) == 1 and len(reasons) > 1, \
+        "distinct reasons must not collapse into one"
 
 
 def test_a_still_firing_flag_is_left_alone():
@@ -279,6 +322,34 @@ def test_a_still_firing_flag_is_left_alone():
     results, _ = evaluate_all([HIGH_YIELD], {"AAA": industrial(yield_=0.15)})
 
     assert deactivations(active, results) == []
+
+
+def test_the_cause_set_renders_in_a_stable_order():
+    """A frozenset deduplicates but does not order; unordered text makes a
+    diff of two runs unreadable and a stored payload uncomparable."""
+    row = industrial()
+    row["rsi_14"] = unhealthy("rsi_14", "price feed incomplete")
+    row["piotroski_f_score"] = assess("piotroski_f_score", 3.0, Domain.BANK)
+
+    first = evaluate_rule(OVERBOUGHT_WEAK, "MIX", row).sorted_causes
+    for _ in range(5):
+        assert evaluate_rule(OVERBOUGHT_WEAK, "MIX", row).sorted_causes == first
+    assert first == ("domain", "source_unhealthy")
+
+
+def test_primary_cause_never_changes_the_outcome_or_the_record():
+    """Ranking one cause above another is a display choice, and display
+    choices must not become semantic ones."""
+    row = industrial()
+    row["rsi_14"] = unhealthy("rsi_14", "price feed incomplete")
+    row["piotroski_f_score"] = assess("piotroski_f_score", 3.0, Domain.BANK)
+    r = evaluate_rule(OVERBOUGHT_WEAK, "MIX", row)
+
+    before = (r.outcome, r.causes, r.blocked_on, r.reason)
+    _ = r.primary_cause
+    assert (r.outcome, r.causes, r.blocked_on, r.reason) == before
+    assert r.primary_cause in r.causes, "it selects, it does not invent"
+    assert len(r.causes) == 2, "and it removes nothing"
 
 
 def test_a_flag_for_a_company_not_in_this_run_is_not_touched():

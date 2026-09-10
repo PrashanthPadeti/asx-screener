@@ -100,11 +100,28 @@ class AnomalyResult:
         return self.outcome is not AnomalyOutcome.NOT_EVALUATED
 
     @property
+    def sorted_causes(self) -> tuple[str, ...]:
+        """The cause set in a stable order, for logs and persistence.
+
+        A frozenset deduplicates but does not order, and an unordered set
+        rendered into a log or a JSON payload produces different text on
+        different runs for identical facts — which makes a diff of two runs
+        unreadable and a stored payload uncomparable.
+        """
+        return tuple(sorted(c.value for c in self.causes))
+
+    @property
     def primary_cause(self) -> Optional[Cause]:
         """A single cause for a one-line log, without discarding the set.
 
         Source failure outranks domain: if a feed is down, that is the thing
         an operator acts on, and it will clear the moment the feed returns.
+
+        **Presentation only.** It never decides whether the result is
+        NOT_EVALUATED, never changes what is persisted, and never removes a
+        cause from ``causes``. Ranking one cause above another is a choice
+        about what to show an operator first, and choices about display must
+        not become choices about semantics.
         """
         for cause in (Cause.SOURCE_UNHEALTHY, Cause.SOURCE_MISSING,
                       Cause.INSUFFICIENT_HISTORY, Cause.OBSERVATION,
@@ -241,8 +258,50 @@ class ActiveFlag:
     asx_code: str
 
 
+class WithdrawalReason(str, Enum):
+    """Why an active flag stopped being asserted.
+
+    None of these keeps the flag on the active surface. They differ in the
+    history, and the history matters: "the condition no longer holds" and
+    "we can no longer check" are different events, and collapsing them
+    rewrites a feed outage as a resolved anomaly. Anyone later measuring
+    anomaly quality, or asking why a flag vanished, would be reading fiction.
+    """
+
+    FALSE = "withdrawn_false"                    # evaluated, no longer holds
+    UNAVAILABLE = "withdrawn_unavailable"        # cannot currently substantiate
+    NOT_MEANINGFUL = "withdrawn_not_meaningful"  # rule no longer applies
+
+
+@dataclass(frozen=True)
+class Withdrawal:
+    """One flag leaving the active surface, with the reason preserved."""
+
+    flag: ActiveFlag
+    reason: WithdrawalReason
+    cause: Optional[Cause] = None
+    detail: str = ""
+
+    @property
+    def was_resolved(self) -> bool:
+        """True only when the condition genuinely stopped holding.
+
+        The property a quality metric should count. Everything else is a gap
+        in the evidence wearing the same shape.
+        """
+        return self.reason is WithdrawalReason.FALSE
+
+
+def _withdrawal_reason(result: AnomalyResult) -> WithdrawalReason:
+    if result.outcome is AnomalyOutcome.NOT_FIRED:
+        return WithdrawalReason.FALSE
+    if result.primary_cause is Cause.DOMAIN:
+        return WithdrawalReason.NOT_MEANINGFUL
+    return WithdrawalReason.UNAVAILABLE
+
+
 def deactivations(active: Iterable[ActiveFlag],
-                  results: Sequence[AnomalyResult]) -> list[ActiveFlag]:
+                  results: Sequence[AnomalyResult]) -> list[Withdrawal]:
     """Flags that must be withdrawn because they can no longer be substantiated.
 
     "The new evaluator does not fire it" is not enough. Yesterday's flag is
@@ -251,11 +310,21 @@ def deactivations(active: Iterable[ActiveFlag],
     NOT_FIRED and NOT_EVALUATED withdraw it — the first because the finding is
     gone, the second because it is unproven, and an unproven assertion is not
     a weaker assertion, it is not one.
-    """
-    still_firing = {(r.flag_type, r.asx_code) for r in results
-                    if r.outcome is AnomalyOutcome.FIRED}
-    evaluated = {(r.flag_type, r.asx_code) for r in results}
 
-    return [flag for flag in active
-            if (flag.flag_type, flag.asx_code) in evaluated
-            and (flag.flag_type, flag.asx_code) not in still_firing]
+    The reason travels with the withdrawal so the audit trail keeps the
+    distinction the active surface deliberately drops.
+    """
+    by_key = {(r.flag_type, r.asx_code): r for r in results}
+
+    out: list[Withdrawal] = []
+    for flag in active:
+        result = by_key.get((flag.flag_type, flag.asx_code))
+        if result is None:
+            # This run never considered the company; a partial run must not
+            # withdraw what it did not examine.
+            continue
+        if result.outcome is AnomalyOutcome.FIRED:
+            continue
+        out.append(Withdrawal(flag, _withdrawal_reason(result),
+                              result.primary_cause, result.reason))
+    return out

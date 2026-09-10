@@ -45,7 +45,10 @@ from compute.engine.dividends import DividendSource, FeedHealth  # noqa: E402
 from compute.engine.metric_states import (  # noqa: E402
     GOVERNED_METRICS,
     LATEST_MODEL_VERSION,
+    ROW,
     SourceHealth,
+    UnsupportedModelVersion,
+    supported_version,
     assert_complete,
     decode,
     decode_all,
@@ -222,16 +225,82 @@ def test_a_governed_metric_absent_from_the_row_is_a_violation():
     assert any(v.metric == "grossed_up_yield" for v in vs)
 
 
-def test_an_ungoverned_metric_is_not_required():
-    vs = violations({"roe": 0.18}, {}, model_version=None)
-    assert vs == [], "no version, no governed set, nothing to require"
+def test_not_checking_a_version_is_distinct_from_a_row_having_none():
+    """UNSPECIFIED is the in-memory pre-write check, where no version exists
+    yet. It is not a claim that the row is unversioned."""
+    assert violations({"roe": 0.18}, {}) == []
 
 
-def test_an_unknown_model_version_governs_nothing():
-    """A row from a model this build does not recognise cannot be validated
-    against a set it never promised to satisfy."""
-    assert governed_for("FACTOR_MODEL_V99") == frozenset()
-    assert violations({"roe": 0.18}, {}, model_version="FACTOR_MODEL_V99") == []
+# ── Unknown model version fails closed ────────────────────────────────────────
+
+def test_an_unknown_version_cannot_pass_completeness_validation():
+    """Unknown model version means unknown contract, not no contract.
+
+    Returning an empty governed set here would let a row from a future model
+    validate clean precisely because nothing could check it.
+    """
+    vs = violations({"roe": 0.18}, {}, model_version="FACTOR_MODEL_V99")
+    assert kinds(vs) == {ROW: "unsupported_model_version"}
+    assert vs != [], "fail-open is the defect this replaces"
+
+    try:
+        assert_complete({"roe": 0.18}, {}, model_version="FACTOR_MODEL_V99")
+    except ValueError as e:
+        assert "unsupported_model_version" in str(e)
+    else:
+        raise AssertionError("completeness must refuse an unknown contract")
+
+
+def test_an_unversioned_row_is_reported_distinctly_from_an_unknown_one():
+    """Both fail closed; they are different remediations. Unversioned means
+    the canonical writer has not been through yet — the expected state during
+    rollout. Unsupported means this build is older than the row."""
+    assert kinds(violations({"roe": 0.18}, {}, model_version=None)) == \
+        {ROW: "unversioned"}
+
+
+def test_an_unknown_version_row_cannot_be_served():
+    values, states = persist_row(compute_cba())
+    try:
+        row_payload(values, states, None, Domain.BANK,
+                    model_version="FACTOR_MODEL_V99")
+    except UnsupportedModelVersion as e:
+        assert "FACTOR_MODEL_V99" in str(e)
+    else:
+        raise AssertionError("a row whose semantics are unknown must not be "
+                             "served as if they were known")
+
+
+def test_governed_for_raises_rather_than_returning_empty():
+    for bad in ("FACTOR_MODEL_V99", None):
+        try:
+            governed_for(bad)
+        except UnsupportedModelVersion:
+            pass
+        else:
+            raise AssertionError(f"governed_for({bad!r}) must raise")
+
+    assert governed_for(LATEST_MODEL_VERSION), "known versions still resolve"
+    assert supported_version(LATEST_MODEL_VERSION)
+    assert not supported_version("FACTOR_MODEL_V99")
+
+
+def test_rollout_validation_reports_unsupported_not_zero():
+    """The rollout gate must not read an uninterpretable row as clean."""
+    values, states = persist_row(compute_cba())
+    vs = violations(values, states, model_version="FACTOR_MODEL_V99")
+
+    assert any(v.kind == "unsupported_model_version" for v in vs)
+    assert len(vs) > 0, "zero violations would mean 'safe to enable consumers'"
+
+
+def test_a_known_version_still_validates_normally():
+    """Fail-closed on unknown must not break the supported path."""
+    governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]
+    values = {m: None for m in governed}
+    states = {m: {"state": "unavailable", "cause": "source_missing"}
+              for m in governed}
+    assert violations(values, states, LATEST_MODEL_VERSION) == []
 
 
 def test_the_governed_set_is_pinned_not_derived():

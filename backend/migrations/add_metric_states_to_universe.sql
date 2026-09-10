@@ -96,6 +96,53 @@ COMMENT ON COLUMN screener.universe.compute_run_id IS
     'never backfill it with a guess.';
 
 
+-- A run that rows point at must not change underneath them. If the recorded
+-- feed watermark or model version can be edited in place, the lineage
+-- guarantee is only as good as nobody having run an UPDATE — and a row
+-- claiming SOURCE_UNHEALTHY could end up joined to evidence that no longer
+-- says the feed was broken. Corrections happen by writing a new run and
+-- repointing rows, which leaves both versions visible.
+--
+-- rows_written is deliberately excluded: it is a tally the run itself fills in
+-- on completion, not evidence a row depends on.
+
+CREATE OR REPLACE FUNCTION screener.compute_runs_are_immutable()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.run_at               IS DISTINCT FROM OLD.run_at
+    OR NEW.engine               IS DISTINCT FROM OLD.engine
+    OR NEW.factor_model_version IS DISTINCT FROM OLD.factor_model_version
+    OR NEW.unhealthy_sources    IS DISTINCT FROM OLD.unhealthy_sources
+    OR NEW.detail               IS DISTINCT FROM OLD.detail THEN
+        RAISE EXCEPTION
+            'screener.compute_runs id=% is immutable evidence; write a new '
+            'run and repoint rows rather than editing this one', OLD.id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_compute_runs_immutable ON screener.compute_runs;
+CREATE TRIGGER trg_compute_runs_immutable
+    BEFORE UPDATE ON screener.compute_runs
+    FOR EACH ROW EXECUTE FUNCTION screener.compute_runs_are_immutable();
+
+
+-- The universe write is one statement. Numeric columns, metric_states and
+-- compute_run_id move together or not at all:
+--
+--     UPDATE screener.universe SET
+--         grossed_up_yield = %(grossed_up_yield)s, ...,
+--         metric_states    = %(metric_states)s::jsonb,
+--         compute_run_id   = %(compute_run_id)s
+--      WHERE asx_code = %(asx_code)s
+--
+-- Application-level coherence (compute.engine.metric_states.persist_row) is
+-- necessary and not sufficient: a crash between two statements leaves exactly
+-- the contradictory state violations() exists to catch, on a row that was
+-- correct a moment earlier.
+
+
 -- Rollout gate. Applying this migration does NOT make the table healthy:
 -- every legacy row with a nullable governed metric and no sidecar entry is
 -- now, correctly, a contract violation. That is the point — it is the

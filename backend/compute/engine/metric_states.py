@@ -154,6 +154,22 @@ def persist_row(assessments: Mapping[str, Assessment] | Iterable[Assessment]
     function returning both cannot, because the pair is derived from a single
     set of assessments rather than assembled by a caller who might update one
     and forget the other.
+
+    Application-level coherence is necessary and **not sufficient**: the write
+    itself must not tear. The numeric columns, ``metric_states`` and
+    ``compute_run_id`` go in one statement, so no reader can observe a row
+    whose number has been updated and whose state has not:
+
+        UPDATE screener.universe SET
+            grossed_up_yield = %(grossed_up_yield)s,
+            ...,
+            metric_states  = %(metric_states)s::jsonb,
+            compute_run_id = %(compute_run_id)s
+        WHERE asx_code = %(asx_code)s
+
+    Never as separate statements, and never with the sidecar updated in a
+    second pass — a crash between them leaves exactly the contradictory state
+    ``violations()`` exists to catch, on a row that was correct a moment ago.
     """
     items = list(assessments.values() if isinstance(assessments, Mapping)
                  else assessments)
@@ -246,15 +262,45 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
 
 LATEST_MODEL_VERSION = "FACTOR_MODEL_V1"
 
+#: Sentinel for "this caller is not validating a version at all" — the
+#: in-memory, pre-write check, where no version has been assigned yet.
+#: Distinct from ``None``, which means the *row* claims no version.
+UNSPECIFIED = object()
+
+
+class UnsupportedModelVersion(Exception):
+    """The row was written under a contract this build cannot interpret."""
+
+
+def supported_version(version: Optional[str]) -> bool:
+    return version in GOVERNED_METRICS
+
 
 def governed_for(version: Optional[str]) -> frozenset[str]:
     """The governed metric set for a row's model version.
 
-    An unknown or absent version governs nothing: a row from a model this
-    build does not recognise cannot be validated against a set it never
-    promised to satisfy, and asserting otherwise would be a guess.
+    Raises on anything this build does not know, and that is the point.
+
+    An earlier *known* version legitimately governs a smaller set — a row
+    written under V1 promised V1's metrics and nothing more. An *unknown*
+    version is a different situation entirely: the build cannot say what the
+    row promised, so it cannot say the row kept its promise.
+
+        Unknown model version means unknown contract, not no contract.
+
+    Returning an empty set here would have made the second case look like the
+    first, and a row from a future model would validate clean precisely
+    because nothing could check it.
     """
-    return GOVERNED_METRICS.get(version or "", frozenset())
+    if version is None:
+        raise UnsupportedModelVersion(
+            "row claims no factor-model version; it predates version "
+            "attribution and cannot be validated against any contract")
+    if version not in GOVERNED_METRICS:
+        raise UnsupportedModelVersion(
+            f"{version!r} is not a contract this build knows "
+            f"(known: {', '.join(sorted(GOVERNED_METRICS))})")
+    return GOVERNED_METRICS[version]
 
 
 @dataclass(frozen=True)
@@ -269,9 +315,13 @@ class Violation:
         return f"{self.metric} [{self.kind}]: {self.detail}"
 
 
+#: Used as the metric name on a violation that is about the row, not a column.
+ROW = "<row>"
+
+
 def violations(values: Mapping[str, Optional[float]],
                states: Optional[Mapping[str, Mapping]] = None,
-               model_version: Optional[str] = None) -> list[Violation]:
+               model_version: Any = UNSPECIFIED) -> list[Violation]:
     """Every way this row's columns and sidecar disagree.
 
     Three kinds, and the second matters as much as the first:
@@ -284,9 +334,23 @@ def violations(values: Mapping[str, Optional[float]],
                           now perfectly good, which is a silent regression in
                           the opposite direction.
       missing_governed    a governed metric absent from the row entirely.
+
+    Plus two row-level kinds when a version is being checked at all. Pass
+    ``UNSPECIFIED`` (the default) for the in-memory pre-write check, where no
+    version has been assigned yet; pass the row's actual version — including
+    ``None`` — when validating something persisted.
     """
     states = states or {}
     out: list[Violation] = []
+
+    governed: frozenset[str] = frozenset()
+    if model_version is not UNSPECIFIED:
+        try:
+            governed = governed_for(model_version)
+        except UnsupportedModelVersion as e:
+            kind = ("unversioned" if model_version is None
+                    else "unsupported_model_version")
+            out.append(Violation(ROW, kind, str(e)))
 
     for metric, value in values.items():
         entry = states.get(metric)
@@ -299,7 +363,7 @@ def violations(values: Mapping[str, Optional[float]],
                 f"value {value!r} present beside state "
                 f"{entry.get('state')!r} — stale sidecar entry"))
 
-    for metric in sorted(governed_for(model_version) - set(values)):
+    for metric in sorted(governed - set(values)):
         out.append(Violation(metric, "missing_governed",
                              f"governed by {model_version} but absent from the row"))
 
@@ -308,7 +372,7 @@ def violations(values: Mapping[str, Optional[float]],
 
 def assert_complete(values: Mapping[str, Optional[float]],
                     states: Optional[Mapping[str, Mapping]] = None,
-                    model_version: Optional[str] = None) -> None:
+                    model_version: Any = UNSPECIFIED) -> None:
     """Raise on any violation. For the write path, before the row is committed."""
     bad = violations(values, states, model_version)
     if bad:
@@ -322,14 +386,22 @@ def row_payload(values: Mapping[str, Optional[float]],
                 states: Optional[Mapping[str, Mapping]] = None,
                 source_health: Optional[SourceHealth] = None,
                 domain: Optional[Domain] = None,
-                compute_run_id: Optional[int] = None) -> dict:
+                compute_run_id: Optional[int] = None,
+                model_version: Any = UNSPECIFIED) -> dict:
     """What a route returns: numbers, plus why any of them are missing.
 
     The client never has to infer a cause from a null. ``source_health`` rides
     at the row level rather than being repeated per metric, and is what lets a
     page render "Data unavailable — dividend feed incomplete" instead of an
     em-dash that reads as "this company pays no dividend".
+
+    Refuses outright when ``model_version`` names a contract this build cannot
+    interpret. A row whose semantics are unknown must not be served *as if*
+    they were known: the numbers might be fine, and there is no way to say so.
     """
+    if model_version is not UNSPECIFIED:
+        governed_for(model_version)      # raises UnsupportedModelVersion
+
     assessments = decode_all(values, states, domain)
     out: dict[str, Any] = {
         "metrics": {m: a.value for m, a in assessments.items()},

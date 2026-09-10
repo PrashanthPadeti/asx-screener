@@ -52,6 +52,40 @@ class CompileError(Exception):
 
 
 @dataclass(frozen=True)
+class RunScope:
+    """The runs whose rows may be read through the applicability clause.
+
+    ``metric_states -> 'm' IS NULL`` means APPLICABLE — but only inside a
+    validated contract. On a legacy row with a populated numeric column and no
+    sidecar, key-absent looks identical to applicable and is in fact
+    uninterpretable. The clause is therefore only sound when the query is
+    scoped to runs whose model version is supported and whose recompute passed
+    the persistence validator.
+
+        Absent sidecar entry means APPLICABLE only inside a validated
+        model/run contract. Outside it, absence means uninterpretable.
+
+    Required rather than optional, and enforced once here rather than
+    rediscovered per criterion, because the failure mode is silent: every
+    predicate would look correct while reading rows that cannot support them.
+    """
+
+    run_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not self.run_ids:
+            raise CompileError(
+                "a screen must be scoped to at least one validated compute "
+                "run; unscoped, an absent sidecar entry on a legacy row is "
+                "indistinguishable from an applicable metric")
+
+    def sql(self, dialect: Dialect = "postgres",
+            column: str = "compute_run_id") -> str:
+        ids = ", ".join(str(int(r)) for r in self.run_ids)
+        return f"{column} IN ({ids})"
+
+
+@dataclass(frozen=True)
 class Criterion:
     """One screen condition, in canonical metric identity."""
 
@@ -130,12 +164,18 @@ class CompiledScreen:
 
 
 def compile_screen(criteria: Sequence[Criterion],
+                   run_scope: RunScope,
                    order_by: Optional[str] = None,
                    descending: bool = True,
                    dialect: Dialect = "postgres",
-                   states_col: str = "metric_states") -> CompiledScreen:
-    """A whole screen: membership, preference expressions and ranking subset."""
-    clauses: list[str] = []
+                   states_col: str = "metric_states",
+                   run_column: str = "compute_run_id") -> CompiledScreen:
+    """A whole screen: membership, preference expressions and ranking subset.
+
+    ``run_scope`` is positional and required. A screen compiled without it
+    would read legacy rows through a clause that cannot interpret them.
+    """
+    clauses: list[str] = [run_scope.sql(dialect, run_column)]
     params: dict = {}
     preferences: dict = {}
 

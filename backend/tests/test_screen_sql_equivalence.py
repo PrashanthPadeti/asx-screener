@@ -40,6 +40,7 @@ from compute.engine.screen_predicates import (  # noqa: E402
 from compute.engine.screen_sql import (  # noqa: E402
     CompileError,
     Criterion,
+    RunScope,
     OPERATORS,
     applicable_sql,
     compile_criterion,
@@ -49,6 +50,8 @@ from compute.engine.screen_sql import (  # noqa: E402
 from compute.engine.universe_writer import column_for  # noqa: E402
 
 METRICS = ["debt_to_equity", "roe", "grossed_up_yield"]
+RUN_ID = 4711
+SCOPE = RunScope((RUN_ID,))
 
 
 def companies() -> dict:
@@ -98,20 +101,20 @@ def build_db() -> sqlite3.Connection:
     conn = sqlite3.connect(":memory:")
     cols = ", ".join(f"{column_for(m)} REAL" for m in METRICS)
     conn.execute(f"CREATE TABLE universe (asx_code TEXT, {cols}, "
-                 f"metric_states TEXT)")
+                 f"metric_states TEXT, compute_run_id INTEGER)")
 
     for code, assessments in companies().items():
         values, states = persist_row(assessments)
-        placeholders = ", ".join("?" for _ in range(len(METRICS) + 2))
+        placeholders = ", ".join("?" for _ in range(len(METRICS) + 3))
         conn.execute(
             f"INSERT INTO universe VALUES ({placeholders})",
-            [code] + [values[m] for m in METRICS] + [json.dumps(states)])
+            [code] + [values[m] for m in METRICS] + [json.dumps(states), RUN_ID])
     conn.commit()
     return conn
 
 
 def sql_membership(conn, criteria) -> list[str]:
-    compiled = compile_screen(criteria, dialect="sqlite")
+    compiled = compile_screen(criteria, SCOPE, dialect="sqlite")
     rows = conn.execute(
         f"SELECT asx_code FROM universe WHERE {compiled.where} ORDER BY asx_code",
         compiled.params).fetchall()
@@ -221,7 +224,7 @@ def test_a_source_unhealthy_yield_neither_matches_nor_excludes():
 
 def test_ranking_participation_matches_the_python_engine():
     conn = build_db()
-    compiled = compile_screen([], order_by="grossed_up_yield", dialect="sqlite")
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield", dialect="sqlite")
 
     rows = conn.execute(
         f"SELECT asx_code FROM universe WHERE {compiled.order_applicable} "
@@ -236,7 +239,7 @@ def test_ranking_participation_matches_the_python_engine():
 def test_a_company_absent_from_the_ranking_is_still_in_the_universe():
     """Membership and ranking participation are different questions."""
     conn = build_db()
-    compiled = compile_screen([], order_by="grossed_up_yield", dialect="sqlite")
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield", dialect="sqlite")
 
     everyone = [r[0] for r in conn.execute(
         "SELECT asx_code FROM universe ORDER BY asx_code")]
@@ -249,7 +252,7 @@ def test_a_company_absent_from_the_ranking_is_still_in_the_universe():
 
 def test_an_unavailable_yield_never_sorts_as_zero():
     conn = build_db()
-    compiled = compile_screen([], order_by="grossed_up_yield",
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield",
                               descending=False, dialect="sqlite")
     ranked = [r[0] for r in conn.execute(
         f"SELECT asx_code FROM universe WHERE {compiled.order_applicable} "
@@ -282,7 +285,7 @@ def test_a_preference_does_not_restrict_membership():
 def test_a_preference_contributes_only_when_applicable():
     conn = build_db()
     compiled = compile_screen(
-        [Criterion("roe", CriterionType.PREFERRED, "gte", 0.12)],
+        [Criterion("roe", CriterionType.PREFERRED, "gte", 0.12)], SCOPE,
         dialect="sqlite")
     expression = compiled.preference_expressions["roe"]
 
@@ -324,6 +327,56 @@ def test_every_permitted_operator_compiles_and_runs():
         criteria = [Criterion("roe", CriterionType.REQUIRED, operator, 0.15)]
         assert sql_membership(conn, criteria) == python_membership(criteria), \
             operator
+
+
+# ── Run scoping · the clause is only sound inside a validated contract ───────
+
+def test_a_screen_cannot_be_compiled_without_a_run_scope():
+    try:
+        RunScope(())
+    except CompileError as e:
+        assert "validated compute run" in str(e)
+    else:
+        raise AssertionError("an unscoped screen must not be compilable")
+
+
+def test_the_run_scope_is_always_in_the_where_clause():
+    compiled = compile_screen([], SCOPE, dialect="sqlite")
+    assert "compute_run_id IN (4711)" in compiled.where
+
+
+def test_a_legacy_row_is_not_readable_through_the_applicability_clause():
+    """The reason scoping is required rather than advisory.
+
+    A row written before the sidecar existed has a populated numeric column
+    and no metric_states entry — which is exactly what an APPLICABLE metric
+    looks like. Every predicate would evaluate it and every predicate would be
+    wrong, silently, because nothing about the row looks unusual.
+    """
+    conn = build_db()
+    conn.execute(
+        "INSERT INTO universe VALUES ('LEGACY', 4.6, 0.05, 0.09, '{}', NULL)")
+    conn.commit()
+
+    unscoped = [r[0] for r in conn.execute(
+        "SELECT asx_code FROM universe WHERE "
+        + applicable_sql("debt_to_equity", "sqlite"))]
+    assert "LEGACY" in unscoped, "absent sidecar reads as applicable — the trap"
+
+    scoped = sql_membership(
+        conn, [Criterion("debt_to_equity", CriterionType.REQUIRED, "lt", 5.0)])
+    assert "LEGACY" not in scoped, "the run scope keeps it out"
+
+
+def test_rows_from_an_unvalidated_run_are_excluded():
+    conn = build_db()
+    conn.execute(
+        "INSERT INTO universe VALUES ('OTHER', 0.3, 0.20, 0.05, '{}', 9999)")
+    conn.commit()
+
+    members = sql_membership(
+        conn, [Criterion("debt_to_equity", CriterionType.REQUIRED, "lt", 1.5)])
+    assert "OTHER" not in members, "a different run is a different contract"
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

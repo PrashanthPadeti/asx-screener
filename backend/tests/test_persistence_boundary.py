@@ -43,13 +43,17 @@ from compute.engine.applicability import (  # noqa: E402
 )
 from compute.engine.dividends import DividendSource, FeedHealth  # noqa: E402
 from compute.engine.metric_states import (  # noqa: E402
+    GOVERNED_METRICS,
+    LATEST_MODEL_VERSION,
     SourceHealth,
     assert_complete,
     decode,
     decode_all,
     encode,
     encode_json,
+    governed_for,
     load_states,
+    persist_row,
     row_payload,
     violations,
 )
@@ -104,19 +108,151 @@ def test_the_payload_is_json_serialisable_and_stable():
     assert a == encode_json(compute_cba()), "sorted keys, stable across runs"
 
 
+def kinds(vs) -> dict:
+    return {v.metric: v.kind for v in vs}
+
+
 def test_a_null_with_no_state_entry_is_a_violation_not_a_default():
     """The rule that makes sparseness safe."""
-    assert violations({"roe": 0.18, "pe_ratio": None}, {}) == ["pe_ratio"]
+    assert kinds(violations({"roe": 0.18, "pe_ratio": None}, {})) == \
+        {"pe_ratio": "unexplained_null"}
     assert violations({"roe": 0.18}, {}) == []
+
+
+def test_a_stale_entry_beside_a_populated_value_is_equally_a_violation():
+    """The other direction: a suppressed -> applicable transition that only
+    half-applied. A contract-aware reader suppresses a number that is now
+    perfectly good, which is a silent regression the opposite way."""
+    stale = {"roe": {"state": "not_meaningful", "cause": "domain"}}
+    assert kinds(violations({"roe": 0.18}, stale)) == \
+        {"roe": "contradictory_state"}
 
 
 def test_assert_complete_refuses_to_write_an_unexplained_null():
     try:
         assert_complete({"grossed_up_yield": None}, {})
     except ValueError as e:
-        assert "grossed_up_yield" in str(e)
+        assert "grossed_up_yield" in str(e) and "unexplained_null" in str(e)
     else:
         raise AssertionError("the write path must refuse")
+
+
+def test_assert_complete_refuses_to_write_a_contradiction():
+    try:
+        assert_complete({"roe": 0.18},
+                        {"roe": {"state": "not_meaningful"}})
+    except ValueError as e:
+        assert "contradictory_state" in str(e)
+    else:
+        raise AssertionError("the write path must refuse")
+
+
+# ── Lock 2 · atomic transitions, both directions ──────────────────────────────
+
+def test_persist_row_produces_a_consistent_pair_by_construction():
+    """Two statements can half-apply; one function returning both cannot."""
+    values, states = persist_row(compute_cba())
+    assert violations(values, states) == []
+    assert values["altman_z_score"] is None and "altman_z_score" in states
+    assert values["roe"] == 0.1284 and "roe" not in states
+
+
+def test_suppressed_to_applicable_drops_the_entry_and_populates_the_value():
+    before = {"roe": assess("roe", 2.06, Domain.GENERAL_CORPORATE,
+                            Observation(equity=-1.0))}
+    after = {"roe": assess("roe", 0.18, Domain.GENERAL_CORPORATE,
+                           Observation(equity=5e8))}
+
+    v0, s0 = persist_row(before)
+    v1, s1 = persist_row(after)
+
+    assert v0["roe"] is None and "roe" in s0
+    assert v1["roe"] == 0.18 and "roe" not in s1
+    assert violations(v1, s1) == [], "no stale key survives the transition"
+
+
+def test_applicable_to_suppressed_nulls_the_value_and_adds_the_entry():
+    """The same metric on the same company, reclassified as a bank."""
+    before = {"debt_to_equity": assess("debt_to_equity", 4.6,
+                                       Domain.GENERAL_CORPORATE)}
+    after = {"debt_to_equity": assess("debt_to_equity", 4.6, Domain.BANK)}
+
+    v0, s0 = persist_row(before)
+    v1, s1 = persist_row(after)
+
+    assert v0["debt_to_equity"] == 4.6 and "debt_to_equity" not in s0
+    assert v1["debt_to_equity"] is None and "debt_to_equity" in s1
+    assert s1["debt_to_equity"]["cause"] == "domain"
+    assert s1["debt_to_equity"]["observed"] == 4.6, "forensics kept in the sidecar"
+    assert violations(v1, s1) == []
+
+
+def test_repeated_transitions_each_leave_exactly_one_interpretation():
+    """SOURCE_UNHEALTHY -> APPLICABLE -> INSUFFICIENT_HISTORY -> APPLICABLE."""
+    from compute.engine.applicability import unhealthy
+
+    sequence = [
+        (unhealthy("grossed_up_yield", "dividend feed incomplete"),
+         Applicability.UNAVAILABLE, Cause.SOURCE_UNHEALTHY, None),
+        (assess("grossed_up_yield", 0.045, Domain.GENERAL_CORPORATE),
+         Applicability.APPLICABLE, None, 0.045),
+        (assess("grossed_up_yield", 0.045, Domain.GENERAL_CORPORATE,
+                Observation(periods_available=1, periods_required=3)),
+         Applicability.INSUFFICIENT_DATA, Cause.INSUFFICIENT_HISTORY, None),
+        (assess("grossed_up_yield", 0.051, Domain.GENERAL_CORPORATE),
+         Applicability.APPLICABLE, None, 0.051),
+    ]
+
+    for step, (assessment, state, cause, expected_value) in enumerate(sequence):
+        values, states = persist_row({assessment.metric: assessment})
+        assert violations(values, states) == [], f"step {step} left a contradiction"
+
+        back = decode("grossed_up_yield", values["grossed_up_yield"], states)
+        assert back.state is state, f"step {step}"
+        assert back.cause is cause, f"step {step}"
+        assert back.value == expected_value, f"step {step}"
+
+
+# ── Lock 3 · version-aware completeness ───────────────────────────────────────
+
+def test_a_governed_metric_absent_from_the_row_is_a_violation():
+    vs = violations({"roe": 0.18}, {}, model_version=LATEST_MODEL_VERSION)
+    by_kind = {v.kind for v in vs}
+    assert "missing_governed" in by_kind
+    assert any(v.metric == "grossed_up_yield" for v in vs)
+
+
+def test_an_ungoverned_metric_is_not_required():
+    vs = violations({"roe": 0.18}, {}, model_version=None)
+    assert vs == [], "no version, no governed set, nothing to require"
+
+
+def test_an_unknown_model_version_governs_nothing():
+    """A row from a model this build does not recognise cannot be validated
+    against a set it never promised to satisfy."""
+    assert governed_for("FACTOR_MODEL_V99") == frozenset()
+    assert violations({"roe": 0.18}, {}, model_version="FACTOR_MODEL_V99") == []
+
+
+def test_the_governed_set_is_pinned_not_derived():
+    """If it were computed from SENSITIVE live, adding a metric next quarter
+    would retroactively make every existing V1 row incomplete."""
+    from compute.engine.metric_registry import SENSITIVE
+
+    v1 = GOVERNED_METRICS["FACTOR_MODEL_V1"]
+    missing = SENSITIVE - v1
+    assert not missing, (
+        f"{sorted(missing)} became sensitive after V1 was pinned. Add them to "
+        f"a NEW model version rather than to V1, or old rows retroactively "
+        f"fail validation for lacking a state they never promised.")
+
+
+def test_a_fully_governed_row_passes():
+    governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]
+    values = {m: None for m in governed}
+    states = {m: {"state": "unavailable", "cause": "source_missing"}
+              for m in governed}
+    assert violations(values, states, LATEST_MODEL_VERSION) == []
 
 
 def test_a_row_written_by_the_engine_has_no_violations():
@@ -195,11 +331,50 @@ def test_the_route_payload_never_makes_the_client_infer_a_cause():
 def test_source_health_round_trips():
     health = SourceHealth(run_at=datetime(2026, 9, 10, 8, 30),
                           unhealthy_sources=("dividends",),
-                          detail={"dividends": "38 days behind"})
+                          detail={"dividends": "38 days behind"},
+                          run_id=4711)
     back = SourceHealth.from_payload(json.loads(json.dumps(health.to_payload())))
 
     assert back.unhealthy_sources == ("dividends",)
+    assert back.run_id == 4711
     assert not back.healthy
+
+
+# ── Lock 4 · run provenance is a join, not a timestamp guess ──────────────────
+
+def test_the_row_carries_the_run_that_produced_it():
+    values, states = persist_row(compute_cba())
+    health = SourceHealth(run_at=datetime(2026, 9, 10, 8, 30),
+                          unhealthy_sources=("dividends",),
+                          detail={"dividends": BROKEN_FEED.reason},
+                          factor_model_version=LATEST_MODEL_VERSION,
+                          run_id=4711)
+
+    payload = row_payload(values, states, health, Domain.BANK, compute_run_id=4711)
+
+    assert payload["compute_run_id"] == 4711
+    assert payload["source_health"]["run_id"] == 4711
+    assert payload["source_health"]["factor_model_version"] == LATEST_MODEL_VERSION
+
+
+def test_a_row_cannot_be_served_with_another_runs_health():
+    """The failure this closes: a SOURCE_UNHEALTHY row whose justifying feed
+    observation has been overwritten by two later runs."""
+    values, states = persist_row(compute_cba())
+    health = SourceHealth(run_at=datetime(2026, 9, 10, 8, 30), run_id=4712)
+
+    try:
+        row_payload(values, states, health, Domain.BANK, compute_run_id=4711)
+    except ValueError as e:
+        assert "4711" in str(e) and "4712" in str(e)
+    else:
+        raise AssertionError("mismatched provenance must not serve")
+
+
+def test_a_legacy_row_has_no_run_and_says_so():
+    values, states = persist_row(compute_cba())
+    payload = row_payload(values, states, None, Domain.BANK)
+    assert "compute_run_id" not in payload, "absent, not zero or guessed"
 
 
 def test_a_healthy_run_records_no_unhealthy_sources():

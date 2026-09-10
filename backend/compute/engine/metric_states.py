@@ -81,9 +81,17 @@ class SourceHealth:
     unhealthy_sources: tuple[str, ...] = ()      # e.g. ("dividends",)
     detail: Mapping[str, str] = None             # source -> human reason
     factor_model_version: Optional[str] = None
+    #: screener.compute_runs.id. Written onto every row the run produces, so
+    #: the chain is a join rather than a timestamp guess:
+    #:     value + state -> compute_run_id -> model version + source health
+    #: Without it a row can say SOURCE_UNHEALTHY while the run that decided
+    #: that has been overwritten by two later runs, and nothing recovers which
+    #: feed observation produced the decision.
+    run_id: Optional[int] = None
 
     def to_payload(self) -> dict:
         return {
+            "run_id": self.run_id,
             "run_at": self.run_at.isoformat(),
             "unhealthy_sources": list(self.unhealthy_sources),
             "detail": dict(self.detail or {}),
@@ -100,6 +108,7 @@ class SourceHealth:
             unhealthy_sources=tuple(payload.get("unhealthy_sources") or ()),
             detail=payload.get("detail") or {},
             factor_model_version=payload.get("factor_model_version"),
+            run_id=payload.get("run_id"),
         )
 
     @property
@@ -127,8 +136,29 @@ def encode(assessments: Mapping[str, Assessment] | Iterable[Assessment]) -> dict
             entry["cause"] = a.cause.value
         if a.reason:
             entry["reason"] = a.reason
+        if a.observed is not None:
+            # Forensics live here, not in the numeric column, so a legacy
+            # SELECT cannot pick up a suppressed value.
+            entry["observed"] = a.observed
         out[a.metric] = entry
     return out
+
+
+def persist_row(assessments: Mapping[str, Assessment] | Iterable[Assessment]
+                ) -> tuple[dict[str, Optional[float]], dict]:
+    """The numeric columns and the sidecar, produced together.
+
+    Transitions are the risk this closes. Going suppressed -> applicable must
+    populate the number *and* drop the entry; going applicable -> suppressed
+    must null the number *and* add one. Two statements can half-apply; one
+    function returning both cannot, because the pair is derived from a single
+    set of assessments rather than assembled by a caller who might update one
+    and forget the other.
+    """
+    items = list(assessments.values() if isinstance(assessments, Mapping)
+                 else assessments)
+    values = {a.metric: (a.value if a.ok else None) for a in items}
+    return values, encode(items)
 
 
 def encode_json(assessments) -> str:
@@ -185,27 +215,105 @@ def load_states(raw: Any) -> dict:
 
 # ── The rule that makes sparseness safe ───────────────────────────────────────
 
-def violations(values: Mapping[str, Optional[float]],
-               states: Optional[Mapping[str, Mapping]] = None) -> list[str]:
-    """Metrics whose value is NULL with no sidecar entry to explain it.
+#: The metrics the contract governs, pinned per factor-model version.
+#:
+#: Pinned literally, and deliberately not derived from whatever
+#: ``metric_registry.SENSITIVE`` happens to hold today. If the governed set
+#: were computed live, adding a metric next quarter would retroactively make
+#: every existing row incomplete — a row written correctly under V1 would
+#: start failing validation because it lacks a state for something that did
+#: not exist when it was written. New metrics join a *new* version.
+GOVERNED_METRICS: dict[str, frozenset[str]] = {
+    "FACTOR_MODEL_V1": frozenset({
+        # domain-sensitive
+        "altman_z_score", "debt_to_equity", "current_ratio", "quick_ratio",
+        "interest_coverage", "working_capital", "gross_margin",
+        "operating_margin", "inventory_turnover", "asset_turnover",
+        "ev_ebitda", "ev_ebit", "net_debt_to_ebitda", "free_cash_flow",
+        "fcf_conversion", "earnings_quality", "price_to_sales",
+        "piotroski_f_score",
+        # observation-sensitive
+        "roe", "return_on_equity", "book_value_per_share", "price_to_book",
+        "pe_ratio", "peg_ratio", "roce", "roic",
+        # dividend methodology
+        "dividend_yield", "grossed_up_yield", "franking_pct",
+        "dividend_per_share", "grossed_up_dividend", "dividend_payout_ratio",
+        # factor layer
+        "value_score", "quality_score", "growth_score", "momentum_score",
+        "income_score", "composite_score",
+    }),
+}
 
-    A NULL numeric column must never be the only signal. This is the check CI
-    runs over a sample of persisted rows: any hit means a writer bypassed the
-    contract, and a consumer downstream of it is guessing.
+LATEST_MODEL_VERSION = "FACTOR_MODEL_V1"
+
+
+def governed_for(version: Optional[str]) -> frozenset[str]:
+    """The governed metric set for a row's model version.
+
+    An unknown or absent version governs nothing: a row from a model this
+    build does not recognise cannot be validated against a set it never
+    promised to satisfy, and asserting otherwise would be a guess.
+    """
+    return GOVERNED_METRICS.get(version or "", frozenset())
+
+
+@dataclass(frozen=True)
+class Violation:
+    """One way a persisted row contradicts the contract."""
+
+    metric: str
+    kind: str        # unexplained_null | contradictory_state | missing_governed
+    detail: str
+
+    def __str__(self) -> str:
+        return f"{self.metric} [{self.kind}]: {self.detail}"
+
+
+def violations(values: Mapping[str, Optional[float]],
+               states: Optional[Mapping[str, Mapping]] = None,
+               model_version: Optional[str] = None) -> list[Violation]:
+    """Every way this row's columns and sidecar disagree.
+
+    Three kinds, and the second matters as much as the first:
+
+      unexplained_null    NULL with no entry — absent means APPLICABLE, so the
+                          row claims a value it does not have.
+      contradictory_state an entry beside a populated value — a stale key left
+                          behind by a suppressed -> applicable transition. A
+                          contract-aware reader suppresses a number that is
+                          now perfectly good, which is a silent regression in
+                          the opposite direction.
+      missing_governed    a governed metric absent from the row entirely.
     """
     states = states or {}
-    return sorted(m for m, v in values.items()
-                  if v is None and m not in states)
+    out: list[Violation] = []
+
+    for metric, value in values.items():
+        entry = states.get(metric)
+        if value is None and entry is None:
+            out.append(Violation(metric, "unexplained_null",
+                                 "null value with no recorded state"))
+        elif value is not None and entry is not None:
+            out.append(Violation(
+                metric, "contradictory_state",
+                f"value {value!r} present beside state "
+                f"{entry.get('state')!r} — stale sidecar entry"))
+
+    for metric in sorted(governed_for(model_version) - set(values)):
+        out.append(Violation(metric, "missing_governed",
+                             f"governed by {model_version} but absent from the row"))
+
+    return sorted(out, key=lambda v: (v.kind, v.metric))
 
 
 def assert_complete(values: Mapping[str, Optional[float]],
-                    states: Optional[Mapping[str, Mapping]] = None) -> None:
+                    states: Optional[Mapping[str, Mapping]] = None,
+                    model_version: Optional[str] = None) -> None:
     """Raise on any violation. For the write path, before the row is committed."""
-    bad = violations(values, states)
+    bad = violations(values, states, model_version)
     if bad:
-        raise ValueError(
-            f"null values with no recorded state: {', '.join(bad)}. "
-            f"Every non-applicable metric must have a metric_states entry.")
+        raise ValueError("persistence contract violated: "
+                         + "; ".join(str(v) for v in bad))
 
 
 # ── The API shape ─────────────────────────────────────────────────────────────
@@ -213,7 +321,8 @@ def assert_complete(values: Mapping[str, Optional[float]],
 def row_payload(values: Mapping[str, Optional[float]],
                 states: Optional[Mapping[str, Mapping]] = None,
                 source_health: Optional[SourceHealth] = None,
-                domain: Optional[Domain] = None) -> dict:
+                domain: Optional[Domain] = None,
+                compute_run_id: Optional[int] = None) -> dict:
     """What a route returns: numbers, plus why any of them are missing.
 
     The client never has to infer a cause from a null. ``source_health`` rides
@@ -230,6 +339,13 @@ def row_payload(values: Mapping[str, Optional[float]],
                        "reason": a.reason}
                    for m, a in assessments.items() if not a.ok},
     }
+    if compute_run_id is not None:
+        out["compute_run_id"] = compute_run_id
     if source_health is not None:
         out["source_health"] = source_health.to_payload()
+        if compute_run_id is not None and source_health.run_id is not None \
+                and compute_run_id != source_health.run_id:
+            raise ValueError(
+                f"row claims compute_run_id {compute_run_id} but the supplied "
+                f"source health belongs to run {source_health.run_id}")
     return out

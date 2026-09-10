@@ -66,3 +66,45 @@ COMMENT ON TABLE screener.compute_runs IS
     'One row per compute run. unhealthy_sources names the feeds that were not '
     'usable, so a consumer can tell "this company pays no dividend" from "we '
     'could not compute a dividend" without inspecting every metric.';
+
+
+-- Provenance. screener.universe is mutable and rewritten every run, so
+-- without an explicit run identifier the chain
+--
+--     value + metric_state  ->  ?  ->  compute run  ->  source health
+--
+-- can only be closed by matching timestamps, which stops working the moment
+-- two runs land close together or a later run partially overwrites an earlier
+-- one. A row can then say SOURCE_UNHEALTHY while the feed observation that
+-- justified it is two runs in the past and unrecoverable.
+--
+-- Nullable because rows written before this migration genuinely have no run
+-- to point at. That is the honest state, and it is distinguishable from a
+-- row that does — which a default of 0 or a backfilled guess would destroy.
+
+ALTER TABLE screener.universe
+    ADD COLUMN IF NOT EXISTS compute_run_id BIGINT
+        REFERENCES screener.compute_runs (id);
+
+CREATE INDEX IF NOT EXISTS idx_universe_compute_run
+    ON screener.universe (compute_run_id);
+
+COMMENT ON COLUMN screener.universe.compute_run_id IS
+    'The run that produced this row. Joins to screener.compute_runs for the '
+    'factor model version and the source-health evidence behind any '
+    'SOURCE_UNHEALTHY state. NULL means the row predates run attribution — '
+    'never backfill it with a guess.';
+
+
+-- Rollout gate. Applying this migration does NOT make the table healthy:
+-- every legacy row with a nullable governed metric and no sidecar entry is
+-- now, correctly, a contract violation. That is the point — it is the
+-- evidence that the canonical writer has not yet been through.
+--
+--     migration
+--       -> recompute through the canonical writer
+--       -> compute.engine.metric_states.violations() == 0 for the governed set
+--       -> enable consumers that rely on the new semantics
+--
+-- Do NOT backfill metric_states with '{}' to make the validator green. That
+-- encodes "applicable" without evidence and destroys the sidecar's purpose.

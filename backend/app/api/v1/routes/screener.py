@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, HTTPException, Body, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+import logging
 import csv
 import hashlib
 import io
@@ -57,6 +59,9 @@ VALIDATED_RUNS_SQL_TEXT = """
 FREE_STOCK_LIMIT = 500   # max rows visible to free / unauthenticated users
 
 router = APIRouter()
+
+# Matches the convention in market.py and ai.py.
+log = logging.getLogger(__name__)
 
 # ── Field registry ────────────────────────────────────────────────────────────
 # col   : SQL column name or expression in screener.universe (alias: u)
@@ -696,16 +701,39 @@ async def resolve_scope_if_needed(db, parsed: ParsedQuery):
     """
     if not parsed.requires_run_scope:
         return None
+
     try:
         rows = await db.execute(text(VALIDATED_RUNS_SQL_TEXT),
                                 {"supported": list(GOVERNED_METRICS.keys()),
                                  "limit": 8})
+        fetched = rows.fetchall()
+    except SQLAlchemyError as exc:
+        # screener.compute_runs does not exist until the P0-A migration runs,
+        # and until the first canonical recompute it is empty. Both are
+        # ordinary pre-rollout states, not faults — but an uncaught
+        # ProgrammingError here is a 500 with a stack trace on every governed
+        # query, which is a worse answer than the honest one.
+        #
+        # The rollback matters as much as the catch: after a failed statement
+        # Postgres aborts the transaction, and every later statement in this
+        # session fails with InFailedSqlTransaction. Without it a single
+        # missing table turns one bad request into a broken connection.
+        await db.rollback()
+        log.warning("Run-scope resolution failed; governed queries "
+                    "unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Governed metrics are unavailable: the applicability "
+                   "contract has not been provisioned on this database yet.")
+
+    try:
         runs = [ValidatedRun(r[0], r[1], tuple(r[2] or ()), validated=True,
                              detail=r[3])
-                for r in rows.fetchall()]
+                for r in fetched]
         if not runs:
-            raise CompileError("no completed compute run under a supported "
-                               "factor model")
+            raise CompileError(
+                "no completed compute run under a supported factor model; "
+                "the canonical recompute has not run")
         newest = runs[0].contract_key
         return RunScope.from_validated_runs(
             [r for r in runs if r.contract_key == newest])

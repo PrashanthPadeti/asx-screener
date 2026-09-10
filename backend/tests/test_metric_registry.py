@@ -137,7 +137,8 @@ def test_strict_resolution_raises_on_an_unknown_node():
     try:
         resolve("some_new_metric_nobody_declared", strict=True)
     except UnresolvedMetric as e:
-        assert "neither a known primitive nor a declared composite" in str(e)
+        assert "unresolved [unknown_metric]" in str(e), \
+            "the raise must name the reason, not just the failure"
     else:
         raise AssertionError("strict resolution must raise")
 

@@ -95,6 +95,12 @@ class Assessment:
     point: a suppressed metric must not be reachable by a caller that forgets
     to check the state, because a ranking built on ``assessment.value`` would
     otherwise silently keep using the number it was told not to use.
+
+    ``observed`` remembers the input for debugging and evidence. It is
+    deliberately *not* the same field: an assessment can remember what it was
+    given without presenting it as an interpretable metric. Nothing that
+    ranks, sorts, filters, alerts or displays may read it — see
+    ``usable_values`` and ``to_payload`` for the supported ways out.
     """
 
     metric: str
@@ -102,6 +108,7 @@ class Assessment:
     value: Optional[float] = None
     reason: str = ""
     domain: Optional[Domain] = None
+    observed: Optional[float] = None
 
     @property
     def ok(self) -> bool:
@@ -285,14 +292,15 @@ def assess(metric: str, value: Optional[float], domain: Domain,
     gate1 = domain_gate(metric, domain)
     if gate1 is not None:
         state, reason = gate1
-        return Assessment(metric, state, None, reason, domain)
+        return Assessment(metric, state, None, reason, domain, observed=value)
 
     gate2 = observation_gate(metric, value, obs)
     if gate2 is not None:
         state, reason = gate2
-        return Assessment(metric, state, None, reason, domain)
+        return Assessment(metric, state, None, reason, domain, observed=value)
 
-    return Assessment(metric, Applicability.APPLICABLE, value, "", domain)
+    return Assessment(metric, Applicability.APPLICABLE, value, "", domain,
+                      observed=value)
 
 
 def assess_all(values: Mapping[str, Optional[float]], domain: Domain,
@@ -330,27 +338,31 @@ def assess_composite(metric: str, value: Optional[float],
     if out_of_domain:
         names = ", ".join(sorted(a.metric for a in out_of_domain))
         return Assessment(metric, Applicability.NOT_MEANINGFUL, None,
-                          f"material constituents out of domain: {names}", domain)
+                          f"material constituents out of domain: {names}", domain,
+                          observed=value)
 
     missing = [a for m, a in by_metric.items()
                if m in required and a.state is Applicability.INSUFFICIENT_DATA]
     if missing:
         names = ", ".join(sorted(a.metric for a in missing))
         return Assessment(metric, Applicability.INSUFFICIENT_DATA, None,
-                          f"constituents lack history: {names}", domain)
+                          f"constituents lack history: {names}", domain,
+                          observed=value)
 
     unavailable = [a for m, a in by_metric.items()
                    if m in required and a.state is Applicability.UNAVAILABLE]
     if unavailable:
         names = ", ".join(sorted(a.metric for a in unavailable))
         return Assessment(metric, Applicability.UNAVAILABLE, None,
-                          f"constituents unavailable: {names}", domain)
+                          f"constituents unavailable: {names}", domain,
+                          observed=value)
 
     if value is None:
         return Assessment(metric, Applicability.UNAVAILABLE, None,
-                          "no value from source", domain)
+                          "no value from source", domain, observed=value)
 
-    return Assessment(metric, Applicability.APPLICABLE, value, "", domain)
+    return Assessment(metric, Applicability.APPLICABLE, value, "", domain,
+                      observed=value)
 
 
 # ── Effective weighting ───────────────────────────────────────────────────────
@@ -397,3 +409,43 @@ def predicate_excludes(assessment: Assessment) -> bool:
     "fail" for a deposit-funded balance sheet.
     """
     return assessment.ok
+
+
+# ── The consumer boundary ─────────────────────────────────────────────────────
+# Everything above decides. These two decide *how the decision leaves*, and
+# they exist because the dangerous failure is not a missing check — it is
+# ``a.value or 0``, which turns a suppressed metric into a real number that
+# sorts last, scores zero, and reads on a page as a fact.
+
+def usable_values(assessments: Mapping[str, Assessment] | Iterable[Assessment]
+                  ) -> dict[str, float]:
+    """The only supported way to get numbers out for ranking or scoring.
+
+    Applicable metrics only, with no placeholder for the rest — a suppressed
+    metric is *absent* from the mapping rather than present as zero. A caller
+    that iterates this cannot accidentally rank on something it was told not
+    to use, because there is nothing there to rank on.
+    """
+    items = assessments.values() if isinstance(assessments, Mapping) else assessments
+    return {a.metric: a.value for a in items if a.ok and a.value is not None}
+
+
+def to_payload(assessment: Assessment, include_observed: bool = False) -> dict:
+    """Serialise one assessment for an API response.
+
+    ``value`` stays None for anything not applicable, all the way through
+    serialisation — the invariant must survive the boundary, or the frontend
+    re-acquires exactly the freedom this module removed. ``observed`` is
+    emitted only when explicitly asked for, under its own key, and is for
+    debugging and evidence rather than display.
+    """
+    out = {
+        "metric": assessment.metric,
+        "state": assessment.state.value,
+        "value": assessment.value if assessment.ok else None,
+        "display": assessment.display(),
+        "reason": assessment.reason,
+    }
+    if include_observed:
+        out["observed_value"] = assessment.observed
+    return out

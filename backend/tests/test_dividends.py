@@ -279,6 +279,33 @@ def test_a_company_that_stopped_paying_writes_nulls():
 
 # ── The invariant the screener row must satisfy ───────────────────────────────
 
+def test_franking_is_never_manufactured_from_gross_alone():
+    """A meaningless denominator must fail closed, not divide through.
+
+    The derivation reads cash and gross together. If cash is zero, absent or
+    negative there is no basis to imply a franking percentage from — and
+    returning one would recreate the defect being fixed, in a new place.
+    """
+    for cash in (0.0, -1.0):
+        assert implied_franking_pct(cash, 1.40) is None, \
+            f"cash={cash} must not yield a franking percentage"
+
+
+def test_a_gross_only_series_produces_no_franking_field():
+    """SFR: 100% franking recorded against no dividend."""
+    m = dividend_metrics([row("2026-08-15", 0.0, franking=100.0, grossed_up=1.40)],
+                         close=10.0, as_of=AS_OF)
+    assert m["franking_pct"] is None
+    assert m["grossed_up_yield"] is None
+    assert reconciles(m), "all-null is the correct fail-closed outcome"
+
+
+def test_reconcile_fails_closed_on_a_zero_cash_yield():
+    """Not a divide-by-zero, and not a pass either."""
+    assert not reconciles({"dividend_yield": 0.0, "grossed_up_yield": 0.02,
+                           "franking_pct": 100.0})
+
+
 def test_implied_franking_round_trips():
     assert abs(implied_franking_pct(1.0, FULLY_FRANKED) - 100.0) < 1e-9
     assert implied_franking_pct(1.0, 1.0) == 0.0

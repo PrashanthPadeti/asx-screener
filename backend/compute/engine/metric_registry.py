@@ -35,6 +35,7 @@ is reported ``unresolved`` and must never be treated as safe.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Iterable, Mapping, Optional, Sequence
 
 from compute.engine.applicability import DOMAIN_RULES, POSITIVE_DENOMINATOR
@@ -46,6 +47,23 @@ class UnresolvedMetric(Exception):
 
 class CircularDependency(Exception):
     """Raised when a composite transitively depends on itself."""
+
+
+class Unresolved(str, Enum):
+    """Why a node could not be classified.
+
+    Fail-closed is the right *safety* result for all of these, but they are
+    not the same defect: ``quality_score`` unresolved because pandas is
+    missing is a packaging problem, and ``some_new_metric`` unresolved because
+    nobody declared it is a financial-policy problem. An audit that says
+    "unsafe" without saying which cannot tell you who fixes it.
+    """
+
+    UNKNOWN_METRIC = "unknown_metric"          # nobody declared it
+    IMPORT_FAILURE = "import_failure"          # graph incomplete, engine not importable
+    MISSING_DEPENDENCY = "missing_dependency"  # a declared composite's child is unknown
+    ALIAS_FAILURE = "alias_failure"            # alias chain did not terminate
+    DEPENDENCY_CYCLE = "dependency_cycle"
 
 
 # ── Aliases ───────────────────────────────────────────────────────────────────
@@ -78,13 +96,23 @@ ALIASES: dict[str, str] = {
 
 
 def normalise(metric: str) -> str:
-    """Canonical name for a metric, following alias chains."""
+    """Canonical metric id, following alias chains.
+
+    Policy — dependency traversal, sensitivity, applicability — runs on this
+    identity, never on the spelling a definition happened to use. Reports keep
+    the source spelling separately so a reader can find the line to edit.
+    """
     seen: set[str] = set()
     m = metric.strip().lower()
     while m in ALIASES and m not in seen:
         seen.add(m)
         m = ALIASES[m]
     return m
+
+
+def alias_resolves(metric: str) -> bool:
+    """False when an alias chain loops instead of terminating at a canonical id."""
+    return normalise(metric) not in ALIASES
 
 
 # ── Level 2 · composites whose constituents live inside function bodies ───────
@@ -188,22 +216,61 @@ SENSITIVE: frozenset[str] = (
 )
 
 
+#: Nodes the factor layer is expected to supply. Used to tell "the graph is
+#: incomplete because the engine would not import" apart from "nobody ever
+#: declared this metric" — the same fail-closed result, different owner.
+EXPECTED_FACTOR_NODES: frozenset[str] = frozenset({
+    "value_score", "quality_score", "growth_score", "momentum_score",
+    "income_score", "composite_score",
+})
+
+#: Set by factor_composites() when the scoring engine cannot be imported.
+_factor_load_error: Optional[str] = None
+
+
 def factor_composites() -> dict[str, list[str]]:
     """The five factor scores, generated from FACTOR_SIGNALS rather than copied.
 
-    Falls back to nothing if the scoring engine cannot be imported (it pulls
-    pandas); ``test_registry_matches_factor_signals`` asserts the two agree
-    wherever the import does work, so CI cannot drift from runtime.
+    Returns nothing if the scoring engine cannot be imported (it pulls
+    pandas), recording why so unresolved nodes can be classified as a
+    packaging failure rather than a missing declaration.
+    ``test_registry_matches_factor_signals`` asserts the two agree wherever
+    the import does work, so CI cannot drift from runtime.
     """
+    global _factor_load_error
     try:
         from compute.engine.composite_score import FACTOR_SIGNALS
-    except Exception:
+    except Exception as e:
+        _factor_load_error = f"{type(e).__name__}: {e}"
         return {}
 
+    _factor_load_error = None
     out = {f"{name}_score": [normalise(col) for col, _ in signals]
            for name, signals in FACTOR_SIGNALS.items()}
     out["composite_score"] = sorted(out)
     return out
+
+
+def classify_unresolved(node: str, via_composite: bool = False) -> Unresolved:
+    """Why this node could not be classified."""
+    if not alias_resolves(node):
+        return Unresolved.ALIAS_FAILURE
+    if node in EXPECTED_FACTOR_NODES and _factor_load_error is not None:
+        return Unresolved.IMPORT_FAILURE
+    if via_composite:
+        return Unresolved.MISSING_DEPENDENCY
+    return Unresolved.UNKNOWN_METRIC
+
+
+def graph_health() -> dict:
+    """Whether the graph this process is running on is complete."""
+    factors = factor_composites()
+    return {
+        "factor_layer_loaded": bool(factors),
+        "factor_load_error": _factor_load_error,
+        "composites_declared": len(COMPOSITES),
+        "factor_nodes": sorted(factors),
+    }
 
 
 def graph() -> dict[str, list[str]]:
@@ -224,6 +291,8 @@ class Resolution:
     #: constituent -> the chain that reached it, e.g. quality_score -> roe
     paths: Mapping[str, tuple[str, ...]]
     unresolved: frozenset[str] = frozenset()
+    #: unresolved node -> why, so a report says who fixes it
+    unresolved_reasons: Mapping[str, Unresolved] = field(default_factory=dict)
 
     @property
     def is_composite(self) -> bool:
@@ -243,6 +312,7 @@ def resolve(metric: str, strict: bool = False,
 
     primitives: set[str] = set()
     unresolved: set[str] = set()
+    reasons: dict[str, Unresolved] = {}
     paths: dict[str, tuple[str, ...]] = {}
 
     def walk(node: str, trail: tuple[str, ...]) -> None:
@@ -257,10 +327,11 @@ def resolve(metric: str, strict: bool = False,
                 primitives.add(node)
             else:
                 unresolved.add(node)
+                reasons[node] = classify_unresolved(node, via_composite=len(trail) > 1)
                 if strict:
                     raise UnresolvedMetric(
-                        f"{node} is neither a known primitive nor a declared "
-                        f"composite (via {' -> '.join(trail)})")
+                        f"{node} is unresolved [{reasons[node].value}] "
+                        f"(via {' -> '.join(trail)})")
             return
 
         for child in children:
@@ -270,7 +341,8 @@ def resolve(metric: str, strict: bool = False,
 
     walk(root, (root,))
     paths.pop(root, None)
-    return Resolution(root, frozenset(primitives), paths, frozenset(unresolved))
+    return Resolution(root, frozenset(primitives), paths,
+                      frozenset(unresolved), reasons)
 
 
 def sensitive_dependencies(metric: str) -> dict[str, tuple[str, ...]]:
@@ -301,19 +373,31 @@ class Finding:
     direct: list[str] = field(default_factory=list)
     inherited: dict[str, tuple[str, ...]] = field(default_factory=dict)
     unresolved: list[str] = field(default_factory=list)
+    #: canonical id -> the spelling the definition actually used, when they
+    #: differ. Policy ran on the canonical id; this is so a reader can find
+    #: the line to edit.
+    spellings: dict[str, str] = field(default_factory=dict)
+    reasons: dict[str, Unresolved] = field(default_factory=dict)
 
     @property
     def affected(self) -> bool:
         return bool(self.direct or self.inherited or self.unresolved)
 
+    def _label(self, canonical: str) -> str:
+        source = self.spellings.get(canonical)
+        return f"{canonical} (as {source})" if source else canonical
+
     def render(self) -> str:
         lines = [self.name]
         if self.direct:
-            lines.append(f"  direct:     {', '.join(sorted(self.direct))}")
+            lines.append("  direct:     "
+                         + ", ".join(self._label(m) for m in sorted(self.direct)))
         for dep, path in sorted(self.inherited.items()):
             lines.append(f"  inherited:  {' -> '.join(path)}")
-        if self.unresolved:
-            lines.append(f"  UNRESOLVED: {', '.join(sorted(self.unresolved))}")
+        for node in sorted(self.unresolved):
+            why = self.reasons.get(node)
+            lines.append(f"  UNRESOLVED: {self._label(node)}"
+                         + (f"  [{why.value}]" if why else ""))
         return "\n".join(lines)
 
 
@@ -323,9 +407,11 @@ def audit_definition(name: str, fields: Iterable[str], kind: str = "screen") -> 
 
     for raw in fields:
         f = normalise(raw)
-        if f in SENSITIVE:
-            if f not in finding.direct:
-                finding.direct.append(f)
+        if raw.strip().lower() != f:
+            finding.spellings.setdefault(f, raw)
+
+        if f in SENSITIVE and f not in finding.direct:
+            finding.direct.append(f)
 
         for dep, path in sensitive_dependencies(f).items():
             if dep == f:
@@ -336,6 +422,8 @@ def audit_definition(name: str, fields: Iterable[str], kind: str = "screen") -> 
         for u in res.unresolved:
             if u not in finding.unresolved:
                 finding.unresolved.append(u)
+            if u in res.unresolved_reasons:
+                finding.reasons.setdefault(u, res.unresolved_reasons[u])
 
     return finding
 
@@ -375,9 +463,21 @@ def render(findings: Sequence[Finding]) -> str:
     """The blast-radius report: why each definition is affected, not how many."""
     affected = [f for f in findings if f.affected]
     body = "\n\n".join(f.render() for f in affected)
-    unresolved = sorted({u for f in findings for u in f.unresolved})
 
     summary = f"{len(affected)} of {len(findings)} definitions affected"
-    if unresolved:
-        summary += f"\nFAIL CLOSED — unresolved nodes: {', '.join(unresolved)}"
+
+    by_reason: dict[Unresolved, set[str]] = {}
+    for f in findings:
+        for node in f.unresolved:
+            by_reason.setdefault(f.reasons.get(node, Unresolved.UNKNOWN_METRIC),
+                                 set()).add(node)
+
+    if by_reason:
+        summary += "\nFAIL CLOSED - unresolved nodes:"
+        for why in sorted(by_reason, key=lambda r: r.value):
+            summary += f"\n  {why.value:20} {', '.join(sorted(by_reason[why]))}"
+        if Unresolved.IMPORT_FAILURE in by_reason:
+            summary += (f"\n  (import_failure is a packaging problem, not a "
+                        f"policy one: {_factor_load_error})")
+
     return f"{body}\n\n{summary}" if body else summary

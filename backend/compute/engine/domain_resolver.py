@@ -42,6 +42,7 @@ from compute.engine.applicability import Domain
 class Source(str, Enum):
     """How a domain was established — recorded so coverage can be audited."""
 
+    OVERRIDE = "override"
     STRUCTURAL_FLAG = "structural_flag"
     INDUSTRY_MAPPING = "industry_mapping"
     SECTOR_FALLBACK = "sector_fallback"
@@ -72,17 +73,63 @@ class DomainResult:
 PRE_REVENUE_CEILING = 1_000_000.0
 
 
+# ── 0 · auditable per-issuer exceptions ───────────────────────────────────────
+# Where the GICS classification is technically correct but analytically
+# insufficient. Highest precedence because it is the only step that is an
+# explicit human decision, and every entry needs a reason a reviewer can check.
+
+OVERRIDES: dict[str, tuple[Domain, str]] = {
+    # Macquarie is classified Capital Markets, which is defensible as a GICS
+    # label and wrong for applicability: MQG holds a banking licence and is
+    # deposit-funded, so CAPITAL_MARKETS would leave debt_to_equity and
+    # current_ratio applicable and reproduce the CBA distress lines on it.
+    "MQG": (Domain.BANK, "deposit-taking ADI classified as Capital Markets"),
+}
+
+
 # ── 2 · canonical industry mapping ────────────────────────────────────────────
-# PENDING preflight B2/B3. Author from the observed vocabulary, lower-cased,
-# after the exemplars confirm CBA/NAB/WBC/ANZ land as banks, QBE/IAG/MPL/SUN as
-# insurers, and NWL/HUB/PNI as capital markets. Every entry here is a claim
-# about an issuer's economics, so each one should be defensible on its own.
+# Authored from the observed production vocabulary (preflight B2/B3), verified
+# against the exemplars in B4. 66 distinct industries exist; only these need
+# mapping, because every other sector has a defensible fallback and mining is
+# caught by flag or by MINING_INDUSTRIES below. Keeping the table to the cases
+# the fallback cannot safely handle is what stops it growing into a guess list.
+#
+# Confirmed by B4: CBA/NAB/WBC/ANZ -> Banks; QBE/IAG/MPL/SUN -> Insurance;
+# MQG/HUB/NWL/PNI -> Capital Markets; GMG -> Diversified REITs (is_reit);
+# SCG -> Retail REITs (is_reit).
 
 INDUSTRY_DOMAIN: dict[str, Domain] = {
-    # e.g. "banks": Domain.BANK,
-    #      "insurance": Domain.INSURER,
-    #      "capital markets": Domain.CAPITAL_MARKETS,
+    # Financials — no sector fallback exists, so these must be explicit.
+    "banks": Domain.BANK,
+    "thrifts & mortgage finance": Domain.BANK,   # deposit- or wholesale-funded
+    "insurance": Domain.INSURER,
+    "capital markets": Domain.CAPITAL_MARKETS,
+    "consumer finance": Domain.OTHER_FINANCIAL,
+    "financial services": Domain.OTHER_FINANCIAL,
+
+    # Real Estate — is_reit is trustworthy and fires first; these cover the
+    # rows where the flag is not set. Managers and developers carry real
+    # inventory and real gearing, so industrial metrics do apply to them.
+    "diversified reits": Domain.REIT,
+    "retail reits": Domain.REIT,
+    "office reits": Domain.REIT,
+    "industrial reits": Domain.REIT,
+    "residential reits": Domain.REIT,
+    "specialized reits": Domain.REIT,
+    "health care reits": Domain.REIT,
+    "hotel & resort reits": Domain.REIT,
+    "real estate management & development": Domain.GENERAL_CORPORATE,
 }
+
+#: Industries that carry the producer/explorer question whether or not
+#: ``is_miner`` is set. 566 companies sit in Metals & Mining and 110 in Oil &
+#: Gas; if the flag is not set on all of them, sector alone would send an
+#: unflagged pre-revenue explorer to GENERAL_CORPORATE — which is the ARU
+#: defect arriving by a different route.
+MINING_INDUSTRIES: frozenset[str] = frozenset({
+    "metals & mining",
+    "oil, gas & consumable fuels",
+})
 
 
 # ── 3 · defensible sector fallback ────────────────────────────────────────────
@@ -129,25 +176,33 @@ def resolve_domain(row: Mapping) -> DomainResult:
     ``sector`` and ``revenue`` the caller has. Anything absent simply means
     that step cannot fire.
     """
+    # 0 · explicit per-issuer exception
+    code = (row.get("asx_code") or "").strip().upper()
+    if code in OVERRIDES:
+        domain, why = OVERRIDES[code]
+        return DomainResult(domain, Source.OVERRIDE, why)
+
+    industry = _clean(row.get("industry"))
+
     # 1 · structural flags
     if row.get("is_reit"):
         return DomainResult(Domain.REIT, Source.STRUCTURAL_FLAG, "is_reit")
 
-    if row.get("is_miner"):
+    if row.get("is_miner") or industry in MINING_INDUSTRIES:
+        evidence = "is_miner" if row.get("is_miner") else f"industry={industry}"
         revenue = row.get("revenue")
         if revenue is None:
             # A miner whose revenue is unknown could be either, and the two
             # have opposite applicability. Refusing to guess is the contract.
             return DomainResult(Domain.UNKNOWN, Source.UNRESOLVED,
-                                "is_miner, revenue unknown")
+                                f"{evidence}, revenue unknown")
         if float(revenue) > PRE_REVENUE_CEILING:
             return DomainResult(Domain.MINING_PRODUCER, Source.STRUCTURAL_FLAG,
-                                "is_miner, revenue above pre-revenue ceiling")
+                                f"{evidence}, revenue above pre-revenue ceiling")
         return DomainResult(Domain.MINING_EXPLORER, Source.STRUCTURAL_FLAG,
-                            "is_miner, pre-revenue")
+                            f"{evidence}, pre-revenue")
 
     # 2 · canonical industry mapping
-    industry = _clean(row.get("industry"))
     if industry and industry in INDUSTRY_DOMAIN:
         return DomainResult(INDUSTRY_DOMAIN[industry], Source.INDUSTRY_MAPPING,
                             f"industry={industry}")

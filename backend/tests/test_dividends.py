@@ -46,18 +46,33 @@ def row(ex_date: str, amount: float, franking=100.0, grossed_up=None) -> dict:
             "franking_pct": franking, "grossed_up": grossed_up}
 
 
-# CBA's actual payments, newest first — the series that produced 8.73%.
+# CBA's payments as they actually stand in market.dividends, newest first,
+# with the stored grossed_up_amount alongside. Every row reconciles exactly to
+# cash x 1.428571, and franking is 100% throughout.
+#
+# CBA's financial year ends 30 June: the interim goes ex around February and
+# the final around August. The series below therefore spans two and a half
+# years, and divs[:4] summed 2024-08 through 2026-02 — the $9.70 that produced
+# the 8.73% on the company page.
 CBA_ROWS = [
-    row("2026-08-20", 2.35), row("2026-02-19", 2.60),
-    row("2025-08-21", 2.25), row("2025-02-20", 2.50),
+    row("2026-02-18", 2.35, grossed_up=3.357143),
+    row("2025-08-20", 2.60, grossed_up=3.714286),
+    row("2025-02-19", 2.25, grossed_up=3.214286),
+    row("2024-08-21", 2.50, grossed_up=3.571429),
+    row("2024-02-21", 2.15, grossed_up=3.071429),
+    row("2023-08-16", 2.40, grossed_up=3.428571),
 ]
+
+#: A date on which CBA's interim and the preceding final both sit inside the
+#: trailing year — the ordinary semi-annual shape the window is built for.
+CBA_TWO_PAYMENT_DATE = date(2026, 3, 1)
 
 
 # ── The window is period-based ────────────────────────────────────────────────
 
 def test_window_is_twelve_months_not_four_payments():
-    kept = in_window(normalise(CBA_ROWS), AS_OF)
-    assert [p.ex_date for p in kept] == [date(2026, 8, 20), date(2026, 2, 19)]
+    kept = in_window(normalise(CBA_ROWS), CBA_TWO_PAYMENT_DATE)
+    assert [p.ex_date for p in kept] == [date(2026, 2, 18), date(2025, 8, 20)]
     assert len(kept) == 2, "a semi-annual payer has two payments in a year"
 
 
@@ -79,34 +94,56 @@ def test_quarterly_payer_keeps_four_payments():
 def test_as_of_is_the_snapshot_date_not_today():
     """A metric computed for a past date selects the window that date saw."""
     kept = in_window(normalise(CBA_ROWS), date(2025, 9, 1))
-    assert [p.ex_date for p in kept] == [date(2025, 8, 21), date(2025, 2, 20)]
+    assert [p.ex_date for p in kept] == [date(2025, 8, 20), date(2025, 2, 19)]
 
 
 # ── Fixture · CBA dividend window ─────────────────────────────────────────────
 
 def test_cba_window_membership_cash_gross_and_yield_separately():
-    res = ttm_dividends(CBA_ROWS, as_of=AS_OF)
+    res = ttm_dividends(CBA_ROWS, as_of=CBA_TWO_PAYMENT_DATE)
 
     assert res.state is DividendState.APPLICABLE
     assert res.payment_count == 2
-    assert res.cash_dps == 4.95, "2.35 + 2.60, already shown as DPS (TTM) $4.950"
-    assert abs(res.gross_dps - 4.95 * FULLY_FRANKED) < 1e-9
-    assert abs(res.franking_pct - 100.0) < 1e-9
+    assert res.cash_dps == 4.95, "2.35 + 2.60, shown as DPS (TTM) $4.950"
+    assert res.provenance == "stored", "the per-payment column is used"
+    # Stored gross-ups are held to six decimals, so summing them lands a
+    # fraction of a cent off the exact ratio. That difference is the price of
+    # preferring the recorded value over recomputing it, and is immaterial at
+    # any display precision.
+    assert abs(res.gross_dps - 4.95 * FULLY_FRANKED) < 1e-5
+    assert abs(res.franking_pct - 100.0) < 1e-4
 
-    m = dividend_metrics(CBA_ROWS, close=158.690, as_of=AS_OF)
+    m = dividend_metrics(CBA_ROWS, close=158.690, as_of=CBA_TWO_PAYMENT_DATE)
     assert abs(m["grossed_up_yield"] - 0.044561) < 5e-6
 
 
-def test_cba_no_longer_reports_the_two_year_figure():
+def test_cba_no_longer_reports_the_two_and_a_half_year_figure():
     """The old arithmetic, asserted so the regression is visible, not implied."""
     old_cash = sum(r["amount"] for r in CBA_ROWS[:4])
     old_yield = old_cash * FULLY_FRANKED / 158.690
 
-    assert abs(old_cash - 9.70) < 1e-9
+    assert abs(old_cash - 9.70) < 1e-9, "2024-08 through 2026-02"
     assert abs(old_yield - 0.08732) < 5e-6, "the 8.73% the company page displayed"
 
-    new = dividend_metrics(CBA_ROWS, close=158.690, as_of=AS_OF)
+    new = dividend_metrics(CBA_ROWS, close=158.690, as_of=CBA_TWO_PAYMENT_DATE)
     assert new["grossed_up_yield"] < old_yield / 1.9, "roughly halved, not adjusted"
+
+
+def test_a_stale_feed_shows_up_as_a_one_payment_window():
+    """A period window reports what the data contains, and that is the point.
+
+    As of September 2026 the trailing year holds only CBA's February interim:
+    the August 2026 final is absent from market.dividends. A payment-count
+    heuristic hides that by reaching further back until it has four rows; a
+    period window states it, which is the behaviour to keep. The yield is
+    genuinely understated until the feed catches up — a data-completeness
+    problem, surfaced rather than papered over.
+    """
+    res = ttm_dividends(CBA_ROWS, as_of=AS_OF)
+
+    assert res.payment_count == 1
+    assert res.cash_dps == 2.35, "the February interim, alone"
+    assert res.window_start == date(2025, 9, 10)
 
 
 # ── Fixture · anomaly predicate ───────────────────────────────────────────────

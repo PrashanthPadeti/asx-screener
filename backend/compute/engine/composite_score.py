@@ -38,7 +38,16 @@ from pathlib import Path
 
 # The database credential lives in the environment, never in source.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+# Both of these resolve only after the path insert above. Run as a script,
+# sys.path[0] is compute/engine/, so `compute.engine.*` is not importable
+# until the repo root is on the path — importing them at the top of the file
+# is the exact ordering that took the pipeline down before.
 from app.core.db import get_database_url_sync  # noqa: E402
+from compute.engine.factor_applicability import (  # noqa: E402
+    DOMAIN_COLS,
+    apply_applicability,
+    withhold_source_failed,
+)
 
 
 load_dotenv()
@@ -156,8 +165,20 @@ def compute_factor(df: pd.DataFrame, factor_name: str) -> pd.Series:
     return stacked.mean(axis=1, skipna=True).round(0).clip(0, 100)
 
 
-def compute_composite(df_scores: pd.DataFrame) -> pd.Series:
-    """Equal-weight composite of the 5 factor scores; requires >= 2 non-null factors."""
+def compute_composite(df_scores: pd.DataFrame,
+                      source_failed: Optional[pd.Series] = None) -> pd.Series:
+    """Equal-weight composite of the 5 factor scores; requires >= 2 non-null.
+
+    ``source_failed`` marks rows where a factor is missing because its *feed*
+    broke rather than because it does not apply. Those get no composite at
+    all, however many factors survive.
+
+    The distinction is the whole point. Averaging four factors for a bank
+    whose Piotroski is out of domain describes the bank. Averaging four
+    factors because the dividend feed stopped describes nothing — it silently
+    converts a five-factor model into a four-factor one and keeps the name,
+    and the resulting number looks entirely ordinary next to a genuine one.
+    """
     score_cols = ["value_score", "quality_score", "growth_score", "momentum_score", "income_score"]
     available = [c for c in score_cols if c in df_scores.columns]
     stacked = df_scores[available]
@@ -166,7 +187,10 @@ def compute_composite(df_scores: pd.DataFrame) -> pd.Series:
     # Null out stocks with fewer than 2 valid factor scores
     valid_count = stacked.notna().sum(axis=1)
     composite = composite.where(valid_count >= 2)
-    return composite
+
+    return withhold_source_failed(composite, source_failed)
+
+
 
 
 
@@ -411,8 +435,12 @@ def run(conn, dry_run: bool = False) -> int:
     """Load universe, compute scores, upsert. Returns number of rows updated."""
     log.info("Loading screener.universe for scoring…")
 
+    from compute.engine.dividends import DividendSource
+    from compute.engine.daily_compute import fetch_feed_health
+
     cur = conn.cursor()
-    col_list = ", ".join(ALL_COLS)
+    select_cols = ALL_COLS + [c for c in DOMAIN_COLS if c not in ALL_COLS]
+    col_list = ", ".join(select_cols)
     cur.execute(f"""
         SELECT {col_list}
         FROM screener.universe
@@ -420,24 +448,41 @@ def run(conn, dry_run: bool = False) -> int:
           AND price IS NOT NULL
     """)
     rows = cur.fetchall()
+
+    # One watermark for the run. The income factor cannot be scored over a
+    # window the dividend feed has not observed, and that has to be decided
+    # once for the whole universe rather than inferred per company.
+    feed_health = fetch_feed_health(cur)
+    dividend_source = DividendSource(feed_health)
     cur.close()
 
     if not rows:
         log.error("No active rows in screener.universe")
         return 0
 
-    df = pd.DataFrame(rows, columns=ALL_COLS)
+    df = pd.DataFrame(rows, columns=select_cols)
     log.info(f"  Loaded {len(df):,} stocks")
 
-    # Coerce numerics
-    for col in ALL_COLS[1:]:
+    # Coerce numerics — domain columns stay as they are.
+    numeric_cols = [c for c in select_cols
+                    if c != "asx_code" and c not in ("sector", "industry")]
+    for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # ── Filter obviously bad values ───────────────────────────────────────────
-    # PE < 0 or > 500 → exclude from value ranking (distorts percentiles)
-    df.loc[df["pe_ratio"] < 0,   "pe_ratio"]  = np.nan
-    df.loc[df["pe_ratio"] > 500, "pe_ratio"]  = np.nan
-    df.loc[df["debt_to_equity"] < 0, "debt_to_equity"] = np.nan
+    # ── Applicability, before ranking ─────────────────────────────────────────
+    # Supersedes the hand-rolled guards that used to live here (pe_ratio < 0 or
+    # > 500, debt_to_equity < 0). Those were observation validity done by
+    # threshold; the contract does it by rule, and records why rather than
+    # silently discarding.
+    if not feed_health.healthy:
+        log.warning("Dividend feed unhealthy: %s. Income factor and composite "
+                    "will be withheld rather than computed on four factors.",
+                    feed_health.reason)
+
+    masked = apply_applicability(df, dividend_source)
+    df, metric_states = masked.frame, masked.states
+    for key, count in sorted(masked.tally.items()):
+        log.info("  %-40s %5d", key, count)
 
     # ── Compute factor scores ─────────────────────────────────────────────────
     df["value_score"]    = compute_factor(df, "value")
@@ -445,7 +490,7 @@ def run(conn, dry_run: bool = False) -> int:
     df["growth_score"]   = compute_factor(df, "growth")
     df["momentum_score"] = compute_factor(df, "momentum")
     df["income_score"]   = compute_factor(df, "income")
-    df["composite_score"]= compute_composite(df)
+    df["composite_score"]= compute_composite(df, masked.source_failed)
 
     # Multibagger potential — computed after momentum_score, which it consumes.
     mb = compute_multibagger(df)

@@ -440,6 +440,122 @@ def test_rows_from_an_unvalidated_run_are_excluded():
     assert "OTHER" not in members, "a different run is a different contract"
 
 
+# ── Pagination applies to participants, not to the result set ────────────────
+
+def test_top_n_does_not_spend_slots_on_unrankable_rows():
+    """The trap: membership and participation separated correctly, then LIMIT
+    applied to a query that still contains the non-participants. The customer
+    asks for the top 3 yields and gets two real answers and a hole."""
+    from compute.engine.screen_sql import paginated_ranking_sql
+
+    conn = build_db()
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield",
+                              dialect="sqlite")
+
+    sql = paginated_ranking_sql(compiled, "universe", "asx_code", limit=3,
+                                dialect="sqlite")
+    top3 = [r[0] for r in conn.execute(sql, compiled.params)]
+
+    assert len(top3) == 3, "three real answers, not three rows"
+    assert "FEED" not in top3 and "QAN" not in top3
+    assert top3 == ["IND1", "CBA", "IND2"], "0.06, 0.045, 0.02 descending"
+
+
+def test_the_naive_query_spends_slots_on_nulls_in_one_direction_or_the_other():
+    """Documents what the helper prevents — and that the direction is a
+    dialect accident, which is the reason not to rely on NULL ordering at all.
+
+        sqlite     NULLs last on DESC, first on ASC
+        Postgres   the opposite: NULLS LAST on ASC, NULLS FIRST on DESC
+
+    So "top 20 lowest P/E" is poisoned under sqlite and "top 20 highest
+    yield" under Postgres. A route that tested one direction on one engine
+    would conclude the problem does not exist.
+    """
+    conn = build_db()
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield",
+                              descending=False, dialect="sqlite")
+    naive = [r[0] for r in conn.execute(
+        f"SELECT asx_code FROM universe WHERE {compiled.where} "
+        f"ORDER BY {compiled.order_by} LIMIT 3", compiled.params)]
+
+    assert set(naive) & {"FEED", "QAN"}, \
+        "sqlite sorts NULLs first ascending, so they take the top slots"
+    assert naive[:2] == ["FEED", "QAN"], \
+        "two of the three answers are companies with no measurable yield"
+
+
+def test_the_helper_is_unaffected_by_null_ordering_in_either_direction():
+    """Because non-participants never reach the ORDER BY at all."""
+    from compute.engine.screen_sql import paginated_ranking_sql
+
+    conn = build_db()
+    for descending in (True, False):
+        compiled = compile_screen([], SCOPE, order_by="grossed_up_yield",
+                                  descending=descending, dialect="sqlite")
+        page = [r[0] for r in conn.execute(
+            paginated_ranking_sql(compiled, "universe", "asx_code", limit=3,
+                                  dialect="sqlite"), compiled.params)]
+        assert not set(page) & {"FEED", "QAN"}, descending
+        assert len(page) == 3
+
+
+def test_offset_walks_the_participant_set():
+    from compute.engine.screen_sql import paginated_ranking_sql
+
+    conn = build_db()
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield",
+                              dialect="sqlite")
+    page2 = [r[0] for r in conn.execute(
+        paginated_ranking_sql(compiled, "universe", "asx_code", limit=2,
+                              offset=2, dialect="sqlite"), compiled.params)]
+
+    assert page2 == ["IND2"], "three participants, so page two holds one"
+
+
+def test_the_excluded_are_returned_alongside_rather_than_discarded():
+    from compute.engine.screen_sql import excluded_from_ordering_sql
+
+    conn = build_db()
+    compiled = compile_screen([], SCOPE, order_by="grossed_up_yield",
+                              dialect="sqlite")
+    excluded = {r[0] for r in conn.execute(
+        excluded_from_ordering_sql(compiled, "universe", "asx_code"),
+        compiled.params)}
+
+    assert excluded == {"FEED", "QAN"}, \
+        "so a surface can say 2 companies could not be ranked"
+
+
+# ── contract_key is semantic, not forensic ───────────────────────────────────
+
+def test_forensic_detail_does_not_fragment_a_logical_snapshot():
+    """Two shards both saying dividends is unhealthy are one snapshot, even
+    with different watermarks and diagnostic wording."""
+    from compute.engine.screen_sql import ValidatedRun
+
+    a = ValidatedRun(1, "FACTOR_MODEL_V1", ("dividends",), validated=True,
+                     detail={"dividends": "latest ex-date 2026-08-03, 38 days"})
+    b = ValidatedRun(2, "FACTOR_MODEL_V1", ("dividends",), validated=True,
+                     detail={"dividends": "latest ex-date 2026-08-04, 37 days"})
+
+    assert a.contract_key == b.contract_key
+    assert RunScope.from_validated_runs([a, b]).run_ids == (1, 2)
+
+
+def test_the_set_of_affected_sources_is_what_is_compared():
+    from compute.engine.screen_sql import ValidatedRun
+
+    a = ValidatedRun(1, "FACTOR_MODEL_V1", ("dividends", "prices"),
+                     validated=True)
+    b = ValidatedRun(2, "FACTOR_MODEL_V1", ("prices", "dividends"),
+                     validated=True)
+    assert a.contract_key == b.contract_key, "order is not semantic"
+
+    c = ValidatedRun(3, "FACTOR_MODEL_V1", ("dividends",), validated=True)
+    assert a.contract_key != c.contract_key, "a different set is a different fact"
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

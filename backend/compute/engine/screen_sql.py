@@ -65,29 +65,71 @@ class ValidatedRun:
     factor_model_version: str
     unhealthy_sources: tuple[str, ...] = ()
     validated: bool = False
+    #: Forensic evidence — watermarks, row counts, diagnostic text. Kept on
+    #: the run and deliberately absent from contract_key.
+    detail: Mapping[str, str] = None
 
     @property
     def contract_key(self) -> tuple:
         """What must match for two runs to be one logical snapshot.
 
-        Model version and source health both, because a ranking that spans
-        runs with different source health compares a company scored while the
-        dividend feed was up against one scored after it fell over — each
-        individually valid, jointly meaningless.
+        Model version and the *semantic* source-health state, and nothing
+        else. Two shards that both say ``dividends`` is unhealthy are the same
+        logical snapshot even when their watermarks, recent-row counts and
+        diagnostic wording differ — that text is evidence about the same fact,
+        not a different fact. Letting it into the key would fragment an
+        otherwise identical snapshot and refuse a screen for no reason.
+
+        Source health is compared as a *set* of affected sources: which feeds
+        were unusable is semantic, how badly and since when is forensic.
         """
         return (self.factor_model_version, tuple(sorted(self.unhealthy_sources)))
 
 
-#: The query a route runs to discover which runs it may read. Kept here so the
-#: route does not invent its own definition of "validated".
-VALIDATED_RUNS_SQL = """
-    SELECT id, factor_model_version, unhealthy_sources
+#: The query behind resolve_run_scope. Not for a route to execute directly —
+#: see the resolver below.
+_VALIDATED_RUNS_SQL = """
+    SELECT id, factor_model_version, unhealthy_sources, detail
       FROM screener.compute_runs
      WHERE factor_model_version = ANY(%(supported)s)
        AND rows_written IS NOT NULL
      ORDER BY run_at DESC
      LIMIT %(limit)s
 """
+
+
+def resolve_run_scope(cur, supported_versions: Optional[Sequence[str]] = None,
+                      limit: int = 8) -> "RunScope":
+    """The server's answer to "which rows may this request read?".
+
+    A service call rather than an SQL snippet a route pastes, because
+    "validated" is a capability the server owns: it means a supported model
+    version, a completed recompute, and a contract-key check across whatever
+    came back. A route importing the query would be one edit away from
+    relaxing a condition it did not know was load-bearing.
+
+    Returns the newest coherent scope. Raises when nothing qualifies, because
+    no trusted run means no screen — never every row.
+    """
+    from compute.engine.metric_states import GOVERNED_METRICS
+
+    supported = list(supported_versions or GOVERNED_METRICS.keys())
+    cur.execute(_VALIDATED_RUNS_SQL, {"supported": supported, "limit": limit})
+
+    runs = [ValidatedRun(run_id, version, tuple(sources or ()), validated=True,
+                         detail=detail)
+            for run_id, version, sources, detail in cur.fetchall()]
+
+    if not runs:
+        raise CompileError(
+            "no completed compute run under a supported factor model; the "
+            "recompute has not run, or every run predates this build")
+
+    # Newest first from the query, so the newest contract wins and older
+    # incompatible runs are dropped rather than fragmenting the scope.
+    newest = runs[0].contract_key
+    return RunScope.from_validated_runs(
+        [r for r in runs if r.contract_key == newest])
 
 
 @dataclass(frozen=True)
@@ -286,3 +328,47 @@ def order_participation_sql(order_by: str, dialect: Dialect = "postgres",
     """
     return (f"CASE WHEN {applicable_sql(order_by, dialect, states_col)} "
             f"THEN TRUE ELSE FALSE END")
+
+
+# ── Pagination ────────────────────────────────────────────────────────────────
+
+def paginated_ranking_sql(compiled: CompiledScreen, table: str,
+                          select: str, limit: int, offset: int = 0,
+                          dialect: Dialect = "postgres") -> str:
+    """Top-N over the ranking participants, not over the result set.
+
+    The trap this closes: membership and ranking participation are separated
+    correctly, and then LIMIT is applied to a query that still contains the
+    non-participants. A company with a source-unhealthy dividend yield does
+    not become 0% — it is simply still there, occupying one of the twenty
+    slots in "top 20 dividend yields" while sorting wherever the database
+    happens to put NULLs. The semantics are locally correct and the customer
+    receives nineteen real answers and a hole.
+
+    So the ordering participant clause is part of the WHERE, not a flag on the
+    projection, and the limit applies after it.
+    """
+    if compiled.order_applicable is None:
+        raise CompileError(
+            "paginated_ranking_sql needs an ORDER BY metric; without one "
+            "there is no participant set to paginate over")
+
+    return (f"SELECT {select} FROM {table} "
+            f"WHERE {compiled.where} AND {compiled.order_applicable} "
+            f"ORDER BY {compiled.order_by} "
+            f"LIMIT {int(limit)} OFFSET {int(offset)}")
+
+
+def excluded_from_ordering_sql(compiled: CompiledScreen, table: str,
+                               select: str) -> str:
+    """The companies that are in the screen and not in the ranking.
+
+    Returned alongside the page rather than discarded, so a surface can say
+    "3 companies could not be ranked on this metric" instead of leaving the
+    customer to infer that the universe is smaller than it is.
+    """
+    if compiled.order_applicable is None:
+        raise CompileError("no ORDER BY metric, so nothing is excluded from it")
+
+    return (f"SELECT {select} FROM {table} "
+            f"WHERE {compiled.where} AND NOT {compiled.order_applicable}")

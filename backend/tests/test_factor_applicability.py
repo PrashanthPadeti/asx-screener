@@ -237,6 +237,28 @@ def test_margin_expansion_inherits_the_domain_of_the_margin():
     assert ind1["gross_margin_expansion"] == 0.01, "industrials keep theirs"
 
 
+def test_a_column_is_matched_by_canonical_name_not_by_spelling():
+    """screener.universe says ev_to_ebitda; the rules say ev_ebitda.
+
+    Comparing raw names skipped the column entirely, so a bank's EV/EBITDA
+    stayed in the frame and in every peer statistic — the alias failure the
+    registry exists to prevent, one layer above where it was being prevented.
+    """
+    df = universe()
+    df["ev_to_ebitda"] = [12.0, 8.0, 9.0, 10.0, 11.0]
+
+    masked = apply_applicability(df, GOOD_FEED)
+    cba_row = masked.frame[masked.frame["asx_code"] == "CBA"].iloc[0]
+
+    assert pd.isna(cba_row["ev_to_ebitda"]), "the frame column is masked"
+    assert "ev_ebitda" in masked.assessments["CBA"], \
+        "the assessment is keyed canonically, which is what consumers look up"
+    assert masked.assessments["CBA"]["ev_ebitda"].cause is Cause.DOMAIN
+
+    ind1 = masked.frame[masked.frame["asx_code"] == "IND1"].iloc[0]
+    assert ind1["ev_to_ebitda"] == 8.0, "industrials keep theirs"
+
+
 # ── Domains that are not resolvable stay conservative ─────────────────────────
 
 def test_an_unresolved_domain_suppresses_domain_sensitive_metrics():

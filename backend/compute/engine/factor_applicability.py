@@ -44,6 +44,7 @@ import pandas as pd
 
 from compute.engine.applicability import assess, unhealthy
 from compute.engine.domain_resolver import resolve_domain
+from compute.engine.metric_registry import normalise
 from compute.engine.metric_states import (
     GOVERNED_METRICS,
     LATEST_MODEL_VERSION,
@@ -94,7 +95,16 @@ def apply_applicability(df: pd.DataFrame,
     row's factor, and in everyone else's percentile.
     """
     governed = GOVERNED_METRICS[model_version]
-    metric_cols = [c for c in df.columns if c in governed]
+
+    # Columns are matched by canonical name, not by spelling. screener.universe
+    # calls it ev_to_ebitda; the governed set and the applicability rules call
+    # it ev_ebitda. Comparing raw names silently skipped that column — the
+    # exact alias failure the registry exists to prevent, one layer up from
+    # where it was being prevented. The frame keeps its own spelling; the
+    # assessment is keyed canonically, because that is what a peer engine and
+    # the sidecar both look up.
+    metric_cols = [(c, normalise(c)) for c in df.columns]
+    metric_cols = [(c, canon) for c, canon in metric_cols if canon in governed]
 
     feed_broken = dividend_source is not None and not dividend_source.healthy
     feed_reason = dividend_source.health.reason if feed_broken else ""
@@ -112,16 +122,16 @@ def apply_applicability(df: pd.DataFrame,
         assessments = []
         row_failed = False
 
-        for col in metric_cols:
+        for col, canon in metric_cols:
             value = row[col]
             if value is not None and pd.isna(value):
                 value = None
 
-            if feed_broken and col in INCOME_METRICS:
-                a = unhealthy(col, feed_reason, result.domain)
+            if feed_broken and canon in INCOME_METRICS:
+                a = unhealthy(canon, feed_reason, result.domain)
                 row_failed = True
             else:
-                a = assess(col, None if value is None else float(value),
+                a = assess(canon, None if value is None else float(value),
                            result.domain)
 
             assessments.append(a)

@@ -49,10 +49,11 @@ class Direction(str, Enum):
 class Criterion:
     """One condition, in semantic terms rather than SQL terms."""
 
-    field: str                       # the name as written by the user
+    field: str                       # the resolved field key, not a column
     role: CriterionType
     operator: str
     value: Any
+    kind: str = "number"             # number | text | boolean
     #: Resolved after parsing. None for an ungoverned field, which keeps its
     #: existing deterministic behaviour rather than acquiring P0-A semantics.
     canonical: Optional[str] = None
@@ -60,7 +61,62 @@ class Criterion:
 
     def resolved(self, definition: FieldDef) -> "Criterion":
         return Criterion(self.field, self.role, self.operator, self.value,
-                         definition.canonical, definition.governed)
+                         self.kind, definition.canonical, definition.governed)
+
+    def fields(self) -> tuple[str, ...]:
+        return (self.field,)
+
+
+# ── The expression tree ───────────────────────────────────────────────────────
+# The existing parser already builds a real AST — _ConditionNode, _AndNode,
+# _OrNode, with proper precedence and parentheses — so the language can express
+# (A AND B) OR C. Flattening that into a list of criteria would silently
+# discard the grouping and turn a disjunction into a conjunction, which is a
+# wrong answer rather than a lost convenience. The tree is preserved.
+
+@dataclass(frozen=True)
+class AllOf:
+    """Every operand must hold."""
+
+    operands: tuple = ()
+
+    def fields(self) -> tuple[str, ...]:
+        return tuple(f for o in self.operands for f in o.fields())
+
+
+@dataclass(frozen=True)
+class AnyOf:
+    """At least one operand must hold."""
+
+    operands: tuple = ()
+
+    def fields(self) -> tuple[str, ...]:
+        return tuple(f for o in self.operands for f in o.fields())
+
+
+def walk(node) -> list:
+    """Every Criterion in a tree, in source order.
+
+    For inspecting *which* fields a query touches — governance, run scope,
+    validation. Never for evaluating it: reading the leaves and ignoring the
+    branches is exactly the flattening the tree exists to prevent.
+    """
+    if isinstance(node, Criterion):
+        return [node]
+    if isinstance(node, (AllOf, AnyOf)):
+        return [c for operand in node.operands for c in walk(operand)]
+    return []
+
+
+def map_criteria(node, fn):
+    """Rebuild a tree with every Criterion transformed, structure intact."""
+    if isinstance(node, Criterion):
+        return fn(node)
+    if isinstance(node, AllOf):
+        return AllOf(tuple(map_criteria(o, fn) for o in node.operands))
+    if isinstance(node, AnyOf):
+        return AnyOf(tuple(map_criteria(o, fn) for o in node.operands))
+    return node
 
 
 @dataclass(frozen=True)
@@ -82,9 +138,15 @@ class ParsedQuery:
     than re-running a string through a parser that may since have changed.
     """
 
-    criteria: tuple[Criterion, ...] = ()
+    #: The whole condition, grouping preserved. None means no filters.
+    expression: Optional[Any] = None
     ordering: Optional[Ordering] = None
     raw: str = ""
+
+    @property
+    def criteria(self) -> tuple[Criterion, ...]:
+        """Every leaf, for inspection only — the tree is what compiles."""
+        return tuple(walk(self.expression))
 
     @property
     def governed_criteria(self) -> tuple[Criterion, ...]:
@@ -96,7 +158,13 @@ class ParsedQuery:
 
     @property
     def requires_run_scope(self) -> bool:
-        """True when anything in the query needs the applicability contract."""
+        """True when any semantic consumer of governed data is present.
+
+        Filters, ordering and eventually preferences alike — not only the
+        WHERE criteria. A query with no filters at all that ranks by a
+        governed metric still needs the contract, and a filter-only check
+        would miss it.
+        """
         return bool(self.governed_criteria) or bool(
             self.ordering and self.ordering.governed)
 
@@ -109,8 +177,8 @@ def canonicalise(parsed: ParsedQuery,
     stage has to guess whether ``ev_to_ebitda`` and ``ev_ebitda`` are the same
     concept. Unknown fields raise here rather than at the database.
     """
-    criteria = tuple(c.resolved(resolve(registry, c.field))
-                     for c in parsed.criteria)
+    expression = map_criteria(
+        parsed.expression, lambda c: c.resolved(resolve(registry, c.field)))
 
     ordering = parsed.ordering
     if ordering is not None:
@@ -118,7 +186,7 @@ def canonicalise(parsed: ParsedQuery,
         ordering = Ordering(ordering.field, ordering.direction,
                             definition.canonical, definition.governed)
 
-    return ParsedQuery(criteria, ordering, parsed.raw)
+    return ParsedQuery(expression, ordering, parsed.raw)
 
 
 # ── The one-way adapter ───────────────────────────────────────────────────────
@@ -145,25 +213,41 @@ def to_legacy_sql(parsed: ParsedQuery,
     that is the point of the migration, and a caller still using this adapter
     for a governed field is knowingly on the old path.
     """
-    clauses: list[str] = []
     params: dict = {}
+    counter = [0]
 
-    for i, criterion in enumerate(parsed.criteria):
-        definition = resolve(registry, criterion.field)
-        operator = OPERATOR_SQL.get(criterion.operator)
+    def render(node) -> str:
+        if isinstance(node, AllOf):
+            if not node.operands:
+                return "TRUE"
+            return " AND ".join(f"({render(o)})" for o in node.operands)
+        if isinstance(node, AnyOf):
+            if not node.operands:
+                return "FALSE"
+            return " OR ".join(f"({render(o)})" for o in node.operands)
+
+        definition = resolve(registry, node.field)
+        operator = OPERATOR_SQL.get(node.operator)
         if operator is None:
-            raise UnknownField(f"unsupported operator: {criterion.operator!r}")
+            raise UnknownField(f"unsupported operator: {node.operator!r}")
 
-        key = f"{prefix}{i}"
-        value = criterion.value
-        if definition.type == "number":
-            value = float(value) * definition.scale
+        if node.kind == "boolean":
+            want_true = node.value if operator == "=" else not node.value
+            clause = (f"({definition.column})::int != 0" if want_true
+                      else f"({definition.column})::int = 0")
+        else:
+            key = f"{prefix}{counter[0]}"
+            counter[0] += 1
+            value = node.value
+            if definition.type == "number":
+                value = float(value) * definition.scale
+            params[key] = value
+            clause = f"({definition.column}) {operator} :{key}"
 
-        clause = f"({definition.column}) {operator} :{key}"
-        if criterion.role is CriterionType.EXCLUDED:
-            clause = f"NOT {clause}"
+        if node.role is CriterionType.EXCLUDED:
+            clause = f"NOT ({clause})"
+        return clause
 
-        clauses.append(clause)
-        params[key] = value
-
-    return (" AND ".join(clauses) if clauses else "TRUE"), params
+    if parsed.expression is None:
+        return "TRUE", {}
+    return render(parsed.expression), params

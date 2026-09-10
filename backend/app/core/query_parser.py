@@ -672,11 +672,24 @@ class _ConditionNode:
                                         both smallint columns and boolean expressions)
     """
 
-    def __init__(self, col: str, op: str, value, kind: str = "number"):
+    def __init__(self, col: str, op: str, value, kind: str = "number",
+                 field_key: str | None = None, user_value=None):
         self.col   = col
         self.op    = op
         self.value = value
         self.kind  = kind
+        # The semantic half. field_key is the resolved API field name — an
+        # identity the registry understands — while col is where it happens
+        # to be stored. user_value is the number as typed, before the scale
+        # factor, so a semantic consumer applies scale once rather than twice.
+        self.field_key  = field_key
+        self.user_value = user_value if user_value is not None else value
+
+    def to_expression(self):
+        from app.core.parsed_query import Criterion
+        from compute.engine.screen_predicates import CriterionType
+        return Criterion(self.field_key, CriterionType.REQUIRED,
+                         self.op, self.user_value, kind=self.kind)
 
     def to_sql(self, params: dict, counter: list) -> str:
         if self.kind == "boolean":
@@ -701,6 +714,10 @@ class _AndNode:
         r = self.right.to_sql(params, counter)
         return f"({l}) AND ({r})"
 
+    def to_expression(self):
+        from app.core.parsed_query import AllOf
+        return AllOf((self.left.to_expression(), self.right.to_expression()))
+
 
 class _OrNode:
     def __init__(self, left, right):
@@ -711,6 +728,10 @@ class _OrNode:
         l = self.left.to_sql(params, counter)
         r = self.right.to_sql(params, counter)
         return f"({l}) OR ({r})"
+
+    def to_expression(self):
+        from app.core.parsed_query import AnyOf
+        return AnyOf((self.left.to_expression(), self.right.to_expression()))
 
 
 # ── Recursive Descent Parser ──────────────────────────────────────────────────
@@ -854,7 +875,8 @@ class _Parser:
                 "Did you miss an operator?"
             )
 
-        field_info = self.allowed_fields[field_key]
+        field_info = dict(self.allowed_fields[field_key])
+        field_info["_key"] = field_key
         ftype      = field_info.get("type", "number")
         col        = field_info["col"]
 
@@ -867,7 +889,8 @@ class _Parser:
                 or nxt.type == TT_RPAREN
                 or (nxt.type == TT_WORD and nxt.value.upper() in _KEYWORDS)
             ):
-                return _ConditionNode(col, "=", True, kind="boolean")
+                return _ConditionNode(col, "=", True, kind="boolean",
+                                      field_key=field_key)
 
         # ── Operator ──────────────────────────────────────────────────────────
         if self._eof() or self._peek().type != TT_OP:
@@ -914,7 +937,9 @@ class _Parser:
         # Apply scale factor (user types 10 meaning 10%; DB stores 0.10)
         scale    = field_info.get("scale", 1.0)
         db_value = raw_value * scale
-        return _ConditionNode(col, sql_op, db_value, kind="number")
+        return _ConditionNode(col, sql_op, db_value, kind="number",
+                              field_key=field_info["_key"],
+                              user_value=raw_value)
 
     def _parse_text_value(self, field_key, col, sql_op, op_tok, raw_phrase):
         if sql_op not in ("=", "!="):
@@ -933,7 +958,8 @@ class _Parser:
                 "e.g. sector = 'Healthcare'"
             )
         value = self._consume().value
-        return _ConditionNode(col, sql_op, value, kind="text")
+        return _ConditionNode(col, sql_op, value, kind="text",
+                              field_key=field_key)
 
     def _parse_boolean_value(self, field_key, col, sql_op, op_tok, raw_phrase):
         if sql_op not in ("=", "!="):
@@ -957,7 +983,8 @@ class _Parser:
                 f"Expected true or false after '{raw_phrase} {op_tok.value}', "
                 f"got '{got}'. Example: is_reit = true"
             )
-        return _ConditionNode(col, sql_op, truth, kind="boolean")
+        return _ConditionNode(col, sql_op, truth, kind="boolean",
+                              field_key=field_key)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -1006,6 +1033,39 @@ def parse_query(
     where_fragment = root.to_sql(params, counter)
 
     return where_fragment, params
+
+
+def parse_query_typed(query_text: str, allowed_fields: dict):
+    """Parse into the semantic representation rather than into SQL.
+
+    The canonical entry point. Same grammar, same tokeniser, same precedence
+    and grouping — only what the parse *returns* is different, because once a
+    fragment has been emitted the meaning is gone: no object saying which
+    conditions were REQUIRED and which EXCLUDED, no canonical identity, no
+    applicability, nowhere to record a non-evaluation.
+
+    The parser deliberately does not consult the field registry. It resolves
+    aliases to field *keys* — semantic identities — and canonicalisation
+    against the 311-field registry happens in a separate pass, so syntax
+    parsing stays independent of the product registry and a saved query
+    survives the registry evolving.
+
+    Returns an unresolved ParsedQuery: run ``parsed_query.canonicalise`` over
+    it to attach canonical identity and governance before compiling.
+    """
+    from app.core.parsed_query import ParsedQuery
+
+    if not query_text or not query_text.strip():
+        raise QueryParseError("Query cannot be empty")
+
+    alias_map = _build_alias_map(allowed_fields)
+    tokens    = _tokenize(query_text)
+
+    if not tokens:
+        raise QueryParseError("Query contains no recognizable tokens")
+
+    root = _Parser(tokens, alias_map, allowed_fields).parse()
+    return ParsedQuery(expression=root.to_expression(), raw=query_text)
 
 
 def get_field_reference(allowed_fields: dict) -> list[dict]:

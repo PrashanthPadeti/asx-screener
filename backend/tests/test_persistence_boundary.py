@@ -339,6 +339,56 @@ def test_serving_with_the_sentinel_does_not_assert_validity():
     assert payload["states"]["grossed_up_yield"]["cause"] == "source_unhealthy"
 
 
+# ── The round trip must preserve who participates, not just what each is ─────
+
+def test_the_valid_population_survives_the_round_trip():
+    """A codec can preserve every individual state correctly and still change
+    *who participates* once the row is reconstructed — which would move every
+    peer statistic without any single metric looking wrong.
+    """
+    from compute.engine.peer_benchmarks import valid_population
+
+    before = compute_cba()
+    values, states = persist_row(before)
+    after = decode_all(values, states, Domain.BANK)
+
+    assert valid_population(before.values()) == valid_population(after.values())
+
+
+def test_a_reconstructed_row_produces_an_identical_benchmark():
+    """The consumer-level version of the same assertion."""
+    from compute.engine.peer_benchmarks import benchmark
+
+    peers_before, peers_after = [], []
+    for i in range(8):
+        row = assess_all_bank()
+        row["roe"] = assess("roe", 0.10 + i * 0.01, Domain.BANK,
+                            Observation(equity=8e10))
+        values, states = persist_row(row)
+        back = decode_all(values, states, Domain.BANK)
+
+        peers_before.append(row["roe"])
+        peers_after.append(back["roe"])
+
+    b_before = benchmark("roe", peers_before)
+    b_after = benchmark("roe", peers_after)
+
+    assert b_before.ok and b_after.ok
+    assert (b_before.n_valid, b_before.median) == (b_after.n_valid, b_after.median)
+    assert (b_before.p25, b_before.p75) == (b_after.p25, b_after.p75)
+
+
+def test_a_suppressed_metric_stays_out_of_the_population_after_persistence():
+    from compute.engine.peer_benchmarks import benchmark
+
+    rows = [persist_row(assess_all_bank()) for _ in range(6)]
+    restored = [decode_all(v, s, Domain.BANK)["debt_to_equity"] for v, s in rows]
+
+    b = benchmark("debt_to_equity", restored)
+    assert b.n_valid == 0 and b.median is None, \
+        "a suppressed value must not become a peer observation on reload"
+
+
 def test_a_known_version_still_validates_normally():
     """Fail-closed on unknown must not break the supported path."""
     governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]

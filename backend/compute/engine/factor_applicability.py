@@ -17,14 +17,14 @@ z-scores, quantile buckets, medians, peer averages, sector-relative
 normalisation, or any clipping threshold derived from the population. Mask
 first, then compute the population statistic.
 
-KNOWN GAP, recorded rather than silently left: ``sector_benchmarks.py``
-computes per-sector median / P25 / P75 for ``debt_to_equity``,
-``current_ratio``, ``gross_margin``, ``roe``, ``net_margin``, ``ev_to_ebitda``
-and ``grossed_up_yield`` straight from the unmasked universe. For the
-Financials sector every one of those inputs is out of domain, so the published
-"Financials sector median debt_to_equity" is a statistic computed entirely
-from suppressed observations. It is a separate engine and a separate wiring
-step; it must not ship enabled until it takes the masked frame.
+``sector_benchmarks.py`` is the peer-aggregate instance of the same rule and
+is handled in ``peer_benchmarks``. Note the correction there: it is **not**
+true that every Financials input is out of domain. For a bank the frozen rules
+suppress ``debt_to_equity``, ``current_ratio``, ``gross_margin`` and
+``ev_ebitda`` — but ``roe``, ``net_margin`` and ``grossed_up_yield`` remain
+meaningful, and withholding a bank dividend-yield median would be the
+industrial-defaults error running in reverse. The assessment decides, metric
+by metric; the sector name decides nothing.
 
 ``pct_rank`` ranks a whole column. An out-of-domain value left in place does
 not merely mislabel its own row — it moves the percentile of every other

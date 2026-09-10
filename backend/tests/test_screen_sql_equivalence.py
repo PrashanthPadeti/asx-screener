@@ -663,6 +663,59 @@ def test_case_4_not_of_a_disjunction_stays_unknown_when_undecidable():
     assert raw["IND2"] == 1, "decidable: neither half holds for IND2"
 
 
+ROLE_TRUTH_TABLE = {
+    # raw E   -> (admitted under REQUIRED, admitted under EXCLUDED)
+    "TRUE":  (True,  False),
+    "FALSE": (False, True),
+    "NULL":  (False, True),      # the row that decides whether this is right
+}
+
+
+def test_the_role_collapse_truth_table():
+    """The boundary is where the bug would reappear if written naively.
+
+    For REQUIRED a plain `WHERE E` happens to behave correctly, because FALSE
+    and NULL are both rejected. For EXCLUDED, `WHERE NOT E` is wrong: NOT NULL
+    is NULL, SQL drops the row, and non-evaluation becomes evidence for
+    exclusion — the exact defect the CASE leaf was built to prevent, undone
+    one line later.
+
+    COALESCE must therefore sit *inside* the negation, collapsing UNKNOWN to
+    "not proven" before the NOT rather than after it.
+    """
+    from compute.engine.screen_sql import membership_sql
+
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE t (label TEXT, e INTEGER)")
+    conn.executemany("INSERT INTO t VALUES (?,?)",
+                     [("TRUE", 1), ("FALSE", 0), ("NULL", None)])
+
+    for role, index in ((CriterionType.REQUIRED, 0), (CriterionType.EXCLUDED, 1)):
+        clause = membership_sql("e", role, "sqlite")
+        admitted = dict(conn.execute(
+            f"SELECT label, CASE WHEN {clause} THEN 1 ELSE 0 END FROM t"))
+        for label, expected in ROLE_TRUTH_TABLE.items():
+            assert bool(admitted[label]) is expected[index], \
+                f"{role.value} on {label}"
+
+
+def test_the_naive_exclusion_fails_the_table():
+    """Kept so the reason for the COALESCE ordering cannot be optimised away."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE t (label TEXT, e INTEGER)")
+    conn.executemany("INSERT INTO t VALUES (?,?)",
+                     [("TRUE", 1), ("FALSE", 0), ("NULL", None)])
+
+    naive = dict(conn.execute(
+        "SELECT label, CASE WHEN NOT e THEN 1 ELSE 0 END FROM t"))
+
+    assert not naive["NULL"], \
+        "NOT NULL is NULL and the row is dropped — non-evaluation acting as " \
+        "evidence for exclusion"
+    assert bool(naive["NULL"]) is not ROLE_TRUTH_TABLE["NULL"][1], \
+        "which is precisely the opposite of the required behaviour"
+
+
 def test_an_exclusion_still_keeps_a_row_it_cannot_evaluate():
     """The boundary rule, unchanged by the three-valued leaf."""
     conn = build_db()
@@ -679,6 +732,39 @@ def test_a_required_criterion_still_refuses_what_it_cannot_prove():
         conn, [Criterion("grossed_up_yield", CriterionType.REQUIRED, "gt", 0.03)])
 
     assert "FEED" not in members and "IND1" in members
+
+
+def test_the_snapshot_names_the_contract_not_a_shard():
+    """A response says what it was computed under. Naming one run id would be
+    false the first time sharding appeared."""
+    from compute.engine.screen_sql import ValidatedRun
+
+    a = ValidatedRun(1, "FACTOR_MODEL_V1", (), validated=True)
+    b = ValidatedRun(2, "FACTOR_MODEL_V1", (), validated=True)
+
+    one = RunScope.from_validated_runs([a, b])
+    same = RunScope.from_validated_runs([b, a])
+    assert one.snapshot == same.snapshot, "order is not part of the identity"
+
+    degraded = RunScope.from_validated_runs(
+        [ValidatedRun(1, "FACTOR_MODEL_V1", ("dividends",), validated=True)])
+    healthy = RunScope.from_validated_runs([a])
+    assert degraded.snapshot != healthy.snapshot, \
+        "the same rows under different source health is a different contract"
+
+
+def test_the_snapshot_is_opaque():
+    """A client compares it; it does not parse it. The moment it looks
+    structured someone reads a run id out of it."""
+    from compute.engine.screen_sql import ValidatedRun
+
+    scope = RunScope.from_validated_runs(
+        [ValidatedRun(4711, "FACTOR_MODEL_V1", (), validated=True)])
+
+    assert scope.snapshot.startswith("snap_")
+    assert "4711" not in scope.snapshot
+    assert "FACTOR_MODEL_V1" not in scope.snapshot
+    assert scope.run_ids == (4711,), "the ids stay available as diagnostics"
 
 
 def test_an_exclusion_nested_in_a_disjunction_is_refused_not_guessed():

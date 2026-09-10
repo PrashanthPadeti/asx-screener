@@ -165,6 +165,25 @@ class RunScope:
         ids = ", ".join(str(int(r)) for r in self.run_ids)
         return f"{column} IN ({ids})"
 
+    #: The logical contract, carried alongside the physical ids so a response
+    #: can name what it was computed under without naming an arbitrary shard.
+    contract: Optional[tuple] = None
+
+    @property
+    def snapshot(self) -> str:
+        """An opaque, deterministic identifier for the logical contract.
+
+        Derived from the model version, the source-health state and the run
+        set, so the same contract over the same rows always produces the same
+        string and a different contract never collides. Opaque because a
+        client should compare it, not parse it — the moment it looks
+        structured someone will read a run id out of it.
+        """
+        import hashlib
+
+        material = repr((self.contract, self.run_ids)).encode()
+        return "snap_" + hashlib.sha256(material).hexdigest()[:16]
+
     @classmethod
     def from_validated_runs(cls, runs: Sequence[ValidatedRun]) -> "RunScope":
         """The only sanctioned way for a route to build a scope.
@@ -195,7 +214,7 @@ class RunScope:
                 f"across them would compare companies scored under different "
                 f"model or source-health states")
 
-        return cls(tuple(sorted(r.run_id for r in runs)))
+        return cls(tuple(sorted(r.run_id for r in runs)), contracts.pop())
 
 
 @dataclass(frozen=True)

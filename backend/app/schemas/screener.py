@@ -292,6 +292,20 @@ class ScreenerRow(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class OrderingExclusion(BaseModel):
+    """Why a screen member is absent from this ordering.
+
+    Returned as a count by default; identifiers and reasons only for a small
+    result set or on request, because a page carrying thousands of exclusions
+    is payload nobody reads.
+    """
+
+    metric:  str
+    count:   int
+    reasons: dict[str, int] = {}             # cause -> how many
+    codes:   Optional[list[str]] = None      # populated only when small
+
+
 class ScreenerResponse(BaseModel):
     data:            list[ScreenerRow]
     total:           int
@@ -301,3 +315,22 @@ class ScreenerResponse(BaseModel):
     filters_applied: int
     is_capped:       bool          = False   # True when free-tier 500-row limit applied
     free_limit:      Optional[int] = None    # 500 for free users, None otherwise
+
+    # ── Three-valued result metadata ─────────────────────────────────────────
+    # total is screen membership. ranked_total is the subset with a valid
+    # observation for the requested ordering. They diverge only when the
+    # ordering is governed and some members cannot participate — a company
+    # with a source-unhealthy dividend yield belongs in the universe and
+    # cannot be placed in a yield ranking, and collapsing those into one
+    # number forces the client to guess which question it answered.
+    ranked_total:           Optional[int] = None
+    excluded_from_ordering: Optional[OrderingExclusion] = None
+
+    # An opaque identifier for the logical contract this result was computed
+    # under — model version plus source-health state, over whatever set of
+    # physical runs happened to be coherent. Deliberately not one run id:
+    # presenting an arbitrary shard's id as though it explained the whole
+    # result set would be false the first time sharding appeared.
+    snapshot:     Optional[str] = None
+    #: Diagnostic only. The physical runs behind the snapshot.
+    run_ids:      Optional[list[int]] = None

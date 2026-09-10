@@ -556,6 +556,158 @@ def test_the_set_of_affected_sources_is_what_is_compared():
     assert a.contract_key != c.contract_key, "a different set is a different fact"
 
 
+# ── Three-valued composition · UNKNOWN must not become evidence ──────────────
+# The collapse being prevented:
+#
+#     yield > 5%  on SOURCE_UNHEALTHY  ->  FALSE
+#     NOT (yield > 5%)                 ->  TRUE
+#
+# NOT is not in the query grammar today (_KEYWORDS is {"AND", "OR"}), so this
+# is not user-reachable through the language. It is reachable through the
+# compiler's own EXCLUDED shape and through any future grammar extension, and
+# a latent version of this defect is worth closing while it is cheap.
+
+def three_valued(conn, expr: str, params: dict) -> dict:
+    """Each company's raw TRUE/FALSE/NULL for one expression."""
+    rows = conn.execute(
+        f"SELECT asx_code, {expr} FROM universe WHERE {SCOPE.sql('sqlite')}",
+        params).fetchall()
+    return {code: value for code, value in rows}
+
+
+def yield_over(threshold: float, param: str = "t"):
+    return Criterion("grossed_up_yield", CriterionType.REQUIRED, "gt", threshold)
+
+
+def test_an_unevaluable_leaf_is_null_not_false():
+    """The property everything else rests on. FALSE is a claim; NULL is not."""
+    from compute.engine.screen_sql import three_valued_sql
+
+    conn = build_db()
+    expr = three_valued_sql(yield_over(0.05), "t", "sqlite")
+    values = three_valued(conn, expr, {"t": 0.05})
+
+    assert values["IND1"] == 1, "0.06 > 0.05 is proven true"
+    assert values["IND2"] == 0, "0.02 > 0.05 is proven false"
+    assert values["FEED"] is None, "source unhealthy says nothing"
+    assert values["QAN"] is None, "no value says nothing"
+
+
+def test_case_1_not_of_an_unevaluable_condition_is_not_proven_true():
+    """NOT UNKNOWN = UNKNOWN, so it cannot admit a row."""
+    from compute.engine.screen_sql import membership_sql, three_valued_sql
+
+    conn = build_db()
+    inner = three_valued_sql(yield_over(0.05), "t", "sqlite")
+    negated = f"NOT ({inner})"
+
+    values = three_valued(conn, negated, {"t": 0.05})
+    assert values["FEED"] is None, "NOT UNKNOWN stays UNKNOWN"
+
+    admitted = [c for c, v in three_valued(
+        conn, membership_sql(negated, CriterionType.REQUIRED, "sqlite"),
+        {"t": 0.05}).items() if v]
+    assert "FEED" not in admitted, \
+        "an unevaluable yield must not prove the company yields under 5%"
+    assert "IND2" in admitted, "a genuine 0.02 is proven under 5%"
+
+
+def test_case_2_true_or_unknown_admits_on_the_true_half():
+    from compute.engine.screen_sql import membership_sql, three_valued_sql
+
+    conn = build_db()
+    # roe > 0.10 is true for every fixture company; the yield half is unknown
+    # for FEED.
+    a = three_valued_sql(
+        Criterion("roe", CriterionType.REQUIRED, "gt", 0.10), "a", "sqlite")
+    b = three_valued_sql(yield_over(0.05), "t", "sqlite")
+
+    clause = membership_sql(f"({a}) OR ({b})", CriterionType.REQUIRED, "sqlite")
+    admitted = [c for c, v in three_valued(
+        conn, clause, {"a": 0.10, "t": 0.05}).items() if v]
+
+    assert "FEED" in admitted, \
+        "A independently proves membership; the unknown half is irrelevant"
+
+
+def test_case_3_false_or_unknown_does_not_admit():
+    from compute.engine.screen_sql import membership_sql, three_valued_sql
+
+    conn = build_db()
+    # roe > 0.9 is false for everyone.
+    a = three_valued_sql(
+        Criterion("roe", CriterionType.REQUIRED, "gt", 0.9), "a", "sqlite")
+    b = three_valued_sql(yield_over(0.05), "t", "sqlite")
+
+    raw = three_valued(conn, f"({a}) OR ({b})", {"a": 0.9, "t": 0.05})
+    assert raw["FEED"] is None, "FALSE OR UNKNOWN is UNKNOWN, not FALSE"
+
+    clause = membership_sql(f"({a}) OR ({b})", CriterionType.REQUIRED, "sqlite")
+    admitted = [c for c, v in three_valued(
+        conn, clause, {"a": 0.9, "t": 0.05}).items() if v]
+    assert "FEED" not in admitted
+
+
+def test_case_4_not_of_a_disjunction_stays_unknown_when_undecidable():
+    from compute.engine.screen_sql import three_valued_sql
+
+    conn = build_db()
+    a = three_valued_sql(
+        Criterion("roe", CriterionType.REQUIRED, "gt", 0.9), "a", "sqlite")
+    b = three_valued_sql(yield_over(0.05), "t", "sqlite")
+
+    raw = three_valued(conn, f"NOT (({a}) OR ({b}))", {"a": 0.9, "t": 0.05})
+
+    assert raw["FEED"] is None, "undecidable stays undecidable"
+    assert raw["IND1"] == 0, "decidable: IND1's yield does exceed 5%"
+    assert raw["IND2"] == 1, "decidable: neither half holds for IND2"
+
+
+def test_an_exclusion_still_keeps_a_row_it_cannot_evaluate():
+    """The boundary rule, unchanged by the three-valued leaf."""
+    conn = build_db()
+    members = sql_membership(
+        conn, [Criterion("grossed_up_yield", CriterionType.EXCLUDED, "gt", 0.03)])
+
+    assert "FEED" in members, "the exclusion is unproven, so it cannot reject"
+    assert "IND1" not in members, "0.06 is proven above 0.03 and does reject"
+
+
+def test_a_required_criterion_still_refuses_what_it_cannot_prove():
+    conn = build_db()
+    members = sql_membership(
+        conn, [Criterion("grossed_up_yield", CriterionType.REQUIRED, "gt", 0.03)])
+
+    assert "FEED" not in members and "IND1" in members
+
+
+def test_an_exclusion_nested_in_a_disjunction_is_refused_not_guessed():
+    """Its meaning there is undefined, and picking one is how the original
+    defect arrived."""
+    from app.core.parsed_query import AnyOf, Criterion as TypedCriterion
+    from compute.engine.screen_sql import assert_role_is_decidable
+
+    tree = AnyOf((
+        TypedCriterion("roe", CriterionType.REQUIRED, "gt", 0.1),
+        TypedCriterion("grossed_up_yield", CriterionType.EXCLUDED, "gt", 0.05)))
+
+    try:
+        assert_role_is_decidable(tree)
+    except CompileError as e:
+        assert "no defined meaning" in str(e)
+    else:
+        raise AssertionError("an undefined composition must be refused")
+
+
+def test_an_exclusion_at_the_top_of_a_conjunction_is_fine():
+    from app.core.parsed_query import AllOf, Criterion as TypedCriterion
+    from compute.engine.screen_sql import assert_role_is_decidable
+
+    assert_role_is_decidable(AllOf((
+        TypedCriterion("roe", CriterionType.REQUIRED, "gt", 0.1),
+        TypedCriterion("grossed_up_yield", CriterionType.EXCLUDED, "gt", 0.05))))
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

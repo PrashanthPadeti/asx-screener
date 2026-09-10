@@ -255,15 +255,101 @@ def compile_criterion(criterion: Criterion, param: str,
     applicable = applicable_sql(criterion.metric, dialect, states_col)
     predicate = predicate_sql(criterion, param, dialect)
 
-    if criterion.criterion is CriterionType.REQUIRED:
-        # The requirement must be *proven*, so both halves must hold.
-        return f"({applicable} AND {predicate})"
-
-    if criterion.criterion is CriterionType.EXCLUDED:
-        # The exclusion must be proven to reject. Unproven leaves the row in.
-        return f"NOT ({applicable} AND {predicate})"
+    if criterion.criterion in (CriterionType.REQUIRED, CriterionType.EXCLUDED):
+        # Three-valued at the leaf, collapsed to membership by role. Both
+        # steps matter: the CASE keeps UNKNOWN from becoming a claim, and the
+        # role decides what UNKNOWN means once a decision is unavoidable.
+        expression = three_valued_sql(criterion, param, dialect, states_col)
+        return f"({membership_sql(expression, criterion.criterion, dialect)})"
 
     return None
+
+
+# ── Three-valued composition ──────────────────────────────────────────────────
+# The collapse this prevents:
+#
+#     yield > 5%  on a SOURCE_UNHEALTHY metric  ->  FALSE
+#     NOT (yield > 5%)                          ->  TRUE
+#
+# which turns "we cannot evaluate the dividend yield" into positive evidence
+# that the company does not yield more than 5%. Harmless while every governed
+# leaf sits directly under a conjunction, and wrong the moment one sits under
+# a negation or contributes to a disjunction.
+#
+# `applicable AND predicate` is a two-valued expression: it says FALSE for
+# unavailable, and FALSE is a claim. A CASE that yields NULL says nothing, and
+# SQL's own three-valued logic is Kleene logic, so AND, OR and NOT compose it
+# correctly without any help:
+#
+#     NOT UNKNOWN = UNKNOWN        TRUE  AND UNKNOWN = UNKNOWN
+#     TRUE  OR UNKNOWN = TRUE      FALSE AND UNKNOWN = FALSE
+#     FALSE OR UNKNOWN = UNKNOWN
+#
+# UNKNOWN becomes a decision only at the membership boundary, and what it
+# becomes depends on the role — which is why the role is applied there and not
+# at the leaf.
+
+def three_valued_sql(criterion: Criterion, param: str,
+                     dialect: Dialect = "postgres",
+                     states_col: str = "metric_states") -> str:
+    """A governed leaf as TRUE / FALSE / UNKNOWN, with no role applied."""
+    applicable = applicable_sql(criterion.metric, dialect, states_col)
+    predicate = predicate_sql(criterion, param, dialect)
+    return f"CASE WHEN {applicable} THEN ({predicate}) ELSE NULL END"
+
+
+def membership_sql(expression: str, role: CriterionType,
+                   dialect: Dialect = "postgres") -> str:
+    """Collapse a three-valued expression into membership, per role.
+
+    REQUIRED  admits only a proven TRUE, so UNKNOWN does not qualify — the
+              requirement is unproven.
+    EXCLUDED  rejects only a proven TRUE, so UNKNOWN keeps the row — the
+              exclusion is unproven.
+
+    Written as an explicit COALESCE rather than `IS TRUE` / `IS NOT TRUE`
+    because sqlite has no IS TRUE, and the equivalence suite needs both
+    engines to agree on the same text.
+    """
+    false_literal = "FALSE" if dialect == "postgres" else "0"
+    proven_true = f"COALESCE(({expression}), {false_literal})"
+
+    if role is CriterionType.REQUIRED:
+        return proven_true
+    if role is CriterionType.EXCLUDED:
+        return f"NOT {proven_true}"
+    raise CompileError(
+        f"{role} has no membership meaning; only REQUIRED and EXCLUDED "
+        f"decide whether a row is in the result set")
+
+
+def assert_role_is_decidable(node, under_disjunction: bool = False) -> None:
+    """Refuse an EXCLUDED criterion whose meaning is undefined where it sits.
+
+    An exclusion is a top-level statement: "reject rows proven to satisfy
+    this". Nested inside a disjunction it has no agreed meaning — is the row
+    admitted because the exclusion failed to prove itself, or is the whole
+    branch unknown? Rather than pick one and call it the rule, this refuses
+    the shape. Guessing at an undefined composition is how the original defect
+    arrived.
+    """
+    from app.core.parsed_query import AllOf, AnyOf
+    from app.core.parsed_query import Criterion as TypedCriterion
+
+    if isinstance(node, TypedCriterion):
+        if under_disjunction and node.role is CriterionType.EXCLUDED:
+            raise CompileError(
+                f"EXCLUDED criterion on {node.field!r} sits inside a "
+                f"disjunction, where an unproven exclusion has no defined "
+                f"meaning. Express it as a top-level exclusion instead.")
+        return
+
+    if isinstance(node, AnyOf):
+        for operand in node.operands:
+            assert_role_is_decidable(operand, under_disjunction=True)
+    elif isinstance(node, AllOf):
+        for operand in node.operands:
+            assert_role_is_decidable(operand, under_disjunction)
 
 
 @dataclass(frozen=True)

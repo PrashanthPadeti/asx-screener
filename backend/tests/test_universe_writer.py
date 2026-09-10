@@ -168,6 +168,23 @@ def test_canonical_identity_translates_to_storage_at_one_point():
     assert canonical_for("ev_to_ebitda") == "ev_ebitda"
 
 
+def test_the_canonical_to_storage_mapping_is_injective():
+    """Two canonical metrics must never share a physical column.
+
+    The alias tests guard the missing-mapping direction: a metric the writer
+    fails to translate. This guards the opposite one — a collision, where two
+    governed metrics write to the same column and the second silently
+    overwrites the first, with both sidecar entries claiming to describe it.
+    """
+    columns: dict[str, str] = {}
+    for metric in sorted(GOVERNED):
+        column = column_for(metric)
+        assert column not in columns, (
+            f"{metric} and {columns[column]} both store in {column!r}; "
+            f"one would silently overwrite the other")
+        columns[column] = metric
+
+
 def test_every_storage_column_round_trips_to_its_canonical_name():
     for canonical, column in STORAGE_COLUMN.items():
         assert normalise(canonical) == canonical, f"{canonical} is not canonical"

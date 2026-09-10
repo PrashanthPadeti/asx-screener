@@ -256,10 +256,10 @@ if __name__ == "__main__":
             print(f"  PASS  {name}")
         except AssertionError as e:
             failures.append(name)
-            print(f"  FAIL  {name}  — {e}")
+            print(f"  FAIL  {name}  - {e}")
         except Exception as e:
             failures.append(name)
-            print(f"  ERROR {name}  — {type(e).__name__}: {e}")
+            print(f"  ERROR {name}  - {type(e).__name__}: {e}")
 
     print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
     sys.exit(1 if failures else 0)

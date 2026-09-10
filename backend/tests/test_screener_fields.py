@@ -19,6 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.parsed_query import (  # noqa: E402
+    AllOf,
     Criterion,
     Direction,
     Ordering,
@@ -162,8 +163,9 @@ def test_lookup_is_case_and_whitespace_insensitive():
 
 def test_canonicalisation_attaches_identity_and_governance():
     parsed = ParsedQuery(
-        criteria=(Criterion("ev_to_ebitda", CriterionType.REQUIRED, "lt", 12),
-                  Criterion("sector", CriterionType.REQUIRED, "eq", "Materials")),
+        expression=AllOf((
+            Criterion("ev_to_ebitda", CriterionType.REQUIRED, "lt", 12),
+            Criterion("sector", CriterionType.REQUIRED, "eq", "Materials"))),
         ordering=Ordering("grossed_up_yield", Direction.DESC))
     out = canonicalise(parsed, REGISTRY)
 
@@ -173,9 +175,9 @@ def test_canonicalisation_attaches_identity_and_governance():
 
 
 def test_governed_and_ungoverned_criteria_are_separable():
-    parsed = canonicalise(ParsedQuery(criteria=(
+    parsed = canonicalise(ParsedQuery(expression=AllOf((
         Criterion("roe", CriterionType.REQUIRED, "gt", 0.1),
-        Criterion("sector", CriterionType.REQUIRED, "eq", "Materials"))),
+        Criterion("sector", CriterionType.REQUIRED, "eq", "Materials")))),
         REGISTRY)
 
     assert [c.field for c in parsed.governed_criteria] == ["roe"]
@@ -183,8 +185,8 @@ def test_governed_and_ungoverned_criteria_are_separable():
 
 
 def test_a_query_touching_nothing_governed_needs_no_run_scope():
-    parsed = canonicalise(ParsedQuery(criteria=(
-        Criterion("sector", CriterionType.REQUIRED, "eq", "Materials"),)),
+    parsed = canonicalise(ParsedQuery(expression=AllOf((
+        Criterion("sector", CriterionType.REQUIRED, "eq", "Materials"),))),
         REGISTRY)
     assert not parsed.requires_run_scope
 
@@ -198,8 +200,8 @@ def test_a_governed_ordering_alone_requires_a_run_scope():
 
 def test_canonicalisation_rejects_an_unknown_field_before_the_database():
     try:
-        canonicalise(ParsedQuery(criteria=(
-            Criterion("nope", CriterionType.REQUIRED, "gt", 1),)), REGISTRY)
+        canonicalise(ParsedQuery(expression=AllOf((
+            Criterion("nope", CriterionType.REQUIRED, "gt", 1),))), REGISTRY)
     except UnknownField:
         pass
     else:
@@ -209,8 +211,8 @@ def test_canonicalisation_rejects_an_unknown_field_before_the_database():
 # ── The adapter compiles one way only ────────────────────────────────────────
 
 def test_the_adapter_produces_the_legacy_shape():
-    parsed = canonicalise(ParsedQuery(criteria=(
-        Criterion("roe", CriterionType.REQUIRED, "gt", 10),)), REGISTRY)
+    parsed = canonicalise(ParsedQuery(expression=AllOf((
+        Criterion("roe", CriterionType.REQUIRED, "gt", 10),))), REGISTRY)
     where, params = to_legacy_sql(parsed, REGISTRY)
 
     assert "(u.roe) >" in where and list(params.values())[0] == 10 * \
@@ -220,18 +222,20 @@ def test_the_adapter_produces_the_legacy_shape():
 def test_the_adapter_applies_the_field_scale():
     field = next(f for f in REGISTRY.values()
                  if f.type == "number" and f.scale != 1.0)
-    parsed = canonicalise(ParsedQuery(criteria=(
-        Criterion(field.key, CriterionType.REQUIRED, "gt", 2),)), REGISTRY)
+    parsed = canonicalise(ParsedQuery(expression=AllOf((
+        Criterion(field.key, CriterionType.REQUIRED, "gt", 2),))), REGISTRY)
     _, params = to_legacy_sql(parsed, REGISTRY)
 
     assert list(params.values())[0] == 2 * field.scale
 
 
 def test_an_excluded_criterion_negates_in_the_legacy_shape():
-    parsed = canonicalise(ParsedQuery(criteria=(
-        Criterion("roe", CriterionType.EXCLUDED, "lt", 5),)), REGISTRY)
+    parsed = canonicalise(ParsedQuery(expression=AllOf((
+        Criterion("roe", CriterionType.EXCLUDED, "lt", 5),))), REGISTRY)
     where, _ = to_legacy_sql(parsed, REGISTRY)
-    assert where.startswith("NOT (")
+    # The AllOf wrapper parenthesises each operand, so the negation is nested
+    # rather than leading. The semantic property is that it is negated at all.
+    assert "NOT (" in where and "(u.roe) <" in where
 
 
 def test_there_is_no_inverse_adapter():

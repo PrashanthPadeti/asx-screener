@@ -56,6 +56,48 @@ class Applicability(str, Enum):
     INSUFFICIENT_DATA = "insufficient_data"  # applicable, too little history
 
 
+class Cause(str, Enum):
+    """*Why* a metric is not applicable — a different axis from *whether*.
+
+    The four states are frozen and stay four. This is the discriminator the
+    states cannot carry on their own, and it exists because of one rule:
+
+        FEED_INCOMPLETE is not NOT_APPLICABLE.
+
+    A REIT metric that does not apply to a bank is an applicability decision:
+    the number would be meaningless, the model is working, and a composite may
+    legitimately reweight around it. A dividend metric that cannot be computed
+    because the exchange-wide feed stopped is a data-quality failure: the
+    number is meaningful and simply missing, and reweighting around it would
+    silently redefine the strategy rather than describe the company.
+
+    Identical downstream behaviour for those two is the failure being designed
+    against.
+    """
+
+    DOMAIN = "domain"                      # gate 1 — wrong economic model
+    OBSERVATION = "observation"            # gate 2 — values without meaning
+    SOURCE_MISSING = "source_missing"      # this company has no value
+    SOURCE_UNHEALTHY = "source_unhealthy"  # the feed itself is broken
+    INSUFFICIENT_HISTORY = "insufficient_history"
+
+
+class PredicateResult(str, Enum):
+    """How a predicate over an assessment resolves.
+
+    ``NOT_ELIGIBLE`` and ``NO_DATA`` both mean "no comparison happened", and
+    they are still different: an NM predicate must not exclude a security,
+    because the metric is meaningless for it and penalising it would be the
+    original bug. An unavailable predicate legitimately fails to match a
+    positive filter, because the company does not demonstrate the property —
+    we simply cannot show that it does.
+    """
+
+    EVALUATED = "evaluated"          # compare the value normally
+    NOT_ELIGIBLE = "not_eligible"    # NM — cannot exclude, cannot include
+    NO_DATA = "no_data"              # cannot match a positive filter
+
+
 class Domain(str, Enum):
     """A company's economic model, which is not its sector or its security type.
 
@@ -109,6 +151,7 @@ class Assessment:
     reason: str = ""
     domain: Optional[Domain] = None
     observed: Optional[float] = None
+    cause: Optional[Cause] = None
 
     @property
     def ok(self) -> bool:
@@ -119,14 +162,36 @@ class Assessment:
         """True when a value exists but must not be used or shown as a number."""
         return self.state is Applicability.NOT_MEANINGFUL
 
+    @property
+    def source_unhealthy(self) -> bool:
+        """True when the *feed* failed, not the company and not the model.
+
+        The one property a composite must consult before reweighting.
+        """
+        return self.cause is Cause.SOURCE_UNHEALTHY
+
+    @property
+    def reweightable(self) -> bool:
+        """May a composite renormalise around this absence?
+
+        Only when the absence is applicability-driven. A metric missing
+        because the source broke is a gap in the data, not a statement about
+        the company, and building a smaller composite on it changes what the
+        composite means without saying so.
+        """
+        return not self.ok and not self.source_unhealthy
+
     def display(self) -> str:
-        """What the UI renders. Never an em-dash for a suppressed metric."""
-        return {
-            Applicability.APPLICABLE: "" if self.value is None else f"{self.value:g}",
-            Applicability.NOT_MEANINGFUL: "NM",
-            Applicability.UNAVAILABLE: "—",
-            Applicability.INSUFFICIENT_DATA: "—",
-        }[self.state]
+        """What the UI renders. Never an em-dash for a suppressed metric, and
+        never a bare em-dash for a broken feed either — those read as "this
+        company has no dividend", which is a different and false claim."""
+        if self.state is Applicability.APPLICABLE:
+            return "" if self.value is None else f"{self.value:g}"
+        if self.state is Applicability.NOT_MEANINGFUL:
+            return "NM"
+        if self.source_unhealthy:
+            return "Data unavailable"
+        return "—"
 
 
 # ── Gate 1 · domain validity ──────────────────────────────────────────────────
@@ -292,15 +357,35 @@ def assess(metric: str, value: Optional[float], domain: Domain,
     gate1 = domain_gate(metric, domain)
     if gate1 is not None:
         state, reason = gate1
-        return Assessment(metric, state, None, reason, domain, observed=value)
+        return Assessment(metric, state, None, reason, domain, observed=value,
+                          cause=Cause.DOMAIN)
 
     gate2 = observation_gate(metric, value, obs)
     if gate2 is not None:
         state, reason = gate2
-        return Assessment(metric, state, None, reason, domain, observed=value)
+        cause = (Cause.INSUFFICIENT_HISTORY
+                 if state is Applicability.INSUFFICIENT_DATA
+                 else Cause.SOURCE_MISSING if state is Applicability.UNAVAILABLE
+                 else Cause.OBSERVATION)
+        return Assessment(metric, state, None, reason, domain, observed=value,
+                          cause=cause)
 
     return Assessment(metric, Applicability.APPLICABLE, value, "", domain,
                       observed=value)
+
+
+def unhealthy(metric: str, reason: str, domain: Optional[Domain] = None) -> Assessment:
+    """An assessment for a metric whose *source* has failed.
+
+    Constructed rather than assessed, because the failure is not about this
+    company: the dividend feed stopping is an exchange-wide event, and every
+    issuer's income metrics are equally uncomputable regardless of domain or
+    observation. State is UNAVAILABLE — the metric is applicable and simply
+    has no value — with the cause that stops consumers treating it as an
+    applicability decision.
+    """
+    return Assessment(metric, Applicability.UNAVAILABLE, None, reason, domain,
+                      cause=Cause.SOURCE_UNHEALTHY)
 
 
 def assess_all(values: Mapping[str, Optional[float]], domain: Domain,
@@ -332,6 +417,17 @@ def assess_composite(metric: str, value: Optional[float],
     """
     by_metric = {a.metric: a for a in constituents}
     required = set(material) if material is not None else set(by_metric)
+
+    # Source failure is checked before anything else and never renormalised
+    # around. A composite built on the remaining factors would be a different
+    # composite wearing the same name.
+    broken = [a for m, a in by_metric.items()
+              if m in required and a.source_unhealthy]
+    if broken:
+        names = ", ".join(sorted(a.metric for a in broken))
+        return Assessment(metric, Applicability.UNAVAILABLE, None,
+                          f"source unhealthy: {names}", domain,
+                          observed=value, cause=Cause.SOURCE_UNHEALTHY)
 
     out_of_domain = [a for m, a in by_metric.items()
                      if m in required and a.suppressed]
@@ -380,10 +476,31 @@ class Weighting:
 
     nominal: Mapping[str, float]
     applicable: frozenset[str]
+    #: Factors absent because their source failed, not because they do not
+    #: apply. Renormalising around these is prohibited.
+    unhealthy: frozenset[str] = frozenset()
+
+    @property
+    def may_reweight(self) -> bool:
+        """False when any absence is a data-quality failure.
+
+        An applicability-driven reweight describes the company: a bank has no
+        meaningful Piotroski, so quality is built from what remains. A
+        source-driven reweight describes nothing — it silently converts a
+        five-factor strategy into a four-factor one and keeps the name.
+        """
+        return not self.unhealthy
 
     @property
     def effective(self) -> dict[str, float]:
-        """Nominal weights renormalised over the applicable factors."""
+        """Nominal weights renormalised over the applicable factors.
+
+        Empty when reweighting is prohibited: there is no defensible weighting
+        of a composite whose input is missing for reasons that have nothing to
+        do with the company.
+        """
+        if not self.may_reweight:
+            return {}
         total = sum(w for k, w in self.nominal.items() if k in self.applicable)
         if total <= 0:
             return {}
@@ -409,6 +526,55 @@ def predicate_excludes(assessment: Assessment) -> bool:
     "fail" for a deposit-funded balance sheet.
     """
     return assessment.ok
+
+
+def predicate_result(assessment: Assessment) -> PredicateResult:
+    """How a filter over this assessment resolves — three outcomes, not two."""
+    if assessment.ok:
+        return PredicateResult.EVALUATED
+    if assessment.suppressed:
+        return PredicateResult.NOT_ELIGIBLE
+    return PredicateResult.NO_DATA
+
+
+# ── The canonical-strategy refresh gate ───────────────────────────────────────
+
+@dataclass(frozen=True)
+class RefreshGate:
+    """Whether a canonical, published strategy may mint a new cohort."""
+
+    permitted: bool
+    blocked_by: tuple[str, ...] = ()
+    message: str = ""
+
+
+def refresh_gate(assessments: Iterable[Assessment],
+                 required_families: Iterable[str],
+                 last_published: Optional[str] = None) -> RefreshGate:
+    """Fail closed at the refresh boundary when a required family has no source.
+
+    AlphaFive is a *canonical* five-factor ranking. If Income disappears
+    because the dividend feed stopped, recomputing it over the remaining four
+    would publish a different strategy under the same name — even with the
+    effective 25/25/25/25 weighting shown. The honest move is to decline to
+    mint the cohort and say why.
+
+    ``last_published`` is deliberately not called "last valid": if earlier
+    cohorts were themselves computed on already-incomplete inputs, calling
+    them valid manufactures a continuity that was never there.
+    """
+    required = set(required_families)
+    broken = sorted({a.metric for a in assessments
+                     if a.source_unhealthy and a.metric in required})
+
+    if not broken:
+        return RefreshGate(True)
+
+    tail = (f"; last published computation: {last_published}"
+            if last_published else "")
+    return RefreshGate(
+        False, tuple(broken),
+        f"Refresh unavailable — source incomplete for {', '.join(broken)}{tail}")
 
 
 # ── The consumer boundary ─────────────────────────────────────────────────────
@@ -442,6 +608,10 @@ def to_payload(assessment: Assessment, include_observed: bool = False) -> dict:
     out = {
         "metric": assessment.metric,
         "state": assessment.state.value,
+        # The cause crosses the boundary too: a client that renders "—" for a
+        # broken feed tells the user this company pays no dividend, which is a
+        # different and false claim.
+        "cause": assessment.cause.value if assessment.cause else None,
         "value": assessment.value if assessment.ok else None,
         "display": assessment.display(),
         "reason": assessment.reason,

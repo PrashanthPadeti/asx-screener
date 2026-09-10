@@ -406,6 +406,107 @@ def dividend_metrics(rows: Iterable[dict] | Sequence[Payment],
     }
 
 
+# ── The dividend source boundary ──────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class FeedHealth:
+    """The dividend feed's own state, obtained once and shared.
+
+    ``FEED_STALENESS_DAYS`` is a **feed-health threshold, not financial
+    logic**: it says how long the exchange can plausibly go without an
+    ex-date, and nothing about dividends themselves. It belongs to operations
+    and can be retuned without touching any calculation.
+
+    ``latest_ex_date`` alone is a weak test — one stray fresh row makes the
+    watermark look healthy while issuer coverage stays broken. ``recent_rows``
+    and ``recent_issuers`` are carried so a stronger check can be added
+    without changing this shape; they are not yet enforced.
+    """
+
+    latest_ex_date: Optional[date]
+    as_of: date
+    recent_rows: Optional[int] = None
+    recent_issuers: Optional[int] = None
+
+    @property
+    def lag_days(self) -> Optional[int]:
+        if self.latest_ex_date is None:
+            return None
+        return (self.as_of - self.latest_ex_date).days
+
+    @property
+    def healthy(self) -> bool:
+        lag = self.lag_days
+        return lag is not None and lag <= FEED_STALENESS_DAYS
+
+    @property
+    def reason(self) -> str:
+        if self.latest_ex_date is None:
+            return "dividend feed holds no ex-dates"
+        return (f"dividend feed incomplete — latest ex-date "
+                f"{self.latest_ex_date.isoformat()}, {self.lag_days} days behind")
+
+
+class DividendSource:
+    """One place that knows whether the feed is usable.
+
+    Slice-2 consumers do not get to choose whether freshness matters: they take
+    a DividendSource, and it applies the watermark consistently. Passing
+    ``feed_as_of`` by hand at each call site would mean every caller
+    reimplementing feed health, and one of them eventually not doing it.
+    """
+
+    def __init__(self, health: FeedHealth,
+                 policy: GrossUpPolicy = GrossUpPolicy.PREFER_STORED,
+                 tax_rate: float = CORP_TAX_RATE):
+        self.health = health
+        self.policy = policy
+        self.tax_rate = tax_rate
+
+    @property
+    def healthy(self) -> bool:
+        return self.health.healthy
+
+    def ttm(self, rows, as_of: Optional[date] = None) -> TTMDividends:
+        return ttm_dividends(rows, as_of=as_of or self.health.as_of,
+                             policy=self.policy, tax_rate=self.tax_rate,
+                             feed_as_of=self.health.latest_ex_date)
+
+    def metrics(self, rows, close: Optional[float],
+                as_of: Optional[date] = None) -> dict:
+        return dividend_metrics(rows, close, as_of=as_of or self.health.as_of,
+                                policy=self.policy, tax_rate=self.tax_rate,
+                                feed_as_of=self.health.latest_ex_date)
+
+    def assessments(self, rows, close: Optional[float],
+                    as_of: Optional[date] = None, domain=None) -> dict:
+        """Dividend metrics as Assessments, carrying the source-failure cause.
+
+        This is the bridge that keeps ``FEED_INCOMPLETE`` distinguishable all
+        the way to the consumer: when the feed is unhealthy every dividend
+        field comes back UNAVAILABLE with ``Cause.SOURCE_UNHEALTHY``, so a
+        composite refuses to reweight and a canonical strategy refuses to
+        refresh, instead of quietly becoming a four-factor model.
+        """
+        from compute.engine.applicability import assess, unhealthy
+
+        values = self.metrics(rows, close, as_of=as_of)
+        if not self.healthy:
+            return {m: unhealthy(m, self.health.reason, domain) for m in values}
+        return {m: assess(m, v, domain) if domain is not None
+                else _plain(m, v) for m, v in values.items()}
+
+
+def _plain(metric: str, value):
+    """An assessment with no domain to gate on — availability only."""
+    from compute.engine.applicability import Applicability, Assessment, Cause
+
+    if value is None:
+        return Assessment(metric, Applicability.UNAVAILABLE, None,
+                          "no value from source", cause=Cause.SOURCE_MISSING)
+    return Assessment(metric, Applicability.APPLICABLE, value, "", observed=value)
+
+
 def reconciles(metrics: dict, tax_rate: float = CORP_TAX_RATE,
                tol: float = 1e-4) -> bool:
     """The invariant every screener row must satisfy.

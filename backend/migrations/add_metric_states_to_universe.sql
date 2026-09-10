@@ -104,7 +104,15 @@ COMMENT ON COLUMN screener.universe.compute_run_id IS
 -- repointing rows, which leaves both versions visible.
 --
 -- rows_written is deliberately excluded: it is a tally the run itself fills in
--- on completion, not evidence a row depends on.
+-- on completion, not evidence a row depends on. It is the SOLE post-insert
+-- mutable field, and it may move from NULL to its final count exactly once,
+-- while the run is executing.
+--
+-- The stricter contract — immutable again once the run is finalised — needs a
+-- run-status concept, and this schema has none. Inventing a state machine for
+-- one tally inside a correctness slice would be the wrong trade. Recorded here
+-- so it is a known gap rather than an oversight: if a run lifecycle is added
+-- later, that is where rows_written should be locked on completion.
 
 CREATE OR REPLACE FUNCTION screener.compute_runs_are_immutable()
 RETURNS TRIGGER AS $$

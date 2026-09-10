@@ -38,6 +38,7 @@ from pathlib import Path
 # The database credential lives in the environment, never in source.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
+from compute.engine.dividends import DividendSource, FeedHealth  # noqa: E402
 
 
 # Auto-cast PostgreSQL NUMERIC/DECIMAL → Python float on read.
@@ -141,6 +142,30 @@ def fetch_company(cur, asx_code: str) -> dict:
     return {"shares_outstanding": row[0], "is_reit": row[1], "is_miner": row[2]}
 
 
+def fetch_feed_health(cur, as_of=None) -> FeedHealth:
+    """The dividend feed's watermark, read once per run.
+
+    Exchange-wide rather than per company: one issuer's gap is
+    indistinguishable from a skipped dividend, but a feed that has recorded
+    nothing for weeks is unambiguous. Measured on production in September
+    2026 this returned 2026-08-03 with zero rows in the preceding 30 days,
+    which is what a trailing-twelve-month window cannot honestly be computed
+    over.
+    """
+    cur.execute("""
+        SELECT MAX(ex_date),
+               COUNT(*) FILTER (WHERE ex_date > NOW() - INTERVAL '30 days'),
+               COUNT(DISTINCT asx_code)
+                   FILTER (WHERE ex_date > NOW() - INTERVAL '30 days')
+        FROM market.dividends
+    """)
+    latest, recent_rows, recent_issuers = cur.fetchone()
+    return FeedHealth(latest_ex_date=latest,
+                      as_of=as_of or datetime.now(timezone.utc).date(),
+                      recent_rows=recent_rows,
+                      recent_issuers=recent_issuers)
+
+
 def fetch_dividends(cur, asx_code: str) -> list:
     """Fetch last 3 years of dividends."""
     cur.execute("""
@@ -236,7 +261,8 @@ def calc_piotroski(pnl: list, bs: dict, cf: dict) -> Optional[int]:
     return min(score, 9)
 
 
-def compute_metrics(asx_code: str, price: dict, fin: dict, company: dict, divs: list) -> dict:
+def compute_metrics(asx_code: str, price: dict, fin: dict, company: dict,
+                    divs: list, dividend_source: DividendSource) -> dict:
     """Compute all metrics for a stock. Returns dict matching computed_metrics columns."""
 
     m = {}  # metrics dict
@@ -288,44 +314,27 @@ def compute_metrics(asx_code: str, price: dict, fin: dict, company: dict, divs: 
 
     # ── Dividend Yield ────────────────────────────────────────
 
-    # TTM DPS from dividends table
-    ttm_dps = sum(d["amount"] for d in divs[:4]) if divs else None
-    if not ttm_dps:
-        ttm_dps = p0.get("dps")
+    # The five dividend fields come from the canonical module, which selects a
+    # period-based trailing-twelve-month window rather than a fixed four
+    # payments, grosses up per payment from market.dividends.grossed_up_amount
+    # rather than averaging franking across an aggregate, and declines to
+    # report anything at all when the feed has not observed the end of the
+    # window. All five keys are always present: upsert_metrics builds its
+    # UPDATE clause from the keys in this dict, so an omitted field keeps
+    # whatever the last run wrote — which is how OEL carried a 480%
+    # grossed-up yield against a zero dividend.
+    m.update(dividend_source.metrics(divs, close, as_of=price["price_date"]))
 
-    if ttm_dps and close and close > 0:
-        m["dividend_per_share"] = round(float(ttm_dps), 4)
-        m["dividend_yield"]     = round(float(ttm_dps) / close, 6)
+    ttm_dps = m["dividend_per_share"]
 
-        # Weighted average franking %
-        if divs:
-            avg_franking = sum(d["franking_pct"] or 0 for d in divs[:4]) / min(len(divs), 4)
-        else:
-            avg_franking = float(p0.get("dps_franking_pct") or 0)
-        m["franking_pct"] = round(avg_franking, 2)
-
-        # Grossed-up yield: dividend × (1 + franking_pct/100 × 30/70) / price
-        corp_tax = 0.30
-        grossed_up_dps = float(ttm_dps) * (1 + (avg_franking / 100) * (corp_tax / (1 - corp_tax)))
-        m["grossed_up_dividend"] = round(grossed_up_dps, 4)
-        m["grossed_up_yield"]    = round(grossed_up_dps / close, 6)
-    else:
-        # No trailing dividend, or no usable price. These must be written as NULL
-        # rather than left unset: upsert_metrics builds its UPDATE clause from the
-        # keys present in this dict, so an omitted field keeps whatever the last
-        # run wrote. A company that stopped paying therefore kept its old yield
-        # forever — OEL carried a 480% grossed-up yield against a zero dividend.
-        m["dividend_per_share"]  = None
-        m["dividend_yield"]      = None
-        m["franking_pct"]        = None
-        m["grossed_up_dividend"] = None
-        m["grossed_up_yield"]    = None
-
-    # Payout ratio
+    # Payout ratio rides on the same TTM figure, so a refused dividend cannot
+    # leave a payout ratio behind that implies one.
     net_profit = p0.get("net_profit")
     if ttm_dps and shares and net_profit and float(net_profit) > 0:
         total_div = float(ttm_dps) * float(shares) / 1_000_000
         m["dividend_payout_ratio"] = round(safe_div(total_div, float(net_profit)) or 0, 4)
+    else:
+        m["dividend_payout_ratio"] = None
 
     # ── Profitability ─────────────────────────────────────────
 
@@ -479,6 +488,15 @@ def main():
         cur.execute(sql)
         codes = [r[0] for r in cur.fetchall()]
 
+    # One watermark for the whole run, obtained once and shared, so no
+    # per-company path reimplements feed health and eventually forgets to.
+    feed_health = fetch_feed_health(cur)
+    dividend_source = DividendSource(feed_health)
+    if not feed_health.healthy:
+        log.warning("Dividend feed unhealthy: %s. Dividend metrics will be "
+                    "written as unavailable rather than computed over a "
+                    "window the feed has not observed.", feed_health.reason)
+
     log.info(f"Computing metrics for {len(codes)} stocks...")
     log.info("─" * 60)
 
@@ -497,7 +515,8 @@ def main():
             company = fetch_company(cur, asx_code)
             divs    = fetch_dividends(cur, asx_code)
 
-            metrics = compute_metrics(asx_code, price, fin, company, divs)
+            metrics = compute_metrics(asx_code, price, fin, company, divs,
+                                      dividend_source)
             upsert_metrics(cur, asx_code, price["price_date"], metrics)
             processed += 1
 

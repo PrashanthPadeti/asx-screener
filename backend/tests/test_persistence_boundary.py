@@ -294,6 +294,51 @@ def test_rollout_validation_reports_unsupported_not_zero():
     assert len(vs) > 0, "zero violations would mean 'safe to enable consumers'"
 
 
+# ── UNSPECIFIED must not survive the persistence boundary ────────────────────
+
+def test_unspecified_is_a_computation_time_state_only():
+    """It is legal while an assessment is being built and never after.
+
+    By the time anything is written or served there is a real run, and that
+    run has a version — so a surviving sentinel means a write path skipped
+    version attribution entirely, and the row would validate against nothing.
+    """
+    values, states = persist_row(compute_cba())
+
+    # Computation time: no version assigned yet, and that is fine.
+    assert violations(values, states) == []
+
+    # Serving time: every path that takes a version rejects the sentinel.
+    for version, expected in ((None, "unversioned"),
+                              ("FACTOR_MODEL_V99", "unsupported_model_version")):
+        assert kinds(violations(values, states, model_version=version)) \
+            .get(ROW) == expected
+
+
+def test_a_write_must_carry_a_version_by_the_time_it_lands():
+    """The lifecycle assertion: validating a persisted row without naming its
+    version is not a pass, it is a check that was never run."""
+    values, states = persist_row(compute_cba())
+
+    unchecked = violations(values, states)
+    checked = violations(values, states, model_version=None)
+
+    assert unchecked == [], "the sentinel suppresses the version check"
+    assert checked, "naming the row's actual version surfaces the problem"
+    assert unchecked != checked, \
+        "UNSPECIFIED and None must not be the same call"
+
+
+def test_serving_with_the_sentinel_does_not_assert_validity():
+    """row_payload with UNSPECIFIED renders, but claims nothing about the
+    contract — the caller has not asked it to check one."""
+    values, states = persist_row(compute_cba())
+    payload = row_payload(values, states, None, Domain.BANK)
+
+    assert "compute_run_id" not in payload
+    assert payload["states"]["grossed_up_yield"]["cause"] == "source_unhealthy"
+
+
 def test_a_known_version_still_validates_normally():
     """Fail-closed on unknown must not break the supported path."""
     governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]

@@ -225,6 +225,22 @@ DOMAIN_RULES: dict[str, tuple[frozenset[Domain], str]] = {
                      "onto interest or rental income"),
     "operating_margin": (FINANCIAL,
                          "no comparable operating revenue line"),
+
+    # BANK only, deliberately not FINANCIAL. A generic net_income / revenue
+    # presumes an industrial revenue line; a bank's profitability is read
+    # through ROE, NIM, cost-to-income, credit losses and return on assets. A
+    # vendor "revenue" field still yields a number, and that number is not a
+    # sound cross-sector profitability measure — treating it as comparable to
+    # an industrial net margin repeats the leverage and gross-margin error.
+    #
+    # Insurers, asset managers and exchanges have different economics again,
+    # and none of them is covered here. Extending this to the whole sector
+    # would turn `sector == Financials` back into policy, which is exactly
+    # what the domain rules replaced.
+    "net_margin": (frozenset({Domain.BANK}),
+                   "a generic net income over revenue presumes an industrial "
+                   "revenue line; bank profitability is read through ROE, "
+                   "NIM, cost-to-income and credit losses"),
     # A change in a meaningless margin is equally meaningless, and these are
     # ranked cross-sectionally by the multibagger score — so leaving them
     # unmasked would let a bank's gross-margin trend move every industrial

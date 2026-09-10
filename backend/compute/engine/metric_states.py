@@ -249,6 +249,7 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
         "altman_z_score", "debt_to_equity", "current_ratio", "quick_ratio",
         "interest_coverage", "working_capital", "gross_margin",
         "operating_margin", "inventory_turnover", "asset_turnover",
+        "net_margin",
         "ev_ebitda", "ev_ebit", "net_debt_to_ebitda", "free_cash_flow",
         "fcf_conversion", "earnings_quality", "price_to_sales",
         "piotroski_f_score",

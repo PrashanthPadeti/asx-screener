@@ -21,7 +21,7 @@ first, then compute the population statistic.
 is handled in ``peer_benchmarks``. Note the correction there: it is **not**
 true that every Financials input is out of domain. For a bank the frozen rules
 suppress ``debt_to_equity``, ``current_ratio``, ``gross_margin`` and
-``ev_ebitda`` — but ``roe``, ``net_margin`` and ``grossed_up_yield`` remain
+``ev_ebitda`` and ``net_margin`` — but ``roe`` and ``grossed_up_yield`` remain
 meaningful, and withholding a bank dividend-yield median would be the
 industrial-defaults error running in reverse. The assessment decides, metric
 by metric; the sector name decides nothing.

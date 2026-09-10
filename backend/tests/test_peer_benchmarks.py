@@ -9,15 +9,16 @@ The three fixtures the contract requires:
      minimum-coverage gate by being counted in the valid denominator.
 
 Plus the correction that prompted the module: the sector name decides nothing.
-For a bank the frozen rules suppress debt_to_equity, current_ratio,
-gross_margin and ev_ebitda — while roe, net_margin and grossed_up_yield stay
-meaningful. Withholding a bank dividend-yield median would be the
-industrial-defaults error running in reverse.
+For a bank the rules suppress debt_to_equity, current_ratio, gross_margin,
+ev_ebitda and net_margin — while roe and grossed_up_yield stay meaningful.
+Withholding a bank dividend-yield median would be the industrial-defaults
+error running in reverse.
 
 Run under pytest, or standalone:
     cd /opt/asx-screener/backend && ../asx-venv/bin/python tests/test_peer_benchmarks.py
 """
 
+import statistics
 import sys
 from pathlib import Path
 
@@ -274,15 +275,22 @@ def bank_peer_group() -> dict:
 
 
 def test_a_financials_sector_is_not_uniformly_invalid():
-    """The correction that prompted this module. Four suppressed, three not."""
+    """The correction that prompted this module. Five suppressed, two not.
+
+    net_margin joined the suppressed side when it was governed before the V1
+    freeze — a generic net income over revenue presumes an industrial revenue
+    line. The point of the test is unchanged and is the ratio, not the count:
+    a bank is neither wholly invalid nor wholly fine, and only the assessment
+    can say which is which.
+    """
     results = benchmark_all(BANK_METRICS, bank_peer_group())
 
     withheld = sorted(m for m, b in results.items() if not b.ok)
     published = sorted(m for m, b in results.items() if b.ok)
 
     assert withheld == ["current_ratio", "debt_to_equity", "ev_ebitda",
-                        "gross_margin"]
-    assert published == ["grossed_up_yield", "net_margin", "roe"]
+                        "gross_margin", "net_margin"]
+    assert published == ["grossed_up_yield", "roe"]
 
 
 def test_a_bank_dividend_yield_median_is_publishable():
@@ -361,6 +369,65 @@ def test_the_same_bank_loses_its_dividend_yield_when_the_feed_breaks():
     assert result.reason_code is BenchmarkReason.SOURCE_UNHEALTHY_FOR_ALL
     assert result.n_applicable_peers == 6, \
         "the metric still applies to a bank — only the data is missing"
+
+
+# ── net_margin · banks leave the population, the sector still publishes ───────
+
+def financials_group() -> tuple[dict, dict]:
+    """Six banks and six other financials, all with a net margin recorded."""
+    obs = Observation(equity=8e10, earnings=1e10)
+    assessments, sectors = {}, {}
+
+    for i, code in enumerate(["CBA", "NAB", "WBC", "ANZ", "BEN", "BOQ"]):
+        assessments[code] = {
+            "net_margin": assess("net_margin", 0.30 + i * 0.01, Domain.BANK, obs)}
+        sectors[code] = "Financials"
+
+    for i, code in enumerate(["QBE", "IAG", "SUN", "MPL", "NWL", "PNI"]):
+        domain = Domain.INSURER if i < 4 else Domain.CAPITAL_MARKETS
+        assessments[code] = {
+            "net_margin": assess("net_margin", 0.10 + i * 0.01, domain, obs)}
+        sectors[code] = "Financials"
+
+    return assessments, sectors
+
+
+def test_a_financials_net_margin_benchmark_excludes_banks_and_still_publishes():
+    assessments, sectors = financials_group()
+    b = by_sector(assessments, sectors, ["net_margin"])["Financials"]["net_margin"]
+
+    assert b.ok, "the six non-bank financials are a complete applicable population"
+    assert b.n_total_peers == 12
+    assert b.n_applicable_peers == 6, "the six banks left the population"
+    assert b.n_valid_peers == 6
+    assert b.coverage_pct == 100.0
+
+
+def test_bank_net_margins_cannot_move_the_remaining_statistic():
+    """The mask-before-statistic rule, on the metric just governed.
+
+    Bank net margins sit at 0.30-0.35 and the others at 0.10-0.15, so leaving
+    the banks in would drag the median from 0.125 to about 0.225 — nearly
+    doubling the number a customer compares an insurer against.
+    """
+    assessments, sectors = financials_group()
+    with_banks = [a["net_margin"] for a in assessments.values()]
+    without = [a["net_margin"] for c, a in assessments.items()
+               if c not in ("CBA", "NAB", "WBC", "ANZ", "BEN", "BOQ")]
+
+    published = by_sector(assessments, sectors,
+                          ["net_margin"])["Financials"]["net_margin"]
+    non_bank_only = benchmark("net_margin", without)
+
+    assert published.median == non_bank_only.median
+    assert (published.p25, published.p75) == (non_bank_only.p25, non_bank_only.p75)
+    assert published.median < 0.16, \
+        "a median above 0.16 means bank margins are still in the aggregate"
+
+    # And the raw arithmetic the contract prevents, asserted so the size of
+    # the distortion is on the record rather than implied.
+    raw = statistics.median([a.observed for a in with_banks])
+    assert raw > published.median * 1.7
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

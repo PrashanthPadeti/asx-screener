@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compute.engine.applicability import (  # noqa: E402
     Applicability,
     Assessment,
+    Cause,
     Domain,
     Observation,
     Weighting,
@@ -116,6 +117,42 @@ def test_five_year_cagr_with_three_years_is_insufficient_not_absent():
                Observation(periods_available=3, periods_required=5))
     assert a.state is Applicability.INSUFFICIENT_DATA
     assert "3 of 5" in a.reason
+
+
+# ── Fixture · net margin, BANK only ───────────────────────────────────────────
+# Resolved before the V1 freeze. A generic net_income / revenue presumes an
+# industrial revenue line; a bank's profitability is read through ROE, NIM,
+# cost-to-income and credit losses. A vendor "revenue" field still yields a
+# number, and that number is not a sound cross-sector profitability measure.
+
+def test_a_bank_net_margin_is_not_meaningful():
+    a = assess("net_margin", 0.31, Domain.BANK)
+    assert a.state is Applicability.NOT_MEANINGFUL
+    assert a.cause is Cause.DOMAIN
+    assert "NIM" in a.reason or "cost-to-income" in a.reason
+
+
+def test_an_industrial_net_margin_is_applicable():
+    a = assess("net_margin", 0.12, Domain.GENERAL_CORPORATE)
+    assert a.ok and a.value == 0.12
+
+
+def test_other_financials_keep_their_net_margin():
+    """BANK only, deliberately. Extending this to the whole sector would turn
+    `sector == Financials` back into policy, which the domain rules replaced.
+    """
+    for domain in (Domain.INSURER, Domain.CAPITAL_MARKETS,
+                   Domain.OTHER_FINANCIAL):
+        assert assess("net_margin", 0.18, domain).ok, domain.value
+
+
+def test_net_margin_has_no_generic_positive_denominator_rule():
+    """A negative or unusual denominator may deserve an observation state, but
+    that is a separate decision from the bank-domain one and is not asserted
+    by adding net_margin to POSITIVE_DENOMINATOR without defining what its
+    denominator means."""
+    from compute.engine.applicability import POSITIVE_DENOMINATOR
+    assert "net_margin" not in POSITIVE_DENOMINATOR
 
 
 # ── The four states are genuinely distinct ────────────────────────────────────

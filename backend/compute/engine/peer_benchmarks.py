@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
+from enum import Enum
 from typing import Iterable, Mapping, Optional, Sequence
 
 from compute.engine.applicability import Applicability, Assessment, Cause
@@ -53,12 +54,38 @@ MIN_VALID_N = 5
 MIN_VALID_FRACTION = 0.30
 
 
+class BenchmarkReason(str, Enum):
+    """Why a benchmark was withheld. All fail closed; all remediate differently.
+
+    The two operational ones are deliberately separate. A sector with three
+    applicable peers, all three valid, has 100% coverage and still cannot be
+    published — telling that operator their *coverage* is poor would send them
+    looking for missing data that does not exist. Their sector is simply too
+    small, which is not a defect and may never change.
+    """
+
+    NO_PEERS = "no_peers"
+    OUT_OF_DOMAIN_FOR_ALL = "out_of_domain_for_all"
+    SOURCE_UNHEALTHY_FOR_ALL = "source_unhealthy_for_all"
+    NO_VALID_OBSERVATIONS = "no_valid_observations"
+    #: Too few companies for which the metric is meaningful at all. Structural:
+    #: widening the data will not help, only widening the peer group would.
+    INSUFFICIENT_PEER_POPULATION = "insufficient_peer_population"
+    #: Enough applicable peers, but most of them could not be measured. A data
+    #: gap, and the one that a feed repair or backfill actually fixes.
+    INSUFFICIENT_COVERAGE = "insufficient_coverage"
+    #: Coverage is acceptable and the population is adequate, but the absolute
+    #: number measured is still too small to describe quartiles.
+    INSUFFICIENT_VALID_OBSERVATIONS = "insufficient_valid_observations"
+
+
 @dataclass(frozen=True)
 class Benchmark:
     """One sector-metric statistic, with its denominator and its state."""
 
     metric: str
     state: Applicability
+    reason_code: Optional[BenchmarkReason] = None
     #: Every company in the peer group, whatever its state.
     n_total_peers: int = 0
     #: Those for which the metric is economically applicable at all — the
@@ -133,39 +160,69 @@ def benchmark(metric: str, assessments: Iterable[Assessment],
     valid = [a for a in applicable if a.ok and a.value is not None]
     n_valid = len(valid)
 
+    counts = dict(n_total_peers=n_total, n_applicable_peers=n_applicable,
+                  n_valid_peers=n_valid)
+
     if n_total == 0:
         return Benchmark(metric, Applicability.UNAVAILABLE,
+                         BenchmarkReason.NO_PEERS,
                          reason="no peer companies", cause=Cause.SOURCE_MISSING)
 
     if n_applicable == 0:
-        return Benchmark(metric, Applicability.NOT_MEANINGFUL, n_total, 0, 0,
+        return Benchmark(metric, Applicability.NOT_MEANINGFUL,
+                         BenchmarkReason.OUT_OF_DOMAIN_FOR_ALL, **counts,
                          reason="metric is out of domain for every peer",
                          cause=Cause.DOMAIN)
 
     # If every applicable peer failed for the same source reason, say so — the
     # remedy is a feed repair, not a wider sector.
     if n_valid == 0 and all(a.cause is Cause.SOURCE_UNHEALTHY for a in applicable):
-        return Benchmark(metric, Applicability.UNAVAILABLE, n_total, n_applicable, 0,
+        return Benchmark(metric, Applicability.UNAVAILABLE,
+                         BenchmarkReason.SOURCE_UNHEALTHY_FOR_ALL, **counts,
                          reason="source unhealthy for every applicable peer",
                          cause=Cause.SOURCE_UNHEALTHY)
 
     if n_valid == 0:
-        return Benchmark(metric, Applicability.UNAVAILABLE, n_total, n_applicable, 0,
+        return Benchmark(metric, Applicability.UNAVAILABLE,
+                         BenchmarkReason.NO_VALID_OBSERVATIONS, **counts,
                          reason="no valid observations among applicable peers",
                          cause=Cause.SOURCE_MISSING)
 
+    # Ordering matters, because the first matching reason is the one an
+    # operator acts on. Population is structural and checked first: a sector
+    # with three applicable peers has nothing to fix. Coverage is next,
+    # because it is the actionable data gap. The absolute count of valid
+    # observations is last — it only fires when the population is adequate and
+    # coverage is acceptable and there are still too few numbers for quartiles.
     coverage = n_valid / n_applicable
-    if n_valid < min_n or coverage < min_fraction:
+
+    if n_applicable < min_n:
         return Benchmark(
-            metric, Applicability.INSUFFICIENT_DATA, n_total, n_applicable, n_valid,
-            reason=(f"{n_valid} of {n_applicable} applicable peers valid "
-                    f"({coverage:.0%}); needs at least {min_n} "
-                    f"and {min_fraction:.0%}"),
+            metric, Applicability.INSUFFICIENT_DATA,
+            BenchmarkReason.INSUFFICIENT_PEER_POPULATION, **counts,
+            reason=(f"only {n_applicable} peers can carry this metric; "
+                    f"needs at least {min_n}"),
+            cause=Cause.INSUFFICIENT_HISTORY)
+
+    if coverage < min_fraction:
+        return Benchmark(
+            metric, Applicability.INSUFFICIENT_DATA,
+            BenchmarkReason.INSUFFICIENT_COVERAGE, **counts,
+            reason=(f"{n_valid} of {n_applicable} applicable peers measured "
+                    f"({coverage:.0%}); needs at least {min_fraction:.0%}"),
+            cause=Cause.INSUFFICIENT_HISTORY)
+
+    if n_valid < min_n:
+        return Benchmark(
+            metric, Applicability.INSUFFICIENT_DATA,
+            BenchmarkReason.INSUFFICIENT_VALID_OBSERVATIONS, **counts,
+            reason=(f"{n_valid} valid observations at {coverage:.0%} coverage; "
+                    f"needs at least {min_n} to describe quartiles"),
             cause=Cause.INSUFFICIENT_HISTORY)
 
     p25, median, p75 = _quartiles([a.value for a in valid])
-    return Benchmark(metric, Applicability.APPLICABLE, n_total, n_applicable,
-                     n_valid, p25=p25, median=median, p75=p75)
+    return Benchmark(metric, Applicability.APPLICABLE, None, **counts,
+                     p25=p25, median=median, p75=p75)
 
 
 def benchmark_all(metrics: Iterable[str],
@@ -178,6 +235,40 @@ def benchmark_all(metrics: Iterable[str],
     error running in reverse.
     """
     return {m: benchmark(m, by_metric.get(m, ()), **kwargs) for m in metrics}
+
+
+def by_sector(assessments_by_code: Mapping[str, Mapping[str, Assessment]],
+              sector_by_code: Mapping[str, Optional[str]],
+              metrics: Sequence[str],
+              **kwargs) -> dict[str, dict[str, Benchmark]]:
+    """Benchmark every metric within every sector, from assessments.
+
+    Takes the in-memory assessments rather than a masked frame on purpose. A
+    frame carries nulls, and a null cannot say whether the metric was out of
+    domain (leaves the coverage denominator) or merely unmeasured (stays in
+    it). Reconstructing that distinction from the columns is exactly the
+    ambiguity the sidecar exists to remove, so the peer engine never sees a
+    frame at all.
+
+    Companies with no sector are grouped under ``None`` and benchmarked like
+    any other group — they will usually fail the population gate, which is the
+    honest outcome rather than a silent exclusion.
+    """
+    groups: dict[Optional[str], list[str]] = {}
+    for code, sector in sector_by_code.items():
+        groups.setdefault(sector, []).append(code)
+
+    out: dict[str, dict[str, Benchmark]] = {}
+    for sector, codes in groups.items():
+        per_metric: dict[str, list[Assessment]] = {}
+        for metric in metrics:
+            per_metric[metric] = [
+                assessments_by_code[c][metric]
+                for c in codes
+                if c in assessments_by_code and metric in assessments_by_code[c]
+            ]
+        out[sector] = benchmark_all(metrics, per_metric, **kwargs)
+    return out
 
 
 def valid_population(assessments: Iterable[Assessment]) -> list[str]:

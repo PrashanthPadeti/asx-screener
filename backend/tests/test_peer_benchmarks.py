@@ -35,8 +35,10 @@ from compute.engine.applicability import (  # noqa: E402
 from compute.engine.peer_benchmarks import (  # noqa: E402
     MIN_VALID_FRACTION,
     MIN_VALID_N,
+    BenchmarkReason,
     benchmark,
     benchmark_all,
+    by_sector,
 )
 
 
@@ -195,6 +197,61 @@ def test_out_of_domain_peers_do_not_depress_coverage():
     assert b.n_total_peers == 36 and b.n_applicable_peers == 6
 
 
+def test_a_small_sector_is_not_told_its_coverage_is_poor():
+    """3 of 3 valid is 100% coverage and still unpublishable. Saying
+    'insufficient coverage' would send an operator looking for missing data
+    that does not exist — the sector is simply small, which may never change.
+    """
+    b = benchmark("roe", valid_many("roe", [0.1, 0.2, 0.3]))
+
+    assert b.reason_code is BenchmarkReason.INSUFFICIENT_PEER_POPULATION
+    assert b.coverage_pct == 100.0
+    assert "only 3 peers can carry this metric" in b.reason
+    assert "coverage" not in b.reason
+
+
+def test_a_large_sector_with_a_data_gap_is_told_exactly_that():
+    peers = valid_many("roe", [0.1] * 6) + \
+        [Assessment("roe", Applicability.UNAVAILABLE, None, "no value",
+                    Domain.GENERAL_CORPORATE, cause=Cause.SOURCE_MISSING)
+         for _ in range(30)]
+    b = benchmark("roe", peers)
+
+    assert b.reason_code is BenchmarkReason.INSUFFICIENT_COVERAGE
+    assert "17%" in b.reason
+    assert b.n_applicable_peers == 36
+
+
+def test_adequate_population_and_coverage_but_too_few_numbers():
+    """The third case: neither of the other two describes it."""
+    peers = valid_many("roe", [0.1, 0.2, 0.3, 0.4]) + \
+        [Assessment("roe", Applicability.UNAVAILABLE, None, "no value",
+                    Domain.GENERAL_CORPORATE, cause=Cause.SOURCE_MISSING)
+         for _ in range(2)]
+    b = benchmark("roe", peers)
+
+    assert b.n_applicable_peers == 6, "population is adequate"
+    assert b.coverage_pct > 60.0, "coverage is adequate"
+    assert b.reason_code is BenchmarkReason.INSUFFICIENT_VALID_OBSERVATIONS
+
+
+def test_every_withheld_benchmark_carries_a_machine_readable_reason():
+    withheld = [
+        benchmark("roe", []),
+        benchmark("debt_to_equity", [domain_suppressed("debt_to_equity", 4.6)] * 6),
+        benchmark("grossed_up_yield",
+                  [unhealthy("grossed_up_yield", "feed") for _ in range(8)]),
+        benchmark("roe", valid_many("roe", [0.1, 0.2, 0.3])),
+    ]
+    for b in withheld:
+        assert not b.ok and b.reason_code is not None
+
+
+def test_a_published_benchmark_carries_no_reason_code():
+    assert benchmark("roe", valid_many("roe", [0.1, 0.2, 0.3, 0.4, 0.5, 0.6])) \
+        .reason_code is None
+
+
 def test_a_healthy_benchmark_reports_real_quartiles():
     b = benchmark("roe", valid_many("roe", [0.05, 0.10, 0.15, 0.20, 0.25, 0.30]))
     assert b.ok
@@ -236,6 +293,74 @@ def test_a_bank_dividend_yield_median_is_publishable():
 
 def test_thresholds_are_named_constants_not_magic():
     assert MIN_VALID_N >= 2 and 0 < MIN_VALID_FRACTION <= 1
+
+
+# ── The pair that guards against "sector determines applicability" ────────────
+
+def test_cba_is_excluded_from_leverage_but_included_in_dividend_yield():
+    """The permanent guard. Both halves must hold at once, for the same
+    company, in the same run — one excluded, one included, decided per metric.
+    """
+    from compute.engine.dividends import DividendSource, FeedHealth
+    from compute.engine.factor_applicability import apply_applicability
+
+    import pandas as pd
+    from datetime import date
+
+    healthy = DividendSource(FeedHealth(latest_ex_date=date(2026, 9, 5),
+                                        as_of=date(2026, 9, 10)))
+
+    rows = [{"asx_code": "CBA", "sector": "Financials", "industry": "Banks",
+             "is_reit": False, "is_miner": False, "revenue_ttm": 2.7e10,
+             "debt_to_equity": 4.6, "grossed_up_yield": 0.0466}]
+    for i, code in enumerate(["NAB", "WBC", "ANZ", "BEN", "BOQ"]):
+        rows.append({"asx_code": code, "sector": "Financials",
+                     "industry": "Banks", "is_reit": False, "is_miner": False,
+                     "revenue_ttm": 1e10, "debt_to_equity": 4.0 + i * 0.2,
+                     "grossed_up_yield": 0.04 + i * 0.002})
+
+    df = pd.DataFrame(rows)
+    masked = apply_applicability(df, healthy)
+    sectors = {r["asx_code"]: r["sector"] for r in rows}
+
+    results = by_sector(masked.assessments, sectors,
+                        ["debt_to_equity", "grossed_up_yield"])["Financials"]
+
+    leverage = results["debt_to_equity"]
+    assert not leverage.ok, "CBA must not participate in a D/E peer statistic"
+    assert leverage.reason_code is BenchmarkReason.OUT_OF_DOMAIN_FOR_ALL
+    assert leverage.n_applicable_peers == 0
+
+    yield_bm = results["grossed_up_yield"]
+    assert yield_bm.ok, "CBA must participate in a dividend-yield statistic"
+    assert yield_bm.n_valid_peers == 6
+    assert yield_bm.median is not None
+
+
+def test_the_same_bank_loses_its_dividend_yield_when_the_feed_breaks():
+    """And the other axis: applicability unchanged, availability gone."""
+    from compute.engine.dividends import DividendSource, FeedHealth
+    from compute.engine.factor_applicability import apply_applicability
+
+    import pandas as pd
+    from datetime import date
+
+    broken = DividendSource(FeedHealth(latest_ex_date=date(2026, 8, 3),
+                                       as_of=date(2026, 9, 10)))
+
+    rows = [{"asx_code": c, "sector": "Financials", "industry": "Banks",
+             "is_reit": False, "is_miner": False, "revenue_ttm": 1e10,
+             "grossed_up_yield": 0.04}
+            for c in ["CBA", "NAB", "WBC", "ANZ", "BEN", "BOQ"]]
+
+    masked = apply_applicability(pd.DataFrame(rows), broken)
+    sectors = {r["asx_code"]: r["sector"] for r in rows}
+    b = by_sector(masked.assessments, sectors, ["grossed_up_yield"])["Financials"]
+
+    result = b["grossed_up_yield"]
+    assert result.reason_code is BenchmarkReason.SOURCE_UNHEALTHY_FOR_ALL
+    assert result.n_applicable_peers == 6, \
+        "the metric still applies to a bank — only the data is missing"
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

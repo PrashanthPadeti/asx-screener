@@ -66,11 +66,17 @@ class Masked:
     """The result of applying applicability to a factor frame."""
 
     def __init__(self, frame: pd.DataFrame, states: dict,
-                 tally: Counter, source_failed: pd.Series):
+                 tally: Counter, source_failed: pd.Series,
+                 assessments: Optional[dict] = None):
         self.frame = frame
         self.states = states                # asx_code -> sidecar payload
         self.tally = tally                  # for the run log
         self.source_failed = source_failed  # bool per row
+        #: asx_code -> metric -> Assessment. The in-memory contract, kept so a
+        #: peer engine can consume the decisions directly instead of
+        #: reconstructing applicability from the masked frame's nulls — which
+        #: would reintroduce exactly the ambiguity the sidecar removes.
+        self.assessments = assessments or {}
 
     @property
     def any_source_failed(self) -> bool:
@@ -95,6 +101,7 @@ def apply_applicability(df: pd.DataFrame,
 
     masked = df.copy()
     states: dict[str, dict] = {}
+    by_code: dict[str, dict] = {}
     tally: Counter = Counter()
     failed: list[bool] = []
 
@@ -123,12 +130,13 @@ def apply_applicability(df: pd.DataFrame,
                 tally[f"state:{a.state.value}"] += 1
 
         failed.append(row_failed)
+        by_code[row["asx_code"]] = {a.metric: a for a in assessments}
         payload = encode(assessments)
         if payload:
             states[row["asx_code"]] = payload
 
     return Masked(masked, states, tally,
-                  pd.Series(failed, index=df.index, dtype=bool))
+                  pd.Series(failed, index=df.index, dtype=bool), by_code)
 
 
 def withhold_source_failed(composite: pd.Series,

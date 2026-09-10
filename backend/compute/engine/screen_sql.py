@@ -424,6 +424,84 @@ def compile_screen(criteria: Sequence[Criterion],
     return CompiledScreen(where, params, preferences, order_sql, order_applicable)
 
 
+@dataclass(frozen=True)
+class ScreenPlan:
+    """Everything one request needs, resolved once and shared by every query.
+
+    One plan per request, not one per statement. Resolving "the latest
+    validated run" separately for the count, the page, the ranked count and
+    the exclusion breakdown would let a compute finishing mid-request give a
+    single HTTP response two internally valid and mutually inconsistent
+    snapshots — every number correct, the set of them impossible.
+    """
+
+    where: str
+    params: dict
+    scope: Optional[RunScope] = None
+    order_column: Optional[str] = None
+    order_direction: str = "DESC"
+    order_applicable: Optional[str] = None
+    order_metric: Optional[str] = None
+    order_governed: bool = False
+
+    @property
+    def snapshot(self) -> Optional[str]:
+        return self.scope.snapshot if self.scope else None
+
+    @property
+    def run_ids(self) -> Optional[list]:
+        return list(self.scope.run_ids) if self.scope else None
+
+    # ── The four statements, all from this one plan ──────────────────────────
+
+    def count_sql(self, table: str) -> str:
+        """Screen membership. Never narrowed by ordering participation."""
+        return f"SELECT COUNT(*) FROM {table} WHERE {self.where}"
+
+    def ranked_count_sql(self, table: str) -> str:
+        """Members that can participate in the requested ordering.
+
+        Equal to the membership count for an ungoverned ordering, so an
+        ordinary market-cap query does not acquire the appearance of having
+        been through applicability machinery.
+        """
+        if not self.order_governed or self.order_applicable is None:
+            return self.count_sql(table)
+        return (f"SELECT COUNT(*) FROM {table} "
+                f"WHERE {self.where} AND {self.order_applicable}")
+
+    def page_sql(self, table: str, select: str, limit: int,
+                 offset: int = 0, tiebreak: str = "asx_code") -> str:
+        """One page of ranked results.
+
+        The participation clause is in the WHERE, so non-participants never
+        reach the ORDER BY and cannot spend a slot. The tiebreak keeps
+        pagination stable across pages when the sort metric ties.
+        """
+        clauses = self.where
+        if self.order_governed and self.order_applicable:
+            clauses = f"{clauses} AND {self.order_applicable}"
+
+        order = (f"{self.order_column} {self.order_direction} NULLS LAST, "
+                 f"{tiebreak} ASC") if self.order_column else f"{tiebreak} ASC"
+
+        return (f"SELECT {select} FROM {table} WHERE {clauses} "
+                f"ORDER BY {order} LIMIT {int(limit)} OFFSET {int(offset)}")
+
+    def exclusion_sql(self, table: str, select: str) -> Optional[str]:
+        """Members excluded from the ordering, and why.
+
+        Scoped to screen members deliberately: a company that fails an
+        unrelated REQUIRED criterion is not "excluded from the ordering", it
+        was never in the result set, and counting it in both places would
+        double-report one absence.
+        """
+        if not self.order_governed or self.order_applicable is None:
+            return None
+        return (f"SELECT {select} FROM {table} "
+                f"WHERE {self.where} AND NOT {self.order_applicable}")
+
+
 def order_participation_sql(order_by: str, dialect: Dialect = "postgres",
                             states_col: str = "metric_states") -> str:
     """A flag a route can select so the UI can say who was left out and why.
@@ -436,6 +514,121 @@ def order_participation_sql(order_by: str, dialect: Dialect = "postgres",
 
 
 # ── Pagination ────────────────────────────────────────────────────────────────
+
+def plan_screen(parsed, registry, scope: Optional[RunScope] = None,
+                dialect: Dialect = "postgres",
+                states_col: str = "metric_states",
+                run_column: str = "compute_run_id",
+                table_alias: str = "u") -> ScreenPlan:
+    """The single authority: a typed query plus a registry becomes one plan.
+
+    Governed leaves compile through the applicability contract; ungoverned
+    leaves keep their existing deterministic behaviour, so the 274 fields P0-A
+    does not govern are not dragged through machinery they do not need.
+
+    ``scope`` is required exactly when the query touches governed data, and
+    must be server-resolved — a caller supplying one satisfies the signature
+    without supplying the guarantee, which is why resolve_run_scope exists.
+    """
+    from app.core.parsed_query import AllOf, AnyOf
+    from app.core.parsed_query import Criterion as TypedCriterion
+
+    assert_role_is_decidable(parsed.expression)
+
+    if parsed.requires_run_scope and scope is None:
+        raise CompileError(
+            "this query reads governed metrics and no validated run scope was "
+            "resolved; an absent sidecar entry cannot be read as APPLICABLE "
+            "outside a known contract")
+
+    params: dict = {}
+    counter = [0]
+
+    def render(node) -> str:
+        if isinstance(node, AllOf):
+            return (" AND ".join(f"({render(o)})" for o in node.operands)
+                    if node.operands else "TRUE")
+        if isinstance(node, AnyOf):
+            return (" OR ".join(f"({render(o)})" for o in node.operands)
+                    if node.operands else "FALSE")
+
+        definition = resolve_field(registry, node.field)
+        key = f"sp{counter[0]}"
+        counter[0] += 1
+
+        if definition.governed:
+            criterion = Criterion(definition.canonical, node.role,
+                                  node.operator, node.value)
+            params[key] = _scaled(node.value, definition)
+            expression = three_valued_sql(criterion, key, dialect, states_col)
+            return membership_sql(expression, node.role, dialect)
+
+        return _ungoverned_sql(node, definition, key, params, dialect)
+
+    clauses = []
+    if scope is not None:
+        clauses.append(scope.sql(dialect, f"{table_alias}.{run_column}"
+                                 if table_alias else run_column))
+    if parsed.expression is not None:
+        clauses.append(f"({render(parsed.expression)})")
+
+    where = " AND ".join(clauses) if clauses else "TRUE"
+
+    order_column = order_applicable = order_metric = None
+    governed_order = False
+    direction = "DESC"
+
+    if parsed.ordering is not None:
+        definition = resolve_field(registry, parsed.ordering.field,
+                                   for_sort=True)
+        order_column = definition.column
+        direction = "DESC" if parsed.ordering.direction.value == "desc" else "ASC"
+        governed_order = definition.governed
+        if governed_order:
+            order_metric = definition.canonical
+            order_applicable = applicable_sql(definition.canonical, dialect,
+                                              states_col)
+
+    return ScreenPlan(where, params, scope, order_column, direction,
+                      order_applicable, order_metric, governed_order)
+
+
+def resolve_field(registry, name: str, for_sort: bool = False):
+    from app.core.screener_fields import resolve as _resolve
+    return _resolve(registry, name, for_sort=for_sort)
+
+
+def _scaled(value, definition):
+    if definition.type == "number":
+        return float(value) * definition.scale
+    return value
+
+
+def _ungoverned_sql(node, definition, key: str, params: dict,
+                    dialect: Dialect) -> str:
+    """Existing deterministic behaviour, unchanged.
+
+    P0-A governs 37 of 311 fields. Forcing the other 274 through the
+    applicability contract would add a run dependency and a CASE expression to
+    every sector filter for no correctness gain.
+    """
+    operator = OPERATORS.get(node.operator) or node.operator
+    placeholder = f":{key}" if dialect == "sqlite" else f"%({key})s"
+
+    if node.kind == "boolean":
+        want_true = node.value if operator in ("=", "==") else not node.value
+        cast = "" if dialect == "sqlite" else "::int"
+        clause = (f"({definition.column}){cast} != 0" if want_true
+                  else f"({definition.column}){cast} = 0")
+    else:
+        params[key] = _scaled(node.value, definition)
+        clause = f"({definition.column}) {operator} {placeholder}"
+
+    if node.role is CriterionType.EXCLUDED:
+        false_literal = "FALSE" if dialect == "postgres" else "0"
+        clause = f"NOT COALESCE(({clause}), {false_literal})"
+    return clause
+
 
 def paginated_ranking_sql(compiled: CompiledScreen, table: str,
                           select: str, limit: int, offset: int = 0,

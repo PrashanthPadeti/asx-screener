@@ -23,10 +23,36 @@ from datetime import date as date_type
 from typing import Any, Optional
 
 from app.db.session import get_db
-from app.schemas.screener import ScreenerRequest, ScreenerResponse, ScreenerRow, QueryScreenerRequest
+from app.schemas.screener import (
+    ScreenerRequest, ScreenerResponse, ScreenerRow, QueryScreenerRequest,
+    OrderingExclusion,
+)
 from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
 from app.core.deps import get_optional_user, get_current_user, require_admin, require_query_access
-from app.core.query_parser import parse_query, get_field_reference, QueryParseError
+from app.core.query_parser import (
+    parse_query, parse_query_typed, get_field_reference, QueryParseError,
+)
+from app.core.parsed_query import (
+    AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
+    canonicalise,
+)
+from app.core.screener_fields import UnknownField, build_registry
+from compute.engine.metric_states import GOVERNED_METRICS
+from compute.engine.screen_predicates import CriterionType
+from compute.engine.screen_sql import (
+    CompileError, RunScope, ValidatedRun, plan_screen,
+)
+
+# The resolver's query, inlined here so the route uses one definition of
+# "validated" rather than inventing its own.
+VALIDATED_RUNS_SQL_TEXT = """
+    SELECT id, factor_model_version, unhealthy_sources, detail
+      FROM screener.compute_runs
+     WHERE factor_model_version = ANY(:supported)
+       AND rows_written IS NOT NULL
+     ORDER BY run_at DESC
+     LIMIT :limit
+"""
 
 FREE_STOCK_LIMIT = 500   # max rows visible to free / unauthenticated users
 
@@ -641,77 +667,90 @@ SORTABLE_COLS: dict[str, str] = {
 }
 
 
-def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
+# One field definition, derived from the two maps above rather than retyped.
+# ALLOWED_FIELDS and SORTABLE_COLS remain the source of truth for their own
+# contents; FIELD_REGISTRY is what every consumer resolves through, so a field
+# cannot be filterable under one spelling and sortable under another.
+FIELD_REGISTRY = build_registry(ALLOWED_FIELDS, SORTABLE_COLS)
+
+
+def _typed_from_filters(req: ScreenerRequest) -> ParsedQuery:
+    """A filter list is a conjunction. Making that explicit is the point of
+    the tree — a flat list was always an implicit AND."""
+    criteria = tuple(
+        TypedCriterion(f.field.lower(), CriterionType.REQUIRED,
+                       f.operator.value, f.value)
+        for f in req.filters)
+    ordering = Ordering(req.sort_by.lower(),
+                        Direction.DESC if req.sort_dir.lower() == "desc"
+                        else Direction.ASC)
+    return ParsedQuery(expression=AllOf(criteria) if criteria else None,
+                       ordering=ordering)
+
+
+async def resolve_scope_if_needed(db, parsed: ParsedQuery):
+    """Server-resolved, and only when the query actually reads governed data.
+
+    A caller cannot supply this. The 274 ungoverned fields acquire no run
+    dependency, so an ordinary sector filter costs nothing.
+    """
+    if not parsed.requires_run_scope:
+        return None
+    try:
+        rows = await db.execute(text(VALIDATED_RUNS_SQL_TEXT),
+                                {"supported": list(GOVERNED_METRICS.keys()),
+                                 "limit": 8})
+        runs = [ValidatedRun(r[0], r[1], tuple(r[2] or ()), validated=True,
+                             detail=r[3])
+                for r in rows.fetchall()]
+        if not runs:
+            raise CompileError("no completed compute run under a supported "
+                               "factor model")
+        newest = runs[0].contract_key
+        return RunScope.from_validated_runs(
+            [r for r in runs if r.contract_key == newest])
+    except CompileError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+def _plan_for(req, scope):
+    """Typed query -> canonical fields -> plan. The single semantic route.
+
+    An explicitly supplied unknown sort is a 400. An omitted sort_by is not an
+    error: removing the silent market_cap fallback must not become an
+    API-breaking requirement for clients that legitimately omit it, so the
+    schema default still applies.
+    """
+    parsed = _typed_from_filters(req)
+    try:
+        parsed = canonicalise(parsed, FIELD_REGISTRY)
+    except UnknownField as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        return plan_screen(parsed, FIELD_REGISTRY, scope,
+                           dialect="postgres", table_alias="u")
+    except CompileError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+def build_screener_sql(req: ScreenerRequest, scope=None) -> tuple[str, str, dict]:
     """
     Build COUNT + DATA queries from the filter list.
     Queries screener.universe directly — no JOINs.
     Returns (count_sql, data_sql, params).
     """
-    where_clauses: list[str] = [
-        "u.price IS NOT NULL",      # exclude no-price stocks
-        "u.status = 'active'",      # match sector heatmap — active stocks only
-    ]
-    params: dict[str, Any] = {}
+    plan = _plan_for(req, scope)
+    where = f"u.price IS NOT NULL AND u.status = 'active' AND ({plan.where})"
+    params = dict(plan.params)
 
-    for i, f in enumerate(req.filters):
-        field_key = f.field.lower()
-        field_info = ALLOWED_FIELDS.get(field_key)
-        if not field_info:
-            raise HTTPException(status_code=400, detail=f"Unknown filter field: '{f.field}'")
+    sort_expr = plan.order_column or "u.market_cap"
+    sort_dir  = plan.order_direction
 
-        sql_col  = field_info["col"]
-        ftype    = field_info["type"]
-        scale    = field_info.get("scale", 1.0)
-        operator = OPERATOR_MAP.get(f.operator.value)
-        param_key = f"p{i}"
-
-        if f.operator.value == "in":
-            if not isinstance(f.value, list):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Field '{f.field}': 'in' operator requires a list value"
-                )
-            placeholders = ", ".join([f":{param_key}_{j}" for j in range(len(f.value))])
-            where_clauses.append(f"({sql_col}) IN ({placeholders})")
-            for j, v in enumerate(f.value):
-                params[f"{param_key}_{j}"] = v
-
-        elif ftype == "boolean":
-            # Cast to int before comparing so this works for BOTH:
-            #   - smallint columns (is_reit, is_asx50, above_vwap, etc.) stored as 0/1
-            #   - boolean expression fields (above_sma50, golden_cross, etc.)
-            # PostgreSQL: true::int=1, false::int=0, 1::smallint::int=1
-            if isinstance(f.value, bool):
-                bool_val = f.value
-            elif isinstance(f.value, str):
-                bool_val = f.value.lower() in ("true", "1", "yes")
-            else:
-                bool_val = bool(f.value)
-            if bool_val:
-                where_clauses.append(f"({sql_col})::int != 0")
-            else:
-                where_clauses.append(f"({sql_col})::int = 0")
-
-        else:
-            # number or text
-            val = f.value
-            if ftype == "number":
-                try:
-                    val = float(val) * scale
-                except (TypeError, ValueError):
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Field '{f.field}': expected a numeric value"
-                    )
-            where_clauses.append(f"({sql_col}) {operator} :{param_key}")
-            params[param_key] = val
-
-    where = " AND ".join(where_clauses)
-
-    # Sort column — whitelist only
-    sort_key = req.sort_by.lower()
-    sort_expr = SORTABLE_COLS.get(sort_key, "u.market_cap")
-    sort_dir  = "DESC" if req.sort_dir.lower() == "desc" else "ASC"
+    # Ranking participation lives in the WHERE, so a non-participant never
+    # reaches the ORDER BY and cannot spend a pagination slot.
+    data_where = where
+    if plan.order_governed and plan.order_applicable:
+        data_where = f"{where} AND {plan.order_applicable}"
 
     count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
 
@@ -789,7 +828,7 @@ def build_screener_sql(req: ScreenerRequest) -> tuple[str, str, dict]:
             u.price_date, u.universe_built_at
 
         FROM screener.universe u
-        WHERE {where}
+        WHERE {data_where}
         ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
         LIMIT :_limit OFFSET :_offset
     """
@@ -904,8 +943,18 @@ async def run_screener(
     Non-percentage fields use their raw values:
     - PE <= 20, Market Cap >= 500 (AUD M), Piotroski >= 7
     """
+    # One scope per request, resolved before any statement. Resolving it per
+    # query would let a compute finishing mid-request give this response two
+    # internally valid, mutually inconsistent snapshots.
     try:
-        count_sql, data_sql, params = build_screener_sql(req)
+        parsed_for_scope = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
+    except UnknownField as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    scope = await resolve_scope_if_needed(db, parsed_for_scope)
+
+    try:
+        plan = _plan_for(req, scope)
+        count_sql, data_sql, params = build_screener_sql(req, scope)
     except HTTPException:
         raise
 
@@ -948,6 +997,24 @@ async def run_screener(
     else:
         rows = []
 
+    # total answers membership; ranked_total answers participation in this
+    # ordering. They are equal unless the ordering is governed and some
+    # members have no valid observation for it.
+    ranked_total = total
+    exclusions = None
+    if plan.order_governed and plan.order_applicable:
+        ranked_sql = (f"SELECT COUNT(*) FROM screener.universe u "
+                      f"WHERE {plan.where} AND {plan.order_applicable}")
+        ranked_raw = (await db.execute(text(ranked_sql), params)).scalar() or 0
+        ranked_total = min(ranked_raw, total)
+
+        excluded_count = max(0, total - ranked_total)
+        if excluded_count:
+            exclusions = OrderingExclusion(
+                metric=plan.order_metric or req.sort_by,
+                count=excluded_count,
+            )
+
     response = ScreenerResponse(
         data=[ScreenerRow(**dict(r)) for r in rows],
         total=total,
@@ -957,6 +1024,10 @@ async def run_screener(
         filters_applied=len(req.filters),
         is_capped=is_capped,
         free_limit=FREE_STOCK_LIMIT if is_free else None,
+        ranked_total=ranked_total,
+        excluded_from_ordering=exclusions,
+        snapshot=plan.snapshot,
+        run_ids=plan.run_ids,
     )
 
     if cache_key:
@@ -1117,6 +1188,25 @@ _EXPORT_COLS: list[str] = [
 _EXPORT_MAX_ROWS = 5_000
 
 
+def _with_limit(sql: str, limit: int) -> str:
+    """Replace the builder's pagination with a fixed export limit.
+
+    Anchored on the parameter names the builder emits rather than on a
+    formatted string, so a whitespace change cannot silently turn an export
+    into an unbounded query. Raises if the anchor is absent, because a missing
+    LIMIT on an export is a table scan served as a download.
+    """
+    import re
+
+    out, count = re.subn(r"LIMIT\s+:_limit\s+OFFSET\s+:_offset",
+                         f"LIMIT {int(limit)}", sql)
+    if count != 1:
+        raise RuntimeError(
+            "export could not find the builder's pagination clause; refusing "
+            "to run an unbounded query")
+    return out
+
+
 def _fmt_val(col: str, val: Any) -> str:
     """Format a value for CSV output. Converts decimal ratios → percentage strings."""
     if val is None:
@@ -1154,15 +1244,20 @@ async def export_screener(
         )
 
     try:
-        _, data_sql, params = build_screener_sql(req)
+        try:
+            parsed = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
+        except UnknownField as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        scope = await resolve_scope_if_needed(db, parsed)
+        _, data_sql, params = build_screener_sql(req, scope)
     except HTTPException:
         raise
 
-    # Strip pagination and apply hard cap
-    export_sql = data_sql.replace(
-        "LIMIT :_limit OFFSET :_offset",
-        f"LIMIT {_EXPORT_MAX_ROWS}"
-    )
+    # An explicit limit, not a string replacement on generated SQL. The old
+    # form matched the literal text "LIMIT :_limit OFFSET :_offset" and broke
+    # silently the moment the builder's output changed shape — which it just
+    # did. Export is the same query plan with a different row limit.
+    export_sql = _with_limit(data_sql, _EXPORT_MAX_ROWS)
     # Remove pagination params if present
     params.pop("_limit",  None)
     params.pop("_offset", None)
@@ -1793,18 +1888,45 @@ async def query_screener(
     """
     # Parse the text query into a parameterized SQL WHERE fragment
     try:
-        custom_where, params = parse_query(req.query, ALLOWED_FIELDS)
+        parsed = parse_query_typed(req.query, ALLOWED_FIELDS)
     except QueryParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    # Baseline WHERE clauses (same as the standard screener)
-    base_where = "u.price IS NOT NULL AND u.status = 'active'"
-    where      = f"{base_where} AND ({custom_where})"
+    # AI Query interprets language and then stops. From here the path is
+    # identical to the ordinary screener: canonical identity, the same
+    # validated scope, the same builder. There is no AI-specific SQL branch,
+    # because two implementations of the same semantics diverge eventually.
+    try:
+        parsed = canonicalise(parsed, FIELD_REGISTRY)
+        if req.sort_by:
+            parsed = ParsedQuery(
+                parsed.expression,
+                Ordering(req.sort_by.lower(),
+                         Direction.DESC if req.sort_dir.lower() == "desc"
+                         else Direction.ASC),
+                parsed.raw)
+            parsed = canonicalise(parsed, FIELD_REGISTRY)
+    except UnknownField as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    # Sort column — whitelist only (same logic as build_screener_sql)
-    sort_key  = req.sort_by.lower()
-    sort_expr = SORTABLE_COLS.get(sort_key, "u.market_cap")
-    sort_dir  = "DESC" if req.sort_dir.lower() == "desc" else "ASC"
+    scope = await resolve_scope_if_needed(db, parsed)
+
+    try:
+        plan = plan_screen(parsed, FIELD_REGISTRY, scope,
+                           dialect="postgres", table_alias="u")
+    except CompileError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    base_where = "u.price IS NOT NULL AND u.status = 'active'"
+    where      = f"{base_where} AND ({plan.where})"
+    params     = dict(plan.params)
+
+    sort_expr = plan.order_column or "u.market_cap"
+    sort_dir  = plan.order_direction
+
+    data_where = where
+    if plan.order_governed and plan.order_applicable:
+        data_where = f"{where} AND {plan.order_applicable}"
 
     count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
 
@@ -1885,15 +2007,38 @@ async def export_query_screener(
         )
 
     try:
-        custom_where, params = parse_query(req.query, ALLOWED_FIELDS)
+        parsed = parse_query_typed(req.query, ALLOWED_FIELDS)
     except QueryParseError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
+    try:
+        parsed = canonicalise(
+            ParsedQuery(parsed.expression,
+                        Ordering(req.sort_by.lower(),
+                                 Direction.DESC if req.sort_dir.lower() == "desc"
+                                 else Direction.ASC),
+                        parsed.raw),
+            FIELD_REGISTRY)
+    except UnknownField as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    scope = await resolve_scope_if_needed(db, parsed)
+    try:
+        plan = plan_screen(parsed, FIELD_REGISTRY, scope,
+                           dialect="postgres", table_alias="u")
+    except CompileError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
     base_where = "u.price IS NOT NULL AND u.status = 'active'"
-    where      = f"{base_where} AND ({custom_where})"
-    sort_key   = req.sort_by.lower()
-    sort_expr  = SORTABLE_COLS.get(sort_key, "u.market_cap")
-    sort_dir   = "DESC" if req.sort_dir.lower() == "desc" else "ASC"
+    where      = f"{base_where} AND ({plan.where})"
+    params     = dict(plan.params)
+    sort_expr  = plan.order_column or "u.market_cap"
+    sort_dir   = plan.order_direction
+
+    # Export membership must match the interactive route exactly; only the
+    # row limit differs.
+    if plan.order_governed and plan.order_applicable:
+        where = f"{where} AND {plan.order_applicable}"
 
     export_sql = f"""
         SELECT {', '.join(f'u.{c}' for c in _EXPORT_COLS)}

@@ -248,6 +248,35 @@ def test_macquarie_is_overridden_to_bank():
         "which is what the override exists to prevent"
 
 
+def test_oil_and_gas_is_never_flagged_so_the_industry_set_carries_it():
+    """Measured: is_miner covers Metals & Mining 566/566 and Oil & Gas 0/110.
+
+    Without MINING_INDUSTRIES those 110 fall to sector Energy ->
+    GENERAL_CORPORATE, and a pre-revenue oil explorer gets ARU's treatment.
+    """
+    explorer = resolve_domain({"asx_code": "OIL", "sector": "Energy",
+                               "industry": "Oil, Gas & Consumable Fuels",
+                               "is_miner": False, "revenue_ttm": 0.0})
+    assert explorer.domain is Domain.MINING_EXPLORER
+    assert assess("altman_z_score", 2853.0, explorer.domain).state \
+        is Applicability.NOT_MEANINGFUL
+
+    producer = resolve_domain({"asx_code": "WDS", "sector": "Energy",
+                               "industry": "Oil, Gas & Consumable Fuels",
+                               "is_miner": False, "revenue_ttm": 1.4e10})
+    assert producer.domain is Domain.MINING_PRODUCER
+
+
+def test_revenue_is_read_from_the_real_column_names():
+    """screener.universe has no plain `revenue` column; it has revenue_ttm."""
+    assert resolve_domain({"is_miner": True, "revenue_ttm": 5e9}).domain \
+        is Domain.MINING_PRODUCER
+    assert resolve_domain({"is_miner": True, "revenue_fy0": 5e9}).domain \
+        is Domain.MINING_PRODUCER
+    assert resolve_domain({"is_miner": True, "revenue_ttm": None,
+                           "revenue_fy0": 0.0}).domain is Domain.MINING_EXPLORER
+
+
 def test_an_unflagged_miner_still_takes_the_revenue_split():
     """566 companies sit in Metals & Mining; if is_miner is not set on all of
     them, sector alone would send a pre-revenue explorer to GENERAL_CORPORATE

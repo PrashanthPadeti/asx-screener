@@ -72,6 +72,23 @@ class DomainResult:
 #: promote an explorer to a producer.
 PRE_REVENUE_CEILING = 1_000_000.0
 
+#: There is no plain ``revenue`` column on screener.universe. These are the
+#: real ones, most current first — ``revenue_ttm`` where it exists, else the
+#: latest full year. Checked in order so the caller can pass a whole universe
+#: row without knowing which one is populated.
+REVENUE_FIELDS = ("revenue", "revenue_ttm", "revenue_fy0")
+
+
+def _revenue(row: Mapping) -> Optional[float]:
+    for fieldname in REVENUE_FIELDS:
+        v = row.get(fieldname)
+        if v is not None:
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                continue
+    return None
+
 
 # ── 0 · auditable per-issuer exceptions ───────────────────────────────────────
 # Where the GICS classification is technically correct but analytically
@@ -122,10 +139,16 @@ INDUSTRY_DOMAIN: dict[str, Domain] = {
 }
 
 #: Industries that carry the producer/explorer question whether or not
-#: ``is_miner`` is set. 566 companies sit in Metals & Mining and 110 in Oil &
-#: Gas; if the flag is not set on all of them, sector alone would send an
-#: unflagged pre-revenue explorer to GENERAL_CORPORATE — which is the ARU
-#: defect arriving by a different route.
+#: ``is_miner`` is set. Measured: the flag covers Metals & Mining perfectly
+#: (566 of 566) and Oil, Gas & Consumable Fuels **not at all** (0 of 110). So
+#: without this set, 110 energy companies fall through to sector Energy ->
+#: GENERAL_CORPORATE, and a pre-revenue oil explorer gets the ARU treatment —
+#: an Altman Z from a model that presumes revenue, read as safety.
+#:
+#: MINING_PRODUCER and MINING_EXPLORER carry resource-extraction semantics
+#: generally, not metalliferous mining specifically: the applicability
+#: questions for an oil explorer are the same ones — no revenue base to price
+#: against, no inventory turnover, a distress model outside its domain.
 MINING_INDUSTRIES: frozenset[str] = frozenset({
     "metals & mining",
     "oil, gas & consumable fuels",
@@ -190,13 +213,13 @@ def resolve_domain(row: Mapping) -> DomainResult:
 
     if row.get("is_miner") or industry in MINING_INDUSTRIES:
         evidence = "is_miner" if row.get("is_miner") else f"industry={industry}"
-        revenue = row.get("revenue")
+        revenue = _revenue(row)
         if revenue is None:
             # A miner whose revenue is unknown could be either, and the two
             # have opposite applicability. Refusing to guess is the contract.
             return DomainResult(Domain.UNKNOWN, Source.UNRESOLVED,
                                 f"{evidence}, revenue unknown")
-        if float(revenue) > PRE_REVENUE_CEILING:
+        if revenue > PRE_REVENUE_CEILING:
             return DomainResult(Domain.MINING_PRODUCER, Source.STRUCTURAL_FLAG,
                                 f"{evidence}, revenue above pre-revenue ceiling")
         return DomainResult(Domain.MINING_EXPLORER, Source.STRUCTURAL_FLAG,

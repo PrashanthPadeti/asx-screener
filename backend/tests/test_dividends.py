@@ -15,7 +15,7 @@ Run under pytest, or standalone the way the multibagger tests are run:
 """
 
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -173,6 +173,43 @@ def test_the_old_calculation_would_have_fired_it():
     assert old_yield > ANOMALY_THRESHOLD, "20% — the doubled figure fires"
     assert dividend_metrics(ORDINARY_PAYER, close=10.0,
                             as_of=AS_OF)["grossed_up_yield"] <= ANOMALY_THRESHOLD
+
+
+# ── Feed staleness · the window is only as honest as the feed ─────────────────
+
+def test_a_stale_feed_refuses_rather_than_halving_the_yield():
+    """Measured Sep 2026: market.dividends held 0 rows in the preceding 30 days
+    and every ASX20 payer was 6-10 months past its last recorded dividend. A
+    correct window over that feed captures one of two semi-annual payments."""
+    res = ttm_dividends(CBA_ROWS, as_of=AS_OF, feed_as_of=date(2026, 8, 3))
+
+    assert res.state is DividendState.FEED_INCOMPLETE
+    assert res.cash_dps is None and res.gross_dps is None
+
+
+def test_a_current_feed_computes_normally():
+    res = ttm_dividends(CBA_ROWS, as_of=CBA_TWO_PAYMENT_DATE,
+                        feed_as_of=date(2026, 2, 25))
+    assert res.state is DividendState.APPLICABLE
+    assert res.cash_dps == 4.95
+
+
+def test_a_quiet_month_does_not_trip_the_guard():
+    """January and July have troughs; the tolerance clears one, not a break."""
+    res = ttm_dividends(CBA_ROWS, as_of=CBA_TWO_PAYMENT_DATE,
+                        feed_as_of=date(2026, 3, 1) - timedelta(days=34))
+    assert res.state is DividendState.APPLICABLE
+
+
+def test_the_guard_is_opt_in():
+    """Callers that cannot supply a feed date keep the previous behaviour."""
+    assert ttm_dividends(CBA_ROWS, as_of=AS_OF).state is DividendState.APPLICABLE
+
+
+def test_feed_incomplete_writes_nulls_not_a_halved_number():
+    m = dividend_metrics(CBA_ROWS, close=158.690, as_of=AS_OF,
+                         feed_as_of=date(2026, 8, 3))
+    assert all(m[f] is None for f in FIELDS)
 
 
 # ── Gross up per payment, not per aggregate ───────────────────────────────────

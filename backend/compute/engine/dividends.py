@@ -59,6 +59,22 @@ MAX_GROSS_RATIO = 1.50
 # consistent with the 30% formula. Dividends are stored to the cent or finer.
 RECONCILE_TOL = 0.0005
 
+# How far the dividend feed may lag the metric date before a trailing-twelve-
+# month figure stops being computable.
+#
+# This exists because a period window is only as honest as the feed under it.
+# Measured on production in September 2026: market.dividends held 0 rows in the
+# preceding 30 days and 1 in the preceding 60, and every ASX20 payer was
+# between six and ten months past its last recorded dividend. A correct window
+# over that feed captures one of two semi-annual payments and halves the yield
+# — the mirror image of the divs[:4] defect, and no better for being
+# conservative-looking.
+#
+# 35 days rather than 30: a month with no ex-dates anywhere on the exchange is
+# possible around the January and July troughs, so the tolerance has to clear a
+# quiet month without clearing a broken feed.
+FEED_STALENESS_DAYS = 35
+
 
 class GrossUpPolicy(str, Enum):
     """How a payment's grossed-up amount is chosen.
@@ -88,6 +104,7 @@ class DividendState(str, Enum):
     NO_PAYMENTS_IN_WINDOW = "no_payments_in_window"   # paid before, not lately
     NO_DIVIDEND_HISTORY = "no_dividend_history"       # never paid, or no rows
     UNAVAILABLE = "unavailable"                       # rows exist, unusable
+    FEED_INCOMPLETE = "feed_incomplete"               # window not fully observed
 
 
 @dataclass(frozen=True)
@@ -279,14 +296,28 @@ def implied_franking_pct(cash_dps: float, gross_dps: float,
 def ttm_dividends(rows: Iterable[dict] | Sequence[Payment],
                   as_of: Optional[date] = None,
                   policy: GrossUpPolicy = GrossUpPolicy.PREFER_STORED,
-                  tax_rate: float = CORP_TAX_RATE) -> TTMDividends:
+                  tax_rate: float = CORP_TAX_RATE,
+                  feed_as_of: Optional[date] = None) -> TTMDividends:
     """Trailing-twelve-month cash and grossed-up dividends per share.
 
     ``as_of`` is the metric snapshot date, not today: a metric computed for a
     past date must select the window that date saw. It defaults to today only
     for interactive use.
+
+    ``feed_as_of`` is the most recent ex-date the dividend feed holds *for the
+    whole exchange* — ``SELECT max(ex_date) FROM market.dividends``. It is not
+    per company, deliberately: a single company's gap is indistinguishable from
+    a skipped dividend, but a feed that has recorded nothing exchange-wide for
+    weeks is unambiguous. When the feed has not observed the end of the window,
+    there is no trailing-twelve-month figure to report, and saying so is better
+    than reporting a confidently halved one.
     """
     as_of = as_of or date.today()
+
+    if feed_as_of is not None and (as_of - feed_as_of).days > FEED_STALENESS_DAYS:
+        start, end = ttm_window(as_of)
+        return TTMDividends(None, None, None, DividendState.FEED_INCOMPLETE,
+                            window_start=start, window_end=end)
 
     payments = list(rows) if rows and isinstance(next(iter(rows), None), Payment) \
         else normalise(rows)  # type: ignore[arg-type]
@@ -343,7 +374,8 @@ def dividend_metrics(rows: Iterable[dict] | Sequence[Payment],
                      close: Optional[float],
                      as_of: Optional[date] = None,
                      policy: GrossUpPolicy = GrossUpPolicy.PREFER_STORED,
-                     tax_rate: float = CORP_TAX_RATE) -> dict:
+                     tax_rate: float = CORP_TAX_RATE,
+                     feed_as_of: Optional[date] = None) -> dict:
     """The five dividend fields, always all five, never partially written.
 
     Every key is present on every path. ``upsert_metrics`` builds its UPDATE
@@ -351,7 +383,8 @@ def dividend_metrics(rows: Iterable[dict] | Sequence[Payment],
     whatever the previous run wrote — which is how OEL carried a 480%
     grossed-up yield long after it stopped paying anything.
     """
-    res = ttm_dividends(rows, as_of=as_of, policy=policy, tax_rate=tax_rate)
+    res = ttm_dividends(rows, as_of=as_of, policy=policy, tax_rate=tax_rate,
+                        feed_as_of=feed_as_of)
 
     empty = {
         "dividend_per_share": None,

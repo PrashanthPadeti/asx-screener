@@ -257,7 +257,7 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
         "gross_margin_expansion", "operating_margin_expansion",
         "gross_margin_expanding", "operating_margin_expanding",
         # observation-sensitive
-        "roe", "return_on_equity", "book_value_per_share", "price_to_book",
+        "roe", "book_value_per_share", "price_to_book",
         "pe_ratio", "peg_ratio", "roce", "roic",
         # dividend methodology
         "dividend_yield", "grossed_up_yield", "franking_pct",
@@ -278,6 +278,37 @@ UNSPECIFIED = object()
 
 class UnsupportedModelVersion(Exception):
     """The row was written under a contract this build cannot interpret."""
+
+
+class RunMismatch(Exception):
+    """Two artefacts from different compute runs were about to be shown together."""
+
+
+def assert_same_run(**run_ids) -> None:
+    """Every artefact displayed together must come from one run.
+
+    A company factor score and the sector benchmark shown beside it are only
+    comparable if they were assessed under the same applicability rules,
+    against the same source health, under the same model version. An overnight
+    partial failure can leave each of them individually valid and jointly
+    meaningless — the score computed while the dividend feed was healthy, the
+    benchmark rebuilt after it broke, and nothing on the page saying so.
+
+    Fails closed. There is no "use the newest benchmark" branch, because the
+    newest one is exactly what makes the pair inconsistent.
+    """
+    present = {name: rid for name, rid in run_ids.items() if rid is not None}
+    if len(set(present.values())) > 1:
+        detail = ", ".join(f"{n}={r}" for n, r in sorted(present.items()))
+        raise RunMismatch(
+            f"artefacts from different compute runs cannot be shown together: "
+            f"{detail}")
+
+    missing = [name for name, rid in run_ids.items() if rid is None]
+    if missing and present:
+        raise RunMismatch(
+            f"{', '.join(sorted(missing))} has no run attribution, so it "
+            f"cannot be shown beside {', '.join(sorted(present))}")
 
 
 def supported_version(version: Optional[str]) -> bool:

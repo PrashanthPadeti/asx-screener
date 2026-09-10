@@ -57,9 +57,18 @@ psycopg2.extensions.register_type(_DEC2FLOAT)
 GOVERNED_BENCHMARK_METRICS = [
     "pe_ratio", "price_to_book", "ev_ebitda",
     "dividend_yield", "grossed_up_yield", "franking_pct",
-    "roe", "net_margin", "gross_margin",
+    "roe", "gross_margin",
     "debt_to_equity", "current_ratio",
 ]
+
+# net_margin is deliberately NOT here. It carries no domain rule and no
+# observation rule, so it is not in the governed set — and listing it here
+# would have sent by_sector looking for assessments that were never made,
+# silently withholding the benchmark with NO_PEERS. Whether a bank's net
+# margin is meaningful is a real question (gross_margin is suppressed for
+# financials because an industrial P&L shape is forced onto interest income;
+# net margin may or may not inherit that), but it is a domain judgement to
+# make deliberately in a new model version, not a gap to paper over here.
 
 #: Deliberately left on the legacy path until migrated on purpose: EBITDA
 #: margin, the growth rates, the return series and market cap. They are not
@@ -201,8 +210,8 @@ def run(conn, dry_run: bool = False) -> int:
             g("dividend_yield", "median"), g("grossed_up_yield", "median"),
             g("franking_pct", "median"),
             g("roe", "p25"), g("roe", "median"), g("roe", "p75"),
-            g("net_margin", "p25"), g("net_margin", "median"),
-            g("net_margin", "p75"),
+            _pct(grp["net_margin"], 0.25), _med(grp["net_margin"]),
+            _pct(grp["net_margin"], 0.75),
             g("gross_margin", "median"),
             # ── Ungoverned: legacy aggregation, deliberately untouched ──────
             _med(grp["ebitda_margin"]),

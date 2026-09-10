@@ -320,8 +320,11 @@ class Observation:
 #: number, it stops having a sign that means anything: QAN's negative equity
 #: produced ROE 206.30%, which a percentile rank reads as exceptional quality.
 POSITIVE_DENOMINATOR: dict[str, tuple[str, str]] = {
+    # Keyed by canonical identity only. `return_on_equity` used to appear here
+    # beside `roe`, which meant the same rule existed twice under two names
+    # and SENSITIVE carried a spelling rather than an identity. Consumers
+    # canonicalise before calling assess(), so the alias needs no entry.
     "roe": ("equity", "negative or zero equity inverts the ratio's meaning"),
-    "return_on_equity": ("equity", "negative or zero equity inverts the ratio"),
     "book_value_per_share": ("equity", "negative book value is not a per-share base"),
     "price_to_book": ("equity", "negative book value inverts the multiple"),
     "pe_ratio": ("earnings", "a negative P/E is not a cheap P/E"),

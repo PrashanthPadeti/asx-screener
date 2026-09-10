@@ -406,9 +406,12 @@ def test_a_financials_net_margin_benchmark_excludes_banks_and_still_publishes():
 def test_bank_net_margins_cannot_move_the_remaining_statistic():
     """The mask-before-statistic rule, on the metric just governed.
 
-    Bank net margins sit at 0.30-0.35 and the others at 0.10-0.15, so leaving
-    the banks in would drag the median from 0.125 to about 0.225 — nearly
-    doubling the number a customer compares an insurer against.
+    CONSTRUCTED FIXTURE, not a market observation. The bank margins here sit
+    at 0.30-0.35 and the others at 0.10-0.15 because that spread makes the
+    mechanism and its direction unmistakable. The resulting 1.8x gap proves
+    contamination is possible and which way it runs; it says nothing about how
+    large the effect is on the real ASX, and must not be quoted as if it did.
+    Production magnitude is measurable only after the recompute.
     """
     assessments, sectors = financials_group()
     with_banks = [a["net_margin"] for a in assessments.values()]

@@ -28,9 +28,20 @@ asymmetric and the asymmetry is the point:
                  suppressed leverage as either the best or worst in the market
                  depending on the direction.
 
-Why REQUIRED and EXCLUDED differ: failing to evaluate must never *reject* a
-security, and must never *admit* one on an unproven positive. Those pull in
-opposite directions, so one rule cannot serve both.
+The global rule, stated so a future maintainer cannot "simplify" it into
+something wrong:
+
+    Non-evaluation must never be interpreted as evidence, either for a
+    positive requirement or for an exclusion.
+
+The asymmetry follows from that single sentence rather than being two
+special cases:
+
+    REQUIRED + unavailable  ->  the requirement is unproven  ->  no match
+    EXCLUDED + unavailable  ->  the exclusion is unproven     ->  still eligible
+
+"Failure to evaluate must never reject" is the wrong formulation and would
+justify admitting a company on a requirement it never demonstrated.
 
 The distinction between NOT_MEANINGFUL and UNAVAILABLE does not change any of
 these behaviours — it changes what the user is told. "Not meaningful for a

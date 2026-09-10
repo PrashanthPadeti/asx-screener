@@ -22,22 +22,33 @@ The mechanism is a sparse sidecar rather than a status column per metric.
 ``screener.universe`` already carries 225 columns; doubling that to shadow each
 one is not a design, it is a tax. Instead:
 
-  * the numeric column keeps holding the number, and holds NULL when there
-    isn't one — unchanged, so every existing reader keeps working;
-  * ``metric_states`` (JSONB) records an entry for **every metric that is not
-    applicable**, and nothing else, so it stays small — most metrics on most
-    companies are fine;
+  * the numeric column keeps holding the number, and holds NULL for every
+    state other than APPLICABLE — unchanged, so every existing reader keeps
+    working and none of them can read a suppressed number by accident;
+  * ``metric_states`` (JSONB) records an entry for **every metric whose state
+    is not APPLICABLE**, and nothing else, so it stays small;
   * run-level source health is recorded once per compute run, not per company,
     because a broken feed is an exchange-wide fact and repeating it 2,117 times
     would invite it to disagree with itself.
 
-The rule that makes the sparse encoding safe:
+"Not APPLICABLE" rather than "not applicable" is deliberate and is not
+pedantry: ``UNAVAILABLE`` with ``SOURCE_UNHEALTHY`` describes a metric that
+*is* economically applicable and merely uncomputable right now. Calling that
+"not applicable" is the exact conflation this module exists to prevent.
 
-    **A NULL numeric column must never be the only signal.**
+Two rules make the sparse encoding safe, and both directions matter:
 
-Absent from ``metric_states`` means applicable. So a NULL value with no entry
-is a contract violation, not a default — ``violations()`` finds them and CI
-fails on them, rather than a consumer silently inventing a reason.
+    **A NULL numeric column must never be the only signal**, and
+    **a populated numeric column must never sit beside a state entry.**
+
+Absent from ``metric_states`` means APPLICABLE. So a NULL with no entry is a
+contract violation rather than a default — and a stale entry left beside a
+newly populated value is just as dangerous, because a contract-aware reader
+suppresses a number that is now perfectly good. ``violations()`` reports both.
+
+The observed input, where one existed, lives inside the sidecar entry rather
+than in the numeric column. That keeps forensics available to a contract-aware
+reader without a legacy ``SELECT`` picking up a suppressed value.
 """
 
 from __future__ import annotations

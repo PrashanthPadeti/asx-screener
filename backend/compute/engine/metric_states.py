@@ -239,6 +239,10 @@ def load_states(raw: Any) -> dict:
 #: every existing row incomplete — a row written correctly under V1 would
 #: start failing validation because it lacks a state for something that did
 #: not exist when it was written. New metrics join a *new* version.
+#:
+#: The pin protects *persisted* rows, so V1 may still be amended until the
+#: first production write under it. After that it freezes and additions go to
+#: V2. Nothing has been written under V1 yet — the recompute has not run.
 GOVERNED_METRICS: dict[str, frozenset[str]] = {
     "FACTOR_MODEL_V1": frozenset({
         # domain-sensitive
@@ -248,6 +252,10 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
         "ev_ebitda", "ev_ebit", "net_debt_to_ebitda", "free_cash_flow",
         "fcf_conversion", "earnings_quality", "price_to_sales",
         "piotroski_f_score",
+        # Margin *changes* inherit the domain of the margin they measure, and
+        # the multibagger score ranks them cross-sectionally.
+        "gross_margin_expansion", "operating_margin_expansion",
+        "gross_margin_expanding", "operating_margin_expanding",
         # observation-sensitive
         "roe", "return_on_equity", "book_value_per_share", "price_to_book",
         "pe_ratio", "peg_ratio", "roce", "roic",

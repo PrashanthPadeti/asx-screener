@@ -225,6 +225,18 @@ DOMAIN_RULES: dict[str, tuple[frozenset[Domain], str]] = {
                      "onto interest or rental income"),
     "operating_margin": (FINANCIAL,
                          "no comparable operating revenue line"),
+    # A change in a meaningless margin is equally meaningless, and these are
+    # ranked cross-sectionally by the multibagger score — so leaving them
+    # unmasked would let a bank's gross-margin trend move every industrial
+    # company's capital-efficiency percentile.
+    "gross_margin_expansion": (FINANCIAL | {Domain.REIT},
+                               "change in a margin that has no meaning here"),
+    "operating_margin_expansion": (FINANCIAL,
+                                   "change in a margin that has no meaning here"),
+    "gross_margin_expanding": (FINANCIAL | {Domain.REIT},
+                               "change in a margin that has no meaning here"),
+    "operating_margin_expanding": (FINANCIAL,
+                                   "change in a margin that has no meaning here"),
     "inventory_turnover": (FINANCIAL | {Domain.REIT, Domain.MINING_EXPLORER},
                            "no inventory"),
     "asset_turnover": (FINANCIAL,

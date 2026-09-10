@@ -218,6 +218,25 @@ def test_no_mask_means_no_change():
     assert withhold_source_failed(composite, None).equals(composite)
 
 
+# ── The rule is about cross-sectional statistics, not about ranking ───────────
+
+def test_margin_expansion_inherits_the_domain_of_the_margin():
+    """The multibagger score ranks these cross-sectionally, so an unmasked
+    bank would move every industrial company's capital-efficiency percentile
+    exactly the way its leverage moved theirs."""
+    df = universe()
+    df["gross_margin_expansion"] = [0.05, 0.01, 0.02, 0.03, 0.04]
+    df["operating_margin_expansion"] = [0.06, 0.01, 0.02, 0.03, 0.04]
+
+    masked = apply_applicability(df, GOOD_FEED)
+    cba = masked.frame[masked.frame["asx_code"] == "CBA"].iloc[0]
+
+    assert pd.isna(cba["gross_margin_expansion"])
+    assert pd.isna(cba["operating_margin_expansion"])
+    ind1 = masked.frame[masked.frame["asx_code"] == "IND1"].iloc[0]
+    assert ind1["gross_margin_expansion"] == 0.01, "industrials keep theirs"
+
+
 # ── Domains that are not resolvable stay conservative ─────────────────────────
 
 def test_an_unresolved_domain_suppresses_domain_sensitive_metrics():

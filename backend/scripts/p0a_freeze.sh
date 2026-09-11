@@ -31,9 +31,10 @@ STATE_DIR=${STATE_DIR:-/var/backups/p0a/freeze}
 ENV_FILE="$ASX_ROOT/backend/.env"
 SERVICE=${SERVICE:-asx-backend}
 PYBIN=${PYBIN:-$ASX_ROOT/asx-venv/bin/python}
-# The unit writes StandardOutput and StandardError to this file rather than to
-# journald, so this is where the scheduler line actually lands. Looking in
-# journalctl reported "no scheduler line found" while the answer sat here.
+# The unit writes StandardOutput and StandardError here rather than to
+# journald. Useful for tracebacks on a failed start, but NOT a source of
+# scheduler state: uvicorn configures its own loggers and app/main.py's
+# logger.info lines never reach it.
 LOGFILE=${LOGFILE:-$ASX_ROOT/logs/backend.log}
 HEALTH_URL=${HEALTH_URL:-http://127.0.0.1:8000/health}
 MARKER="# P0A-FREEZE"
@@ -61,12 +62,24 @@ status() {
     pgrep -af 'daily_pipeline|weekly_refresh|weekly_pipeline|top5_strategy|daily_compute|sector_bench|anomaly_detect|anomaly_alert|build_screener_universe' \
         || echo "none"
     echo
-    echo "--- what the process actually did (last startup) ---"
-    # The unit writes StandardOutput to a file, not journald, so journalctl
-    # shows only systemd's own lines. Looking there reported "no scheduler
-    # line found" while the answer sat in backend.log.
-    grep -hE "SCHEDULERS FROZEN|Schedulers started" "$LOGFILE" 2>/dev/null \
-        | tail -2 || echo "(no scheduler line in $LOGFILE)"
+    echo "--- what the running process actually holds ---"
+    local jobs; jobs=$(scheduler_jobs)
+    case "${jobs:-}" in
+        "")   echo "scheduler jobs: unknown (health endpoint unreachable)" ;;
+        null) echo "scheduler jobs: null (deployed code predates this field)" ;;
+        0)    echo "scheduler jobs: 0  <- frozen, verified in the process" ;;
+        *)    echo "scheduler jobs: $jobs  <- NOT frozen" ;;
+    esac
+}
+
+# How many jobs the RUNNING scheduler holds. Ground truth from the process
+# rather than from a log line: uvicorn configures its own loggers, so none of
+# app/main.py's logger.info output reaches logs/backend.log. A whole-file grep
+# for "Schedulers started" returns zero, which means a freeze verified by log
+# line could never succeed — it would revert on every attempt.
+scheduler_jobs() {
+    curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null \
+        | sed -nE 's/.*"jobs"[[:space:]]*:[[:space:]]*([0-9]+|null).*/\1/p'
 }
 
 # Whether the app can still construct its Settings. pydantic-settings forbids
@@ -79,30 +92,25 @@ settings_load() {
         "from app.core.config import get_settings; get_settings()" 2>&1)
 }
 
-# Where the log currently ends, captured before a restart so the lines that
-# follow can be read as evidence *from that restart*. Grepping the whole file
-# and taking the last match proves only that some historical startup said the
-# right thing — a freeze that silently failed would be confirmed by the line
-# from the freeze before it. journalctl cannot serve here: the unit sends
-# StandardOutput to this file, so journald carries systemd's lines only.
-log_offset() { stat -c%s "$LOGFILE" 2>/dev/null || echo 0; }
-
-since_restart() { tail -c "+$(( ${1:-0} + 1 ))" "$LOGFILE" 2>/dev/null; }
-
 # Three independent conditions, because each can pass while another fails:
-#   active        systemd is happy
-#   healthy       the app actually answers, rather than being mid-crash-loop
-#   fresh line    this startup did what was asked, not a previous one
+#   active     systemd is happy
+#   healthy    the app answers, rather than being mid-crash-loop with
+#              is-active momentarily true
+#   jobs       the running scheduler holds the number this state requires.
+#              0 is proof the freeze reached the process, not proof a config
+#              file says it should have.
 verify_running() {
-    local want="$1" offset="$2"
+    local want="$1"
     sleep 8
     [ "$(systemctl is-active "$SERVICE")" = "active" ] || return 1
     curl -fsS --max-time 10 "$HEALTH_URL" >/dev/null 2>&1 || return 3
-    if [ "$want" = "FROZEN" ]; then
-        since_restart "$offset" | grep -q "SCHEDULERS FROZEN" || return 2
-    else
-        since_restart "$offset" | grep -q "Application startup complete" || return 2
-    fi
+
+    local jobs; jobs=$(scheduler_jobs)
+    case "$want" in
+        FROZEN) [ "$jobs" = "0" ] || return 2 ;;
+        ACTIVE) [ -n "$jobs" ] && [ "$jobs" != "0" ] && [ "$jobs" != "null" ] \
+                    || return 2 ;;
+    esac
     return 0
 }
 
@@ -114,6 +122,16 @@ restore_env() {
 freeze() {
     mkdir -p "$STATE_DIR" && chmod 700 "$STATE_DIR"
     local stamp; stamp=$(date -u +%Y%m%dT%H%M%SZ)
+
+    # Baseline: can the app load its configuration as things stand? If not,
+    # something is already wrong and this is not the moment to change more.
+    # Without it a pre-existing fault would be discovered after the .env edit
+    # and blamed on the freeze.
+    if ! err=$(settings_load); then
+        echo "ERROR: settings do not load BEFORE any change — aborting." >&2
+        echo "$err" | tail -5 >&2
+        exit 3
+    fi
 
     # Record before changing. A freeze that cannot be undone exactly is not a
     # freeze, it is a schedule rewrite.
@@ -141,25 +159,14 @@ freeze() {
         echo "SCHEDULERS_ENABLED=false appended to $ENV_FILE"
     fi
 
-    # Prove the app can still load its configuration BEFORE restarting it.
+    # The check that matters: settings must still load with the key present.
     # Writing SCHEDULERS_ENABLED into .env without the matching field in
     # config.py took the API down for eight minutes on 11 Sep 2026 — the
     # variable did not fall back to a default, it failed Settings()
-    # construction at import. This check turns that into an aborted freeze.
+    # construction at import, so uvicorn could not load the app at all. This
+    # turns that outage into an aborted freeze with the service untouched.
     echo
     echo "checking the app can still load its settings ..."
-    if ! err=$(settings_load); then
-        echo "ERROR: settings will not load with this .env — reverting." >&2
-        echo "$err" | tail -5 >&2
-        restore_env
-        echo "ENV REVERTED. The service was NOT restarted and is untouched." >&2
-        exit 3
-    fi
-    echo "settings load cleanly."
-
-    # Validated again here, against the file as it now stands. The first check
-    # ran before the append; this one is what proves the appended key itself is
-    # acceptable, which is exactly the step whose absence caused the outage.
     if ! err=$(settings_load); then
         echo "ERROR: settings will not load with SCHEDULERS_ENABLED set — reverting." >&2
         echo "$err" | tail -5 >&2
@@ -170,10 +177,9 @@ freeze() {
 
     echo
     echo "restarting $SERVICE so the scheduler restarts with no jobs ..."
-    offset=$(log_offset)
     systemctl restart "$SERVICE"
 
-    verify_running FROZEN "$offset"
+    verify_running FROZEN
     case $? in
         0) echo "verified: service active and SCHEDULERS FROZEN in the log" ;;
         3) echo "ERROR: $SERVICE is active but $HEALTH_URL does not answer." >&2
@@ -219,9 +225,8 @@ thaw() {
 
     echo
     echo "restarting $SERVICE ..."
-    offset=$(log_offset)
     systemctl restart "$SERVICE"
-    if ! verify_running ACTIVE "$offset"; then
+    if ! verify_running ACTIVE; then
         echo "ERROR: $SERVICE did not come back after thaw." >&2
         tail -20 "$LOGFILE" >&2
         exit 3

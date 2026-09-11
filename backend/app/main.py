@@ -260,6 +260,17 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
 
+    # Published on /health because the log is not a usable channel: uvicorn
+    # configures its own loggers and none of this module's logger.info lines
+    # reach logs/backend.log — a whole-file grep for "Schedulers started"
+    # returns zero. A freeze verified by log line could never succeed.
+    #
+    # The job count rather than the flag, because the flag only says what was
+    # asked for. len(get_jobs()) is what the running scheduler actually holds,
+    # so a freeze that silently failed to remove them cannot report success.
+    app.state.schedulers_frozen = frozen
+    app.state.scheduler_jobs = len(scheduler.get_jobs())
+
     yield
 
     scheduler.shutdown(wait=False)
@@ -303,6 +314,13 @@ async def health():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "redis": "connected" if redis_ok else "unavailable",
+        # Observable scheduler state, for maintenance windows. "jobs" is what
+        # this process currently holds, so 0 is proof the freeze took effect
+        # in the running app rather than proof a config file says so.
+        "schedulers": {
+            "frozen": getattr(app.state, "schedulers_frozen", None),
+            "jobs":   getattr(app.state, "scheduler_jobs", None),
+        },
     }
 
 

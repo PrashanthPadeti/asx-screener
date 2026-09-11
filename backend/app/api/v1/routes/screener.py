@@ -756,7 +756,8 @@ def _plan_for(req, scope):
         raise HTTPException(status_code=400, detail=str(exc))
     try:
         return plan_screen(parsed, FIELD_REGISTRY, scope,
-                           dialect="postgres", table_alias="u")
+                           dialect="postgres", table_alias="u",
+                           paramstyle="named")
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -1941,7 +1942,8 @@ async def query_screener(
 
     try:
         plan = plan_screen(parsed, FIELD_REGISTRY, scope,
-                           dialect="postgres", table_alias="u")
+                           dialect="postgres", table_alias="u",
+                           paramstyle="named")
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2053,7 +2055,8 @@ async def export_query_screener(
     scope = await resolve_scope_if_needed(db, parsed)
     try:
         plan = plan_screen(parsed, FIELD_REGISTRY, scope,
-                           dialect="postgres", table_alias="u")
+                           dialect="postgres", table_alias="u",
+                           paramstyle="named")
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

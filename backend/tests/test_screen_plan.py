@@ -274,6 +274,68 @@ def test_pagination_is_stable_across_pages():
     assert not set(page1) & set(page2), "no row appears on two pages"
 
 
+# ── The placeholder style matches the driver that will bind it ───────────────
+# The live defect: the route compiled Postgres SQL with psycopg2's %(sp0)s and
+# handed it to SQLAlchemy text() over asyncpg, which reads :sp0. text() found
+# no bind parameters, the literal survived into the compiled statement, and it
+# died in SQLAlchemy's numeric conversion as KeyError: 'sp0' — on the first
+# request, governed or not. The suite missed it because the equivalence tests
+# execute the sqlite path and only string-compare the Postgres one.
+
+
+def _plan_pg(paramstyle):
+    parsed = canonicalise(
+        ParsedQuery(expression=AllOf((
+            Criterion("sector", CriterionType.REQUIRED, "eq", "Materials"),
+            Criterion("roe", CriterionType.REQUIRED, "gt", 12))),
+            ordering=Ordering("grossed_up_yield", Direction.DESC)),
+        REGISTRY)
+    return plan_screen(parsed, REGISTRY, SCOPE, dialect="postgres",
+                       table_alias="u", paramstyle=paramstyle)
+
+
+def test_named_paramstyle_emits_no_pyformat_placeholder():
+    p = _plan_pg("named")
+    assert "%(" not in p.where, (
+        "a pyformat placeholder reaching SQLAlchemy text() binds nothing and "
+        "fails as KeyError at compile time")
+    for key in p.params:
+        assert f":{key}" in p.where, f"{key} is bound but never referenced"
+
+
+def test_every_param_the_plan_declares_appears_exactly_once():
+    """A declared-but-absent parameter is the failure above; an emitted-but-
+    undeclared one is the same failure from the other side."""
+    p = _plan_pg("named")
+    import re
+    referenced = set(re.findall(r":(sp\d+)\b", p.where))
+    assert referenced == set(p.params), (
+        f"referenced {sorted(referenced)} vs declared {sorted(p.params)}")
+
+
+def test_pyformat_remains_the_postgres_default():
+    """The compute engine binds through psycopg2 and must be unaffected."""
+    p = _plan_pg(None)
+    assert "%(sp" in p.where and ":sp" not in p.where
+
+
+def test_the_route_asks_for_the_style_its_driver_reads():
+    """The defect was not in the compiler, which could emit either style, but
+    in the caller, which asked for the wrong one. Assert the call itself."""
+    tree = ast.parse(ROUTE.read_text(encoding="utf-8"))
+    calls = [n for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+             and n.func.id == "plan_screen"]
+
+    assert calls, "the route must compile through plan_screen"
+    for call in calls:
+        styles = [kw.value.value for kw in call.keywords
+                  if kw.arg == "paramstyle"]
+        assert styles == ["named"], (
+            f"plan_screen at line {call.lineno} does not request the named "
+            f"paramstyle asyncpg reads")
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

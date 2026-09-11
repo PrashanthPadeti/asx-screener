@@ -38,6 +38,33 @@ from compute.engine.universe_writer import column_for
 
 Dialect = Literal["postgres", "sqlite"]
 
+#: How a bind parameter is spelled, which is a property of the *driver* and not
+#: of the SQL. The same Postgres statement reaches the database two ways here:
+#: psycopg2 from the compute engine, which wants ``%(key)s``, and asyncpg via
+#: SQLAlchemy ``text()`` from the API, which wants ``:key``. Conflating the two
+#: with ``dialect`` produced a real failure — the route emitted ``%(sp0)s``,
+#: ``text()`` registered no bind parameters, and the literal survived into the
+#: compiled statement to die in SQLAlchemy's numeric conversion as
+#: ``KeyError: 'sp0'``. Every other dialect branch in this module really is
+#: about SQL (JSONB operators, ``::int``, TRUE versus 1) and stays put.
+Paramstyle = Literal["pyformat", "named"]
+
+
+def _paramstyle_for(dialect: Dialect,
+                    paramstyle: Optional[Paramstyle]) -> Paramstyle:
+    """An explicit choice wins; otherwise infer the historical default.
+
+    Defaulting rather than requiring keeps every existing caller — and the
+    sqlite equivalence suite — compiling exactly the SQL it did before.
+    """
+    if paramstyle is not None:
+        return paramstyle
+    return "named" if dialect == "sqlite" else "pyformat"
+
+
+def placeholder_for(key: str, paramstyle: Paramstyle) -> str:
+    return f":{key}" if paramstyle == "named" else f"%({key})s"
+
 #: Comparison operators a screen definition may use, mapped to SQL. Kept as a
 #: closed set: a screen cannot inject an operator, and an unknown one is a
 #: definition error rather than something that reaches the database.
@@ -255,9 +282,10 @@ def applicable_sql(metric: str, dialect: Dialect = "postgres",
 
 
 def predicate_sql(criterion: Criterion, param: str,
-                  dialect: Dialect = "postgres") -> str:
+                  dialect: Dialect = "postgres",
+                  paramstyle: Optional[Paramstyle] = None) -> str:
     column = column_for(criterion.metric)
-    placeholder = f":{param}" if dialect == "sqlite" else f"%({param})s"
+    placeholder = placeholder_for(param, _paramstyle_for(dialect, paramstyle))
     return f"{column} {OPERATORS[criterion.operator]} {placeholder}"
 
 
@@ -310,10 +338,11 @@ def compile_criterion(criterion: Criterion, param: str,
 
 def three_valued_sql(criterion: Criterion, param: str,
                      dialect: Dialect = "postgres",
-                     states_col: str = "metric_states") -> str:
+                     states_col: str = "metric_states",
+                     paramstyle: Optional[Paramstyle] = None) -> str:
     """A governed leaf as TRUE / FALSE / UNKNOWN, with no role applied."""
     applicable = applicable_sql(criterion.metric, dialect, states_col)
-    predicate = predicate_sql(criterion, param, dialect)
+    predicate = predicate_sql(criterion, param, dialect, paramstyle)
     return f"CASE WHEN {applicable} THEN ({predicate}) ELSE NULL END"
 
 
@@ -519,7 +548,8 @@ def plan_screen(parsed, registry, scope: Optional[RunScope] = None,
                 dialect: Dialect = "postgres",
                 states_col: str = "metric_states",
                 run_column: str = "compute_run_id",
-                table_alias: str = "u") -> ScreenPlan:
+                table_alias: str = "u",
+                paramstyle: Optional[Paramstyle] = None) -> ScreenPlan:
     """The single authority: a typed query plus a registry becomes one plan.
 
     Governed leaves compile through the applicability contract; ungoverned
@@ -560,10 +590,12 @@ def plan_screen(parsed, registry, scope: Optional[RunScope] = None,
             criterion = Criterion(definition.canonical, node.role,
                                   node.operator, node.value)
             params[key] = _scaled(node.value, definition)
-            expression = three_valued_sql(criterion, key, dialect, states_col)
+            expression = three_valued_sql(criterion, key, dialect, states_col,
+                                          paramstyle)
             return membership_sql(expression, node.role, dialect)
 
-        return _ungoverned_sql(node, definition, key, params, dialect)
+        return _ungoverned_sql(node, definition, key, params, dialect,
+                               paramstyle)
 
     clauses = []
     if scope is not None:
@@ -605,7 +637,8 @@ def _scaled(value, definition):
 
 
 def _ungoverned_sql(node, definition, key: str, params: dict,
-                    dialect: Dialect) -> str:
+                    dialect: Dialect,
+                    paramstyle: Optional[Paramstyle] = None) -> str:
     """Existing deterministic behaviour, unchanged.
 
     P0-A governs 37 of 311 fields. Forcing the other 274 through the
@@ -613,7 +646,7 @@ def _ungoverned_sql(node, definition, key: str, params: dict,
     every sector filter for no correctness gain.
     """
     operator = OPERATORS.get(node.operator) or node.operator
-    placeholder = f":{key}" if dialect == "sqlite" else f"%({key})s"
+    placeholder = placeholder_for(key, _paramstyle_for(dialect, paramstyle))
 
     if node.kind == "boolean":
         want_true = node.value if operator in ("=", "==") else not node.value

@@ -231,6 +231,31 @@ def test_a_contradictory_row_withholds_rather_than_serves():
     assert states["debt_to_equity"]["state"] == "not_meaningful"
 
 
+def test_an_unassessed_row_is_not_read_as_all_applicable():
+    """NULL and {} are different facts. Empty says "assessed, nothing
+    suppressed"; NULL says "never assessed". Collapsing them would make every
+    governed value on an unassessed row applicable by default — the same false
+    claim a '{}' column default would have baked into the schema, which is why
+    the migration adds the column nullable with no default."""
+    row = stored_row(a_bank(), asx_code="CBA")
+    row["metric_states"] = None                  # as an unassessed row reads
+
+    values, states = project(row, [RUN])
+
+    assert values["debt_to_equity"] is None and values["roe"] is None
+    assert states["roe"]["cause"] == "source_missing"
+    assert "never assessed" in states["roe"]["reason"]
+
+
+def test_an_assessed_row_with_nothing_suppressed_keeps_its_values():
+    """The other side: an explicit {} is a real answer, not a missing one."""
+    row = stored_row(an_industrial(), asx_code="IND")
+    assert row["metric_states"] == {}, "nothing about an industrial suppresses"
+
+    values, states = project(row, [RUN])
+    assert values["roe"] == 0.22 and states == {}
+
+
 def test_a_sidecar_returned_as_text_is_decoded():
     """Not every driver hands back JSONB as a dict."""
     row = stored_row(a_bank(), asx_code="CBA")

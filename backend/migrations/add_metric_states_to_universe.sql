@@ -25,13 +25,37 @@
 -- written by the old one simply has an empty payload and reads as it does
 -- today.
 
+-- Nullable, with NO DEFAULT, and the distinction is the whole point:
+--
+--     NULL   this row has never been assessed
+--     '{}'   this row was assessed and nothing was suppressed
+--
+-- An earlier draft of this migration read
+--
+--     ADD COLUMN metric_states JSONB NOT NULL DEFAULT '{}'::jsonb
+--
+-- which contradicts the rollout gate at the bottom of this file. Under a
+-- sparse contract an absent entry means APPLICABLE, so defaulting every
+-- legacy row to '{}' would have the schema assert that each of the 2,117
+-- existing rows had been assessed and nothing suppressed. CBA would carry
+-- ev_to_ebitda = 0.0 beside an empty state map: a positive claim that the
+-- zero is a valid EV/EBITDA, made without any assessment having run.
+--
+-- The default also makes future ad-hoc INSERTs valid by construction, which
+-- is precisely the property a contract must not have. Writing the sidecar is
+-- the canonical writer's responsibility; persist_row() produces the numeric
+-- values and the states together so the pair cannot disagree.
+
 ALTER TABLE screener.universe
-    ADD COLUMN IF NOT EXISTS metric_states JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ADD COLUMN IF NOT EXISTS metric_states JSONB;
 
 COMMENT ON COLUMN screener.universe.metric_states IS
     'Sparse applicability sidecar: metric -> {state, cause, reason} for every '
-    'metric that is not applicable. Absent means applicable. A NULL numeric '
-    'column with no entry here is a contract violation.';
+    'metric that is not applicable. Absent entry means applicable; NULL means '
+    'the row was never assessed, which is not the same thing and must fail '
+    'closed. A NULL numeric column with no entry here is a contract '
+    'violation. No default: the canonical writer sets this, so an ad-hoc '
+    'INSERT cannot be valid by construction.';
 
 -- Only rows that actually carry a suppressed metric are worth indexing, and
 -- jsonb_path_ops is the smaller operator class for containment queries such as

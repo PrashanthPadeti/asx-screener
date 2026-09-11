@@ -31,8 +31,16 @@
 -- are what lets a surface say "4.8%, 118 of 142 valid observations" instead
 -- of a bare percentage whose denominator nobody can see.
 
+-- Nullable, no default, for the reason set out in
+-- add_metric_states_to_universe.sql: NULL means never assessed, '{}' means
+-- assessed with nothing to record. The distinction is stronger here than on
+-- the company sidecar, because this payload is not an exception report — an
+-- APPLICABLE benchmark still writes its population counts. So '{}' on a
+-- benchmark row would claim it was computed and had nothing to say, which is
+-- never true of a valid benchmark.
+
 ALTER TABLE market.sector_benchmarks
-    ADD COLUMN IF NOT EXISTS benchmark_states JSONB NOT NULL DEFAULT '{}'::jsonb;
+    ADD COLUMN IF NOT EXISTS benchmark_states JSONB;
 
 COMMENT ON COLUMN market.sector_benchmarks.benchmark_states IS
     'Per-metric benchmark state: metric -> {state, reason_code, n_total_peers, '

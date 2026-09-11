@@ -52,6 +52,8 @@ PRIVATE_ENTRY_KEYS = frozenset({"observed"})
 NO_CONTRACT = "no validated applicability contract on this database"
 OUTSIDE_SNAPSHOT = ("row was computed under a run outside the validated "
                     "snapshot, so its states cannot be read")
+NOT_ASSESSED = ("row is attributed to a validated run but carries no "
+                "applicability sidecar, so it was never assessed")
 
 
 class MissingProjectedColumn(RuntimeError):
@@ -179,10 +181,27 @@ def project_row(row: Mapping[str, Any],
             f"governed fields advertised by the response but not fetched: "
             f"{', '.join(absent)}")
 
-    sidecar = row.get(states_key) or {}
+    sidecar = row.get(states_key)
     if isinstance(sidecar, str):                      # a driver that returns
         import json                                   # JSONB as text
-        sidecar = json.loads(sidecar) or {}
+        sidecar = json.loads(sidecar)
+
+    # NULL and {} are different facts and must not collapse into one. An empty
+    # map says the row was assessed and nothing was suppressed; NULL says it
+    # was never assessed at all. Reading NULL as {} would make every governed
+    # value on an unassessed row APPLICABLE by default — the same false claim
+    # a '{}' column default would have baked into the schema.
+    #
+    # A row attributed to a validated run with no sidecar should not exist:
+    # persist_row() produces the values and the states together. If one
+    # appears, it is a torn or hand-edited write, and withholding is the safe
+    # reading. Not an exception, because this is a data condition reaching a
+    # customer request rather than a defect in this request's code.
+    if sidecar is None:
+        for metric, column in columns.items():
+            values[column] = None
+            states[metric] = _withheld(NOT_ASSESSED)
+        return _clean(values, states_key, run_key), states
 
     for raw_metric, entry in sidecar.items():
         metric = normalise(raw_metric)

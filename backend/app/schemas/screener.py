@@ -346,6 +346,26 @@ class ScreenerResponse(BaseModel):
     # physical runs happened to be coherent. Deliberately not one run id:
     # presenting an arbitrary shard's id as though it explained the whole
     # result set would be false the first time sharding appeared.
+    #
+    # It means exactly one thing:
+    #
+    #     Any governed values in this response were interpreted under this
+    #     logical contract.
+    #
+    # It does NOT mean the snapshot determined universe membership, and a
+    # present snapshot is not licence to add WHERE compute_run_id IN (...) to
+    # the query. An ungoverned screen — sector = Financials ORDER BY
+    # market_cap — selects every company satisfying that ordinary question,
+    # including one newly listed and not yet through a factor-model run, and
+    # then suppresses that row's governed fields with a stated cause. Scoping
+    # membership to the compute run instead would silently delete the new
+    # listing from results it belongs in, trading discovery completeness for
+    # a correctness guarantee that projection already provides.
+    #
+    # So a non-null snapshot on an ungoverned response is expected after
+    # migration, and explains the governed fields inside the rows rather than
+    # which rows there are. Null means no validated contract was resolvable,
+    # in which case every governed field in every row has failed closed.
     snapshot:     Optional[str] = None
     #: Diagnostic only. The physical runs behind the snapshot.
     run_ids:      Optional[list[int]] = None

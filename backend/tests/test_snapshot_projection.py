@@ -151,6 +151,53 @@ def test_a_row_outside_the_snapshot_keeps_its_identity_and_loses_its_metrics():
     assert "outside the validated snapshot" in served.metric_states["roe"]["reason"]
 
 
+def newly_listed():
+    """A company that satisfies an ordinary filter and has never been through
+    a factor-model run: no governed values, no sidecar, no attribution."""
+    return {"asx_code": "NEW", "company_name": "Newly Listed Ltd",
+            "sector": "Financials", "price": 2.50, "market_cap": 120.0,
+            "metric_states": {}, "compute_run_id": None}
+
+
+def test_a_new_listing_stays_in_an_ungoverned_screen():
+    """Discovery completeness. A company must not disappear from
+    `sector = Financials ORDER BY market_cap` merely because it has not yet
+    participated in the latest factor-model run. Membership is an ordinary
+    universe question; the snapshot governs interpretation, not existence.
+
+    This is the test that protects the judgement — putting a compute_run_id
+    predicate on an ungoverned screen would delete this row, and no comment
+    prevents someone adding one later.
+    """
+    assert WITH_CONTRACT.for_filtering(ungoverned()) is None, \
+        "no compute_run predicate may constrain ungoverned membership"
+
+    served = WITH_CONTRACT.project([cba_row(), newly_listed()])
+    codes = [r.asx_code for r in served]
+    assert codes == ["CBA", "NEW"], "the new listing is a member"
+
+
+def test_one_response_may_mix_compatible_and_incompatible_rows():
+    """The row-by-row rule: compatibility is a property of the row against
+    the snapshot, not of the request. Both companies are returned; only the
+    attributable one exposes governed values."""
+    cba, new = WITH_CONTRACT.project([cba_row(), newly_listed()])
+
+    # Attributable to the snapshot: governed values decode normally.
+    assert cba.roe == 0.1284
+    assert cba.current_ratio is None, "still suppressed on its own merits"
+    assert cba.metric_states["current_ratio"]["cause"] == "domain"
+
+    # Not attributable: ordinary fields stay, governed fields fail closed.
+    assert new.price == 2.50 and new.market_cap == 120.0
+    assert new.sector == "Financials"
+    assert new.roe is None
+    assert new.metric_states["roe"]["cause"] == "source_missing"
+    assert new.metric_states["roe"]["reason"] != \
+        cba.metric_states["current_ratio"]["reason"], \
+        "a run mismatch and a domain judgement are different facts"
+
+
 # ── What must never leave ────────────────────────────────────────────────────
 
 def test_the_forensic_observed_value_never_reaches_the_client():

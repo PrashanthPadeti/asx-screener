@@ -747,11 +747,21 @@ class Snapshot:
     def for_filtering(self, parsed: ParsedQuery) -> Optional[RunScope]:
         """The scope the *query* runs under, which is not always this one.
 
-        None for an ungoverned query even when a contract exists. Passing the
-        scope would add a compute_run_id predicate to an ordinary sector
-        screen, so a newly listed company not yet in the current compute run
-        would silently vanish from results it belongs in. Governance
-        constrains governed metrics, not membership of the universe.
+        None for an ungoverned query even when a contract exists. Universe
+        membership and governed projection are separate concerns:
+
+            membership    ordinary SQL, no compute_run predicate
+            projection    the resolved snapshot, applied row by row
+
+        Passing the scope here would collapse them, putting a compute_run_id
+        predicate on `sector = Financials ORDER BY market_cap` so a newly
+        listed company not yet through a factor-model run would silently
+        vanish from results it belongs in. It stays in the result and loses
+        its governed fields to an explicit cause instead — discovery
+        completeness preserved without weakening correctness.
+
+        A governed query is the other case: there, the contract genuinely does
+        decide which rows can be compared, so the scope constrains the query.
         """
         if not parsed.requires_run_scope:
             return None

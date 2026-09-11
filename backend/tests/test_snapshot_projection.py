@@ -37,10 +37,14 @@ from app.api.v1.routes.screener import Snapshot  # noqa: E402
 from app.core.parsed_query import (  # noqa: E402
     AllOf, Criterion, Ordering, ParsedQuery, canonicalise,
 )
+from app.core.row_projection import expected_outputs  # noqa: E402
 from app.core.screener_fields import build_registry  # noqa: E402
 from compute.engine.applicability import Domain, Observation, assess  # noqa: E402
-from compute.engine.metric_states import persist_row  # noqa: E402
+from compute.engine.metric_states import (  # noqa: E402
+    LATEST_MODEL_VERSION, persist_row,
+)
 from compute.engine.screen_predicates import CriterionType  # noqa: E402
+from app.schemas.screener import ScreenerRow  # noqa: E402
 from compute.engine.screen_sql import RunScope, ValidatedRun  # noqa: E402
 from compute.engine.universe_writer import column_for  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
@@ -78,6 +82,20 @@ def governed():
         ordering=Ordering("grossed_up_yield")), REGISTRY)
 
 
+#: Every governed column ScreenerRow advertises. A fixture carrying fewer
+#: would not be a realistic SQL row: inside a contract the projector requires
+#: each promised field to have been fetched, and a thin fixture would fail for
+#: that reason rather than for the behaviour under test.
+PROMISED = expected_outputs(LATEST_MODEL_VERSION, ScreenerRow.model_fields)
+
+
+def base_row(**plain):
+    """A fetched row: every promised governed column present, unset."""
+    row = {column: None for column in PROMISED.values()}
+    row.update(plain)
+    return row
+
+
 def cba_row(run_id=RUN):
     """A bank: leverage and liquidity are not meaningful, ROE is."""
     values, states = persist_row({
@@ -86,10 +104,10 @@ def cba_row(run_id=RUN):
         "roe": assess("roe", 0.1284, Domain.BANK,
                       Observation(equity=8e10, earnings=1e10)),
     })
-    row = {column_for(m): v for m, v in values.items()}
-    row.update(asx_code="CBA", company_name="Commonwealth Bank",
-               sector="Financials", price=100.0, market_cap=9000.0,
-               metric_states=states, compute_run_id=run_id)
+    row = base_row(asx_code="CBA", company_name="Commonwealth Bank",
+                   sector="Financials", price=100.0, market_cap=9000.0,
+                   metric_states=states, compute_run_id=run_id)
+    row.update({column_for(m): v for m, v in values.items()})
     return row
 
 
@@ -154,9 +172,9 @@ def test_a_row_outside_the_snapshot_keeps_its_identity_and_loses_its_metrics():
 def newly_listed():
     """A company that satisfies an ordinary filter and has never been through
     a factor-model run: no governed values, no sidecar, no attribution."""
-    return {"asx_code": "NEW", "company_name": "Newly Listed Ltd",
-            "sector": "Financials", "price": 2.50, "market_cap": 120.0,
-            "metric_states": {}, "compute_run_id": None}
+    return base_row(asx_code="NEW", company_name="Newly Listed Ltd",
+                    sector="Financials", price=2.50, market_cap=120.0,
+                    metric_states={}, compute_run_id=None)
 
 
 def test_a_new_listing_stays_in_an_ungoverned_screen():
@@ -212,7 +230,7 @@ def test_the_csv_projection_matches_the_json_projection():
     arrive in a file the user keeps."""
     row = cba_row()
     served = WITH_CONTRACT.project([row])[0]
-    values = WITH_CONTRACT.projected_values(row)
+    values = WITH_CONTRACT.projected_values(row, ScreenerRow.model_fields)
 
     assert values["current_ratio"] is None and served.current_ratio is None
     assert values["debt_to_equity"] is None and served.debt_to_equity is None

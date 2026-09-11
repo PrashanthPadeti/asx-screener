@@ -54,6 +54,43 @@ OUTSIDE_SNAPSHOT = ("row was computed under a run outside the validated "
                     "snapshot, so its states cannot be read")
 
 
+class MissingProjectedColumn(RuntimeError):
+    """A governed field the response model advertises was never fetched.
+
+    This is an implementation error, never a financial state. A column absent
+    from the SQL row means the application failed to select something its own
+    contract promises — it does not mean the metric is unavailable, not
+    meaningful, or missing at source.
+
+    The distinction is the whole point of raising rather than degrading. If
+    SQL omission were allowed to produce SOURCE_MISSING, a developer deleting
+    a column from a SELECT would cause the product to tell customers, politely
+    and in good faith, that their financial data is unavailable. The defect
+    would look exactly like correct fail-closed behaviour and could persist
+    indefinitely.
+
+        For a validated snapshot, every governed metric advertised by the
+        response model must either be fetched and projected, or be explicitly
+        excluded from that response model. SQL omission is never interpreted
+        as metric unavailability.
+    """
+
+
+def expected_outputs(model_version: str,
+                     response_fields: Iterable[str]) -> dict[str, str]:
+    """The governed metrics one response model promises: canonical -> column.
+
+    Being governed means "if consumed, these semantics apply". It does not
+    oblige every endpoint to expose every governed metric, so this is an
+    intersection rather than the whole set — a metric absent from the response
+    model is a surface-design choice, not a gap.
+    """
+    fields = set(response_fields)
+    return {metric: column
+            for metric, column in governed_columns(model_version).items()
+            if column in fields}
+
+
 def _public(entry: Mapping) -> dict:
     """The client-facing part of a stored sidecar entry."""
     return {k: v for k, v in entry.items() if k not in PRIVATE_ENTRY_KEYS}
@@ -85,6 +122,7 @@ def governed_columns(model_version: str) -> dict[str, str]:
 def project_row(row: Mapping[str, Any],
                 *,
                 model_version: str,
+                expected: Mapping[str, str],
                 run_ids: Optional[Iterable[int]] = None,
                 states_key: str = "metric_states",
                 run_key: str = "compute_run_id",
@@ -96,24 +134,50 @@ def project_row(row: Mapping[str, Any],
     Both withhold, for different stated reasons, and neither is an error — a
     watchlist must still show a price when the contract is unavailable.
 
+    ``expected`` is the governed output set the *response model* promises,
+    from expected_outputs(). It is what makes this a contract rather than a
+    filter: the projector evaluates every field the endpoint advertises, not
+    merely the fields the SELECT happened to return. Without it a governed
+    field omitted from a query reaches the client as a null with no cause,
+    indistinguishable from a suppression.
+
+    Required, with no default, because neither available default is correct.
+    Every governed metric would demand columns of surfaces that legitimately
+    expose a subset; none would restore the silent-null bug this argument
+    exists to close. A caller that has not decided what it promises has not
+    finished designing its response.
+
     The state map is sparse in the same way the sidecar is: a metric that is
     applicable has no entry. Absence means applicable *inside a contract*, and
     the caller is responsible for having established one.
     """
     values = dict(row)
     states: dict[str, dict] = {}
-    columns = governed_columns(model_version)
+    columns = dict(expected) if expected is not None \
+        else governed_columns(model_version)
 
     scope = None if run_ids is None else {int(r) for r in run_ids}
     in_scope = scope is not None and _run_of(row, run_key) in scope
 
     if scope is None or not in_scope:
+        # Synthesised, not read. Nothing governed on this row is interpretable,
+        # so the legacy numeric column need not be fetched at all — which is
+        # why containment does not require widening every SELECT merely to
+        # suppress values it was never going to trust.
         reason = NO_CONTRACT if scope is None else OUTSIDE_SNAPSHOT
         for metric, column in columns.items():
-            if column in values:
-                values[column] = None
-                states[metric] = _withheld(reason)
+            values[column] = None
+            states[metric] = _withheld(reason)
         return _clean(values, states_key, run_key), states
+
+    # Inside a contract the promise is binding: a field this response model
+    # advertises must have been fetched. Degrading here would convert a query
+    # defect into a financial claim about the company.
+    absent = sorted(f"{m} ({c})" for m, c in columns.items() if c not in row)
+    if absent:
+        raise MissingProjectedColumn(
+            f"governed fields advertised by the response but not fetched: "
+            f"{', '.join(absent)}")
 
     sidecar = row.get(states_key) or {}
     if isinstance(sidecar, str):                      # a driver that returns

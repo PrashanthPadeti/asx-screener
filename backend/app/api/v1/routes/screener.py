@@ -39,7 +39,7 @@ from app.core.parsed_query import (
     AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
     canonicalise,
 )
-from app.core.row_projection import project_row
+from app.core.row_projection import expected_outputs, project_row
 from app.core.screener_fields import UnknownField, build_registry
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 from compute.engine.screen_predicates import CriterionType
@@ -771,17 +771,28 @@ class Snapshot:
                 detail=f"Governed metrics are unavailable: {self.reason}")
         return self.scope
 
+    def expected(self, fields) -> dict:
+        """The governed outputs a given surface promises.
+
+        Per surface, not global: ScreenerRow and the CSV column list advertise
+        different governed subsets, and a projector holding the wrong one
+        would either miss a field or demand one the query never needed.
+        """
+        return expected_outputs(self.model_version, fields)
+
     def project(self, rows) -> list[ScreenerRow]:
         """Stored rows as served rows, all under this one snapshot."""
+        promised = self.expected(ScreenerRow.model_fields)
         out = []
         for row in rows:
             values, states = project_row(dict(row),
                                          model_version=self.model_version,
-                                         run_ids=self.run_ids)
+                                         run_ids=self.run_ids,
+                                         expected=promised)
             out.append(ScreenerRow(**values, metric_states=states))
         return out
 
-    def projected_values(self, row) -> dict:
+    def projected_values(self, row, fields) -> dict:
         """The numeric side alone, for CSV, which has nowhere to put a state.
 
         An empty cell is a lossy rendering of a withheld metric — it cannot
@@ -791,7 +802,8 @@ class Snapshot:
         keeps and may analyse long after the contract that withheld it.
         """
         values, _ = project_row(dict(row), model_version=self.model_version,
-                                run_ids=self.run_ids)
+                                run_ids=self.run_ids,
+                                expected=self.expected(fields))
         return values
 
 
@@ -1454,7 +1466,7 @@ async def export_screener(
         for row in rows:
             buf.truncate(0)
             buf.seek(0)
-            served = snapshot.projected_values(row)
+            served = snapshot.projected_values(row, _EXPORT_COLS)
             writer.writerow([_fmt_val(col, served.get(col))
                              for col in _EXPORT_COLS])
             yield buf.getvalue()
@@ -2251,7 +2263,7 @@ async def export_query_screener(
         for row in rows:
             buf.truncate(0)
             buf.seek(0)
-            served = snapshot.projected_values(row)
+            served = snapshot.projected_values(row, _EXPORT_COLS)
             writer.writerow([_fmt_val(col, served.get(col))
                              for col in _EXPORT_COLS])
             yield buf.getvalue()

@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.core.row_projection import (  # noqa: E402
     NO_CONTRACT,
     OUTSIDE_SNAPSHOT,
+    MissingProjectedColumn,
+    expected_outputs,
     governed_columns,
     project_row,
 )
@@ -32,6 +34,19 @@ from compute.engine.universe_writer import column_for  # noqa: E402
 
 V1 = "FACTOR_MODEL_V1"
 RUN = 4711
+
+
+def promised(*metrics) -> dict:
+    """The governed outputs a fixture's notional response advertises."""
+    return {m: column_for(m) for m in metrics}
+
+
+THREE = promised("debt_to_equity", "ev_ebitda", "roe")
+
+
+def project(row, run_ids, expected=THREE):
+    return project_row(row, model_version=V1, run_ids=run_ids,
+                       expected=expected)
 
 
 def stored_row(assessments, *, run_id=RUN, **plain):
@@ -67,7 +82,7 @@ def an_industrial():
 
 def test_an_applicable_metric_keeps_its_value():
     row = stored_row(an_industrial(), asx_code="IND", price=10.0)
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
 
     assert values["roe"] == 0.22
     assert values[column_for("ev_ebitda")] == 8.2
@@ -76,7 +91,7 @@ def test_an_applicable_metric_keeps_its_value():
 
 def test_a_suppressed_metric_is_nulled_and_explained():
     row = stored_row(a_bank(), asx_code="CBA", price=100.0)
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
 
     assert values["debt_to_equity"] is None
     assert states["debt_to_equity"]["state"] == "not_meaningful"
@@ -90,7 +105,7 @@ def test_a_source_unhealthy_metric_is_not_reported_as_not_applicable():
     row = stored_row({"grossed_up_yield": unhealthy("grossed_up_yield",
                                                     "feed incomplete")},
                      asx_code="FEED")
-    _, states = project_row(row, model_version=V1, run_ids=[RUN])
+    _, states = project(row, [RUN], promised("grossed_up_yield"))
 
     assert states["grossed_up_yield"]["state"] == "unavailable"
     assert states["grossed_up_yield"]["cause"] == "source_unhealthy"
@@ -103,7 +118,7 @@ def test_without_a_contract_every_governed_metric_is_withheld():
     but the watchlist must still show a price."""
     row = stored_row(an_industrial(), asx_code="IND", price=10.0,
                      market_cap=5000.0)
-    values, states = project_row(row, model_version=V1, run_ids=None)
+    values, states = project(row, None)
 
     assert values["roe"] is None and values["debt_to_equity"] is None
     assert values["price"] == 10.0 and values["market_cap"] == 5000.0
@@ -116,7 +131,7 @@ def test_a_row_outside_the_snapshot_is_withheld_for_a_different_reason():
     """Its sidecar was written under semantics this response is not speaking,
     so reading it would mix two contracts in one payload."""
     row = stored_row(an_industrial(), asx_code="OLD", price=10.0, run_id=99)
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
 
     assert values["roe"] is None
     assert states["roe"]["reason"] == OUTSIDE_SNAPSHOT
@@ -126,7 +141,7 @@ def test_a_row_outside_the_snapshot_is_withheld_for_a_different_reason():
 
 def test_a_row_with_no_run_id_is_not_treated_as_in_scope():
     row = stored_row(an_industrial(), asx_code="LEGACY", run_id=None)
-    values, _ = project_row(row, model_version=V1, run_ids=[RUN])
+    values, _ = project(row, [RUN])
     assert values["roe"] is None, "a legacy row predates the contract"
 
 
@@ -140,7 +155,7 @@ def test_the_forensic_observed_value_never_reaches_the_client():
     assert any("observed" in e for e in row["metric_states"].values()), \
         "the fixture must actually carry a forensic value"
 
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
 
     for metric, entry in states.items():
         assert "observed" not in entry, f"{metric} leaked its observed value"
@@ -149,7 +164,7 @@ def test_the_forensic_observed_value_never_reaches_the_client():
 
 def test_the_machinery_columns_are_not_served_as_fields():
     row = stored_row(a_bank(), asx_code="CBA")
-    values, _ = project_row(row, model_version=V1, run_ids=[RUN])
+    values, _ = project(row, [RUN])
 
     assert "metric_states" not in values, \
         "the raw sidecar would re-expose the observed values just stripped"
@@ -161,7 +176,7 @@ def test_ungoverned_columns_are_never_touched():
                  sector="Materials", price=10.0, rsi_14=55.0, sma_50=9.4)
     for run_ids in ([RUN], [99], None):
         row = stored_row(an_industrial(), **plain)
-        values, _ = project_row(row, model_version=V1, run_ids=run_ids)
+        values, _ = project(row, run_ids)
         for key, expected in plain.items():
             assert values[key] == expected, f"{key} changed for {run_ids}"
 
@@ -175,7 +190,7 @@ def test_a_metric_stored_under_another_spelling_is_still_projected():
         "the fixture must exercise a differing spelling"
 
     row = stored_row(a_bank(), asx_code="CBA")
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
 
     assert values[column_for("ev_ebitda")] is None
     assert "ev_ebitda" in states
@@ -211,7 +226,7 @@ def test_a_contradictory_row_withholds_rather_than_serves():
     row = stored_row(a_bank(), asx_code="CBA")
     row["debt_to_equity"] = 4.6              # as a torn write would leave it
 
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
     assert values["debt_to_equity"] is None
     assert states["debt_to_equity"]["state"] == "not_meaningful"
 
@@ -221,7 +236,7 @@ def test_a_sidecar_returned_as_text_is_decoded():
     row = stored_row(a_bank(), asx_code="CBA")
     row["metric_states"] = json.dumps(row["metric_states"])
 
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
     assert values["debt_to_equity"] is None and "debt_to_equity" in states
 
 
@@ -230,9 +245,86 @@ def test_an_entry_for_an_ungoverned_metric_is_ignored_not_applied():
     row["metric_states"] = dict(row["metric_states"])
     row["metric_states"]["sma_50"] = {"state": "unavailable"}
 
-    values, states = project_row(row, model_version=V1, run_ids=[RUN])
+    values, states = project(row, [RUN])
     assert values["sma_50"] == 9.4, "an ungoverned column must not be nulled"
     assert "sma_50" not in states
+
+
+# ── SQL omission is not a financial state ────────────────────────────────────
+# Gate A found governed fields arriving as null with no cause because the
+# query never selected them. A column absent from the SQL row means the
+# application failed to fetch something its own contract promises. It is not
+# SOURCE_MISSING, not UNAVAILABLE and not NOT_MEANINGFUL, and letting it
+# become one would make a deleted SELECT column indistinguishable from correct
+# fail-closed behaviour.
+
+PROMISED = {"roe": "roe", "ev_ebitda": column_for("ev_ebitda"),
+            "interest_coverage": "interest_coverage"}
+
+
+def test_an_advertised_field_absent_from_the_row_is_an_error_not_a_state():
+    """Inside a contract the promise is binding."""
+    row = stored_row(an_industrial(), asx_code="IND")   # no interest_coverage
+    try:
+        project_row(row, model_version=V1, run_ids=[RUN], expected=PROMISED)
+    except MissingProjectedColumn as e:
+        assert "interest_coverage" in str(e)
+    else:
+        raise AssertionError(
+            "a field the response promises and the query never fetched must "
+            "fail loudly, not tell the customer their data is unavailable")
+
+
+def test_without_a_contract_an_unfetched_field_is_synthesised_not_demanded():
+    """Nothing governed is interpretable, so the legacy column need not be
+    fetched at all — containment does not require widening every SELECT."""
+    row = stored_row(an_industrial(), asx_code="IND")   # no interest_coverage
+    values, states = project_row(row, model_version=V1, run_ids=None,
+                                 expected=PROMISED)
+
+    assert values["interest_coverage"] is None
+    assert states["interest_coverage"]["cause"] == "source_missing"
+    assert states["interest_coverage"]["reason"] == NO_CONTRACT
+
+
+def test_every_promised_field_is_explained_when_there_is_no_contract():
+    """Both halves together, which is what Gate A actually asserts."""
+    row = stored_row(an_industrial(), asx_code="IND", price=10.0)
+    values, states = project_row(row, model_version=V1, run_ids=None,
+                                 expected=PROMISED)
+
+    for metric, column in PROMISED.items():
+        assert values[column] is None, f"{column} leaked"
+        assert metric in states, f"{column} blank without a cause"
+    assert values["price"] == 10.0
+
+
+def test_a_row_outside_the_snapshot_explains_unfetched_fields_too():
+    row = stored_row(an_industrial(), asx_code="OLD", run_id=99)
+    _, states = project_row(row, model_version=V1, run_ids=[RUN],
+                            expected=PROMISED)
+    assert states["interest_coverage"]["reason"] == OUTSIDE_SNAPSHOT
+
+
+def test_expected_outputs_is_an_intersection_not_the_whole_governed_set():
+    """Being governed means 'if consumed, these semantics apply'. It does not
+    oblige every endpoint to expose every governed metric."""
+    promised = expected_outputs(V1, {"roe", "price", "sector"})
+
+    assert promised == {"roe": "roe"}
+    assert "price" not in promised.values(), "ungoverned fields are not owned"
+    assert len(promised) < len(governed_columns(V1))
+
+
+def test_an_unadvertised_governed_metric_is_neither_demanded_nor_explained():
+    """A governed metric a surface does not expose is a design choice, so it
+    must not appear in that surface's state map either."""
+    row = stored_row(a_bank(), asx_code="CBA")
+    _, states = project_row(row, model_version=V1, run_ids=[RUN],
+                            expected={"roe": "roe"})
+
+    assert "debt_to_equity" not in states, \
+        "explaining a field the response does not carry is noise"
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

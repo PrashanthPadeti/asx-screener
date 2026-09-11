@@ -8,10 +8,22 @@ from app.core.config import settings
 
 
 # Async engine (FastAPI endpoints)
+#
+# pool_recycle is not a tuning knob here, it is a memory bound. A TimescaleDB
+# backend accumulates relcache and catcache entries for every chunk it touches
+# and never returns that memory to the OS, so a connection SQLAlchemy keeps
+# forever (the pool_recycle=-1 default) only grows. Measured on the 4GB
+# production box: 20 permanently pooled backends, all idle, ~370MB RSS each.
+# Retiring a connection every 30 minutes caps how much any one can accrue.
+#
+# The pool is sized for 2 vCPU, where Postgres cannot usefully run more than a
+# handful of queries at once. Brief queueing under a burst is the intended
+# trade against exhausting the box.
 engine = create_async_engine(
     settings.DATABASE_URL,
-    pool_size=20,
-    max_overflow=10,
+    pool_size=5,
+    max_overflow=5,
+    pool_recycle=1800,
     pool_pre_ping=True,
     echo=settings.DEBUG,
 )

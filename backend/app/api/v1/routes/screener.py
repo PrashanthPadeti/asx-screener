@@ -946,6 +946,12 @@ def build_screener_sql(req: ScreenerRequest, scope=None,
             u.book_value_per_share, u.total_assets, u.total_equity,
             u.fcf_fy0, u.cfo_fy0,
 
+            -- Governed, and previously unselected. See the note in the batch
+            -- SELECT: promised-but-unfetched is an application defect, and
+            -- inside a contract it raises rather than degrading.
+            u.net_debt_to_ebitda, u.interest_coverage, u.working_capital,
+            u.asset_turnover,
+
             -- Factor Scores
             u.composite_score, u.value_score, u.quality_score,
             u.growth_score, u.momentum_score, u.income_score,
@@ -1067,6 +1073,17 @@ async def batch_screener(
             u.fcf_fy0, u.cfo_fy0,
             u.piotroski_f_score, u.altman_z_score,
             u.percent_insiders, u.percent_institutions, u.short_pct,
+
+            -- Governed fields ScreenerRow advertises. Inside a validated
+            -- contract every one of these must be fetched or the projector
+            -- raises MissingProjectedColumn: a field the response promises
+            -- and the query omits is an application defect, not a claim that
+            -- the company has no data. Gate A found them arriving null with
+            -- no cause because nothing selected them.
+            u.net_debt_to_ebitda, u.interest_coverage, u.working_capital,
+            u.asset_turnover, u.roic,
+            u.composite_score, u.value_score, u.quality_score,
+            u.growth_score, u.momentum_score, u.income_score,
             u.rsi_14, u.adx_14, u.macd, u.macd_signal,
             u.sma_20, u.sma_50, u.sma_200, u.ema_20,
             u.bb_upper, u.bb_lower, u.atr_14, u.obv,
@@ -2146,6 +2163,17 @@ async def query_screener(
             u.fcf_fy0, u.cfo_fy0,
             u.piotroski_f_score, u.altman_z_score,
             u.percent_insiders, u.percent_institutions, u.short_pct,
+
+            -- Governed fields ScreenerRow advertises. Inside a validated
+            -- contract every one of these must be fetched or the projector
+            -- raises MissingProjectedColumn: a field the response promises
+            -- and the query omits is an application defect, not a claim that
+            -- the company has no data. Gate A found them arriving null with
+            -- no cause because nothing selected them.
+            u.net_debt_to_ebitda, u.interest_coverage, u.working_capital,
+            u.asset_turnover, u.roic,
+            u.composite_score, u.value_score, u.quality_score,
+            u.growth_score, u.momentum_score, u.income_score,
             u.rsi_14, u.adx_14, u.macd, u.macd_signal,
             u.sma_20, u.sma_50, u.sma_200, u.ema_20,
             u.bb_upper, u.bb_lower, u.atr_14, u.obv,

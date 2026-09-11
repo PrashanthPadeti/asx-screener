@@ -310,6 +310,49 @@ def test_every_handler_that_serves_governed_columns_resolves_one():
         f"expected batch, screener, query and both exports; saw {checked}"
 
 
+def test_every_select_fetches_every_governed_field_it_promises():
+    """The prerequisite for the migration, and the reason it is a test.
+
+    Inside a validated contract a governed field the response advertises and
+    the query omits raises MissingProjectedColumn — correct, but it would
+    arrive as a 500 on the first request after the migration rather than as a
+    failure here. Gate A found four such fields on the screener and eleven on
+    batch and query, all arriving null with no cause because nothing selected
+    them.
+
+    Exactly once, not merely at least once: a duplicated column collapses in
+    the result mapping, which is harmless today and hides a transcription
+    error tomorrow.
+    """
+    import re
+
+    source = ROUTE.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    for name in ("build_screener_sql", "batch_screener", "query_screener"):
+        fn = next(n for n in ast.walk(tree)
+                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and n.name == name)
+        body = ast.get_source_segment(source, fn) or ""
+
+        for metric, column in PROMISED.items():
+            found = len(re.findall(rf"u\.{column}\b", body))
+            assert found == 1, (
+                f"{name}: {column} ({metric}) selected {found} times, want 1 "
+                f"— promised by ScreenerRow, so it must be fetched")
+
+
+def test_the_export_fetches_every_governed_field_it_serialises():
+    """The CSV surface advertises _EXPORT_COLS rather than ScreenerRow, and
+    selects that list directly, so its promise is met by construction. This
+    asserts the two have not drifted apart."""
+    from app.api.v1.routes.screener import _EXPORT_COLS
+
+    promised = expected_outputs(LATEST_MODEL_VERSION, _EXPORT_COLS)
+    assert promised, "the export must carry some governed columns"
+    assert set(promised.values()) <= set(_EXPORT_COLS)
+
+
 def test_no_raw_row_is_constructed_anywhere():
     """ScreenerRow(**dict(r)) is the bypass in its original form."""
     source = ROUTE.read_text(encoding="utf-8")

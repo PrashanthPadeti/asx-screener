@@ -35,6 +35,7 @@ PYBIN=${PYBIN:-$ASX_ROOT/asx-venv/bin/python}
 # journald, so this is where the scheduler line actually lands. Looking in
 # journalctl reported "no scheduler line found" while the answer sat here.
 LOGFILE=${LOGFILE:-$ASX_ROOT/logs/backend.log}
+HEALTH_URL=${HEALTH_URL:-http://127.0.0.1:8000/health}
 MARKER="# P0A-FREEZE"
 
 usage() { echo "usage: $0 {status|freeze|thaw}" >&2; exit 2; }
@@ -78,17 +79,29 @@ settings_load() {
         "from app.core.config import get_settings; get_settings()" 2>&1)
 }
 
-# Did the service actually come back, and did it do what was asked? Both, since
-# a running service that ignored the freeze is the dangerous case: it looks
-# fine and keeps writing.
+# Where the log currently ends, captured before a restart so the lines that
+# follow can be read as evidence *from that restart*. Grepping the whole file
+# and taking the last match proves only that some historical startup said the
+# right thing — a freeze that silently failed would be confirmed by the line
+# from the freeze before it. journalctl cannot serve here: the unit sends
+# StandardOutput to this file, so journald carries systemd's lines only.
+log_offset() { stat -c%s "$LOGFILE" 2>/dev/null || echo 0; }
+
+since_restart() { tail -c "+$(( ${1:-0} + 1 ))" "$LOGFILE" 2>/dev/null; }
+
+# Three independent conditions, because each can pass while another fails:
+#   active        systemd is happy
+#   healthy       the app actually answers, rather than being mid-crash-loop
+#   fresh line    this startup did what was asked, not a previous one
 verify_running() {
-    local want="$1"           # FROZEN | ACTIVE
+    local want="$1" offset="$2"
     sleep 8
-    if [ "$(systemctl is-active "$SERVICE")" != "active" ]; then
-        return 1
-    fi
+    [ "$(systemctl is-active "$SERVICE")" = "active" ] || return 1
+    curl -fsS --max-time 10 "$HEALTH_URL" >/dev/null 2>&1 || return 3
     if [ "$want" = "FROZEN" ]; then
-        tail -50 "$LOGFILE" 2>/dev/null | grep -q "SCHEDULERS FROZEN" || return 2
+        since_restart "$offset" | grep -q "SCHEDULERS FROZEN" || return 2
+    else
+        since_restart "$offset" | grep -q "Application startup complete" || return 2
     fi
     return 0
 }
@@ -144,20 +157,39 @@ freeze() {
     fi
     echo "settings load cleanly."
 
+    # Validated again here, against the file as it now stands. The first check
+    # ran before the append; this one is what proves the appended key itself is
+    # acceptable, which is exactly the step whose absence caused the outage.
+    if ! err=$(settings_load); then
+        echo "ERROR: settings will not load with SCHEDULERS_ENABLED set — reverting." >&2
+        echo "$err" | tail -5 >&2
+        restore_env
+        echo "ENV REVERTED. The service was NOT restarted and is untouched." >&2
+        exit 3
+    fi
+
     echo
     echo "restarting $SERVICE so the scheduler restarts with no jobs ..."
+    offset=$(log_offset)
     systemctl restart "$SERVICE"
 
-    verify_running FROZEN
+    verify_running FROZEN "$offset"
     case $? in
         0) echo "verified: service active and SCHEDULERS FROZEN in the log" ;;
+        3) echo "ERROR: $SERVICE is active but $HEALTH_URL does not answer." >&2
+           echo "       Reverting .env and restarting." >&2
+           restore_env
+           systemctl restart "$SERVICE"; sleep 8
+           echo "state after revert: $(systemctl is-active "$SERVICE")" >&2
+           tail -20 "$LOGFILE" >&2
+           exit 3 ;;
         1) echo "ERROR: $SERVICE did not come back — reverting .env." >&2
            restore_env
            systemctl restart "$SERVICE"; sleep 8
            echo "state after revert: $(systemctl is-active "$SERVICE")" >&2
            tail -20 "$LOGFILE" >&2
            exit 3 ;;
-        2) echo "ERROR: service is running but the log does not say FROZEN." >&2
+        2) echo "ERROR: this startup did not log SCHEDULERS FROZEN." >&2
            echo "       The deployed code predates the freeze switch, so cron" >&2
            echo "       is stopped and the in-process scheduler is NOT." >&2
            echo "       Reverting .env; deploy the switch, then freeze again." >&2
@@ -187,8 +219,9 @@ thaw() {
 
     echo
     echo "restarting $SERVICE ..."
+    offset=$(log_offset)
     systemctl restart "$SERVICE"
-    if ! verify_running ACTIVE; then
+    if ! verify_running ACTIVE "$offset"; then
         echo "ERROR: $SERVICE did not come back after thaw." >&2
         tail -20 "$LOGFILE" >&2
         exit 3

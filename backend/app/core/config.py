@@ -96,6 +96,22 @@ class Settings(BaseSettings):
     # Set to 0 to disable the promotion entirely.
     FOUNDING_MEMBER_LIMIT: int = 100
 
+    # Rollout freeze. False stops app/main.py registering any background job,
+    # so a maintenance window can halt computation while the API keeps serving.
+    #
+    # It must be declared here, not merely set in .env. pydantic-settings
+    # defaults to extra="forbid", so an undeclared key does not fall back to a
+    # default — it raises ValidationError while Settings() is constructed, at
+    # import time, and uvicorn cannot load the app at all. Setting this
+    # variable without this field took the API down for eight minutes on
+    # 11 Sep 2026: the failure was total and immediate, not a quiet fallback.
+    #
+    # Reading it through Settings rather than os.getenv also matters. The
+    # systemd unit has no EnvironmentFile, so nothing in .env reaches the
+    # process environment; os.getenv would have returned None and reported a
+    # freeze that had not happened.
+    SCHEDULERS_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True

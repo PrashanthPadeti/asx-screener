@@ -5,7 +5,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
-import os
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -238,10 +237,16 @@ async def lifespan(app: FastAPI):
     # Removing before start() means the scheduler begins with nothing to run,
     # and no await happens in between, so nothing can fire in the gap.
     #
+    # Read through Settings, not os.getenv. The systemd unit has no
+    # EnvironmentFile, so nothing in .env reaches the process environment —
+    # os.getenv would have returned None and reported a freeze that had not
+    # happened. Settings is also where the variable must be *declared*:
+    # pydantic-settings forbids extras, so an undeclared key in .env fails
+    # Settings() construction at import and the app cannot start at all.
+    #
     # Default is on: forgetting to set this leaves production behaving exactly
     # as it does today, and the freeze is the deliberate act.
-    frozen = os.getenv("SCHEDULERS_ENABLED", "true").strip().lower() in (
-        "0", "false", "no", "off")
+    frozen = not settings.SCHEDULERS_ENABLED
     if frozen:
         scheduler.remove_all_jobs()
 

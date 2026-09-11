@@ -30,6 +30,11 @@ ASX_ROOT=${ASX_ROOT:-/opt/asx-screener}
 STATE_DIR=${STATE_DIR:-/var/backups/p0a/freeze}
 ENV_FILE="$ASX_ROOT/backend/.env"
 SERVICE=${SERVICE:-asx-backend}
+PYBIN=${PYBIN:-$ASX_ROOT/asx-venv/bin/python}
+# The unit writes StandardOutput and StandardError to this file rather than to
+# journald, so this is where the scheduler line actually lands. Looking in
+# journalctl reported "no scheduler line found" while the answer sat here.
+LOGFILE=${LOGFILE:-$ASX_ROOT/logs/backend.log}
 MARKER="# P0A-FREEZE"
 
 usage() { echo "usage: $0 {status|freeze|thaw}" >&2; exit 2; }
@@ -55,10 +60,42 @@ status() {
     pgrep -af 'daily_pipeline|weekly_refresh|weekly_pipeline|top5_strategy|daily_compute|sector_bench|anomaly_detect|anomaly_alert|build_screener_universe' \
         || echo "none"
     echo
-    echo "--- scheduler state in the service log ---"
-    journalctl -u "$SERVICE" --no-pager -n 200 2>/dev/null \
-        | grep -E "SCHEDULERS FROZEN|Schedulers started" | tail -2 \
-        || echo "(no scheduler line found)"
+    echo "--- what the process actually did (last startup) ---"
+    # The unit writes StandardOutput to a file, not journald, so journalctl
+    # shows only systemd's own lines. Looking there reported "no scheduler
+    # line found" while the answer sat in backend.log.
+    grep -hE "SCHEDULERS FROZEN|Schedulers started" "$LOGFILE" 2>/dev/null \
+        | tail -2 || echo "(no scheduler line in $LOGFILE)"
+}
+
+# Whether the app can still construct its Settings. pydantic-settings forbids
+# extras, so an undeclared key in .env raises at import and uvicorn cannot load
+# the app at all — a total outage, not a quiet fallback. Checked before any
+# restart, because a config edit that cannot start is not something to discover
+# from systemd's restart counter.
+settings_load() {
+    (cd "$ASX_ROOT/backend" && "$PYBIN" -c \
+        "from app.core.config import get_settings; get_settings()" 2>&1)
+}
+
+# Did the service actually come back, and did it do what was asked? Both, since
+# a running service that ignored the freeze is the dangerous case: it looks
+# fine and keeps writing.
+verify_running() {
+    local want="$1"           # FROZEN | ACTIVE
+    sleep 8
+    if [ "$(systemctl is-active "$SERVICE")" != "active" ]; then
+        return 1
+    fi
+    if [ "$want" = "FROZEN" ]; then
+        tail -50 "$LOGFILE" 2>/dev/null | grep -q "SCHEDULERS FROZEN" || return 2
+    fi
+    return 0
+}
+
+restore_env() {
+    sed -i -E '/^[[:space:]]*SCHEDULERS_ENABLED[[:space:]]*=/d; /^# rollout freeze, added /d' \
+        "$ENV_FILE"
 }
 
 freeze() {
@@ -91,16 +128,46 @@ freeze() {
         echo "SCHEDULERS_ENABLED=false appended to $ENV_FILE"
     fi
 
+    # Prove the app can still load its configuration BEFORE restarting it.
+    # Writing SCHEDULERS_ENABLED into .env without the matching field in
+    # config.py took the API down for eight minutes on 11 Sep 2026 — the
+    # variable did not fall back to a default, it failed Settings()
+    # construction at import. This check turns that into an aborted freeze.
+    echo
+    echo "checking the app can still load its settings ..."
+    if ! err=$(settings_load); then
+        echo "ERROR: settings will not load with this .env — reverting." >&2
+        echo "$err" | tail -5 >&2
+        restore_env
+        echo "ENV REVERTED. The service was NOT restarted and is untouched." >&2
+        exit 3
+    fi
+    echo "settings load cleanly."
+
     echo
     echo "restarting $SERVICE so the scheduler restarts with no jobs ..."
     systemctl restart "$SERVICE"
-    sleep 6
+
+    verify_running FROZEN
+    case $? in
+        0) echo "verified: service active and SCHEDULERS FROZEN in the log" ;;
+        1) echo "ERROR: $SERVICE did not come back — reverting .env." >&2
+           restore_env
+           systemctl restart "$SERVICE"; sleep 8
+           echo "state after revert: $(systemctl is-active "$SERVICE")" >&2
+           tail -20 "$LOGFILE" >&2
+           exit 3 ;;
+        2) echo "ERROR: service is running but the log does not say FROZEN." >&2
+           echo "       The deployed code predates the freeze switch, so cron" >&2
+           echo "       is stopped and the in-process scheduler is NOT." >&2
+           echo "       Reverting .env; deploy the switch, then freeze again." >&2
+           restore_env
+           systemctl restart "$SERVICE"; sleep 8
+           exit 3 ;;
+    esac
+
     echo
     status
-    echo
-    echo "Confirm the log says SCHEDULERS FROZEN before proceeding. If it says"
-    echo "'Schedulers started', the deployed code predates the freeze switch —"
-    echo "deploy it first."
 }
 
 thaw() {
@@ -112,9 +179,7 @@ thaw() {
     fi
 
     if env_frozen; then
-        # Remove only the lines this script added.
-        sed -i -E '/^[[:space:]]*SCHEDULERS_ENABLED[[:space:]]*=/d; /^# rollout freeze, added /d' \
-            "$ENV_FILE"
+        restore_env
         echo "SCHEDULERS_ENABLED removed from $ENV_FILE"
     else
         echo "SCHEDULERS_ENABLED was not set — untouched"
@@ -123,7 +188,12 @@ thaw() {
     echo
     echo "restarting $SERVICE ..."
     systemctl restart "$SERVICE"
-    sleep 6
+    if ! verify_running ACTIVE; then
+        echo "ERROR: $SERVICE did not come back after thaw." >&2
+        tail -20 "$LOGFILE" >&2
+        exit 3
+    fi
+    echo "verified: service active"
     echo
     status
     echo

@@ -3,10 +3,16 @@
 # Gate A runner — unit suite, containment gate, then schema evidence.
 #
 # Lives in the repo rather than being pasted, because a long heredoc through a
-# wrapped console has twice produced a corrupted or wrong-tree run. Run it from
-# the backend/ directory of a checkout at the commit you intend to prove:
+# wrapped console has twice produced a corrupted or wrong-tree run.
 #
-#     cd /tmp/p0a-gate/backend && bash scripts/gate_a.sh 2>&1 | tee /tmp/gate.log
+# Run it from the backend/ directory of a checkout at the commit you intend to
+# prove. Note the subshell and pipefail: a bare `... | tee log` returns tee's
+# status, so a failing gate would report success. The subshell also keeps
+# pipefail out of the calling shell, and avoids `exit`, which would end an
+# interactive session rather than the run.
+#
+#     ( set -o pipefail; cd /tmp/p0a-gate/backend && \
+#       bash scripts/gate_a.sh 2>&1 | tee /tmp/gate.log ); echo "EXIT=$?"
 #
 # The evidence queries always run, even when the gate fails, because what the
 # storage schema holds is what decides the post-migration work either way.

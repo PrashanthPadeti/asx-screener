@@ -289,6 +289,21 @@ class ScreenerRow(BaseModel):
     price_date:         Optional[date]     = None
     universe_built_at:  Optional[datetime] = None
 
+    # ── Why a governed field is null ─────────────────────────────────────────
+    # Sparse, and the absence is the signal: a metric with no entry here was
+    # applicable, so the payload stays proportional to the problem rather than
+    # to the column count.
+    #
+    # A null governed field is never evidence. Without an entry a client cannot
+    # tell "this bank has no meaningful current ratio" from "the dividend feed
+    # is stale" from "nobody has computed this yet", and all three would
+    # otherwise render as the same dash — or, worse, as zero. Each entry
+    # carries state, cause and reason so the client renders the right one.
+    #
+    # The forensic observed value is deliberately not here; it is stripped at
+    # projection, because a frontend that finds a number will display it.
+    metric_states: dict[str, dict] = {}
+
     model_config = {"from_attributes": True}
 
 

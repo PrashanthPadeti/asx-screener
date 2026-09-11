@@ -38,8 +38,9 @@ from app.core.parsed_query import (
     AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
     canonicalise,
 )
+from app.core.row_projection import project_row
 from app.core.screener_fields import UnknownField, build_registry
-from compute.engine.metric_states import GOVERNED_METRICS
+from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 from compute.engine.screen_predicates import CriterionType
 from compute.engine.screen_sql import (
     CompileError, RunScope, ValidatedRun, plan_screen,
@@ -698,10 +699,42 @@ async def resolve_scope_if_needed(db, parsed: ParsedQuery):
 
     A caller cannot supply this. The 274 ungoverned fields acquire no run
     dependency, so an ordinary sector filter costs nothing.
+
+    Asking a governed *question* without a contract is unanswerable, so this
+    refuses. Projection is the other case and degrades instead — see
+    resolve_scope_for_projection.
     """
     if not parsed.requires_run_scope:
         return None
 
+    scope, reason = await _validated_scope(db)
+    if scope is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Governed metrics are unavailable: {reason}")
+    return scope
+
+
+async def resolve_scope_for_projection(db):
+    """The same resolution, for a response that must still be served.
+
+    A watchlist asks no governed question; it projects stored rows. Without a
+    contract every governed metric is withheld with a stated reason and the
+    price still reaches the user, which is a better answer than refusing the
+    page. Governance suppresses the governed metric, not the row.
+    """
+    scope, _ = await _validated_scope(db)
+    return scope
+
+
+async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
+    """One resolution, shared, returning (scope, why-it-is-absent).
+
+    The reason is carried rather than discarded because the two ways to have
+    no contract are different operational states — the migration has not run,
+    or it has and the canonical recompute has not — and an operator reading a
+    503 needs to know which.
+    """
     try:
         rows = await db.execute(text(VALIDATED_RUNS_SQL_TEXT),
                                 {"supported": list(GOVERNED_METRICS.keys()),
@@ -719,26 +752,37 @@ async def resolve_scope_if_needed(db, parsed: ParsedQuery):
         # session fails with InFailedSqlTransaction. Without it a single
         # missing table turns one bad request into a broken connection.
         await db.rollback()
-        log.warning("Run-scope resolution failed; governed queries "
+        log.warning("Run-scope resolution failed; governed metrics "
                     "unavailable: %s", exc)
-        raise HTTPException(
-            status_code=503,
-            detail="Governed metrics are unavailable: the applicability "
-                   "contract has not been provisioned on this database yet.")
+        return None, ("the applicability contract has not been provisioned "
+                      "on this database yet.")
 
     try:
         runs = [ValidatedRun(r[0], r[1], tuple(r[2] or ()), validated=True,
                              detail=r[3])
                 for r in fetched]
         if not runs:
-            raise CompileError(
-                "no completed compute run under a supported factor model; "
-                "the canonical recompute has not run")
+            return None, ("no completed compute run under a supported factor "
+                          "model; the canonical recompute has not run.")
         newest = runs[0].contract_key
         return RunScope.from_validated_runs(
-            [r for r in runs if r.contract_key == newest])
+            [r for r in runs if r.contract_key == newest]), ""
     except CompileError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
+        log.warning("Run scope refused: %s", exc)
+        return None, str(exc)
+
+
+def _model_version(scope) -> str:
+    """The version whose governed set a projection applies.
+
+    Taken from the resolved contract when there is one, so a response never
+    decodes states under a version other than the one its rows were written
+    under. LATEST is the fallback only when there is no contract at all, where
+    it decides nothing but which metrics to withhold.
+    """
+    if scope is not None and scope.contract:
+        return scope.contract[0]
+    return LATEST_MODEL_VERSION
 
 
 def _plan_for(req, scope):
@@ -883,6 +927,12 @@ async def batch_screener(
     Returns screener.universe rows for a specific list of ASX codes.
     Used by the watchlist page to show live prices and key metrics.
     Input order is preserved in the response.
+
+    Governed metrics pass through the same applicability contract the screener
+    filters on, so a watchlist cannot show a value the screener would refuse to
+    rank. Without a provisioned contract the governed metrics are withheld with
+    a stated reason and the prices are still served: a watchlist that refuses
+    the whole page because one metric is uninterpretable is a worse answer.
     """
     if not codes:
         return []
@@ -907,6 +957,14 @@ async def batch_screener(
         f"WHEN :c{i} THEN {i}" for i in range(len(unique))
     )
     params = {f"c{i}": code for i, code in enumerate(unique)}
+
+    # Resolved before the SELECT is built, because it decides whether the
+    # sidecar columns exist to be selected at all. Pre-migration they do not,
+    # and asking for them would be an UndefinedColumn 500 on the watchlist —
+    # the same class of failure the screener's 503 path already avoids.
+    scope = await resolve_scope_for_projection(db)
+    contract_cols = (", u.metric_states, u.compute_run_id" if scope
+                     else "")
 
     sql = f"""
         SELECT
@@ -936,7 +994,7 @@ async def batch_screener(
             u.return_1w, u.return_1m, u.return_3m, u.return_6m,
             u.return_1y, u.return_ytd, u.return_3y, u.return_5y,
             u.drawdown_from_ath,
-            u.price_date, u.universe_built_at
+            u.price_date, u.universe_built_at{contract_cols}
         FROM screener.universe u
         WHERE u.asx_code IN ({placeholders})
         ORDER BY
@@ -947,7 +1005,18 @@ async def batch_screener(
     """
     result = await db.execute(text(sql), params)
     rows = result.mappings().all()
-    return [ScreenerRow(**dict(r)) for r in rows]
+
+    # One projection, shared with the screener. A row outside the resolved
+    # snapshot keeps its identity and price and loses its governed metrics,
+    # rather than being dropped — a watchlist entry that vanishes because its
+    # compute run is stale reads as a delisting.
+    served = []
+    for row in rows:
+        values, states = project_row(
+            dict(row), model_version=_model_version(scope),
+            run_ids=scope.run_ids if scope else None)
+        served.append(ScreenerRow(**values, metric_states=states))
+    return served
 
 
 # ── POST /screener ────────────────────────────────────────────────────────────

@@ -43,9 +43,29 @@ if [ -z "${DBNAME:-}" ]; then
     exit 2
 fi
 
-echo "HOST:            $(hostname)"
-echo "DATABASE:        $DBNAME"
-echo "HEAD UNDER TEST: $(git log --oneline -1 2>/dev/null || echo 'not a checkout')"
+PSQL="sudo -u postgres psql -d $DBNAME"
+
+# Identity of both things under test, printed before anything is proven. A
+# previous run reported every governed column as absent because psql had
+# connected to the default "postgres" database; the evidence looked like a
+# storage contract mismatch rather than a harness fault. Naming the database
+# the connection actually reached makes that failure self-announcing.
+IDENT=$($PSQL -tAc "SELECT current_database() || ' @ ' ||
+                           coalesce(host(inet_server_addr()), 'local socket') ||
+                           ':' || coalesce(inet_server_port()::text, '-');" 2>&1)
+
+echo "HOST:                $(hostname)"
+echo "DATABASE UNDER TEST: $IDENT"
+echo "HEAD UNDER TEST:     $(git log --oneline -1 2>/dev/null || echo 'not a checkout')"
+
+# Schema existence is a prerequisite, not a finding. Continuing without it
+# yields empty evidence that reads as "these columns do not exist" when the
+# truth is that nothing was looked at.
+if [ "$($PSQL -tAc "SELECT to_regclass('screener.universe') IS NOT NULL;" 2>/dev/null)" != "t" ]; then
+    echo "ERROR: screener.universe not visible in $DBNAME — aborting rather" >&2
+    echo "       than reporting misleading empty evidence." >&2
+    exit 2
+fi
 
 echo
 echo "=== unit suite ==="
@@ -66,17 +86,27 @@ echo "=== GATE A: pre-migration containment ==="
 "$PYBIN" scripts/gate_a.py
 gate=$?
 
+#: The governed fields ScreenerRow advertises that no endpoint currently
+#: selects. Gate A found them arriving null with no cause.
+SUSPECT="('net_debt_to_ebitda'),('working_capital'),('interest_coverage'),
+         ('asset_turnover'),('roic'),('composite_score'),('value_score'),
+         ('quality_score'),('growth_score'),('momentum_score'),('income_score')"
+
 echo
-echo "=== governed columns that exist in screener.universe ==="
-sudo -u postgres psql -d "$DBNAME" -tAc "
-    SELECT column_name FROM information_schema.columns
-     WHERE table_schema='screener' AND table_name='universe'
-       AND column_name IN ('net_debt_to_ebitda','working_capital',
-           'interest_coverage','asset_turnover','roic','composite_score',
-           'value_score','quality_score','growth_score','momentum_score',
-           'income_score')
-     ORDER BY 1;" | tr '\n' ' '
-echo
+echo "=== do the unselected governed columns exist? ==="
+# Reported per column, so an absent one says ABSENT rather than simply not
+# appearing in a list. Silence and absence must not look the same in evidence
+# that decides whether the fix is a SELECT, a migration, or a writer change.
+$PSQL -c "
+    SELECT v.name,
+           CASE WHEN c.column_name IS NULL THEN 'ABSENT' ELSE 'present' END
+               AS status
+      FROM (VALUES $SUSPECT) AS v(name)
+      LEFT JOIN information_schema.columns c
+             ON c.table_schema = 'screener'
+            AND c.table_name   = 'universe'
+            AND c.column_name  = v.name
+     ORDER BY 2, 1;"
 
 echo
 echo "=== populated? (active rows) ==="
@@ -84,18 +114,17 @@ echo "=== populated? (active rows) ==="
 # one absent column error the whole query out, losing the counts for the ten
 # that are there — and "exists but never written" is the distinction Gate B
 # depends on.
-COUNTS=$(sudo -u postgres psql -d "$DBNAME" -tAc "
-    SELECT string_agg(format('count(%I) AS %I', column_name, column_name),
-                      ', ' ORDER BY column_name)
-      FROM information_schema.columns
-     WHERE table_schema='screener' AND table_name='universe'
-       AND column_name IN ('net_debt_to_ebitda','working_capital',
-           'interest_coverage','asset_turnover','roic','composite_score',
-           'value_score','quality_score','growth_score','momentum_score',
-           'income_score');")
+COUNTS=$($PSQL -tAc "
+    SELECT string_agg(format('count(%I) AS %I', c.column_name, c.column_name),
+                      ', ' ORDER BY c.column_name)
+      FROM (VALUES $SUSPECT) AS v(name)
+      JOIN information_schema.columns c
+             ON c.table_schema = 'screener'
+            AND c.table_name   = 'universe'
+            AND c.column_name  = v.name;")
 
 if [ -n "${COUNTS:-}" ]; then
-    sudo -u postgres psql -d "$DBNAME" -x -c \
+    $PSQL -x -c \
         "SELECT count(*) AS rows, $COUNTS
            FROM screener.universe WHERE status='active';"
 else

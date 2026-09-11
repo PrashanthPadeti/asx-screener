@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -223,8 +224,36 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=6, minute=0, timezone="Australia/Sydney"),
                       id="asx_companies", replace_existing=True)
 
+    # ── Rollout freeze ────────────────────────────────────────
+    # A maintenance window needs the API serving and nothing computing. The
+    # P0-A migration and canonical recompute rewrite screener.universe, and
+    # most of the jobs above read or write it; a job landing mid-rollout would
+    # observe a half-transitioned table or overwrite recomputed rows with
+    # values from the previous contract.
+    #
+    # Jobs are removed rather than the scheduler paused. job_defaults carries
+    # misfire_grace_time=3600 with coalesce=True, so a paused scheduler that
+    # resumes fires everything missed in the preceding hour — including on the
+    # restart that lifts the freeze, which is the worst possible moment.
+    # Removing before start() means the scheduler begins with nothing to run,
+    # and no await happens in between, so nothing can fire in the gap.
+    #
+    # Default is on: forgetting to set this leaves production behaving exactly
+    # as it does today, and the freeze is the deliberate act.
+    frozen = os.getenv("SCHEDULERS_ENABLED", "true").strip().lower() in (
+        "0", "false", "no", "off")
+    if frozen:
+        scheduler.remove_all_jobs()
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
+
+    if frozen:
+        logger.warning(
+            "SCHEDULERS FROZEN — SCHEDULERS_ENABLED is off, so no background "
+            "jobs are registered. The API is serving normally and nothing is "
+            "computing. Unset the variable and restart to resume.")
+    else:
+        logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
 
     yield
 

@@ -31,7 +31,20 @@ fi
 
 set -a; . "$ASX_ROOT/backend/.env"; set +a
 
+# psql as the postgres superuser connects to the "postgres" database by
+# default, where screener.universe does not exist — which reports every column
+# as absent rather than saying it looked in the wrong place. Take the database
+# name from the same DATABASE_URL the app uses.
+DBNAME=$("$PYBIN" -c "
+import os, urllib.parse as u
+print(u.urlparse(os.environ['DATABASE_URL']).path.lstrip('/'))" 2>/dev/null)
+if [ -z "${DBNAME:-}" ]; then
+    echo "ERROR: could not read the database name from DATABASE_URL" >&2
+    exit 2
+fi
+
 echo "HOST:            $(hostname)"
+echo "DATABASE:        $DBNAME"
 echo "HEAD UNDER TEST: $(git log --oneline -1 2>/dev/null || echo 'not a checkout')"
 
 echo
@@ -55,7 +68,7 @@ gate=$?
 
 echo
 echo "=== governed columns that exist in screener.universe ==="
-sudo -u postgres psql -tAc "
+sudo -u postgres psql -d "$DBNAME" -tAc "
     SELECT column_name FROM information_schema.columns
      WHERE table_schema='screener' AND table_name='universe'
        AND column_name IN ('net_debt_to_ebitda','working_capital',
@@ -67,20 +80,27 @@ echo
 
 echo
 echo "=== populated? (active rows) ==="
-sudo -u postgres psql -c "
-    SELECT count(*) AS rows,
-           count(interest_coverage)  AS int_cov,
-           count(working_capital)    AS work_cap,
-           count(net_debt_to_ebitda) AS nd_ebitda,
-           count(asset_turnover)     AS asset_t,
-           count(roic)               AS roic,
-           count(composite_score)    AS composite,
-           count(value_score)        AS value,
-           count(quality_score)      AS quality,
-           count(growth_score)       AS growth,
-           count(momentum_score)     AS momentum,
-           count(income_score)       AS income
-      FROM screener.universe WHERE status='active';"
+# Built from the columns that actually exist. Naming them literally would make
+# one absent column error the whole query out, losing the counts for the ten
+# that are there — and "exists but never written" is the distinction Gate B
+# depends on.
+COUNTS=$(sudo -u postgres psql -d "$DBNAME" -tAc "
+    SELECT string_agg(format('count(%I) AS %I', column_name, column_name),
+                      ', ' ORDER BY column_name)
+      FROM information_schema.columns
+     WHERE table_schema='screener' AND table_name='universe'
+       AND column_name IN ('net_debt_to_ebitda','working_capital',
+           'interest_coverage','asset_turnover','roic','composite_score',
+           'value_score','quality_score','growth_score','momentum_score',
+           'income_score');")
+
+if [ -n "${COUNTS:-}" ]; then
+    sudo -u postgres psql -d "$DBNAME" -x -c \
+        "SELECT count(*) AS rows, $COUNTS
+           FROM screener.universe WHERE status='active';"
+else
+    echo "none of the suspect columns exist on screener.universe"
+fi
 
 echo "=== governed metrics not exposed on ScreenerRow ==="
 "$PYBIN" - <<'PY'

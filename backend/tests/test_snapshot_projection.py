@@ -261,23 +261,52 @@ def test_no_handler_resolves_the_snapshot_twice():
             f"{fn.name} resolves the snapshot {len(calls)} times"
 
 
+def _serves_governed(fn, source: str) -> bool:
+    """Whether a handler emits governed columns, read from what it declares.
+
+    Keyed off the decorator's response_model rather than a string in the body.
+    The first version of this looked for the literal "ScreenerRow" and so
+    missed batch_screener and query_screener the moment they were refactored
+    to return snapshot.project(rows) — the detector failed on exactly the two
+    handlers the refactor had fixed.
+
+    Searching the body for the projection call instead would be circular: it
+    would only ever find handlers that already do the right thing, which is
+    the opposite of what this test is for. What a handler promises to return
+    is independent of whether it projects correctly.
+    """
+    for decorator in fn.decorator_list:
+        if not isinstance(decorator, ast.Call):
+            continue
+        for keyword in decorator.keywords:
+            if keyword.arg != "response_model":
+                continue
+            declared = ast.get_source_segment(source, keyword.value) or ""
+            if "ScreenerRow" in declared or "ScreenerResponse" in declared:
+                return True
+
+    # The CSV exports stream bytes and declare no response_model, so they are
+    # identified by the column list they serialise.
+    body = ast.get_source_segment(source, fn) or ""
+    return "_EXPORT_COLS" in body
+
+
 def test_every_handler_that_serves_governed_columns_resolves_one():
-    """Scoped to handlers that actually emit governed data: those returning
-    ScreenerRow, and the CSV exports. An endpoint reading the universe for
-    some other purpose is not in scope and must not be forced to resolve."""
+    """Scoped to handlers that actually emit governed data. An endpoint
+    reading the universe for some other purpose is not in scope and must not
+    be forced to resolve a snapshot it has no use for."""
     source = ROUTE.read_text(encoding="utf-8")
     checked = []
     for fn in _handlers():
-        body = ast.get_source_segment(source, fn) or ""
-        serves = ("ScreenerRow" in body or "build_screener_sql" in body
-                  or "_EXPORT_COLS" in body)
-        if not serves:
+        if not _serves_governed(fn, source):
             continue
         checked.append(fn.name)
+        body = ast.get_source_segment(source, fn) or ""
         assert "resolve_snapshot" in body, \
             f"{fn.name} serves governed columns without a snapshot"
 
-    assert len(checked) >= 5, \
+    assert set(checked) >= {"batch_screener", "run_screener", "query_screener",
+                            "export_screener", "export_query_screener"}, \
         f"expected batch, screener, query and both exports; saw {checked}"
 
 

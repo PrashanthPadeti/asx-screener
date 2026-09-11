@@ -21,6 +21,7 @@ import hashlib
 import io
 import json
 import math
+from dataclasses import dataclass
 from datetime import date as date_type
 from typing import Any, Optional
 
@@ -694,37 +695,100 @@ def _typed_from_filters(req: ScreenerRequest) -> ParsedQuery:
                        ordering=ordering)
 
 
-async def resolve_scope_if_needed(db, parsed: ParsedQuery):
-    """Server-resolved, and only when the query actually reads governed data.
+@dataclass(frozen=True)
+class Snapshot:
+    """One request's logical snapshot, resolved once and carried throughout.
 
-    A caller cannot supply this. The 274 ungoverned fields acquire no run
-    dependency, so an ordinary sector filter costs nothing.
+    Filtering and projection need different failure policies over the same
+    resolution. Asking a governed question without a contract is unanswerable
+    and refuses; projecting one is answerable and degrades. Resolving twice to
+    serve those two policies would reintroduce exactly the mid-request race
+    ScreenPlan removed — a compute finishing between the two calls would give
+    one response a filtered set from one snapshot and decoded values from
+    another, each internally valid and mutually inconsistent.
 
-    Asking a governed *question* without a contract is unanswerable, so this
-    refuses. Projection is the other case and degrades instead — see
-    resolve_scope_for_projection.
+    The invariant:
+
+        Every governed value leaving a screener response is projected through
+        the same logical snapshot that governed the request; when no validated
+        snapshot exists, projection degrades explicitly rather than exposing
+        stored observations.
     """
-    if not parsed.requires_run_scope:
-        return None
 
+    scope: Optional[RunScope]
+    reason: str = ""
+
+    @property
+    def available(self) -> bool:
+        return self.scope is not None
+
+    @property
+    def run_ids(self) -> Optional[tuple]:
+        """None means no contract, which projection reads as 'withhold'."""
+        return self.scope.run_ids if self.scope else None
+
+    @property
+    def identifier(self) -> Optional[str]:
+        return self.scope.snapshot if self.scope else None
+
+    @property
+    def model_version(self) -> str:
+        """The version whose governed set the projection applies.
+
+        From the resolved contract when there is one, so a response never
+        decodes states under a version other than the one its rows were
+        written under. LATEST is the fallback only when there is no contract,
+        where it decides nothing but which metrics to withhold.
+        """
+        if self.scope is not None and self.scope.contract:
+            return self.scope.contract[0]
+        return LATEST_MODEL_VERSION
+
+    def for_filtering(self, parsed: ParsedQuery) -> Optional[RunScope]:
+        """The scope the *query* runs under, which is not always this one.
+
+        None for an ungoverned query even when a contract exists. Passing the
+        scope would add a compute_run_id predicate to an ordinary sector
+        screen, so a newly listed company not yet in the current compute run
+        would silently vanish from results it belongs in. Governance
+        constrains governed metrics, not membership of the universe.
+        """
+        if not parsed.requires_run_scope:
+            return None
+        if self.scope is None:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Governed metrics are unavailable: {self.reason}")
+        return self.scope
+
+    def project(self, rows) -> list[ScreenerRow]:
+        """Stored rows as served rows, all under this one snapshot."""
+        out = []
+        for row in rows:
+            values, states = project_row(dict(row),
+                                         model_version=self.model_version,
+                                         run_ids=self.run_ids)
+            out.append(ScreenerRow(**values, metric_states=states))
+        return out
+
+    def projected_values(self, row) -> dict:
+        """The numeric side alone, for CSV, which has nowhere to put a state.
+
+        An empty cell is a lossy rendering of a withheld metric — it cannot
+        distinguish "not meaningful for a bank" from "the feed is stale" the
+        way the JSON payload can. It is still the right answer, because the
+        alternative is a number that is wrong, written into a file the user
+        keeps and may analyse long after the contract that withheld it.
+        """
+        values, _ = project_row(dict(row), model_version=self.model_version,
+                                run_ids=self.run_ids)
+        return values
+
+
+async def resolve_snapshot(db) -> Snapshot:
+    """The single resolution a request owns, before any statement."""
     scope, reason = await _validated_scope(db)
-    if scope is None:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Governed metrics are unavailable: {reason}")
-    return scope
-
-
-async def resolve_scope_for_projection(db):
-    """The same resolution, for a response that must still be served.
-
-    A watchlist asks no governed question; it projects stored rows. Without a
-    contract every governed metric is withheld with a stated reason and the
-    price still reaches the user, which is a better answer than refusing the
-    page. Governance suppresses the governed metric, not the row.
-    """
-    scope, _ = await _validated_scope(db)
-    return scope
+    return Snapshot(scope, reason)
 
 
 async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
@@ -772,19 +836,6 @@ async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
         return None, str(exc)
 
 
-def _model_version(scope) -> str:
-    """The version whose governed set a projection applies.
-
-    Taken from the resolved contract when there is one, so a response never
-    decodes states under a version other than the one its rows were written
-    under. LATEST is the fallback only when there is no contract at all, where
-    it decides nothing but which metrics to withhold.
-    """
-    if scope is not None and scope.contract:
-        return scope.contract[0]
-    return LATEST_MODEL_VERSION
-
-
 def _plan_for(req, scope):
     """Typed query -> canonical fields -> plan. The single semantic route.
 
@@ -806,13 +857,20 @@ def _plan_for(req, scope):
         raise HTTPException(status_code=503, detail=str(exc))
 
 
-def build_screener_sql(req: ScreenerRequest, scope=None) -> tuple[str, str, dict]:
+def build_screener_sql(req: ScreenerRequest, scope=None,
+                       sidecar: bool = False) -> tuple[str, str, dict]:
     """
     Build COUNT + DATA queries from the filter list.
     Queries screener.universe directly — no JOINs.
     Returns (count_sql, data_sql, params).
+
+    ``sidecar`` selects the applicability columns the projection decodes. It
+    is off by default because those columns do not exist until the P0-A
+    migration runs, and selecting them unconditionally would turn every
+    pre-migration screen into an UndefinedColumn 500.
     """
     plan = _plan_for(req, scope)
+    contract_cols = ", u.metric_states, u.compute_run_id" if sidecar else ""
     where = f"u.price IS NOT NULL AND u.status = 'active' AND ({plan.where})"
     params = dict(plan.params)
 
@@ -898,7 +956,7 @@ def build_screener_sql(req: ScreenerRequest, scope=None) -> tuple[str, str, dict
             u.drawdown_from_ath,
 
             -- Metadata
-            u.price_date, u.universe_built_at
+            u.price_date, u.universe_built_at{contract_cols}
 
         FROM screener.universe u
         WHERE {data_where}
@@ -962,9 +1020,9 @@ async def batch_screener(
     # sidecar columns exist to be selected at all. Pre-migration they do not,
     # and asking for them would be an UndefinedColumn 500 on the watchlist —
     # the same class of failure the screener's 503 path already avoids.
-    scope = await resolve_scope_for_projection(db)
-    contract_cols = (", u.metric_states, u.compute_run_id" if scope
-                     else "")
+    snapshot = await resolve_snapshot(db)
+    contract_cols = (", u.metric_states, u.compute_run_id"
+                     if snapshot.available else "")
 
     sql = f"""
         SELECT
@@ -1010,13 +1068,7 @@ async def batch_screener(
     # snapshot keeps its identity and price and loses its governed metrics,
     # rather than being dropped — a watchlist entry that vanishes because its
     # compute run is stale reads as a delisting.
-    served = []
-    for row in rows:
-        values, states = project_row(
-            dict(row), model_version=_model_version(scope),
-            run_ids=scope.run_ids if scope else None)
-        served.append(ScreenerRow(**values, metric_states=states))
-    return served
+    return snapshot.project(rows)
 
 
 # ── POST /screener ────────────────────────────────────────────────────────────
@@ -1041,20 +1093,22 @@ async def run_screener(
     Non-percentage fields use their raw values:
     - PE <= 20, Market Cap >= 500 (AUD M), Piotroski >= 7
     """
-    # One scope per request, resolved before any statement. Resolving it per
-    # query would let a compute finishing mid-request give this response two
-    # internally valid, mutually inconsistent snapshots.
+    # One snapshot per request, resolved before any statement, and carried
+    # through planning, counting, ordering and row projection alike. Resolving
+    # separately for filtering and for projection would let a compute
+    # finishing mid-request give this response a filtered set from one
+    # snapshot and decoded values from another.
     try:
-        parsed_for_scope = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
+        parsed = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    scope = await resolve_scope_if_needed(db, parsed_for_scope)
 
-    try:
-        plan = _plan_for(req, scope)
-        count_sql, data_sql, params = build_screener_sql(req, scope)
-    except HTTPException:
-        raise
+    snapshot = await resolve_snapshot(db)
+    scope = snapshot.for_filtering(parsed)      # 503 only for a governed query
+
+    plan = _plan_for(req, scope)
+    count_sql, data_sql, params = build_screener_sql(
+        req, scope, sidecar=snapshot.available)
 
     # Determine if this user is on a free tier
     is_free = user is None or user.get("plan", "free") == "free"
@@ -1064,7 +1118,16 @@ async def run_screener(
     if req.page == 1:
         req_hash  = hashlib.md5(req.model_dump_json().encode()).hexdigest()
         tier_tag  = "free" if is_free else "paid"
-        cache_key = make_key("screener", tier_tag, req_hash)
+        # The snapshot is part of the key, not just of the response. A cached
+        # body was projected under the snapshot current when it was stored;
+        # serving it after a recompute would hand back governed values decoded
+        # under a contract this request did not resolve — the same
+        # inconsistency the single resolution above prevents, arriving by a
+        # slower route. "none" keys the pre-migration shape separately, so the
+        # first post-migration request does not read a withheld-everything
+        # body out of the cache.
+        cache_key = make_key("screener", tier_tag,
+                             snapshot.identifier or "none", req_hash)
         cached    = await cache_get(cache_key)
         if cached:
             return ScreenerResponse(**cached)
@@ -1114,7 +1177,7 @@ async def run_screener(
             )
 
     response = ScreenerResponse(
-        data=[ScreenerRow(**dict(r)) for r in rows],
+        data=snapshot.project(rows),
         total=total,
         page=req.page,
         page_size=req.page_size,
@@ -1124,8 +1187,13 @@ async def run_screener(
         free_limit=FREE_STOCK_LIMIT if is_free else None,
         ranked_total=ranked_total,
         excluded_from_ordering=exclusions,
-        snapshot=plan.snapshot,
-        run_ids=plan.run_ids,
+        # The snapshot that governed *this response*, which for an ungoverned
+        # query is not the one the plan ran under: the plan deliberately
+        # carries no scope there, while the rows were still decoded under a
+        # contract. Reporting the plan's would say "no snapshot" about a
+        # payload whose governed values came from one.
+        snapshot=snapshot.identifier,
+        run_ids=list(snapshot.run_ids) if snapshot.run_ids else None,
     )
 
     if cache_key:
@@ -1346,8 +1414,10 @@ async def export_screener(
             parsed = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
         except UnknownField as exc:
             raise HTTPException(status_code=400, detail=str(exc))
-        scope = await resolve_scope_if_needed(db, parsed)
-        _, data_sql, params = build_screener_sql(req, scope)
+        snapshot = await resolve_snapshot(db)
+        scope = snapshot.for_filtering(parsed)
+        _, data_sql, params = build_screener_sql(
+            req, scope, sidecar=snapshot.available)
     except HTTPException:
         raise
 
@@ -1374,7 +1444,9 @@ async def export_screener(
         for row in rows:
             buf.truncate(0)
             buf.seek(0)
-            writer.writerow([_fmt_val(col, row.get(col)) for col in _EXPORT_COLS])
+            served = snapshot.projected_values(row)
+            writer.writerow([_fmt_val(col, served.get(col))
+                             for col in _EXPORT_COLS])
             yield buf.getvalue()
 
     filename = f"asx_screener_{date_type.today().isoformat()}.csv"
@@ -2007,7 +2079,9 @@ async def query_screener(
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    scope = await resolve_scope_if_needed(db, parsed)
+    snapshot = await resolve_snapshot(db)
+    scope = snapshot.for_filtering(parsed)
+    contract_cols = ", u.metric_states, u.compute_run_id" if snapshot.available else ""
 
     try:
         plan = plan_screen(parsed, FIELD_REGISTRY, scope,
@@ -2057,7 +2131,7 @@ async def query_screener(
             u.return_1w, u.return_1m, u.return_3m, u.return_6m,
             u.return_1y, u.return_ytd, u.return_3y, u.return_5y,
             u.drawdown_from_ath,
-            u.price_date, u.universe_built_at
+            u.price_date, u.universe_built_at{contract_cols}
         FROM screener.universe u
         WHERE {where}
         ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
@@ -2079,7 +2153,11 @@ async def query_screener(
         rows = []
 
     return ScreenerResponse(
-        data=[ScreenerRow(**dict(r)) for r in rows],
+        # Identical projection semantics to the ordinary screener, from the
+        # same snapshot object. AI Query interprets language and then stops;
+        # a second projection implementation here would diverge eventually,
+        # and the divergence would be invisible until it served a number.
+        data=snapshot.project(rows),
         total=total,
         page=req.page,
         page_size=req.page_size,
@@ -2087,6 +2165,8 @@ async def query_screener(
         filters_applied=1,   # 1 = the custom query counts as one expression
         is_capped=False,
         free_limit=None,
+        snapshot=snapshot.identifier,
+        run_ids=list(snapshot.run_ids) if snapshot.run_ids else None,
     )
 
 
@@ -2121,7 +2201,10 @@ async def export_query_screener(
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    scope = await resolve_scope_if_needed(db, parsed)
+    snapshot = await resolve_snapshot(db)
+    scope = snapshot.for_filtering(parsed)
+    contract_cols = (", u.metric_states, u.compute_run_id"
+                     if snapshot.available else "")
     try:
         plan = plan_screen(parsed, FIELD_REGISTRY, scope,
                            dialect="postgres", table_alias="u",
@@ -2141,7 +2224,7 @@ async def export_query_screener(
         where = f"{where} AND {plan.order_applicable}"
 
     export_sql = f"""
-        SELECT {', '.join(f'u.{c}' for c in _EXPORT_COLS)}
+        SELECT {', '.join(f'u.{c}' for c in _EXPORT_COLS)}{contract_cols}
         FROM screener.universe u
         WHERE {where}
         ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
@@ -2158,7 +2241,9 @@ async def export_query_screener(
         for row in rows:
             buf.truncate(0)
             buf.seek(0)
-            writer.writerow([_fmt_val(col, row.get(col)) for col in _EXPORT_COLS])
+            served = snapshot.projected_values(row)
+            writer.writerow([_fmt_val(col, served.get(col))
+                             for col in _EXPORT_COLS])
             yield buf.getvalue()
 
     filename = f"asx_query_export_{date_type.today().isoformat()}.csv"

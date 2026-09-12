@@ -1003,35 +1003,68 @@ LEFT JOIN LATERAL (
     SELECT fiscal_year, revenue, gross_profit, ebitda, pbt, net_profit, eps
     FROM financials.annual_pnl
     WHERE asx_code = c.asx_code
-    ORDER BY fiscal_year DESC
-    LIMIT 1 OFFSET 1
+      AND fiscal_year = pnl0.fiscal_year - 1
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) pnl1 ON TRUE
 
--- ── Annual P&L history (2/3/5/7/10 fiscal years back, for level + growth screening)
+-- ── Annual P&L history (2/3/5/7/10 fiscal years back, for level + growth
+--    screening). Named years, not row offsets: OFFSET n returns the nth
+--    previous ROW, so a company with a gap had its "FY10" taken from
+--    thirteen or more years back while the column still said ten. The
+--    comment already claimed fiscal years; the code counted rows.
 LEFT JOIN LATERAL (
     SELECT revenue, pbt FROM financials.annual_pnl
-    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 2
+    WHERE asx_code = c.asx_code
+      AND fiscal_year = pnl0.fiscal_year - 2
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) pnl2 ON TRUE
 LEFT JOIN LATERAL (
     SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
-    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 3
+    WHERE asx_code = c.asx_code
+      AND fiscal_year = pnl0.fiscal_year - 3
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) pnl3 ON TRUE
 LEFT JOIN LATERAL (
     SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
-    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 5
+    WHERE asx_code = c.asx_code
+      AND fiscal_year = pnl0.fiscal_year - 5
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) pnl5 ON TRUE
 LEFT JOIN LATERAL (
     SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
-    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 7
+    WHERE asx_code = c.asx_code
+      AND fiscal_year = pnl0.fiscal_year - 7
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) pnl7 ON TRUE
 LEFT JOIN LATERAL (
     SELECT revenue, gross_profit, pbt, net_profit FROM financials.annual_pnl
-    WHERE asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1 OFFSET 10
+    WHERE asx_code = c.asx_code
+      AND fiscal_year = pnl0.fiscal_year - 10
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) pnl10 ON TRUE
 
 -- ── Balance Sheet (latest FY) ─────────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT total_assets, total_equity, total_debt, net_debt,
+    SELECT fiscal_year,
+           total_assets, total_equity, total_debt, net_debt,
            cash_equivalents, book_value_per_share,
            total_current_assets, total_current_liab,
            trade_receivables, inventory, goodwill, intangibles, gross_block,
@@ -1048,13 +1081,20 @@ LEFT JOIN LATERAL (
     SELECT total_debt, inventory, trade_receivables
     FROM financials.annual_balance_sheet
     WHERE asx_code = c.asx_code
-    ORDER BY fiscal_year DESC
-    LIMIT 1 OFFSET 1
+      -- The year before bs0's, named rather than counted. OFFSET 1 returned
+      -- the previous ROW, so a company missing a year had its "prior year"
+      -- taken from two or more years back and three year-over-year signals
+      -- silently compared across the wrong interval.
+      AND fiscal_year = bs0.fiscal_year - 1
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) bs1 ON TRUE
 
 -- ── Cash Flow (latest FY) ─────────────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT cfo, capex, fcf, cfi, dividends_paid
+    SELECT fiscal_year, cfo, capex, fcf, cfi, dividends_paid
     FROM financials.annual_cashflow
     WHERE asx_code = c.asx_code
     ORDER BY fiscal_year DESC
@@ -1066,8 +1106,15 @@ LEFT JOIN LATERAL (
     SELECT cfo
     FROM financials.annual_cashflow
     WHERE asx_code = c.asx_code
-    ORDER BY fiscal_year DESC
-    LIMIT 1 OFFSET 1
+      -- Exactly the prior fiscal year. "OCF growing" must mean this year
+      -- against last year; with OFFSET 1 a company missing a year compared
+      -- against an older one and the signal read as growth over an interval
+      -- nobody declared. If Y-1 is absent the signal is unknown, not false.
+      AND fiscal_year = cf0.fiscal_year - 1
+    -- Bounded even though (asx_code, fiscal_year) should be
+    -- unique: a duplicate would multiply the result set rather than
+    -- fail, which is the quietest possible way to corrupt a join.
+    LIMIT 1
 ) cf1 ON TRUE
 
 -- ── Computed metrics (daily compute — freshest ratios & margins) ──────────────

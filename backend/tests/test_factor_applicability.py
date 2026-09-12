@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
-from compute.engine.applicability import Cause, Domain  # noqa: E402
+from compute.engine.applicability import Applicability, Cause, Domain  # noqa: E402
 from compute.engine.dividends import DividendSource, FeedHealth  # noqa: E402
 from compute.engine.factor_applicability import (  # noqa: E402
     INCOME_METRICS,
@@ -284,6 +284,87 @@ def test_an_unresolved_domain_suppresses_domain_sensitive_metrics():
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────
+
+# ── Gate 2 runs in the production path, not only in unit tests ───────────────
+# It did not. apply_applicability called assess() with no Observation, so
+# POSITIVE_DENOMINATOR never fired: every NM in a real scoring run came from
+# the domain gate and not one from an observation. QAN's negative equity still
+# produced a 206% ROE that percentile-ranked as exceptional quality — the
+# original defect, surviving inside the contract built to remove it.
+
+def _row(code, **extra):
+    base = {"asx_code": code, "sector": "Industrials", "industry": "Machinery",
+            "is_reit": False, "is_miner": False, "revenue_ttm": 1e9,
+            "debt_to_equity": 0.5, "altman_z_score": 3.0, "current_ratio": 2.0,
+            "roe": 0.15, "grossed_up_yield": 0.03, "pe_ratio": 12.0,
+            "total_equity": 5e8, "eps_fy0": 1.20}
+    base.update(extra)
+    return base
+
+
+def _state(masked, code, metric):
+    return masked.assessments.get(code, {}).get(metric)
+
+
+def test_negative_equity_is_not_meaningful_in_the_production_path():
+    """QAN. The stored ROE is arithmetically enormous and economically
+    meaningless, and the domain gate cannot catch it — only the observation
+    can, and only if it is supplied."""
+    df = pd.DataFrame([_row("IND1"), _row("QAN", roe=2.06, total_equity=-1.2e9)])
+    masked = apply_applicability(df, GOOD_FEED)
+
+    qan = _state(masked, "QAN", "roe")
+    assert qan.state is not None and not qan.ok
+    assert qan.cause is Cause.OBSERVATION, \
+        f"negative equity is an observation failure, got {qan.cause}"
+    assert pd.isna(masked.frame.loc[1, "roe"]), \
+        "the value must be masked before it reaches any percentile"
+
+
+def test_the_same_null_pe_means_two_different_things():
+    """The acceptance case for the P/E fix.
+
+    pe_ratio is NULL for both companies. One has non-positive EPS, which is
+    why its P/E does not exist — NOT_MEANINGFUL, and the model may reweight
+    around it. The other simply has no earnings observation at all, so
+    nothing can be concluded — UNAVAILABLE, and the factor refuses.
+
+    Collapsing these was costing Value 985 rows on production data.
+    """
+    df = pd.DataFrame([
+        _row("LOSS", pe_ratio=None, eps_fy0=-0.40),
+        _row("BLIND", pe_ratio=None, eps_fy0=None),
+    ])
+    masked = apply_applicability(df, GOOD_FEED)
+
+    loss = _state(masked, "LOSS", "pe_ratio")
+    blind = _state(masked, "BLIND", "pe_ratio")
+
+    assert loss.state is Applicability.NOT_MEANINGFUL
+    assert loss.cause is Cause.OBSERVATION
+    assert blind.state is Applicability.UNAVAILABLE
+    assert blind.cause is Cause.SOURCE_MISSING
+
+
+def test_positive_earnings_with_no_pe_is_still_unavailable():
+    """A positive denominator does not make an absent value meaningful — it
+    only removes one reason for the absence."""
+    df = pd.DataFrame([_row("OK", pe_ratio=None, eps_fy0=0.85)])
+    masked = apply_applicability(df, GOOD_FEED)
+
+    pe = _state(masked, "OK", "pe_ratio")
+    assert pe.state is Applicability.UNAVAILABLE
+    assert pe.cause is Cause.SOURCE_MISSING
+
+
+def test_zero_equity_is_an_observation_not_a_missing_one():
+    """0.0 is a value. A truthiness check would read it as absent and let the
+    ratio through."""
+    df = pd.DataFrame([_row("ZERO", roe=0.5, total_equity=0.0)])
+    masked = apply_applicability(df, GOOD_FEED)
+
+    assert _state(masked, "ZERO", "roe").cause is Cause.OBSERVATION
+
 
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())

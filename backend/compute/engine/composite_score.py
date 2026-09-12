@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.applicability import Applicability  # noqa: E402
 from compute.engine.factor_applicability import (  # noqa: E402
+    OBSERVATION_COLS,  # noqa: E402
     DOMAIN_COLS,
     apply_applicability,
     withhold_source_failed,
@@ -535,6 +536,9 @@ def run(conn, dry_run: bool = False) -> int:
 
     cur = conn.cursor()
     select_cols = ALL_COLS + [c for c in DOMAIN_COLS if c not in ALL_COLS]
+    # Gate 2 needs each metric's own denominator, or it cannot run
+    # and every non-positive-denominator ratio passes as applicable.
+    select_cols += [c for c in OBSERVATION_COLS.values() if c not in select_cols]
     col_list = ", ".join(select_cols)
     cur.execute(f"""
         SELECT {col_list}

@@ -42,7 +42,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from compute.engine.applicability import assess, unhealthy
+from compute.engine.applicability import Observation, assess, unhealthy
 from compute.engine.domain_resolver import resolve_domain
 from compute.engine.metric_registry import normalise
 from compute.engine.metric_states import (
@@ -53,6 +53,33 @@ from compute.engine.metric_states import (
 
 #: Columns needed to resolve a domain, over and above the factor signals.
 DOMAIN_COLS = ["sector", "industry", "is_reit", "is_miner", "revenue_ttm"]
+
+#: Observation field -> the column that is genuinely that metric's denominator.
+#:
+#: Gate 2 was inert here. assess() was called with no Observation at all, so
+#: POSITIVE_DENOMINATOR never fired in the production factor path: every NM in
+#: a scoring run came from the domain gate, and not one from an observation.
+#: The rule was implemented, tested in isolation, and unwired — so QAN's
+#: negative equity still produced a 206% ROE that percentile-ranked as
+#: exceptional quality, which is the original defect this contract was built
+#: to remove.
+#:
+#: The bases are the metrics' own, not convenient substitutes. eps_fy0 is
+#: COALESCE(pnl0.eps, ym.eps), which is the identical expression
+#: build_screener_universe divides price by to derive pe_ratio — so a
+#: non-positive eps_fy0 is exactly why that P/E is absent. Feeding net income
+#: instead would recover coverage by answering a different question.
+#:
+#: invested_capital has no column in screener.universe, so roce and roic keep
+#: no observation check. That is the honest state: a check that cannot run has
+#: not passed, and inventing a proxy denominator would be the same error in
+#: the other direction.
+OBSERVATION_COLS: dict[str, str] = {
+    "equity": "total_equity",
+    "earnings": "eps_fy0",
+    "revenue": "revenue_ttm",
+    "ebitda": "ebitda_ttm",
+}
 
 #: The income family. When the dividend feed is unhealthy these are withheld
 #: as a source failure rather than assessed, because the feed's state is a
@@ -82,6 +109,23 @@ class Masked:
     @property
     def any_source_failed(self) -> bool:
         return bool(self.source_failed.any())
+
+
+
+def _numeric(value) -> Optional[float]:
+    """A denominator, or None when there is no observation at all.
+
+    Distinguishing these matters more than usual here: None means the check
+    cannot run, while 0.0 or a negative number means it runs and fails. A
+    truthiness test would collapse the two and silently pass every company
+    whose equity is exactly zero.
+    """
+    if value is None or pd.isna(value):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def apply_applicability(df: pd.DataFrame,
@@ -119,6 +163,18 @@ def apply_applicability(df: pd.DataFrame,
         result = resolve_domain(row)
         tally[f"domain:{result.domain.value}"] += 1
 
+        # One observation per company, from the columns that are genuinely
+        # each metric's denominator. A field whose column is absent from the
+        # frame stays None, which means that particular check cannot run —
+        # not that it passed.
+        observation = Observation(**{
+            field: _numeric(row.get(column))
+            for field, column in OBSERVATION_COLS.items()
+            if column in df.columns})
+        if any(getattr(observation, f) is not None
+               for f in OBSERVATION_COLS):
+            tally["observation:supplied"] += 1
+
         assessments = []
         row_failed = False
 
@@ -132,7 +188,7 @@ def apply_applicability(df: pd.DataFrame,
                 row_failed = True
             else:
                 a = assess(canon, None if value is None else float(value),
-                           result.domain)
+                           result.domain, observation)
 
             assessments.append(a)
             if not a.ok:

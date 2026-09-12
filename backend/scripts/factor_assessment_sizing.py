@@ -44,6 +44,7 @@ from compute.engine.composite_score import (  # noqa: E402
     compute_factor,
 )
 from compute.engine.factor_applicability import (  # noqa: E402
+    OBSERVATION_COLS,  # noqa: E402
     DOMAIN_COLS,
     apply_applicability,
 )
@@ -65,6 +66,9 @@ def load(conn):
     from compute.engine.dividends import DividendSource
 
     select = ALL_COLS + [c for c in DOMAIN_COLS if c not in ALL_COLS]
+    # Gate 2 needs each metric's own denominator, or it cannot run
+    # and every non-positive-denominator ratio passes as applicable.
+    select += [c for c in OBSERVATION_COLS.values() if c not in select]
     select += [c for c in CURRENT_SCORES if c not in select]
     cur = conn.cursor()
     cur.execute(f"""

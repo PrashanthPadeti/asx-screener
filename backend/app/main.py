@@ -223,8 +223,53 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=6, minute=0, timezone="Australia/Sydney"),
                       id="asx_companies", replace_existing=True)
 
+    # ── Rollout freeze ────────────────────────────────────────
+    # A maintenance window needs the API serving and nothing computing. The
+    # P0-A migration and canonical recompute rewrite screener.universe, and
+    # most of the jobs above read or write it; a job landing mid-rollout would
+    # observe a half-transitioned table or overwrite recomputed rows with
+    # values from the previous contract.
+    #
+    # Jobs are removed rather than the scheduler paused. job_defaults carries
+    # misfire_grace_time=3600 with coalesce=True, so a paused scheduler that
+    # resumes fires everything missed in the preceding hour — including on the
+    # restart that lifts the freeze, which is the worst possible moment.
+    # Removing before start() means the scheduler begins with nothing to run,
+    # and no await happens in between, so nothing can fire in the gap.
+    #
+    # Read through Settings, not os.getenv. The systemd unit has no
+    # EnvironmentFile, so nothing in .env reaches the process environment —
+    # os.getenv would have returned None and reported a freeze that had not
+    # happened. Settings is also where the variable must be *declared*:
+    # pydantic-settings forbids extras, so an undeclared key in .env fails
+    # Settings() construction at import and the app cannot start at all.
+    #
+    # Default is on: forgetting to set this leaves production behaving exactly
+    # as it does today, and the freeze is the deliberate act.
+    frozen = not settings.SCHEDULERS_ENABLED
+    if frozen:
+        scheduler.remove_all_jobs()
+
     scheduler.start()
-    logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
+
+    if frozen:
+        logger.warning(
+            "SCHEDULERS FROZEN — SCHEDULERS_ENABLED is off, so no background "
+            "jobs are registered. The API is serving normally and nothing is "
+            "computing. Unset the variable and restart to resume.")
+    else:
+        logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
+
+    # Published on /health because the log is not a usable channel: uvicorn
+    # configures its own loggers and none of this module's logger.info lines
+    # reach logs/backend.log — a whole-file grep for "Schedulers started"
+    # returns zero. A freeze verified by log line could never succeed.
+    #
+    # The job count rather than the flag, because the flag only says what was
+    # asked for. len(get_jobs()) is what the running scheduler actually holds,
+    # so a freeze that silently failed to remove them cannot report success.
+    app.state.schedulers_frozen = frozen
+    app.state.scheduler_jobs = len(scheduler.get_jobs())
 
     yield
 
@@ -269,6 +314,13 @@ async def health():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "redis": "connected" if redis_ok else "unavailable",
+        # Observable scheduler state, for maintenance windows. "jobs" is what
+        # this process currently holds, so 0 is proof the freeze took effect
+        # in the running app rather than proof a config file says so.
+        "schedulers": {
+            "frozen": getattr(app.state, "schedulers_frozen", None),
+            "jobs":   getattr(app.state, "scheduler_jobs", None),
+        },
     }
 
 

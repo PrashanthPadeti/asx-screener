@@ -80,6 +80,16 @@ class Cause(str, Enum):
     SOURCE_MISSING = "source_missing"      # this company has no value
     SOURCE_UNHEALTHY = "source_unhealthy"  # the feed itself is broken
     INSUFFICIENT_HISTORY = "insufficient_history"
+    # The observations may all be present and the method still not implemented
+    # faithfully. Distinct from INSUFFICIENT_HISTORY because that blames the
+    # company's data for a defect in our code, and the two clear by entirely
+    # different means: more history arrives on its own, a correct
+    # implementation does not.
+    #
+    #     we lack Y-1 data                  -> INSUFFICIENT_HISTORY
+    #     we lack a required source field   -> SOURCE_MISSING
+    #     the implemented method is invalid -> COMPUTATION_UNSUPPORTED
+    COMPUTATION_UNSUPPORTED = "computation_unsupported"
 
 
 class PredicateResult(str, Enum):
@@ -377,6 +387,23 @@ def observation_gate(metric: str, value: Optional[float],
 
 # ── The assessment ────────────────────────────────────────────────────────────
 
+#: Metrics whose stored value cannot be substantiated by the implementation
+#: that produced it. Not a data problem — the number exists and is wrong.
+#:
+#: A metric here is UNAVAILABLE for every company regardless of its data,
+#: because the fault is ours. Entries leave this map only when a faithful
+#: implementation replaces the one that put them in it.
+UNSUPPORTED_COMPUTATION: dict[str, str] = {
+    "piotroski_f_score":
+        "the implementation does not compute a Piotroski F-Score: two of the "
+        "nine criteria (F5 leverage, F7 share issuance) award a point "
+        "unconditionally, so no company can score below 2; F3 and F9 compare "
+        "year-over-year ratios using the current balance sheet as the "
+        "denominator for both years; and a missing prior year scores as a "
+        "failed criterion rather than as unassessable",
+}
+
+
 def assess(metric: str, value: Optional[float], domain: Domain,
            obs: Optional[Observation] = None) -> Assessment:
     """Run both gates, in order, before the value reaches anything downstream.
@@ -390,6 +417,29 @@ def assess(metric: str, value: Optional[float], domain: Domain,
         state, reason = gate1
         return Assessment(metric, state, None, reason, domain, observed=value,
                           cause=Cause.DOMAIN)
+
+    # After domain, before observation. A bank's Piotroski is NM whether or not
+    # our implementation is sound, and it will still be NM once the
+    # implementation is fixed — so DOMAIN is the more durable answer and must
+    # keep outranking this. Reporting COMPUTATION_UNSUPPORTED there would be
+    # true, less useful, and would churn back to NM later.
+    #
+    # Ahead of the observation gate, though: an unsupported method is not made
+    # sound by the company having good data. Checking it later would let a
+    # well-formed company pass every gate and receive a fabricated number.
+    #
+    # Imported here rather than at module scope: metric_registry imports
+    # DOMAIN_RULES from this module, so a top-level import would be circular.
+    # Normalising matters even for a one-entry map — matching raw spellings is
+    # how ev_to_ebitda escaped assessment, and a lookup that silently missed
+    # would serve the value it exists to withhold.
+    from compute.engine.metric_registry import normalise
+
+    unsupported = UNSUPPORTED_COMPUTATION.get(normalise(metric))
+    if unsupported:
+        return Assessment(metric, Applicability.UNAVAILABLE, None,
+                          unsupported, domain, observed=value,
+                          cause=Cause.COMPUTATION_UNSUPPORTED)
 
     gate2 = observation_gate(metric, value, obs)
     if gate2 is not None:
@@ -448,6 +498,26 @@ def assess_composite(metric: str, value: Optional[float],
     """
     by_metric = {a.metric: a for a in constituents}
     required = set(material) if material is not None else set(by_metric)
+
+    # An unsupported constituent is checked first, and the cause travels with
+    # it rather than flattening into a generic unavailability. A quality score
+    # is not "missing a source" when the truth is that one of its inputs is
+    # computed by a method we cannot substantiate — and the two clear by
+    # different means, so a reader who cannot tell them apart cannot tell
+    # whether waiting will help.
+    #
+    # Renormalising around it is the thing not to do. Dropping Piotroski and
+    # rescaling the remaining factors would publish a quality score under a
+    # model nobody declared, to preserve coverage. If the declared model needs
+    # the constituent, the composite is unavailable while the constituent is.
+    unsupported = [a for m, a in by_metric.items()
+                   if m in required and a.cause is Cause.COMPUTATION_UNSUPPORTED]
+    if unsupported:
+        names = ", ".join(sorted(a.metric for a in unsupported))
+        return Assessment(metric, Applicability.UNAVAILABLE, None,
+                          f"constituent computation unsupported: {names}",
+                          domain, observed=value,
+                          cause=Cause.COMPUTATION_UNSUPPORTED)
 
     # Source failure is checked before anything else and never renormalised
     # around. A composite built on the remaining factors would be a different

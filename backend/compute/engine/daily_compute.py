@@ -190,16 +190,72 @@ def safe_div(a, b, default=None):
         return default
 
 
-def calc_growth(values: list, periods: int) -> Optional[float]:
-    """CAGR over N periods. values[0] = latest, values[-1] = oldest."""
-    if len(values) <= periods:
-        return None
-    latest = values[0]
-    base   = values[periods]
-    if not latest or not base or base <= 0 or latest <= 0:
+def _observed(row: dict, field: str) -> Optional[float]:
+    """One observation, distinguishing an economic zero from missing data.
+
+    Truthiness is what made this necessary. The previous code filtered with
+    ``if p.get("revenue")``, which discards 0.0 as readily as None — so a
+    year of zero revenue vanished from the series entirely rather than being
+    recorded as a year in which revenue was zero.
+    """
+    value = row.get(field)
+    if value is None:
         return None
     try:
-        return (latest / base) ** (1 / periods) - 1
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def growth_over(pnl: list, field: str, n: int) -> Optional[float]:
+    """CAGR over exactly n fiscal years, anchored to the latest reported year.
+
+    FACTOR_MODEL_V2. The previous form took values[n] from a list built as
+    ``[p[field] for p in pnl if p.get(field)]`` — n POSITIONS back, in a
+    series that had already dropped every year whose value was null or zero.
+
+    Both halves did damage, and the second was worse. Dropping zero years
+    removed the *latest* observation too, so values[0] was not the current
+    year: for a company whose revenue had fallen to zero, this compared two
+    historical non-zero years and served the result as current growth.
+    Measured on production, EXR reported +450.7% where the exact Y-3
+    comparison gives -100%, and seven other companies showed the same
+    signature.
+
+    The contract now:
+
+        required fiscal year absent   -> None (unavailable, no observation)
+        base observation is 0         -> None (undefined, not "no history")
+        latest observation is 0       -> -1.0, i.e. -100%
+
+    Zero is an observation. A value that fell to nothing did not go missing,
+    and reporting -100% is the honest answer; only the absence of the period
+    itself makes the metric unavailable. That distinction is what the
+    truthiness check destroyed.
+    """
+    by_year = {int(p["fiscal_year"]): p for p in pnl
+               if p.get("fiscal_year") is not None}
+    if not by_year:
+        return None
+
+    latest_year = max(by_year)
+    prior = by_year.get(latest_year - n)
+    if prior is None:
+        return None
+
+    latest = _observed(by_year[latest_year], field)
+    base = _observed(prior, field)
+    if latest is None or base is None:
+        return None
+    # A zero or negative base leaves the ratio undefined, which is a property
+    # of the arithmetic and not of the history. It must not be reported as an
+    # absent period.
+    if base <= 0 or latest < 0:
+        return None
+    if latest == 0:
+        return -1.0
+    try:
+        return (latest / base) ** (1 / n) - 1
     except Exception:
         return None
 
@@ -402,18 +458,14 @@ def compute_metrics(asx_code: str, price: dict, fin: dict, company: dict,
 
     # ── Growth ───────────────────────────────────────────────
 
-    revenues = [float(p["revenue"]) for p in pnl if p.get("revenue")]
-    profits  = [float(p["net_profit"]) for p in pnl if p.get("net_profit")]
-    eps_vals = [float(p["eps"]) for p in pnl if p.get("eps")]
-
-    if len(revenues) >= 2:
-        m["revenue_growth_1y"] = calc_growth(revenues, 1)
-    if len(revenues) >= 4:
-        m["revenue_growth_3y"] = calc_growth(revenues, 3)
-    if len(profits) >= 2:
-        m["profit_growth_1y"] = calc_growth(profits, 1)
-    if len(profits) >= 4:
-        m["profit_growth_3y"] = calc_growth(profits, 3)
+    # Year-anchored, not positional. growth_over locates the required fiscal
+    # year itself, so the length guards that used to stand in for history
+    # ("at least 4 rows exist, therefore a 3-year window exists") are gone —
+    # they were counting rows in a list that had already been compacted.
+    m["revenue_growth_1y"] = growth_over(pnl, "revenue", 1)
+    m["revenue_growth_3y"] = growth_over(pnl, "revenue", 3)
+    m["profit_growth_1y"]  = growth_over(pnl, "net_profit", 1)
+    m["profit_growth_3y"]  = growth_over(pnl, "net_profit", 3)
 
     # ── Quality Scores ────────────────────────────────────────
 

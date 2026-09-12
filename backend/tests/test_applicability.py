@@ -223,10 +223,33 @@ def test_composite_cannot_be_more_applicable_than_its_constituents():
 
 
 def test_piotroski_is_nm_for_a_bank_without_naming_the_sector():
-    """The rule generalises: explorers fail it too, for different subtests."""
+    """The rule generalises: explorers fail it too, for different subtests.
+
+    Domain still outranks the unsupported-computation gate, and must: a bank's
+    Piotroski is meaningless whatever our implementation does, and it will
+    still be NM after the implementation is fixed. Reporting the
+    implementation fault there would be true, less useful, and would change
+    back later.
+    """
     assert assess("piotroski_f_score", 3.0, Domain.BANK).suppressed
     assert assess("piotroski_f_score", 2.0, Domain.MINING_EXPLORER).suppressed
-    assert assess("piotroski_f_score", 7.0, Domain.GENERAL_CORPORATE).ok
+
+
+def test_piotroski_is_unavailable_for_everyone_else_until_it_is_computed():
+    """Not NM, and not a data problem. The stored score awards two of nine
+    points unconditionally, compares two years of ratios against one balance
+    sheet, and scores a missing prior year as a failure — so no company has a
+    Piotroski F-Score, whatever its data looks like."""
+    a = assess("piotroski_f_score", 7.0, Domain.GENERAL_CORPORATE)
+
+    assert not a.ok
+    assert a.state is Applicability.UNAVAILABLE
+    assert a.cause is Cause.COMPUTATION_UNSUPPORTED
+    assert a.cause is not Cause.INSUFFICIENT_HISTORY, \
+        "blaming the company's history for a defect in our code would send " \
+        "an operator looking for data that is already there"
+    assert a.value is None and a.observed == 7.0, \
+        "the fabricated score stays as forensic evidence, not as a value"
 
 
 # ── Fixture · AI Query non-exclusion ──────────────────────────────────────────

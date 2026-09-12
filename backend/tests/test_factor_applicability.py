@@ -142,9 +142,17 @@ def test_states_are_recorded_per_company_with_causes():
     assert "roe" not in masked.states["CBA"], "applicable metrics stay out"
 
 
-def test_a_company_with_nothing_suppressed_has_no_payload():
+def test_a_clean_company_carries_only_our_own_defect():
+    """There is no longer a company with an empty payload, and the reason is
+    deliberate: piotroski_f_score is unavailable for everyone until it is
+    computed faithfully, so an otherwise clean industrial carries exactly one
+    entry — and it names a fault in our implementation, not in its data."""
     masked = apply_applicability(universe(), GOOD_FEED)
-    assert "IND1" not in masked.states or not masked.states.get("IND1")
+    entries = masked.states.get("IND1") or {}
+
+    assert set(entries) == {"piotroski_f_score"}, \
+        f"expected only the unsupported computation, got {sorted(entries)}"
+    assert entries["piotroski_f_score"]["cause"] == "computation_unsupported"
 
 
 def test_the_tally_reports_domains_and_states():

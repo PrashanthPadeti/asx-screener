@@ -438,6 +438,18 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
 
     fin    = fin.reset_index(drop=True)
     yearly = fin.to_dict("records")
+
+    # Fiscal year -> row, so a horizon can be resolved by the year it names
+    # rather than by counting list positions. FACTOR_MODEL_V2 requires the
+    # exact year: see cn() below.
+    #
+    # A positional check would not be enough even as a guard. With reported
+    # years [2016, 2017, 2019, 2020] and a 3-year window from 2020, position
+    # i-3 lands on 2016 while the wanted year 2017 is present at index 1 —
+    # rejecting on position would suppress a value the company actually has.
+    by_year = {int(r["fiscal_year"]): r for r in yearly
+               if r.get("fiscal_year") is not None}
+
     now    = datetime.now(tz=timezone.utc)
     rows   = []
 
@@ -595,9 +607,34 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         bvps_g1  = yoy("book_value_per_share", "book_value_per_share")
 
         # ── Multi-year CAGRs ─────────────────────────────────────────────
-        def cn(field, n):
-            prior = yearly[i - n] if i >= n else None
-            return _cagr(row.get(field), prior.get(field) if prior else None, n)
+        def cn(field, n, _fy=fy, _row=row):
+            """An n-year CAGR, over exactly n years or not at all.
+
+            FACTOR_MODEL_V2. The previous form took yearly[i - n] — n ROWS
+            back — and passed n to _cagr, which divides by n YEARS. Those
+            agree only when a company's reported years are contiguous, and
+            when they are not the exponent is too large, so the rate comes
+            out inflated:
+
+                MNE  eps_3y   reported 29.6%   real span 8y   true 10.2%
+                AAL  rev_5y   reported 93.0%   real span 9y   true 44.1%
+                IFN  rev_3y   reported -74.0%  real span 6y   true -49.0%
+
+            Dividing by the real span instead would be arithmetically honest
+            and still wrong for this field: `revenue_cagr_5y` makes a claim
+            about five years, and a correct nine-year rate is not that claim.
+            So an absent horizon yields no value, and the state layer records
+            UNAVAILABLE / INSUFFICIENT_HISTORY — the company genuinely has no
+            observation at that horizon.
+
+            Resolved by year rather than position, because the exact year can
+            exist at an index other than i - n when an intervening year is
+            missing.
+            """
+            prior = by_year.get(_fy - n)
+            if prior is None:
+                return None
+            return _cagr(_row.get(field), prior.get(field), n)
 
         # ── Rolling averages ──────────────────────────────────────────────
         roe_l .append(roe);   roa_l .append(roa)

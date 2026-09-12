@@ -269,6 +269,45 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
     }),
 }
 
+#: Every horizon-labelled CAGR produced by yearly_compute.cn(). Governed from
+#: V2 onward, because their absence now carries a meaning that must survive the
+#: persistence boundary: no observation exists at the exact horizon the field
+#: name claims.
+HORIZON_CAGRS: frozenset[str] = frozenset({
+    "revenue_cagr_3y", "revenue_cagr_5y", "revenue_cagr_7y",
+    "revenue_cagr_10y",
+    "net_income_cagr_3y", "net_income_cagr_5y",
+    "eps_cagr_3y", "eps_cagr_5y",
+    "ebitda_cagr_3y", "ebitda_cagr_5y",
+    "fcf_cagr_3y", "fcf_cagr_5y",
+    "gross_profit_cagr_3y", "gross_profit_cagr_5y",
+    "bvps_cagr_3y", "bvps_cagr_5y",
+})
+
+# FACTOR_MODEL_V2 = V1 plus period-exact CAGR semantics.
+#
+# V1 is left untouched and unpublished. It could still have been amended — no
+# production row has ever referenced it — but that exception stops being used
+# here. V1 was treated as complete, a freeze discipline was built around
+# versioned semantics, and this defect was found after that point. Amending it
+# now would mean the first production contract had already been rewritten once
+# to hide something, which is precisely what a pinned version exists to prevent.
+#
+# What changed: an n-year CAGR requires an observation at fiscal year Y - n.
+# Under V1 the window was positional — n rows back — so a company with a gap
+# in its reported years had its growth annualised over too few years and came
+# out inflated, plausibly and invisibly. The fix is not to divide by the real
+# span: `revenue_cagr_5y` claims five years, and a correct nine-year rate is
+# not that claim. The horizon is either available or it is not.
+#
+# These metrics are therefore governed from V2, so a missing horizon persists
+# as UNAVAILABLE / INSUFFICIENT_HISTORY rather than as an unexplained null —
+# and cannot be ranked, filtered, ordered or averaged into a peer statistic
+# while unavailable.
+GOVERNED_METRICS["FACTOR_MODEL_V2"] = (
+    GOVERNED_METRICS["FACTOR_MODEL_V1"] | HORIZON_CAGRS
+)
+
 LATEST_MODEL_VERSION = "FACTOR_MODEL_V1"
 
 #: Sentinel for "this caller is not validating a version at all" — the

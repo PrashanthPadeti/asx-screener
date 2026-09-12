@@ -5,20 +5,32 @@
 # Lives in the repo rather than being pasted, because a long heredoc through a
 # wrapped console has twice produced a corrupted or wrong-tree run.
 #
-# Run it from the backend/ directory of a checkout at the commit you intend to
-# prove. Note the subshell and pipefail: a bare `... | tee log` returns tee's
-# status, so a failing gate would report success. The subshell also keeps
-# pipefail out of the calling shell, and avoids `exit`, which would end an
-# interactive session rather than the run.
+# Run it from anywhere: it anchors on its own location, not on the caller's
+# working directory. It used to require being run from backend/, and invoked
+# from the repo root it reported "can't open file 'tests/test_*.py'" and
+# "can't open file 'scripts/gate_a.py'" — a gate whose result depends on where
+# you were standing when you ran it is not a gate.
 #
-#     ( set -o pipefail; cd /tmp/p0a-gate/backend && \
-#       bash scripts/gate_a.sh 2>&1 | tee /tmp/gate.log ); echo "EXIT=$?"
+# Note the subshell and pipefail: a bare `... | tee log` returns tee's status,
+# so a failing gate would report success. The subshell also keeps pipefail out
+# of the calling shell, and avoids `exit`, which would end an interactive
+# session rather than the run.
+#
+#     ( set -o pipefail; bash /opt/asx-screener/backend/scripts/gate_a.sh \
+#       2>&1 | tee /tmp/gate.log ); echo "EXIT=$?"
 #
 # The evidence queries always run, even when the gate fails, because what the
 # storage schema holds is what decides the post-migration work either way.
 # Exits with the gate's status so it is executable truth, not a report.
 
 set -u
+
+# Anchor on the script, then work from backend/. Every relative path below —
+# tests/, scripts/, and the import root for `compute.engine` — is relative to
+# this and to nothing else.
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+BACKEND=$(cd -- "$HERE/.." && pwd)
+cd "$BACKEND" || { echo "ERROR: cannot enter $BACKEND" >&2; exit 2; }
 
 ASX_ROOT=${ASX_ROOT:-/opt/asx-screener}
 PYBIN=${PYBIN:-$ASX_ROOT/asx-venv/bin/python}
@@ -76,7 +88,21 @@ fi
 echo
 echo "=== unit suite ==="
 suite_failed=0
-for t in tests/test_*.py; do
+
+# An unmatched glob expands to itself, so `for t in tests/test_*.py` would run
+# python on the literal string and the suite's verdict would rest on that
+# happening to be an error. Zero tests found is a harness failure and has to
+# say so: a suite that runs nothing must never be able to report PASS.
+shopt -s nullglob
+TESTS=(tests/test_*.py)
+shopt -u nullglob
+if [ ${#TESTS[@]} -eq 0 ]; then
+    echo "ERROR: no tests matched tests/test_*.py under $BACKEND" >&2
+    exit 2
+fi
+echo "(${#TESTS[@]} test files)"
+
+for t in "${TESTS[@]}"; do
     printf '%-48s' "$(basename "$t")"
     if "$PYBIN" "$t" >/tmp/gate-unit.log 2>&1; then
         tail -1 /tmp/gate-unit.log
@@ -148,6 +174,70 @@ print(sorted(columns - set(ScreenerRow.model_fields)))
 PY
 
 echo
-echo "unit suite:  $([ $suite_failed -eq 0 ] && echo PASS || echo FAIL)"
-echo "gate A exit: $gate"
-exit $gate
+echo "=== is every governed field ScreenerRow promises actually fetched? ==="
+# The other direction of the same boundary, and the one that bites hardest.
+#
+# A governed field that ScreenerRow advertises and a SELECT omits does not
+# come back blank inside a validated contract: project_row raises
+# MissingProjectedColumn, because the projector cannot tell "the company has
+# no value" from "the application never asked for one" and must not guess.
+# So an omission here is a 500 on every row of every governed response.
+#
+# Checked for each model version, not just the latest, because the failure
+# arrives precisely when a version widens the governed set: six horizon CAGRs
+# (ebitda/fcf/bvps x 3y/5y) sat in the field catalogue and in no SELECT on any
+# surface for as long as they were ungoverned, and became fatal the moment V2
+# governed them. Reading the SELECTs by eye is how they stayed missed.
+"$PYBIN" - <<'PY' || exit_fetch=1
+import ast, pathlib, re, sys
+
+from app.schemas.screener import ScreenerRow
+from compute.engine.metric_states import GOVERNED_METRICS
+from compute.engine.universe_writer import column_for
+
+SURFACES = ("build_screener_sql", "batch_screener", "query_screener")
+
+src = pathlib.Path("app/api/v1/routes/screener.py").read_text(encoding="utf-8")
+tree = ast.parse(src)
+fields = set(ScreenerRow.model_fields)
+
+bodies = {}
+for node in ast.walk(tree):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if node.name in SURFACES:
+            bodies[node.name] = ast.get_source_segment(src, node) or ""
+
+missing_any = False
+for version in sorted(GOVERNED_METRICS):
+    promised = sorted({column_for(m) for m in GOVERNED_METRICS[version]} & fields)
+    for surface in SURFACES:
+        body = bodies.get(surface)
+        if body is None:
+            print(f"  {version:18} {surface:20} SURFACE NOT FOUND")
+            missing_any = True
+            continue
+        gaps = [c for c in promised
+                if not re.search(rf"\bu\.{c}\b", body)]
+        status = "ok" if not gaps else f"MISSING {gaps}"
+        print(f"  {version:18} {surface:20} "
+              f"{len(promised) - len(gaps):3}/{len(promised):<3} {status}")
+        if gaps:
+            missing_any = True
+
+sys.exit(1 if missing_any else 0)
+PY
+exit_fetch=${exit_fetch:-0}
+
+echo
+echo "unit suite:     $([ $suite_failed -eq 0 ] && echo PASS || echo FAIL)"
+echo "promised/fetch: $([ "$exit_fetch" -eq 0 ] && echo PASS || echo FAIL)"
+echo "gate A exit:    $gate"
+
+# Every check that can fail contributes to the status, or the ones that do not
+# are decoration. The gate used to exit on $gate alone, so the unit suite could
+# report FAIL in the body while the command returned 0 — which is the shape of
+# failure this script exists to remove.
+rc=$gate
+[ $suite_failed -eq 0 ] || rc=1
+[ "$exit_fetch" -eq 0 ] || rc=1
+exit $rc

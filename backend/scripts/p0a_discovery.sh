@@ -1,43 +1,51 @@
 #!/usr/bin/env bash
 #
-# P0-A discovery run — the V2 pipeline against a scratch database
-# ===============================================================
-# A discovery run, with publication disabled. It answers "what does V2
-# actually produce" without any of it becoming servable, and it must stay
-# incapable of becoming authoritative by construction rather than by care.
+# Targeted V2 discovery rebuild — the changed pipeline, against a database it
+# cannot publish from
+# =====================================================================
+# A discovery run with publication disabled. It answers **do the changed
+# contracts compose?** It does not answer "does the whole production sequence
+# compose?" — that is a later, production-shaped rehearsal, immediately before
+# the real canonical recompute, and it is a different gate.
 #
-# Why a separate DATABASE and not a scratch SCHEMA. Every write path in the
-# pipeline is hardcoded to schema-qualified names -- screener.universe,
-# market.yearly_metrics, market.computed_metrics -- so a scratch schema means
-# threading a schema parameter through three scripts, and a parameter that can
-# be set to screener_scratch can be set back to screener. The isolation would
-# rest on a flag. A separate database needs no code change at all, and the only
-# way its contents reach a customer is editing the application's connection
-# string, which is the same action as pointing production at anything else.
+# The name matters and is used throughout: this is a TARGETED V2 DISCOVERY
+# REBUILD, not a full canonical rebuild. Technical, weekly, monthly and period
+# products are cloned and held constant, deliberately, so that every
+# difference observed is attributable to the code that changed rather than to
+# unrelated recomputation. The consequence is that a result from this run must
+# never later be described as proving full same-run coherence, and the
+# evidence bundle prints the recomputed/held-constant manifest so that claim
+# cannot be made by accident.
 #
-# What that guarantee is and is not: the scratch data lives in a database the
-# application's configured DATABASE_URL does not name. This script refuses to
-# target the production database, and verifies by observation -- it asks the
-# connection which database it actually reached -- rather than trusting that
-# an exported variable took effect.
+# Why a separate DATABASE and not a scratch SCHEMA. Every write path is
+# hardcoded to schema-qualified names, so a scratch schema means threading a
+# schema parameter through three scripts — and a parameter that can be set to
+# screener_scratch can be set back to screener. The isolation would rest on a
+# flag. A separate database needs no code change at all.
 #
-# Stage order is the weekly pipeline's, not invented here:
-#   daily_compute -> yearly_compute -> build_screener_universe
-#   -> composite_score -> sector_benchmarks
-# Steps the V2 change does not touch (technical, weekly, monthly, period,
-# pros_cons) are deliberately NOT rerun: their production outputs are cloned
-# and read as-is, which keeps the discovery run comparable to production
-# instead of mixing in unrelated recomputation.
+# Isolation, stated exactly:
+#   - the scratch data lives in a database no configured DATABASE_URL names
+#   - this script refuses to target the production database by name
+#   - the connection is asked which database it reached, immediately before
+#     EVERY stage, not once at startup
+#   - a production sentinel is captured before the run and compared after, so
+#     a stage that escaped the redirect is detected even if every check above
+#     passed
+# Optionally (see `role`), a dedicated scratch role that cannot CONNECT to
+# production turns the refusal into a database-enforced property. Running the
+# stages as `postgres` is deliberately NOT offered: raising privilege to
+# improve isolation is a worse trade than the differing database name already
+# provides.
 #
 # Usage:
 #   p0a_discovery.sh clone      create + load the scratch database
-#   p0a_discovery.sh verify     row counts scratch vs production
+#   p0a_discovery.sh verify     counts, hypertable shape, restore errors
+#   p0a_discovery.sh role       report on (and create) a scratch-only role
+#   p0a_discovery.sh preflight  the acceptance boundary, + sentinel capture
 #   p0a_discovery.sh run        the five stages, scratch only
+#   p0a_discovery.sh sentinel   re-compare the production sentinel
 #   p0a_discovery.sh evidence   the evidence bundle
-#   p0a_discovery.sh all        all four, stopping on the first failure
-#
-#   ( set -o pipefail; backend/scripts/p0a_discovery.sh all 2>&1 \
-#     | tee /tmp/discovery.log ); echo "EXIT=$?"
+#   p0a_discovery.sh all        clone, verify, preflight, run, sentinel, evidence
 
 set -u
 
@@ -49,10 +57,18 @@ ASX_ROOT=${ASX_ROOT:-/opt/asx-screener}
 PYBIN=${PYBIN:-$ASX_ROOT/asx-venv/bin/python}
 SCRATCH=${SCRATCH_DB:-asx_screener_scratch}
 WORKDIR=${WORKDIR:-/var/backups/p0a/discovery}
+ALLOWLIST="$HERE/p0a_restore_allowlist.txt"
+RESTORE_LOG="$WORKDIR/restore.err"
+SENTINEL="$WORKDIR/production_sentinel.txt"
 
-#: Read by no pipeline stage (derived from the code, not assumed), and between
-#: them 1.7GB of the 7.4GB database. Excluded so the clone is 5.3GB.
+#: Read by no pipeline stage — derived from the code, not assumed. Between
+#: them 1.7GB of the 7.4GB database.
 EXCLUDE=(-T staging_au.eod_prices -T market.price_predictions)
+
+#: The hypertables in the pipeline's dependency set. Row counts alone cannot
+#: tell a faithful restore from one with the right number of rows and the
+#: wrong temporal or key shape, or one that lost its Timescale identity.
+HYPERTABLES=(market.daily_prices market.daily_metrics market.computed_metrics)
 
 [ -x "$PYBIN" ] || { echo "ERROR: $PYBIN not found — wrong host?" >&2; exit 2; }
 [ -f "$BACKEND/.env" ] || { echo "ERROR: $BACKEND/.env not found" >&2; exit 2; }
@@ -64,15 +80,14 @@ import os, urllib.parse as u
 print(u.urlparse(os.environ['DATABASE_URL']).path.lstrip('/'))" 2>/dev/null)
 [ -n "${PROD:-}" ] || { echo "ERROR: cannot read database name from DATABASE_URL" >&2; exit 2; }
 
-# The one guard that matters. Everything else in this script is convenience.
 if [ "$SCRATCH" = "$PROD" ]; then
     echo "REFUSING: scratch database resolves to production ($PROD)." >&2
     exit 2
 fi
 
-# The scratch URL: production's, with the database name replaced. Built by
-# parsing rather than by string substitution, so a password that happens to
-# contain the database name cannot corrupt it.
+PSQL_PROD="sudo -u postgres psql -X -tA -d $PROD"
+PSQL_SCRATCH="sudo -u postgres psql -X -tA -d $SCRATCH"
+
 scratch_url() {
     "$PYBIN" - "$1" "$SCRATCH" <<'PY'
 import sys, urllib.parse as u
@@ -81,6 +96,19 @@ print(u.urlunparse(parsed._replace(path="/" + sys.argv[2])))
 PY
 }
 
+#: Ask the connection which database it reached, through the same resolver the
+#: stages use. Printed before every stage, because the whole history of P0-A
+#: says a runtime observation beats an assumption about inheritance.
+observed_db() {
+    DATABASE_URL_SYNC="$1" "$PYBIN" -c "
+import psycopg2
+from app.core.db import get_database_url_sync
+c = psycopg2.connect(get_database_url_sync())
+cur = c.cursor(); cur.execute('SELECT current_database()')
+print(cur.fetchone()[0])" 2>&1 | tail -1
+}
+
+echo "run type:   TARGETED V2 DISCOVERY REBUILD (publication disabled)"
 echo "host:       $(hostname)"
 echo "production: $PROD  (read-only here, never written)"
 echo "scratch:    $SCRATCH"
@@ -91,8 +119,7 @@ echo
 
 do_clone() {
     echo "=== clone ==="
-    if [ "$(sudo -u postgres psql -tAc \
-            "SELECT 1 FROM pg_database WHERE datname='$SCRATCH';")" = "1" ]; then
+    if [ "$($PSQL_PROD -c "SELECT 1 FROM pg_database WHERE datname='$SCRATCH';")" = "1" ]; then
         echo "ERROR: $SCRATCH already exists." >&2
         echo "       Drop it deliberately before recloning:" >&2
         echo "         sudo -u postgres dropdb $SCRATCH" >&2
@@ -104,24 +131,20 @@ do_clone() {
     mkdir -p "$WORKDIR" && chmod 755 "$WORKDIR" || return 2
     local dump="$WORKDIR/discovery_$(date -u +%Y%m%dT%H%M%SZ).dump"
 
-    # Same owner as production, so the restored grants land on a role that can
-    # actually hold them and the scratch permission structure mirrors the real
-    # one rather than being flattened to postgres.
     local owner
-    owner=$(sudo -u postgres psql -tAc \
+    owner=$($PSQL_PROD -c \
         "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname='$PROD';")
     echo "owner: $owner"
 
     sudo -u postgres createdb -O "$owner" "$SCRATCH" || return 2
-
-    # TimescaleDB: three hypertables are in the pipeline's dependency set
-    # (market.daily_metrics, market.daily_prices, market.computed_metrics).
-    # Restoring them without the pre/post wrapper produces a database that
-    # looks populated while its chunk structure is wrong -- which would read
-    # as data findings and poison the entire run.
-    sudo -u postgres psql -q -d "$SCRATCH" -c \
+    sudo -u postgres psql -X -q -d "$SCRATCH" -c \
         "CREATE EXTENSION IF NOT EXISTS timescaledb;" || return 2
-    sudo -u postgres psql -q -d "$SCRATCH" -c "SELECT timescaledb_pre_restore();" || return 2
+
+    # Without the pre/post wrapper the clone looks populated while its chunk
+    # structure is wrong — which would read as data findings and poison the
+    # entire run.
+    sudo -u postgres psql -X -q -d "$SCRATCH" -c \
+        "SELECT timescaledb_pre_restore();" || return 2
 
     # Redirect as root rather than -f: pg_dump runs as postgres and cannot
     # write into a root-owned directory. That failure has been hit before.
@@ -131,58 +154,107 @@ do_clone() {
     ls -lh "$dump"
 
     echo "restoring into $SCRATCH…"
-    # pg_restore's exit status is non-zero for warnings as well as errors, so
-    # it is reported but not treated as fatal on its own -- the row-count
-    # verification below is what decides whether the clone is usable.
-    sudo -u postgres pg_restore -d "$SCRATCH" -j2 "$dump"
-    echo "pg_restore exit: $? (verification below is the real test)"
+    # stderr is kept, not discarded. It is the only record of an index,
+    # constraint, function or Timescale metadata object that failed while
+    # every table row arrived — the class of failure row counts cannot see.
+    sudo -u postgres pg_restore -d "$SCRATCH" -j2 "$dump" 2> "$RESTORE_LOG"
+    local restore_rc=$?
+    chmod 644 "$RESTORE_LOG" 2>/dev/null
+    echo "pg_restore exit: $restore_rc  (stderr -> $RESTORE_LOG)"
 
-    sudo -u postgres psql -q -d "$SCRATCH" -c "SELECT timescaledb_post_restore();" || return 2
+    # Fatal regardless of anything else. A failed post-restore leaves
+    # Timescale in its restoring state, and every later reading of that
+    # database is of an object in a mode it should not be in.
+    echo "running timescaledb_post_restore()…"
+    local post
+    post=$(sudo -u postgres psql -X -tA -d "$SCRATCH" \
+             -c "SELECT timescaledb_post_restore();" 2>&1)
+    if [ "$post" != "t" ]; then
+        echo "FATAL: timescaledb_post_restore() did not return true: $post" >&2
+        echo "       Row counts are irrelevant to this. The clone is unusable." >&2
+        return 2
+    fi
+    echo "timescaledb_post_restore: t"
 
-    # PUBLIC keeps CONNECT on a new database by default. The application role
-    # must retain it -- the stages run as that role -- so this removes only the
-    # blanket grant, not the one the run needs.
-    sudo -u postgres psql -q -d "$SCRATCH" -c \
+    sudo -u postgres psql -X -q -d "$SCRATCH" -c \
         "REVOKE CONNECT ON DATABASE $SCRATCH FROM PUBLIC;" || return 2
-
-    sudo -u postgres psql -q -d "$SCRATCH" -c \
+    sudo -u postgres psql -X -q -d "$SCRATCH" -c \
         "COMMENT ON DATABASE $SCRATCH IS
-         'P0-A discovery run. Publication disabled: no application connection
-          string names this database. Not authoritative, not backed up, safe
-          to drop.';" || return 2
+         'Targeted V2 discovery rebuild. Publication disabled: no application
+          connection string names this database. Not authoritative, not backed
+          up, safe to drop.';" || return 2
 
-    echo "clone complete"
+    echo "clone complete — acceptance is decided by 'verify', not by this step"
 }
 
 # ── verify ────────────────────────────────────────────────────────────────────
 
+check_restore_errors() {
+    echo "--- restore output"
+    if [ ! -f "$RESTORE_LOG" ]; then
+        echo "  no restore log at $RESTORE_LOG — clone not run here?" >&2
+        return 1
+    fi
+
+    # Everything that looks like a failure, minus exactly what has been
+    # allowlisted. An empty allowlist means every such line is unrecognised,
+    # which is the correct starting state: a message is benign only once
+    # somebody has looked at it and said so.
+    local unrecognised
+    unrecognised=$("$PYBIN" - "$RESTORE_LOG" "$ALLOWLIST" <<'PY'
+import pathlib, sys
+
+log = pathlib.Path(sys.argv[1]).read_text(errors="replace").splitlines()
+allow = []
+p = pathlib.Path(sys.argv[2])
+if p.exists():
+    allow = [ln.strip() for ln in p.read_text().splitlines()
+             if ln.strip() and not ln.lstrip().startswith("#")]
+
+SUSPECT = ("error", "fatal", "could not", "does not exist",
+           "already exists", "permission denied", "warning")
+out = []
+for line in log:
+    low = line.lower()
+    if not any(token in low for token in SUSPECT):
+        continue
+    if any(entry in line for entry in allow):
+        continue
+    out.append(line)
+
+for line in out:
+    print(line)
+sys.exit(1 if out else 0)
+PY
+)
+    local rc=$?
+    if [ $rc -eq 0 ]; then
+        echo "  no unrecognised restore errors"
+        return 0
+    fi
+    echo "  UNRECOGNISED RESTORE OUTPUT:" >&2
+    echo "$unrecognised" | sed 's/^/    /' >&2
+    echo "" >&2
+    echo "  Row counts cannot see an index, constraint, function or Timescale" >&2
+    echo "  metadata object that failed. Read these, and if any is genuinely" >&2
+    echo "  harmless add its exact text to:" >&2
+    echo "    $ALLOWLIST" >&2
+    return 1
+}
+
 do_verify() {
-    echo "=== verify: row counts, scratch vs production ==="
-    # A short table in the scratch clone does not announce itself. It produces
-    # a company with no financials, which the discovery run reports as reduced
-    # coverage -- indistinguishable from a real V2 withdrawal, and far more
-    # damaging than a failed clone, because it is believed.
-    "$PYBIN" - "$PROD" "$SCRATCH" <<'PY'
+    echo "=== verify ==="
+    local bad=0
+
+    check_restore_errors || bad=1
+
+    echo
+    echo "--- dependency table counts"
+    "$PYBIN" - "$PROD" "$SCRATCH" <<'PY' || bad=1
 import subprocess, sys
 
 prod, scratch = sys.argv[1], sys.argv[2]
 
-def counts(db):
-    sql = """
-    SELECT n.nspname||'.'||c.relname, c.reltuples::bigint
-      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind = 'r'
-       AND n.nspname IN ('screener','market','financials','staging_au')
-     ORDER BY 1;"""
-    out = subprocess.run(["sudo", "-u", "postgres", "psql", "-tAF", "\t",
-                          "-d", db, "-c", sql],
-                         capture_output=True, text=True, check=True).stdout
-    return {line.split("\t")[0]: int(line.split("\t")[1])
-            for line in out.strip().splitlines() if "\t" in line}
-
-# Exact counts, not reltuples estimates, for the tables the run actually reads.
-# reltuples is fine for spotting a table that failed to restore at all; it is
-# not fine for deciding the clone is faithful.
 CRITICAL = [
     "financials.annual_pnl", "financials.annual_balance_sheet",
     "financials.annual_cashflow", "financials.earnings_quarterly",
@@ -192,67 +264,253 @@ CRITICAL = [
     "market.halfyearly_metrics", "market.weekly_metrics",
     "market.short_positions", "market.analyst_ratings",
     "staging_au.shares_stats", "staging_au.company_profile",
-    "screener.universe",
+    "screener.universe", "market.sector_benchmarks",
 ]
 
-def exact(db, table):
-    out = subprocess.run(["sudo", "-u", "postgres", "psql", "-tA",
-                          "-d", db, "-c", f"SELECT count(*) FROM {table};"],
-                         capture_output=True, text=True)
-    return int(out.stdout.strip()) if out.returncode == 0 else None
-
-p, s = counts(prod), counts(scratch)
-missing = sorted(set(p) - set(s))
-if missing:
-    print(f"  TABLES ABSENT FROM SCRATCH: {missing}")
+def q(db, sql):
+    r = subprocess.run(["sudo", "-u", "postgres", "psql", "-X", "-tA",
+                        "-d", db, "-c", sql], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
 
 bad = False
 for table in CRITICAL:
-    a, b = exact(prod, table), exact(scratch, table)
+    a, b = q(prod, f"SELECT count(*) FROM {table};"), q(scratch, f"SELECT count(*) FROM {table};")
     if a is None or b is None:
         print(f"  {table:38} UNREADABLE prod={a} scratch={b}")
         bad = True
         continue
-    # screener.universe is expected to differ after the run; before it, equal.
-    flag = "ok" if a == b else "MISMATCH"
-    if a != b:
-        bad = True
-    print(f"  {table:38} prod={a:>9}  scratch={b:>9}  {flag}")
+    same = a == b
+    bad = bad or not same
+    print(f"  {table:38} prod={int(a):>9,}  scratch={int(b):>9,}  "
+          f"{'ok' if same else 'MISMATCH'}")
 
-if missing:
-    bad = True
-print("\nclone faithful" if not bad else "\nCLONE NOT FAITHFUL — do not run")
 sys.exit(1 if bad else 0)
 PY
+
+    echo
+    echo "--- hypertable shape and Timescale identity"
+    # Not a checksum. The purpose is to catch a restore with the right number
+    # of rows and the wrong temporal or key shape, or one that came back as a
+    # plain table having lost its Timescale identity entirely.
+    "$PYBIN" - "$PROD" "$SCRATCH" "${HYPERTABLES[@]}" <<'PY' || bad=1
+import subprocess, sys
+
+prod, scratch = sys.argv[1], sys.argv[2]
+tables = sys.argv[3:]
+
+def q(db, sql):
+    r = subprocess.run(["sudo", "-u", "postgres", "psql", "-X", "-tA", "-F", "|",
+                        "-d", db, "-c", sql], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+def shape(db, schema, name):
+    ident = q(db, f"""
+        SELECT count(*) FROM timescaledb_information.hypertables
+         WHERE hypertable_schema='{schema}' AND hypertable_name='{name}';""")
+    chunks = q(db, f"""
+        SELECT count(*) FROM timescaledb_information.chunks
+         WHERE hypertable_schema='{schema}' AND hypertable_name='{name}';""")
+    # The time column comes from Timescale's own metadata rather than being
+    # guessed from a column name that might differ per table.
+    tcol = q(db, f"""
+        SELECT column_name FROM timescaledb_information.dimensions
+         WHERE hypertable_schema='{schema}' AND hypertable_name='{name}'
+         ORDER BY dimension_number LIMIT 1;""")
+    bounds = key = None
+    if tcol:
+        bounds = q(db, f"SELECT min({tcol})||' .. '||max({tcol}) FROM {schema}.{name};")
+    has_code = q(db, f"""
+        SELECT count(*) FROM information_schema.columns
+         WHERE table_schema='{schema}' AND table_name='{name}'
+           AND column_name='asx_code';""")
+    if has_code == "1":
+        key = q(db, f"SELECT count(DISTINCT asx_code) FROM {schema}.{name};")
+    return {"hypertable": ident, "chunks": chunks, "time_col": tcol,
+            "bounds": bounds, "distinct_asx_code": key}
+
+bad = False
+for table in tables:
+    schema, name = table.split(".", 1)
+    a, b = shape(prod, schema, name), shape(scratch, schema, name)
+    print(f"  {table}")
+    if b["hypertable"] != "1":
+        print(f"    NOT A HYPERTABLE IN SCRATCH (prod={a['hypertable']}, "
+              f"scratch={b['hypertable']}) — Timescale identity lost")
+        bad = True
+    for field in ("hypertable", "chunks", "time_col", "bounds", "distinct_asx_code"):
+        same = a[field] == b[field]
+        bad = bad or not same
+        mark = "ok" if same else "MISMATCH"
+        print(f"    {field:18} prod={str(a[field]):<34} scratch={str(b[field]):<34} {mark}")
+
+sys.exit(1 if bad else 0)
+PY
+
+    echo
+    if [ $bad -eq 0 ]; then
+        echo "CLONE ACCEPTED — data verified and no unrecognised restore error"
+    else
+        echo "CLONE NOT ACCEPTED — do not run" >&2
+    fi
+    return $bad
+}
+
+# ── role ──────────────────────────────────────────────────────────────────────
+
+do_role() {
+    echo "=== scratch-only role ==="
+    # The cleanest extra guard is a role that CANNOT connect to production,
+    # which turns "the harness refuses" into a database-enforced property.
+    # Whether that is cheap depends on one fact about production, so it is
+    # measured rather than assumed.
+    local pub
+    pub=$($PSQL_PROD -c "
+        SELECT CASE WHEN datacl IS NULL THEN 'implicit-public'
+                    WHEN array_to_string(datacl,',') LIKE '%=Tc/%' THEN 'public-connect'
+                    ELSE 'restricted' END
+          FROM pg_database WHERE datname='$PROD';")
+    echo "  production CONNECT for PUBLIC: $pub"
+
+    if [ "$pub" != "restricted" ]; then
+        echo
+        echo "  A scratch-only role CANNOT be delivered as a real guarantee here."
+        echo "  PUBLIC holds CONNECT on $PROD, so any role — including a new"
+        echo "  scratch one — can reach production. Making it real requires"
+        echo "  REVOKE CONNECT ON DATABASE $PROD FROM PUBLIC, which is a"
+        echo "  production permission change during a freeze, and would break"
+        echo "  any role that reaches production through PUBLIC rather than"
+        echo "  through its own grant."
+        echo
+        echo "  Not doing that now. Creating the role anyway would produce a"
+        echo "  guard that looks database-enforced and is not, which is worse"
+        echo "  than the honest position: isolation currently rests on the"
+        echo "  differing database name, the pre-stage identity observation,"
+        echo "  and the production sentinel."
+        return 0
+    fi
+
+    echo "  PUBLIC has no CONNECT on production, so the role is a real guard."
+    echo "  Create it with a password you supply, then re-run with"
+    echo "  SCRATCH_ROLE_URL set to its connection string:"
+    echo
+    echo "    sudo -u postgres createuser --login --pwprompt asx_scratch"
+    echo "    sudo -u postgres psql -d $SCRATCH \\"
+    echo "      -c 'GRANT CONNECT ON DATABASE $SCRATCH TO asx_scratch;' \\"
+    echo "      -c 'GRANT ALL ON ALL TABLES IN SCHEMA screener, market, financials, staging_au TO asx_scratch;'"
+    echo
+    echo "  Not created automatically: it needs a password, and a password"
+    echo "  this script invented would have to be stored somewhere."
+}
+
+# ── preflight (the acceptance boundary) + sentinel ────────────────────────────
+
+capture_sentinel() {
+    $PSQL_PROD -F '|' -c "
+        SELECT 'universe_rows',        count(*)::text FROM screener.universe
+        UNION ALL SELECT 'universe_active',     count(*)::text FROM screener.universe WHERE status='active'
+        UNION ALL SELECT 'universe_built_at',   coalesce(max(universe_built_at)::text,'-') FROM screener.universe
+        UNION ALL SELECT 'universe_with_run',   count(compute_run_id)::text FROM screener.universe
+        UNION ALL SELECT 'universe_sidecars',   count(metric_states)::text FROM screener.universe
+        UNION ALL SELECT 'compute_runs_rows',   count(*)::text FROM screener.compute_runs
+        UNION ALL SELECT 'benchmark_rows',      count(*)::text FROM market.sector_benchmarks
+        UNION ALL SELECT 'yearly_metrics_rows', count(*)::text FROM market.yearly_metrics
+        UNION ALL SELECT 'computed_metrics_rows', count(*)::text FROM market.computed_metrics
+        UNION ALL SELECT 'fixture_rows_md5',    md5(string_agg(t,'|' ORDER BY t))
+                    FROM (SELECT asx_code||':'||coalesce(ev_to_ebitda::text,'-')
+                                 ||':'||coalesce(current_ratio::text,'-')
+                                 ||':'||coalesce(debt_to_equity::text,'-')
+                                 ||':'||coalesce(grossed_up_yield::text,'-') AS t
+                            FROM screener.universe
+                           WHERE asx_code IN ('ANZ','BHP','CBA','MQG','NAB','WBC')) f
+        ORDER BY 1;"
+}
+
+do_preflight() {
+    echo "=== preflight: acceptance boundary ==="
+    local bad=0
+
+    # 1. Writers still frozen — both authorities, by observation.
+    local cron_live
+    cron_live=$(crontab -l 2>/dev/null | grep -cE '^[^#[:space:]]')
+    echo "  cron live entries:        $cron_live  $([ "$cron_live" -eq 0 ] && echo ok || echo 'NOT FROZEN')"
+    [ "$cron_live" -eq 0 ] || bad=1
+
+    local health
+    health=$(curl -s --max-time 5 http://127.0.0.1:8000/health 2>/dev/null)
+    local frozen jobs
+    frozen=$(printf '%s' "$health" | "$PYBIN" -c "
+import json,sys
+try: print(json.load(sys.stdin).get('frozen'))
+except Exception: print('unreadable')" 2>/dev/null)
+    jobs=$(printf '%s' "$health" | "$PYBIN" -c "
+import json,sys
+try: print(json.load(sys.stdin).get('jobs'))
+except Exception: print('unreadable')" 2>/dev/null)
+    echo "  in-process frozen:        $frozen"
+    echo "  in-process jobs:          $jobs"
+    if [ "$frozen" != "True" ] || [ "$jobs" != "0" ]; then
+        echo "    NOT FROZEN — the scratch run must not share the window with a" >&2
+        echo "    production writer, or a production change during the run is" >&2
+        echo "    unattributable." >&2
+        bad=1
+    fi
+
+    # 2. Scratch reachable and correctly identified through the real resolver.
+    local url_sync reached
+    url_sync=$(scratch_url "$DATABASE_URL_SYNC") || return 2
+    reached=$(observed_db "$url_sync")
+    echo "  resolver reaches:         $reached  $([ "$reached" = "$SCRATCH" ] && echo ok || echo WRONG)"
+    [ "$reached" = "$SCRATCH" ] || bad=1
+
+    # 3. Production sentinel. Writers are frozen, so production must be stable
+    #    on these observables for the duration. Detection, not prevention —
+    #    but cheap and highly diagnostic if a stage escapes the redirect.
+    mkdir -p "$WORKDIR" && chmod 755 "$WORKDIR"
+    capture_sentinel > "$SENTINEL" || return 2
+    echo "  production sentinel:      captured -> $SENTINEL"
+    sed 's/^/    /' "$SENTINEL"
+
+    echo
+    if [ $bad -eq 0 ]; then
+        echo "PREFLIGHT PASSED — the acceptance boundary holds"
+    else
+        echo "PREFLIGHT FAILED — do not run" >&2
+    fi
+    return $bad
+}
+
+do_sentinel() {
+    echo "=== production sentinel: re-compare ==="
+    if [ ! -f "$SENTINEL" ]; then
+        echo "ERROR: no sentinel at $SENTINEL — preflight was not run" >&2
+        return 2
+    fi
+    local now="$WORKDIR/production_sentinel.after.txt"
+    capture_sentinel > "$now" || return 2
+    if diff -u "$SENTINEL" "$now" > /tmp/sentinel.diff 2>&1; then
+        echo "  production unchanged across the run — no stage escaped the redirect"
+        return 0
+    fi
+    echo "  PRODUCTION CHANGED DURING THE SCRATCH RUN:" >&2
+    sed 's/^/    /' /tmp/sentinel.diff >&2
+    echo "" >&2
+    echo "  Writers are frozen, so nothing should have moved. This is evidence" >&2
+    echo "  that a stage reached production. Treat the run's output as void." >&2
+    return 1
 }
 
 # ── run ───────────────────────────────────────────────────────────────────────
 
 do_run() {
     echo "=== run: five stages against $SCRATCH ==="
+    echo "RECOMPUTED: computed_metrics, yearly_metrics, universe, factor scores,"
+    echo "            sector_benchmarks"
+    echo "HELD CONSTANT (cloned): daily_metrics, weekly, monthly, quarterly,"
+    echo "            halfyearly, period_metrics, prices, dividends, financials"
 
     local url_sync url_async
     url_sync=$(scratch_url "$DATABASE_URL_SYNC") || return 2
     url_async=$(scratch_url "$DATABASE_URL") || return 2
-
-    # load_dotenv() defaults to override=False, so an exported variable beats
-    # .env. That is the mechanism -- but it is a property of a library default,
-    # so it is verified rather than assumed, through the same resolver the
-    # stages use, before a single row is written.
-    local reached
-    reached=$(DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" "$PYBIN" -c "
-import psycopg2
-from app.core.db import get_database_url_sync
-conn = psycopg2.connect(get_database_url_sync())
-cur = conn.cursor(); cur.execute('SELECT current_database()')
-print(cur.fetchone()[0])" 2>&1 | tail -1)
-
-    echo "stages will write to: $reached"
-    if [ "$reached" != "$SCRATCH" ]; then
-        echo "REFUSING: the resolver reached '$reached', not '$SCRATCH'." >&2
-        echo "          .env is winning over the environment. Nothing has run." >&2
-        return 2
-    fi
 
     local -a STAGES=(
         "compute/engine/daily_compute.py"
@@ -264,7 +522,18 @@ print(cur.fetchone()[0])" 2>&1 | tail -1)
 
     for stage in "${STAGES[@]}"; do
         echo
-        echo "--- $stage"
+        # Observed before EVERY stage. Environment inheritance is expected to
+        # be stable; P0-A's whole history says to check anyway.
+        local reached
+        reached=$(observed_db "$url_sync")
+        echo "--- $stage   [writes to: $reached]"
+        if [ "$reached" != "$SCRATCH" ]; then
+            echo "REFUSING: resolver reached '$reached', not '$SCRATCH'." >&2
+            echo "          Stopping before this stage. Earlier stages wrote to" >&2
+            echo "          the scratch database; run 'sentinel' to confirm." >&2
+            return 2
+        fi
+
         local t0=$SECONDS
         if DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" \
                "$PYBIN" "$stage"; then
@@ -287,18 +556,24 @@ do_evidence() {
     echo "=== evidence bundle ==="
     local url_sync
     url_sync=$(scratch_url "$DATABASE_URL_SYNC") || return 2
-    DATABASE_URL_SYNC="$url_sync" "$PYBIN" scripts/p0a_discovery_evidence.py
+    DISCOVERY_REV="$(git log --oneline -1 2>/dev/null)" \
+        DATABASE_URL_SYNC="$url_sync" "$PYBIN" scripts/p0a_discovery_evidence.py
 }
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 case "${1:-all}" in
-    clone)    do_clone ;;
-    verify)   do_verify ;;
-    run)      do_run ;;
-    evidence) do_evidence ;;
-    all)      do_clone && do_verify && do_run && do_evidence ;;
-    *)        echo "usage: $0 {clone|verify|run|evidence|all}" >&2; exit 2 ;;
+    clone)     do_clone ;;
+    verify)    do_verify ;;
+    role)      do_role ;;
+    preflight) do_preflight ;;
+    run)       do_run ;;
+    sentinel)  do_sentinel ;;
+    evidence)  do_evidence ;;
+    all)       do_clone && do_verify && do_preflight && do_run \
+                        && do_sentinel && do_evidence ;;
+    *) echo "usage: $0 {clone|verify|role|preflight|run|sentinel|evidence|all}" >&2
+       exit 2 ;;
 esac
 rc=$?
 

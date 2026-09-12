@@ -1,0 +1,26 @@
+# Known-benign pg_restore messages — exact substrings, one per line
+# ==================================================================
+# Deliberately EMPTY of guesses.
+#
+# pg_restore returns non-zero for warnings as well as errors, and a restore
+# can reproduce every table row while still failing on an index, a
+# constraint, a function, or a Timescale metadata object. Those failures
+# matter later even when every row count matches, so arbitrary non-zero
+# status must not become irrelevant.
+#
+# The rule this file implements: the clone is accepted only when data
+# verification passes AND the restore produced no unrecognised error. An
+# entry here is a claim that a specific message is harmless. Nothing is
+# pre-populated, because an allowlist written before seeing the output is a
+# guess about which failures do not matter — which is the same act as
+# ignoring the exit status, performed earlier.
+#
+# After the first clone, read the captured restore log, and add the exact
+# message text of anything you have decided is benign. Prefer the most
+# specific substring that identifies it. A comment saying why belongs beside
+# each entry, because the next person needs the reasoning and not just the
+# permission.
+#
+# Example of the shape (commented out, not active):
+#   # Timescale internal catalogue row already present from CREATE EXTENSION
+#   # ERROR:  duplicate key value violates unique constraint "extension_pkey"

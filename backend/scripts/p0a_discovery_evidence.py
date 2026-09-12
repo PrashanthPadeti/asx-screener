@@ -66,8 +66,39 @@ def main() -> int:
               "they came from.", file=sys.stderr)
         return 2
 
+    print("run type: TARGETED V2 DISCOVERY REBUILD")
     print(f"database: {db}")
     print(f"revision: {os.environ.get('DISCOVERY_REV', '(see run log)')}")
+
+    # ── Provenance ───────────────────────────────────────────────────────────
+    # First, and unprompted, because it bounds what this run can be said to
+    # prove. Holding the unchanged producers constant is what makes every
+    # observed difference attributable to the code that changed — and it is
+    # exactly why a result here must never later be described as proving full
+    # same-run coherence. Some upstream products came from the production
+    # snapshot on purpose.
+    heading("PROVENANCE")
+    print("  RECOMPUTED under the code under test")
+    for item in ("market.computed_metrics      (daily_compute)",
+                 "market.yearly_metrics        (yearly_compute)",
+                 "screener.universe            (build_screener_universe)",
+                 "screener.universe factors    (composite_score)",
+                 "market.sector_benchmarks     (sector_benchmarks)"):
+        print(f"    {item}")
+    print("\n  CLONED / HELD CONSTANT from the production snapshot")
+    for item in ("market.daily_metrics         (technical_compute)",
+                 "market.weekly_metrics        (weekly_compute)",
+                 "market.monthly_metrics       (monthly_compute)",
+                 "market.halfyearly_metrics    (halfyearly_compute)",
+                 "market.period_metrics        (period_metrics_compute)",
+                 "market.daily_prices, market.dividends, financials.*",
+                 "market.valuation_snapshot, market.analyst_ratings",
+                 "staging_au.shares_stats, staging_au.company_profile"):
+        print(f"    {item}")
+    print("\n  This run answers: do the changed contracts compose?")
+    print("  It does NOT answer: does the whole production sequence compose?")
+    print("  That needs a production-shaped rehearsal immediately before the")
+    print("  canonical recompute, and it is a separate gate.")
 
     # ── Stated conditions of the run ─────────────────────────────────────────
     # Reported first and unprompted. The dividend feed is unhealthy, so Income

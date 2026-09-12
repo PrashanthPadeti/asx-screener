@@ -55,7 +55,10 @@ status() {
     echo "host:        $(hostname)"
     echo "cron:        $(cron_frozen && echo FROZEN || echo active) "\
          "($(crontab -l 2>/dev/null | grep -cE '^[^#[:space:]]') live entries)"
-    echo "scheduler:   $(env_frozen && echo FROZEN || echo active)"
+    # What was asked for. Deliberately labelled as such: the earlier version
+    # printed this as "scheduler: FROZEN" and was reporting a freeze that had
+    # not happened, because the app could not start to honour it.
+    echo "env flag:    $(env_frozen && echo set || echo unset)"
     echo "service:     $(systemctl is-active "$SERVICE" 2>/dev/null)"
     echo
     echo "--- jobs in flight ---"
@@ -63,12 +66,17 @@ status() {
         || echo "none"
     echo
     echo "--- what the running process actually holds ---"
-    local jobs; jobs=$(scheduler_jobs)
+    local jobs flag
+    jobs=$(scheduler_jobs); flag=$(scheduler_frozen_flag)
     case "${jobs:-}" in
-        "")   echo "scheduler jobs: unknown (health endpoint unreachable)" ;;
-        null) echo "scheduler jobs: null (deployed code predates this field)" ;;
-        0)    echo "scheduler jobs: 0  <- frozen, verified in the process" ;;
-        *)    echo "scheduler jobs: $jobs  <- NOT frozen" ;;
+        "")   echo "scheduler: unknown (health endpoint unreachable)" ;;
+        null) echo "scheduler: null (deployed code predates this field)" ;;
+        0)    if [ "$flag" = "true" ]; then
+                  echo "scheduler: 0 jobs, frozen=true  <- frozen, verified in the process"
+              else
+                  echo "scheduler: 0 jobs but frozen=$flag  <- BROKEN, not frozen"
+              fi ;;
+        *)    echo "scheduler: $jobs jobs, frozen=$flag  <- NOT frozen" ;;
     esac
 }
 
@@ -80,6 +88,16 @@ status() {
 scheduler_jobs() {
     curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null \
         | sed -nE 's/.*"jobs"[[:space:]]*:[[:space:]]*([0-9]+|null).*/\1/p'
+}
+
+# The flag the running process attributes its state to. Checked alongside the
+# job count because the two prove different things: the count proves the
+# operational effect, the flag proves the effect came from this maintenance
+# control rather than from job registration having failed for some other
+# reason. A scheduler holding 0 jobs with frozen=false is broken, not frozen.
+scheduler_frozen_flag() {
+    curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null \
+        | sed -nE 's/.*"frozen"[[:space:]]*:[[:space:]]*(true|false|null).*/\1/p'
 }
 
 # Whether the app can still construct its Settings. pydantic-settings forbids
@@ -105,11 +123,12 @@ verify_running() {
     [ "$(systemctl is-active "$SERVICE")" = "active" ] || return 1
     curl -fsS --max-time 10 "$HEALTH_URL" >/dev/null 2>&1 || return 3
 
-    local jobs; jobs=$(scheduler_jobs)
+    local jobs flag
+    jobs=$(scheduler_jobs); flag=$(scheduler_frozen_flag)
     case "$want" in
-        FROZEN) [ "$jobs" = "0" ] || return 2 ;;
+        FROZEN) [ "$jobs" = "0" ] && [ "$flag" = "true" ] || return 2 ;;
         ACTIVE) [ -n "$jobs" ] && [ "$jobs" != "0" ] && [ "$jobs" != "null" ] \
-                    || return 2 ;;
+                    && [ "$flag" = "false" ] || return 2 ;;
     esac
     return 0
 }

@@ -226,6 +226,43 @@ def test_every_declared_model_is_internally_consistent():
             assert all(c.direction in (+1, -1) for c in spec.constituents)
 
 
+def test_every_declared_constituent_resolves_to_a_real_frame_column():
+    """The guard that would have caught eps_cagr_3y.
+
+    The model declares canonical identities, the frame carries storage
+    spellings, and compute_factor bridges them with column_for(). A
+    constituent whose column does not exist raises on every score for that
+    factor — and the failure lands at compute time, on the server, not here.
+
+    V1's signal table is the authority for what the engine actually ranked,
+    read by AST so this stays runnable without psycopg2. V2 may only narrow
+    it: a V2 constituent that V1 never ranked would be a new signal smuggled
+    in under a version bump.
+    """
+    import ast
+
+    source = (Path(__file__).resolve().parents[1]
+              / "compute/engine/composite_score.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    table = next(
+        ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        and node.target.id == "FACTOR_SIGNALS")
+
+    ranked_columns = {col for signals in table.values() for col, _ in signals}
+
+    from compute.engine.universe_writer import column_for
+
+    for version, model in FACTOR_MODELS.items():
+        for name, spec in model.items():
+            for c in spec.constituents:
+                column = column_for(c.metric)
+                assert column in ranked_columns, (
+                    f"{version} {name}: {c.metric} -> {column}, which the "
+                    f"engine has never ranked")
+
+
 def test_v2_differs_from_v1_only_in_quality():
     """A version bump that quietly changed several models would make "what
     did V2 change" unanswerable from the code."""

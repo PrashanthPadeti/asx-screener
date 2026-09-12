@@ -215,9 +215,17 @@ FACTOR_MODEL_V1: dict[str, FactorSpec] = {
     "quality": _spec("quality", [
         ("piotroski_f_score", +1), ("roe", +1), ("roce", +1),
         ("altman_z_score", +1), ("debt_to_equity", -1), ("net_margin", +1)]),
+    # eps_growth_3y_cagr, not eps_cagr_3y. They are the same concept under two
+    # names — market.yearly_metrics calls it one thing and screener.universe
+    # the other — but no STORAGE_COLUMN alias links them, and their canonical
+    # identity is genuinely unresolved: the served column is
+    # COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) for its sibling, so
+    # the two sides are different computations rather than two spellings.
+    # Declaring the canonical-looking name here would have made compute_factor
+    # raise on every growth score.
     "growth": _spec("growth", [
         ("revenue_growth_1y", +1), ("earnings_growth_1y", +1),
-        ("eps_cagr_3y", +1), ("revenue_growth_hoh", +1),
+        ("eps_growth_3y_cagr", +1), ("revenue_growth_hoh", +1),
         ("eps_growth_hoh", +1), ("revenue_cagr_5y", +1)]),
     "momentum": _spec("momentum", [
         ("return_1m", +1), ("return_3m", +1), ("return_6m", +1),

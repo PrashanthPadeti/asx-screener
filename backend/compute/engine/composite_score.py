@@ -43,11 +43,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # until the repo root is on the path — importing them at the top of the file
 # is the exact ordering that took the pipeline down before.
 from app.core.db import get_database_url_sync  # noqa: E402
+from compute.engine.applicability import Applicability  # noqa: E402
 from compute.engine.factor_applicability import (  # noqa: E402
     DOMAIN_COLS,
     apply_applicability,
     withhold_source_failed,
 )
+# The declaration lives in its own module and is imported, never defined or
+# mutated here. This module cannot be loaded without psycopg2, which is why
+# the factor tables were previously unreadable to every test run and to
+# metric_registry.graph_health(). Scoring depends on the model; the model must
+# not depend on scoring.
+from compute.engine.factor_model import FactorSpec, model_for  # noqa: E402
+from compute.engine.metric_states import LATEST_MODEL_VERSION  # noqa: E402
+from compute.engine.universe_writer import column_for  # noqa: E402
+
+#: The frame carries asx_code as a column; assessments are keyed by it.
+CODE_COLUMN = "asx_code"
 
 
 load_dotenv()
@@ -145,24 +157,107 @@ def pct_rank(series: pd.Series, direction: int) -> pd.Series:
     return s.rank(method="average", pct=True, na_option="keep") * 100
 
 
-def compute_factor(df: pd.DataFrame, factor_name: str) -> pd.Series:
-    """Compute one factor score as the mean percentile rank of its signals."""
-    signals = FACTOR_SIGNALS[factor_name]
-    ranks = []
-    for col, direction in signals:
-        if col not in df.columns:
-            continue
-        r = pct_rank(df[col], direction)
-        # Clamp edge values
-        r = r.clip(0, 100)
-        ranks.append(r)
+def compute_factor(df: pd.DataFrame, factor_name: str,
+                   spec: Optional[FactorSpec] = None,
+                   assessments: Optional[dict] = None,
+                   model_version: str = LATEST_MODEL_VERSION) -> pd.Series:
+    """One factor score, from the weights the model declares.
 
-    if not ranks:
-        return pd.Series(np.nan, index=df.index)
+    The invariant this enforces:
 
-    # Stack and take row-wise mean (ignoring NaN)
-    stacked = pd.concat(ranks, axis=1)
-    return stacked.mean(axis=1, skipna=True).round(0).clip(0, 100)
+        Factor weights come from the declared model specification, never from
+        whatever values happen to be non-null at runtime.
+
+    What it replaces was ``stacked.mean(axis=1, skipna=True)``. A constituent
+    that was NaN for any reason left the average and the survivors absorbed
+    its weight, so a bank's quality_score was a five-signal blend wearing a
+    six-signal name with nothing in the payload to say so. Worse, the two
+    reasons a constituent goes missing have opposite correct answers and that
+    form could not tell them apart:
+
+      NOT_MEANINGFUL   the signal does not describe this company's economics.
+                       Reweighting is right — a bank has no meaningful
+                       leverage ratio — but only as declared policy, with the
+                       effective weights recoverable.
+
+      UNAVAILABLE      the signal applies and is missing. Reweighting
+                       publishes a different model under this one's name.
+
+    ``assessments`` is asx_code -> metric -> Assessment, as produced by
+    apply_applicability. Without it this falls back to the old behaviour, and
+    logs that it has done so: a silent fallback would restore the defect in
+    exactly the conditions that make it hardest to notice.
+    """
+    spec = spec or model_for(model_version)[factor_name]
+
+    declared = list(spec.constituents)
+
+    # The model declares canonical identities; the frame carries storage
+    # spellings; the assessments are keyed canonically. Indexing the frame by
+    # the canonical name would KeyError on ev_ebitda while the column is
+    # ev_to_ebitda — the alias failure this codebase has now produced at three
+    # separate layers.
+    column = {c.metric: column_for(c.metric) for c in declared}
+
+    absent = [f"{m} ({col})" for m, col in column.items()
+              if col not in df.columns]
+    if absent:
+        # A contract error, not financial unavailability: the model names a
+        # column the frame does not carry. Returning NaN would look like a
+        # company with no data.
+        raise KeyError(
+            f"{factor_name}: declared constituents missing from the frame: "
+            f"{', '.join(sorted(absent))}")
+
+    ranks = pd.concat(
+        [pct_rank(df[column[c.metric]], c.direction).clip(0, 100)
+         for c in declared],
+        axis=1)
+    ranks.columns = [c.metric for c in declared]
+
+    if assessments is None:
+        log.warning("%s scored without assessments — weights fall back to "
+                    "whatever is non-null, which is the defect this signature "
+                    "exists to remove", factor_name)
+        return ranks.mean(axis=1, skipna=True).round(0).clip(0, 100)
+
+    codes = df[CODE_COLUMN] if CODE_COLUMN in df.columns else pd.Series(
+        df.index, index=df.index)
+
+    # Per-row weights, built from the declaration and zeroed only where the
+    # model permits. Vectorised rather than looped so the policy is visible as
+    # one table: rows are companies, columns are declared constituents, and a
+    # zero means "dropped under a declared rule", never "happened to be null".
+    weights = pd.DataFrame(
+        {c.metric: float(c.weight) for c in declared},
+        index=df.index, columns=[c.metric for c in declared])
+    unavailable = pd.Series(False, index=df.index)
+
+    for position, code in zip(df.index, codes):
+        per_metric = (assessments or {}).get(code, {})
+        for c in declared:
+            state = getattr(per_metric.get(c.metric), "state", None)
+            if state is Applicability.NOT_MEANINGFUL:
+                if not spec.domain_reweight:
+                    unavailable.at[position] = True
+                weights.at[position, c.metric] = 0.0
+            elif state in (Applicability.UNAVAILABLE,
+                           Applicability.INSUFFICIENT_DATA):
+                unavailable.at[position] = True
+
+    # A constituent with no assessment and no value is still a declared signal
+    # we cannot supply. Treating it as droppable would be the skipna rule
+    # returning by another name, so it makes the factor unavailable too.
+    unavailable |= ranks[[c.metric for c in declared]].isna().where(
+        weights > 0, other=False).any(axis=1)
+
+    total = weights.sum(axis=1)
+    # Every constituent out of domain is no score, not a low one.
+    unavailable |= (total <= 0)
+
+    normalised = weights.div(total.replace(0, np.nan), axis=0)
+    score = (ranks.fillna(0) * normalised).sum(axis=1, min_count=1)
+    return score.where(~unavailable).round(0).clip(0, 100)
 
 
 def compute_composite(df_scores: pd.DataFrame,
@@ -485,11 +580,14 @@ def run(conn, dry_run: bool = False) -> int:
         log.info("  %-40s %5d", key, count)
 
     # ── Compute factor scores ─────────────────────────────────────────────────
-    df["value_score"]    = compute_factor(df, "value")
-    df["quality_score"]  = compute_factor(df, "quality")
-    df["growth_score"]   = compute_factor(df, "growth")
-    df["momentum_score"] = compute_factor(df, "momentum")
-    df["income_score"]   = compute_factor(df, "income")
+    # The assessments are passed, not re-derived from the frame's nulls. A
+    # NaN cannot say whether it is out of domain or merely absent, and those
+    # two have opposite correct answers.
+    model = model_for(LATEST_MODEL_VERSION)
+    for factor in ("value", "quality", "growth", "momentum", "income"):
+        df[f"{factor}_score"] = compute_factor(
+            df, factor, model[factor], masked.assessments,
+            model_version=LATEST_MODEL_VERSION)
     df["composite_score"]= compute_composite(df, masked.source_failed)
 
     # Multibagger potential — computed after momentum_score, which it consumes.

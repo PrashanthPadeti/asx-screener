@@ -260,10 +260,53 @@ def growth_over(pnl: list, field: str, n: int) -> Optional[float]:
         return None
 
 
+class UnsupportedComputation(RuntimeError):
+    """A method that cannot be executed faithfully must not be executed."""
+
+
 def calc_piotroski(pnl: list, bs: dict, cf: dict) -> Optional[int]:
+    """Refuses. The implementation below it is not a Piotroski F-Score.
+
+    An upstream suppression already withholds piotroski_f_score
+    (UNAVAILABLE / COMPUTATION_UNSUPPORTED), so nothing reaches a customer
+    today. That protects the current path and not the next developer: a
+    function with this name returning a plausible 2-9 integer is exactly what
+    someone restores when the suppression looks like over-caution.
+
+    What the legacy body actually does, measured rather than suspected:
+
+      F5 and F7 award a point unconditionally, so no company can score below
+      2 and the range is 2-9 rather than 0-9.
+      F3 and F9 claim year-over-year comparisons while dividing both years by
+      the CURRENT balance sheet, so they compare numerators.
+      F3, F8 and F9 score an absent prior year as a failed criterion rather
+      than as unassessable.
+
+    And it cannot be repaired from the data that exists. Of the 1,599 active
+    companies carrying annual statements, 1,596 have the exact Y-1 pair — so
+    period coverage is not the constraint — but prior-year shares_outstanding
+    is NULL for all 1,596, making F7 unevaluable universally, and prior
+    long_term_debt is NULL for 915, capping F5 at 594. No company anywhere in
+    the universe, including the ASX 200, can have all nine criteria assessed.
+
+    The body is preserved as _legacy_invalid_piotroski for the record, not for
+    use.
     """
-    Piotroski F-Score (0-9). Higher = better financial quality.
-    Each criterion scores 0 or 1.
+    raise UnsupportedComputation(
+        "the legacy Piotroski implementation is methodologically invalid: two "
+        "of nine criteria award a point unconditionally, two compare years "
+        "against a single balance sheet, and a missing prior year scores as a "
+        "failure. It cannot be repaired from current data — prior-year "
+        "shares_outstanding is absent for every company. Do not use it until "
+        "all nine criteria have supported inputs.")
+
+
+def _legacy_invalid_piotroski(pnl: list, bs: dict, cf: dict) -> Optional[int]:
+    """SUPERSEDED AND INVALID — kept as evidence, never called.
+
+    See calc_piotroski above for what is wrong with it and why it cannot be
+    fixed from the data available. Retained so that "what did the old score
+    actually compute" has an answer that is not archaeology.
     """
     if not pnl or not bs or not cf:
         return None
@@ -469,7 +512,15 @@ def compute_metrics(asx_code: str, price: dict, fin: dict, company: dict,
 
     # ── Quality Scores ────────────────────────────────────────
 
-    m["piotroski_score"] = calc_piotroski(pnl, bs, cf)
+    # Not computed. The legacy implementation is not a Piotroski F-Score —
+    # see calc_piotroski — and the metric is withheld downstream as
+    # UNAVAILABLE / COMPUTATION_UNSUPPORTED. Continuing to write it would keep
+    # the fabricated number in market.computed_metrics, where the next reader
+    # finds a plausible 2-9 integer with nothing to say it is meaningless.
+    #
+    # NULL is the honest column value: no score exists, rather than a score
+    # that happens to be missing.
+    m["piotroski_score"] = None
 
     # ── TTM Reference Values ──────────────────────────────────
 

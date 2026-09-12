@@ -295,6 +295,57 @@ DOMAIN_RULES: dict[str, tuple[frozenset[Domain], str]] = {
                           "of domain"),
 }
 
+# ── Rolling averages inherit their base metric's domain rule ──────────────────
+#
+# An average of a metric over n years is the same claim about the same
+# economic quantity, made n times. If gross margin is not meaningful for a
+# deposit-funded balance sheet this year, the mean of three such years is not
+# meaningful either — it is the same category error with more arithmetic in
+# front of it.
+#
+# Written as a derivation rather than hand-maintained entries so the two
+# cannot drift: a rule added to gross_margin reaches avg_gross_margin_3y in
+# the same commit, and a rule that is never added reaches nothing. Before
+# this, FACTOR_MODEL_V2 governed the averages while the domain gate knew
+# nothing about them — so a bank suppressed on gross_margin would have been
+# served avg_gross_margin_3y as APPLICABLE, which is the CBA defect arriving
+# through the column next to the one that was fixed.
+#
+# Only the domain rule is inherited. POSITIVE_DENOMINATOR deliberately is not:
+# that gate reads today's equity, and today's equity says nothing about
+# whether the base was positive in the years the average covers. Judging a
+# three-year mean by a one-day balance sheet would be a period-integrity
+# violation of exactly the kind this model version exists to remove.
+#
+# The derivation runs over the declared bases, not over every key in
+# DOMAIN_RULES. Crossing the whole rule set with (3, 5) would manufacture
+# rules for forty-six names that are not columns — avg_altman_z_score_3y,
+# avg_ev_ebitda_5y — and each one would enter SENSITIVE, which is derived
+# from this map. Sensitivity is what makes a metric require a persisted state,
+# so inventing it for a column that does not exist is not merely untidy: it
+# widens the contract to fields nothing can ever satisfy.
+
+#: The metrics that actually have avg_*_ny columns, and the windows they come
+#: in. One declaration, because three consumers need the same list: the domain
+#: inheritance below, PERIOD_REQUIREMENT, and metric_states.ROLLING_AVERAGES.
+#: Kept here rather than in metric_states because that module imports this one.
+ROLLING_AVERAGE_BASES: tuple[str, ...] = (
+    "roe", "roa", "roce", "roic", "gross_margin",
+    "ebitda_margin", "operating_margin", "net_margin", "eps_growth",
+)
+ROLLING_AVERAGE_WINDOWS: tuple[int, ...] = (3, 5)
+
+for _base in ROLLING_AVERAGE_BASES:
+    _rule = DOMAIN_RULES.get(_base)
+    if _rule is None:
+        continue
+    _domains, _reason = _rule
+    for _n in ROLLING_AVERAGE_WINDOWS:
+        DOMAIN_RULES.setdefault(
+            f"avg_{_base}_{_n}y",
+            (_domains, f"{_reason} (inherited from {_base})"))
+del _base, _rule, _n, _domains, _reason
+
 #: Metrics that are domain-sensitive at all. Under an unresolved domain these
 #: are suppressed rather than defaulted — the absence of a rule is exactly how
 #: CBA came to be treated as an industrial company.
@@ -362,10 +413,44 @@ POSITIVE_DENOMINATOR: dict[str, tuple[str, str]] = {
 }
 
 
+#: metric -> how many consecutive annual periods its name claims.
+#:
+#: An avg_*_ny metric means the mean of exactly n annual observations from a
+#: contiguous window. When that cannot be satisfied the value is absent, and
+#: the two reasons for the absence are different facts that clear by different
+#: means:
+#:
+#:     the required fiscal years do not exist   INSUFFICIENT_HISTORY
+#:     the years exist, an observation is NULL  SOURCE_MISSING
+#:
+#: Separating them matters most for ROIC. Of 1,594 contiguous three-year
+#: windows, 537 hold fewer than three ROIC observations — the periods are
+#: there and the metric is sparse. Reporting that as insufficient history
+#: would blame the company's reporting record for a gap in ours, and send an
+#: operator looking for years that are already present.
+PERIOD_REQUIREMENT: dict[str, int] = {
+    f"avg_{metric}_{n}y": n
+    for n in ROLLING_AVERAGE_WINDOWS
+    for metric in ROLLING_AVERAGE_BASES
+}
+
+
 def observation_gate(metric: str, value: Optional[float],
                      obs: Optional[Observation]) -> Optional[tuple[Applicability, str]]:
     """Gate 2. Returns None when the observation passes."""
     if obs is not None:
+        # Period sufficiency before anything else, because a metric whose
+        # window does not exist has nothing to check a denominator against.
+        # periods_available is a company fact — how many consecutive annual
+        # periods it has reported — so one Observation serves every window
+        # length without carrying a per-metric requirement.
+        required = PERIOD_REQUIREMENT.get(metric)
+        if required is not None and obs.periods_available is not None:
+            if obs.periods_available < required:
+                return (Applicability.INSUFFICIENT_DATA,
+                        f"{obs.periods_available} consecutive annual periods "
+                        f"available, {required} required")
+
         need = POSITIVE_DENOMINATOR.get(metric)
         if need is not None:
             field, reason = need

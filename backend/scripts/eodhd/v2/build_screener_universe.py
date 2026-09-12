@@ -112,6 +112,9 @@ INSERT INTO screener.universe (
     -- ── EPS ──────────────────────────────────────────────────────────────────
     eps_fy0, eps_fy1,
 
+    -- ── Reporting history (an observation, not a metric) ─────────────────────
+    annual_periods,
+
     -- ── Income Statement FY0 / FY1 ───────────────────────────────────────────
     revenue_fy0, revenue_fy1,
     ebitda_fy0, ebitda_fy1,
@@ -412,6 +415,10 @@ SELECT
     pnl1.eps                    AS eps_fy1,
 
     -- ── Income Statement FY0 / FY1 ───────────────────────────────────────────
+    -- 0 rather than NULL would be a claim; a company with no annual_pnl row
+    -- at all has no FY0 to anchor a run to, and the count is unknown.
+    hist.annual_periods,
+
     pnl0.revenue    AS revenue_fy0,
     pnl1.revenue    AS revenue_fy1,
     pnl0.ebitda     AS ebitda_fy0,
@@ -998,6 +1005,42 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) pnl0 ON TRUE
 
+-- ── How many consecutive annual periods the company has actually reported ────
+--    ending at FY0. Not a metric: an observation, in the same class as
+--    total_equity, and the input gate 2 needs to tell two absences apart.
+--
+--    An avg_*_ny that comes back empty has one of two causes, and they clear
+--    by different means:
+--
+--        the required fiscal years do not exist   INSUFFICIENT_HISTORY
+--        the years exist, an observation is NULL  SOURCE_MISSING
+--
+--    Without this count both report as SOURCE_MISSING, which for roic would
+--    blame our feed for 537 of 1,594 windows that are genuinely short, and
+--    for a young company would blame its reporting record for neither.
+--
+--    Counted over financials.annual_pnl because that is the same row set
+--    fetch_annual_financials draws the averaging series from — the balance
+--    sheet and cashflow joins there are LEFT, so they add no years and remove
+--    none. Counting a different table would be a second definition of the
+--    same word.
+--
+--    The gaps-and-islands form: ordered descending, fiscal_year + row_number
+--    is constant within a run of consecutive years, so the run containing FY0
+--    is the one whose key is FY0 + 1. A company reporting 2025, 2024, 2021
+--    counts 2, not 3.
+LEFT JOIN LATERAL (
+    SELECT COUNT(*)::smallint AS annual_periods
+    FROM (
+        SELECT fiscal_year
+                 + ROW_NUMBER() OVER (ORDER BY fiscal_year DESC) AS run_key
+        FROM financials.annual_pnl
+        WHERE asx_code = c.asx_code
+          AND fiscal_year <= pnl0.fiscal_year
+    ) runs
+    WHERE runs.run_key = pnl0.fiscal_year + 1
+) hist ON TRUE
+
 -- ── Annual P&L FY1 (second most recent) ──────────────────────────────────────
 LEFT JOIN LATERAL (
     SELECT fiscal_year, revenue, gross_profit, ebitda, pbt, net_profit, eps
@@ -1443,6 +1486,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     cfo_fy0                 = EXCLUDED.cfo_fy0,
     capex_fy0               = EXCLUDED.capex_fy0,
     fcf_fy0                 = EXCLUDED.fcf_fy0,
+    annual_periods          = EXCLUDED.annual_periods,
     -- Growth rates
     revenue_growth_1y       = EXCLUDED.revenue_growth_1y,
     revenue_growth_3y_cagr  = EXCLUDED.revenue_growth_3y_cagr,

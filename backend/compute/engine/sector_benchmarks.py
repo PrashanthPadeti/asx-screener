@@ -137,7 +137,9 @@ def _benchmark_payload(results: dict) -> dict:
 def run(conn, dry_run: bool = False) -> int:
     from compute.engine.daily_compute import fetch_feed_health
     from compute.engine.dividends import DividendSource
-    from compute.engine.factor_applicability import DOMAIN_COLS, apply_applicability
+    from compute.engine.factor_applicability import (
+        DOMAIN_COLS, OBSERVATION_COLS, apply_applicability,
+    )
     from compute.engine.peer_benchmarks import by_sector
 
     cur = conn.cursor()
@@ -145,6 +147,17 @@ def run(conn, dry_run: bool = False) -> int:
     # company's economic model rather than inferring it from the sector label.
     select_cols = ["asx_code"] + COLS + [
         c for c in DOMAIN_COLS if c not in COLS and c != "asx_code"]
+    # And OBSERVATION_COLS, without which gate 2 cannot run here at all.
+    # apply_applicability builds its Observation from whatever columns the
+    # frame happens to have, and this frame had none of them — so every
+    # assessment in the peer path came from the domain gate, and QAN's
+    # negative-equity ROE of 206% was still entering its sector's median.
+    # That is the identical unwiring the factor path was carrying, surviving
+    # in the one place whose output is a comparison baseline for everyone
+    # else. The module docstring above describes the rule; this makes the
+    # inputs available to enforce it.
+    select_cols += [c for c in OBSERVATION_COLS.values()
+                    if c not in select_cols]
     col_list = ", ".join(select_cols)
     cur.execute(f"""
         SELECT {col_list}

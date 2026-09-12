@@ -74,11 +74,16 @@ DOMAIN_COLS = ["sector", "industry", "is_reit", "is_miner", "revenue_ttm"]
 #: no observation check. That is the honest state: a check that cannot run has
 #: not passed, and inventing a proxy denominator would be the same error in
 #: the other direction.
+#: periods_available is the odd one out and belongs here anyway: it is not a
+#: denominator but it is an observation, read by the same gate from the same
+#: row. It is what lets an empty avg_*_ny say which of its two absences it is —
+#: a window that does not exist, or a window that exists with a hole in it.
 OBSERVATION_COLS: dict[str, str] = {
     "equity": "total_equity",
     "earnings": "eps_fy0",
     "revenue": "revenue_ttm",
     "ebitda": "ebitda_ttm",
+    "periods_available": "annual_periods",
 }
 
 #: The income family. When the dividend feed is unhealthy these are withheld
@@ -167,10 +172,16 @@ def apply_applicability(df: pd.DataFrame,
         # each metric's denominator. A field whose column is absent from the
         # frame stays None, which means that particular check cannot run —
         # not that it passed.
-        observation = Observation(**{
-            field: _numeric(row.get(column))
-            for field, column in OBSERVATION_COLS.items()
-            if column in df.columns})
+        values = {field: _numeric(row.get(column))
+                  for field, column in OBSERVATION_COLS.items()
+                  if column in df.columns}
+        # A period count is a count. It arrives through pd.to_numeric as a
+        # float like every other column, and left that way the withheld
+        # metric's reason reads "2.0 consecutive annual periods available".
+        periods = values.get("periods_available")
+        if periods is not None:
+            values["periods_available"] = int(periods)
+        observation = Observation(**values)
         if any(getattr(observation, f) is not None
                for f in OBSERVATION_COLS):
             tally["observation:supplied"] += 1

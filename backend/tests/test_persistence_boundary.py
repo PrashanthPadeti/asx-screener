@@ -398,17 +398,61 @@ def test_a_known_version_still_validates_normally():
     assert violations(values, states, LATEST_MODEL_VERSION) == []
 
 
-def test_the_governed_set_is_pinned_not_derived():
-    """If it were computed from SENSITIVE live, adding a metric next quarter
-    would retroactively make every existing V1 row incomplete."""
+#: V1's governed set, as pinned. A literal, so that growing it is an edit
+#: somebody makes on purpose and not something a change elsewhere causes.
+V1_GOVERNED_COUNT = 42
+
+
+def test_v1_is_a_literal_and_has_not_grown():
+    """The original form of this guard asserted SENSITIVE - V1 == empty, which
+    reads as "V1 governs everything sensitive" and is a stronger claim than
+    the risk warrants. It also made the correct move impossible: a metric can
+    only *become* sensitive by being added somewhere, and if every such
+    addition must land in V1 then no later version can ever introduce one —
+    which is the whole purpose of having versions.
+
+    What actually matters is that V1 does not move. Rows written under V1 are
+    validated against V1, so V1 absorbing a new metric is what would make
+    them retroactively incomplete. A metric joining V2 leaves them untouched.
+    """
+    assert len(GOVERNED_METRICS["FACTOR_MODEL_V1"]) == V1_GOVERNED_COUNT, (
+        "FACTOR_MODEL_V1 changed size. Rows already written under V1 are "
+        "validated against this set; adding to it fails them for lacking a "
+        "state they were never asked to carry. Add to a new version instead.")
+
+
+def test_nothing_sensitive_escapes_governance_entirely():
+    """The half of the original guard that was load-bearing. A sensitive
+    metric governed by no version at all is served with no state and no way
+    to notice — the condition the whole contract exists to prevent.
+
+    Every sensitive metric must be governed *somewhere*; which version is a
+    question about when it was introduced, not about whether it is covered.
+    """
+    from compute.engine.metric_registry import SENSITIVE
+
+    governed_anywhere = frozenset().union(*GOVERNED_METRICS.values())
+    escaped = SENSITIVE - governed_anywhere
+    assert not escaped, (
+        f"{sorted(escaped)} are sensitive but governed by no model version. "
+        f"Add them to the latest version — a sensitive metric with no "
+        f"persisted state is exactly the unexplained value this contract "
+        f"removes.")
+
+
+def test_metrics_sensitive_beyond_v1_are_governed_by_a_later_version():
+    """The rolling averages are the live instance: avg_gross_margin_3y is
+    domain-sensitive for the same reason gross_margin is, and is governed
+    from V2. It must not have leaked into V1 to get there."""
     from compute.engine.metric_registry import SENSITIVE
 
     v1 = GOVERNED_METRICS["FACTOR_MODEL_V1"]
-    missing = SENSITIVE - v1
-    assert not missing, (
-        f"{sorted(missing)} became sensitive after V1 was pinned. Add them to "
-        f"a NEW model version rather than to V1, or old rows retroactively "
-        f"fail validation for lacking a state they never promised.")
+    later = frozenset().union(*(
+        s for v, s in GOVERNED_METRICS.items() if v != "FACTOR_MODEL_V1"))
+
+    for metric in sorted(SENSITIVE - v1):
+        assert metric in later, (
+            f"{metric} is sensitive, absent from V1, and in no later version")
 
 
 def test_a_fully_governed_row_passes():

@@ -59,6 +59,8 @@ from datetime import date, datetime
 from typing import Any, Iterable, Mapping, Optional
 
 from compute.engine.applicability import (
+    ROLLING_AVERAGE_BASES,
+    ROLLING_AVERAGE_WINDOWS,
     Applicability,
     Assessment,
     Cause,
@@ -284,6 +286,28 @@ HORIZON_CAGRS: frozenset[str] = frozenset({
     "bvps_cagr_3y", "bvps_cagr_5y",
 })
 
+#: The fiscal-year rolling averages ScreenerRow advertises. Governed from V2
+#: because the strict window rule makes them NULL more often, and a newly
+#: introduced NULL on a promised field must not become an unexplained blank —
+#: which is the condition Gate A exists to catch.
+#:
+#: The boundary is semantic, not mechanical. These eighteen are exposed on the
+#: response model; avg_assets, avg_equity and avg_franking_pct are internal
+#: intermediates with no governed surface and stay ungoverned, because
+#: enlarging the registry is not the same as governing something.
+#: avg_volume_20d is a twenty-day trading average, not a fiscal-year one, and
+#: does not belong to this family at all.
+#: Built from the same declaration the domain inheritance and
+#: PERIOD_REQUIREMENT use, so the governed set, the domain rules and the
+#: window requirements cannot disagree about which averages exist. A metric
+#: governed here but absent from PERIOD_REQUIREMENT would withhold with
+#: SOURCE_MISSING universally and look entirely normal doing it.
+ROLLING_AVERAGES: frozenset[str] = frozenset(
+    f"avg_{metric}_{n}y"
+    for n in ROLLING_AVERAGE_WINDOWS
+    for metric in ROLLING_AVERAGE_BASES
+)
+
 # FACTOR_MODEL_V2 = V1 plus period-exact CAGR semantics.
 #
 # V1 is left untouched and unpublished. It could still have been amended — no
@@ -305,7 +329,7 @@ HORIZON_CAGRS: frozenset[str] = frozenset({
 # and cannot be ranked, filtered, ordered or averaged into a peer statistic
 # while unavailable.
 GOVERNED_METRICS["FACTOR_MODEL_V2"] = (
-    GOVERNED_METRICS["FACTOR_MODEL_V1"] | HORIZON_CAGRS
+    GOVERNED_METRICS["FACTOR_MODEL_V1"] | HORIZON_CAGRS | ROLLING_AVERAGES
 )
 
 LATEST_MODEL_VERSION = "FACTOR_MODEL_V1"

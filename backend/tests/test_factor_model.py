@@ -263,15 +263,32 @@ def test_every_declared_constituent_resolves_to_a_real_frame_column():
                     f"engine has never ranked")
 
 
-def test_v2_differs_from_v1_only_in_quality():
-    """A version bump that quietly changed several models would make "what
-    did V2 change" unanswerable from the code."""
+def test_v2_changes_exactly_two_factors_and_only_by_removal():
+    """A version bump that quietly changed several models would make "what did
+    V2 change" unanswerable from the code, so the difference is pinned.
+
+    Quality drops piotroski_f_score, which cannot be computed faithfully from
+    available data. Growth drops eps_growth_hoh, which is NULL for all 2,117
+    active companies and has no producer — a specification naming something
+    that does not exist. Both are removals; V2 introduces no new signal.
+    """
     v1, v2 = model_for(V1), model_for(V2)
 
-    assert set(v1) == set(v2)
-    differing = [name for name in v1
-                 if v1[name].constituents != v2[name].constituents]
-    assert differing == ["quality"], f"unexpected changes in {differing}"
+    assert set(v1) == set(v2), "V2 neither adds nor removes a factor"
+
+    changes = {name: (
+        {c.metric for c in v1[name].constituents}
+        - {c.metric for c in v2[name].constituents})
+        for name in v1
+        if v1[name].constituents != v2[name].constituents}
+
+    assert changes == {"quality": {"piotroski_f_score"},
+                       "growth": {"eps_growth_hoh"}}, changes
+
+    for name in v1:
+        added = ({c.metric for c in v2[name].constituents}
+                 - {c.metric for c in v1[name].constituents})
+        assert not added, f"V2 {name} introduces {added} under a version bump"
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

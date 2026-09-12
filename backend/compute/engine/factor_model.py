@@ -243,6 +243,24 @@ FACTOR_MODEL_V2["quality"] = _spec("quality", [
     ("roe", +1), ("roce", +1), ("altman_z_score", +1),
     ("debt_to_equity", -1), ("net_margin", +1)])
 
+# Growth loses eps_growth_hoh, which is NULL for all 2,117 active companies
+# and has no producer anywhere in the pipeline.
+#
+# That is not an unavailable observation, and treating it as one would be a
+# category error with consequences: under the strict weighting rule a
+# constituent that is universally absent makes its factor universally
+# unavailable, so V1's growth model cannot score a single company. It also
+# makes every coverage measurement of growth meaningless, because the answer
+# is always zero for a reason that has nothing to do with the companies.
+#
+# A specification naming something that does not exist is a defect in the
+# specification. If a producer is added before V2 freezes, this can be
+# reconsidered — as a declared change, not by the column quietly filling in.
+FACTOR_MODEL_V2["growth"] = _spec("growth", [
+    ("revenue_growth_1y", +1), ("earnings_growth_1y", +1),
+    ("eps_growth_3y_cagr", +1), ("revenue_growth_hoh", +1),
+    ("revenue_cagr_5y", +1)])
+
 FACTOR_MODELS: dict[str, dict[str, FactorSpec]] = {
     "FACTOR_MODEL_V1": FACTOR_MODEL_V1,
     "FACTOR_MODEL_V2": FACTOR_MODEL_V2,

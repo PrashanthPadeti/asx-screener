@@ -160,6 +160,52 @@ CREATE TRIGGER trg_compute_runs_immutable
     FOR EACH ROW EXECUTE FUNCTION screener.compute_runs_are_immutable();
 
 
+-- Ownership, because a migration that creates a table the application cannot
+-- read is not finished.
+--
+-- This runs as a superuser (ALTER TABLE on screener.universe requires it on
+-- this database), so screener.compute_runs is created owned by postgres while
+-- screener.universe is owned by the application role. The new columns were
+-- unaffected — they inherit their table's privileges — but the new table had
+-- none, and the application's first governed query returned
+--
+--     InsufficientPrivilegeError: permission denied for table compute_runs
+--
+-- which the API correctly degrades to a 503. That is the dangerous part: it is
+-- the same 503 as "no completed run yet", so a perfectly good canonical
+-- recompute would have left every governed surface unavailable while looking
+-- exactly like a rollout that had not reached that step.
+--
+-- The owner is derived from screener.universe rather than named, so this is
+-- correct in any environment and idempotent when already aligned. Changing a
+-- table's owner also reassigns sequences owned by its columns, so the BIGSERIAL
+-- sequence follows without a separate grant.
+
+DO $$
+DECLARE
+    schema_owner text;
+    table_owner  text;
+BEGIN
+    SELECT tableowner INTO schema_owner
+      FROM pg_tables WHERE schemaname = 'screener' AND tablename = 'universe';
+    SELECT tableowner INTO table_owner
+      FROM pg_tables WHERE schemaname = 'screener' AND tablename = 'compute_runs';
+
+    IF schema_owner IS NULL THEN
+        RAISE EXCEPTION 'screener.universe not found; cannot derive an owner';
+    END IF;
+
+    IF table_owner IS DISTINCT FROM schema_owner THEN
+        EXECUTE format('ALTER TABLE screener.compute_runs OWNER TO %I',
+                       schema_owner);
+        EXECUTE format('ALTER FUNCTION screener.compute_runs_are_immutable() '
+                       'OWNER TO %I', schema_owner);
+        RAISE NOTICE 'screener.compute_runs ownership aligned: % -> %',
+                     table_owner, schema_owner;
+    END IF;
+END $$;
+
+
 -- The universe write is one statement. Numeric columns, metric_states and
 -- compute_run_id move together or not at all:
 --

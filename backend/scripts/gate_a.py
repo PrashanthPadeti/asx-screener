@@ -110,7 +110,48 @@ def audit(tag: str, rows) -> None:
               f"unexplained={len(unexplained)} wrong={len(wrong)}")
 
 
+def contract_table_is_readable() -> tuple[bool, str]:
+    """Can the APPLICATION read screener.compute_runs, once it exists?
+
+    Gate A asserts a 503 on governed queries, and gets one whether the table
+    is missing, empty, or unreadable. That is a hole: after the migration the
+    table was owned by postgres while the app connects as another role, so
+    every governed query failed with InsufficientPrivilegeError and degraded
+    to the same 503 this gate treats as success. A canonical recompute could
+    then write a valid run and leave every governed surface unavailable, with
+    this gate still reporting PASS.
+
+    So the permission is checked positively, through the app's own engine.
+    Zero rows is a pass; a permission error is not.
+    """
+    import asyncio
+
+    from sqlalchemy import text
+
+    from app.db.session import AsyncSessionLocal
+
+    async def _probe() -> tuple[bool, str]:
+        async with AsyncSessionLocal() as db:
+            try:
+                await db.execute(text("SELECT 1 FROM screener.compute_runs LIMIT 1"))
+                return True, "readable"
+            except Exception as exc:                      # noqa: BLE001
+                await db.rollback()
+                message = str(exc)
+                if "does not exist" in message:
+                    return True, "absent (pre-migration)"
+                return False, message.splitlines()[0][:160]
+
+    return asyncio.run(_probe())
+
+
 def main() -> int:
+    readable, detail = contract_table_is_readable()
+    check(readable,
+          f"the application cannot read screener.compute_runs: {detail}. "
+          f"Governed queries would 503 forever and this gate would still pass.")
+    print(f"contract table: {detail}")
+
     check(len(COL2CANON) == len(GOVERNED),
           f"storage-column collision: {len(GOVERNED)} metrics -> "
           f"{len(COL2CANON)} columns")

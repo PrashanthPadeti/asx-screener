@@ -121,26 +121,40 @@ def contract_table_is_readable() -> tuple[bool, str]:
     then write a valid run and leave every governed surface unavailable, with
     this gate still reporting PASS.
 
-    So the permission is checked positively, through the app's own engine.
-    Zero rows is a pass; a permission error is not.
+    So the permission is checked positively, with the credentials the app
+    uses. Zero rows is a pass; a permission error is not.
+
+    On its own engine, disposed before returning. Using the application's
+    shared AsyncSessionLocal left a pooled connection bound to this probe's
+    event loop; TestClient then opened a different loop, checked that
+    connection out, and the app's startup DDL failed with "attached to a
+    different loop". A gate that breaks part of application startup in order
+    to run its own check can hide a real startup failure behind its own.
     """
     import asyncio
 
     from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
 
-    from app.db.session import AsyncSessionLocal
+    from app.core.config import settings
 
     async def _probe() -> tuple[bool, str]:
-        async with AsyncSessionLocal() as db:
-            try:
-                await db.execute(text("SELECT 1 FROM screener.compute_runs LIMIT 1"))
-                return True, "readable"
-            except Exception as exc:                      # noqa: BLE001
-                await db.rollback()
-                message = str(exc)
-                if "does not exist" in message:
-                    return True, "absent (pre-migration)"
-                return False, message.splitlines()[0][:160]
+        # NullPool plus dispose(): nothing survives this call to be checked
+        # out later on another loop.
+        engine = create_async_engine(settings.DATABASE_URL, poolclass=NullPool)
+        try:
+            async with engine.connect() as conn:
+                await conn.execute(
+                    text("SELECT 1 FROM screener.compute_runs LIMIT 1"))
+            return True, "readable"
+        except Exception as exc:                          # noqa: BLE001
+            message = str(exc)
+            if "does not exist" in message:
+                return True, "absent (pre-migration)"
+            return False, message.splitlines()[0][:160]
+        finally:
+            await engine.dispose()
 
     return asyncio.run(_probe())
 

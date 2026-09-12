@@ -200,7 +200,7 @@ freeze() {
 
     verify_running FROZEN
     case $? in
-        0) echo "verified: service active and SCHEDULERS FROZEN in the log" ;;
+        0) echo "verified: service active, health OK, 0 jobs, frozen=true" ;;
         3) echo "ERROR: $SERVICE is active but $HEALTH_URL does not answer." >&2
            echo "       Reverting .env and restarting." >&2
            restore_env

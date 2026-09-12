@@ -43,7 +43,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # until the repo root is on the path — importing them at the top of the file
 # is the exact ordering that took the pipeline down before.
 from app.core.db import get_database_url_sync  # noqa: E402
-from compute.engine.applicability import Applicability  # noqa: E402
+from compute.engine.applicability import (  # noqa: E402
+    Applicability, Assessment, Cause,
+)
 from compute.engine.factor_applicability import (  # noqa: E402
     OBSERVATION_COLS,  # noqa: E402
     DOMAIN_COLS,
@@ -55,7 +57,9 @@ from compute.engine.factor_applicability import (  # noqa: E402
 # the factor tables were previously unreadable to every test run and to
 # metric_registry.graph_health(). Scoring depends on the model; the model must
 # not depend on scoring.
-from compute.engine.factor_model import FactorSpec, model_for  # noqa: E402
+from compute.engine.factor_model import (  # noqa: E402
+    FactorSpec, composite_for, effective_weights, model_for,
+)
 from compute.engine.metric_states import LATEST_MODEL_VERSION  # noqa: E402
 from compute.engine.universe_writer import column_for  # noqa: E402
 
@@ -161,7 +165,8 @@ def pct_rank(series: pd.Series, direction: int) -> pd.Series:
 def compute_factor(df: pd.DataFrame, factor_name: str,
                    spec: Optional[FactorSpec] = None,
                    assessments: Optional[dict] = None,
-                   model_version: str = LATEST_MODEL_VERSION) -> pd.Series:
+                   model_version: str = LATEST_MODEL_VERSION,
+                   states_out: Optional[dict] = None) -> pd.Series:
     """One factor score, from the weights the model declares.
 
     The invariant this enforces:
@@ -222,47 +227,63 @@ def compute_factor(df: pd.DataFrame, factor_name: str,
                     "exists to remove", factor_name)
         return ranks.mean(axis=1, skipna=True).round(0).clip(0, 100)
 
+    assessments = assessments or {}
+
     codes = df[CODE_COLUMN] if CODE_COLUMN in df.columns else pd.Series(
         df.index, index=df.index)
 
-    # Per-row weights, built from the declaration and zeroed only where the
-    # model permits. Vectorised rather than looped so the policy is visible as
-    # one table: rows are companies, columns are declared constituents, and a
-    # zero means "dropped under a declared rule", never "happened to be null".
-    weights = pd.DataFrame(
-        {c.metric: float(c.weight) for c in declared},
-        index=df.index, columns=[c.metric for c in declared])
-    unavailable = pd.Series(False, index=df.index)
+    # One policy, in one place. This used to reimplement the rules as a
+    # vectorised weight table, which meant the declared contract existed twice
+    # — and two implementations of the same semantics diverge, which is the
+    # failure mode this whole model exists to remove. effective_weights() is
+    # now the only thing that decides.
+    score = pd.Series(float("nan"), index=df.index)
 
     for position, code in zip(df.index, codes):
-        per_metric = (assessments or {}).get(code, {})
+        assessed = dict(assessments.get(code, {}))
+
+        # An ungoverned constituent has no assessment because no gate ran for
+        # it, so its value is all the evidence there is. Synthesising one here
+        # keeps effective_weights the single authority rather than teaching
+        # compute_factor a second, quieter rule for a subset of signals.
         for c in declared:
-            state = getattr(per_metric.get(c.metric), "state", None)
-            if state is Applicability.NOT_MEANINGFUL:
-                if not spec.domain_reweight:
-                    unavailable.at[position] = True
-                weights.at[position, c.metric] = 0.0
-            elif state in (Applicability.UNAVAILABLE,
-                           Applicability.INSUFFICIENT_DATA):
-                unavailable.at[position] = True
+            if c.metric in assessed:
+                continue
+            raw = df.at[position, column[c.metric]]
+            assessed[c.metric] = (
+                Assessment(c.metric, Applicability.UNAVAILABLE, None,
+                           "ungoverned constituent with no value", None,
+                           cause=Cause.SOURCE_MISSING)
+                if pd.isna(raw) else
+                Assessment(c.metric, Applicability.APPLICABLE, float(raw), "",
+                           None))
 
-    # A constituent with no assessment and no value is still a declared signal
-    # we cannot supply. Treating it as droppable would be the skipna rule
-    # returning by another name, so it makes the factor unavailable too.
-    unavailable |= ranks[[c.metric for c in declared]].isna().where(
-        weights > 0, other=False).any(axis=1)
+        effective = effective_weights(spec, assessed)
+        if states_out is not None:
+            states_out[code] = effective
+        if not effective.usable:
+            continue
 
-    total = weights.sum(axis=1)
-    # Every constituent out of domain is no score, not a low one.
-    unavailable |= (total <= 0)
+        total = 0.0
+        for metric, weight in effective.weights.items():
+            rank = ranks.at[position, metric]
+            if pd.isna(rank):
+                # Applicable with no rank means the column is empty for a
+                # metric the assessment called usable — a contradiction the
+                # persistence validator exists to catch. Withhold rather than
+                # score it as zero.
+                total = float("nan")
+                break
+            total += rank * weight
+        score.at[position] = total
 
-    normalised = weights.div(total.replace(0, np.nan), axis=0)
-    score = (ranks.fillna(0) * normalised).sum(axis=1, min_count=1)
-    return score.where(~unavailable).round(0).clip(0, 100)
+    return score.round(0).clip(0, 100)
 
 
 def compute_composite(df_scores: pd.DataFrame,
-                      source_failed: Optional[pd.Series] = None) -> pd.Series:
+                      source_failed: Optional[pd.Series] = None,
+                      factor_states: Optional[dict] = None,
+                      model_version: str = LATEST_MODEL_VERSION) -> pd.Series:
     """Equal-weight composite of the 5 factor scores; requires >= 2 non-null.
 
     ``source_failed`` marks rows where a factor is missing because its *feed*
@@ -275,16 +296,64 @@ def compute_composite(df_scores: pd.DataFrame,
     converts a five-factor model into a four-factor one and keeps the name,
     and the resulting number looks entirely ordinary next to a genuine one.
     """
-    score_cols = ["value_score", "quality_score", "growth_score", "momentum_score", "income_score"]
-    available = [c for c in score_cols if c in df_scores.columns]
-    stacked = df_scores[available]
-    # Require at least 2 valid factors to produce a composite
-    composite = stacked.mean(axis=1, skipna=True).round(0).clip(0, 100)
-    # Null out stocks with fewer than 2 valid factor scores
-    valid_count = stacked.notna().sum(axis=1)
-    composite = composite.where(valid_count >= 2)
+    spec = composite_for(model_version)
 
-    return withhold_source_failed(composite, source_failed)
+    if factor_states is None:
+        # The old behaviour: an equal-weight mean of whatever is non-null,
+        # requiring two. That is the skipna defect one level up — a company
+        # with two surviving factors received a "composite" built from 40% of
+        # the declared model, indistinguishable from one built on all five.
+        # Kept only so a caller without factor states is not silently broken,
+        # and loud because it should not happen in the pipeline.
+        log.warning("composite computed without factor states — falling back "
+                    "to a mean of whatever is non-null, which is the defect "
+                    "this signature exists to remove")
+        stacked = df_scores[[c.metric for c in spec.constituents
+                             if c.metric in df_scores.columns]]
+        composite = stacked.mean(axis=1, skipna=True).round(0).clip(0, 100)
+        return withhold_source_failed(
+            composite.where(stacked.notna().sum(axis=1) >= 2), source_failed)
+
+    codes = df_scores[CODE_COLUMN]
+    composite = pd.Series(float("nan"), index=df_scores.index)
+
+    for position, code in zip(df_scores.index, codes):
+        # A factor's own EffectiveWeights becomes this composite's assessment
+        # of it. NOT_MEANINGFUL travels as NOT_MEANINGFUL so the composite may
+        # reweight within its floor; UNAVAILABLE travels as UNAVAILABLE so it
+        # refuses — including when the cause is a dividend feed outage three
+        # layers down, which is exactly the case that must not quietly become
+        # a four-factor model.
+        assessments = {}
+        for c in spec.constituents:
+            effective = (factor_states.get(c.metric.removesuffix("_score"), {})
+                         .get(code))
+            if effective is None:
+                assessments[c.metric] = Assessment(
+                    c.metric, Applicability.UNAVAILABLE, None,
+                    "factor not scored", None, cause=Cause.SOURCE_MISSING)
+                continue
+            assessments[c.metric] = Assessment(
+                c.metric, effective.state,
+                df_scores.at[position, c.metric]
+                if c.metric in df_scores.columns else None,
+                effective.reason, None, cause=effective.cause)
+
+        resolved = effective_weights(spec, assessments)
+        if not resolved.usable:
+            continue
+
+        total = 0.0
+        for metric, weight in resolved.weights.items():
+            value = df_scores.at[position, metric]
+            if pd.isna(value):
+                total = float("nan")
+                break
+            total += float(value) * weight
+        composite.at[position] = total
+
+    return withhold_source_failed(composite.round(0).clip(0, 100),
+                                  source_failed)
 
 
 
@@ -588,11 +657,16 @@ def run(conn, dry_run: bool = False) -> int:
     # NaN cannot say whether it is out of domain or merely absent, and those
     # two have opposite correct answers.
     model = model_for(LATEST_MODEL_VERSION)
+    factor_states: dict[str, dict] = {}
     for factor in ("value", "quality", "growth", "momentum", "income"):
+        states: dict = {}
         df[f"{factor}_score"] = compute_factor(
             df, factor, model[factor], masked.assessments,
-            model_version=LATEST_MODEL_VERSION)
-    df["composite_score"]= compute_composite(df, masked.source_failed)
+            model_version=LATEST_MODEL_VERSION, states_out=states)
+        factor_states[factor] = states
+    df["composite_score"]= compute_composite(
+        df, masked.source_failed, factor_states,
+        model_version=LATEST_MODEL_VERSION)
 
     # Multibagger potential — computed after momentum_score, which it consumes.
     mb = compute_multibagger(df)

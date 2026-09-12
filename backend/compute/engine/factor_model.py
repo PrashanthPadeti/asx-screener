@@ -88,7 +88,39 @@ class FactorSpec:
     #: the caller to expose.
     domain_reweight: bool = True
 
+    #: How much of the declared nominal weight must remain applicable for the
+    #: result to still be this model.
+    #:
+    #: Unlimited reweighting reproduces the defect it was introduced to fix,
+    #: one level down: a factor keeps its name after most of its declared
+    #: economic dimensions have gone. Measured on production, 429 companies
+    #: — almost all pre-revenue mining explorers — scored Value on
+    #: {fcf_yield, price_to_book} alone, having legitimately lost revenue,
+    #: earnings and EBITDA. That pair may well describe an explorer, but it is
+    #: not the five-signal Value model, and calling it Value is the
+    #: label-preservation problem in miniature.
+    #:
+    #: Expressed as retained weight rather than a count, because counts only
+    #: coincide with weight while every constituent is equally weighted and a
+    #: future unequal model would break a count-based floor silently.
+    #:
+    #: 0.60 with five equal constituents means 3/5 scores and 2/5 does not.
+    #: The consequence is deliberate and recorded: a bank retains only
+    #: {roe, roce} — 40% — because debt_to_equity, net_margin and
+    #: altman_z_score are all structurally NM for banks, so V2 gives banks no
+    #: Quality score. That is a fact about the model's reach, not a coverage
+    #: bug. V2's Quality methodology is a general-corporate methodology; a
+    #: bank Quality model needs its own signals, weights and validation, and
+    #: blessing {roe, roce} as one merely because they are what survived would
+    #: be inventing a methodology to preserve coverage — which is the thing
+    #: this contract exists to refuse.
+    min_effective_weight_fraction: float = 0.60
+
     def __post_init__(self) -> None:
+        if not 0.0 < self.min_effective_weight_fraction <= 1.0:
+            raise ValueError(
+                f"{self.name}: min_effective_weight_fraction must be in "
+                f"(0, 1], got {self.min_effective_weight_fraction}")
         total = sum(c.weight for c in self.constituents)
         if abs(total - 1.0) > 1e-9:
             raise ValueError(
@@ -187,6 +219,20 @@ def effective_weights(spec: FactorSpec,
             reason="every declared constituent is out of domain")
 
     total = sum(c.weight for c in keep)
+
+    # The floor. NOT_MEANINGFUL and not UNAVAILABLE, because nothing is
+    # missing: every observation may be perfectly healthy and the model simply
+    # has too few economically applicable dimensions left to be itself. A bank
+    # with flawless ROE and ROCE data fails this — its Quality is not absent,
+    # it is inapplicable.
+    if total < spec.min_effective_weight_fraction - 1e-9:
+        return EffectiveWeights(
+            spec.name, {}, dropped_for_domain=out_of_domain,
+            state=Applicability.NOT_MEANINGFUL, cause=Cause.DOMAIN,
+            reason=(f"insufficient applicable factor weight: {total:.2f} of "
+                    f"1.00 retained, floor {spec.min_effective_weight_fraction:.2f}"
+                    f"; out of domain: {', '.join(out_of_domain)}"))
+
     return EffectiveWeights(
         spec.name,
         {c.metric: c.weight / total for c in keep},
@@ -265,6 +311,44 @@ FACTOR_MODELS: dict[str, dict[str, FactorSpec]] = {
     "FACTOR_MODEL_V1": FACTOR_MODEL_V1,
     "FACTOR_MODEL_V2": FACTOR_MODEL_V2,
 }
+
+#: The headline composite, declared with the same machinery as a factor.
+#:
+#: It had an implicit policy — an equal-weight mean of whatever factor scores
+#: were non-null, requiring at least two — which is the skipna defect one level
+#: up: a company with two surviving factors received a "composite" built from
+#: 40% of the declared model, indistinguishable from one built on all five.
+#:
+#: Declaring it as a FactorSpec makes the same three rules apply, for the same
+#: reasons. A factor that is NOT_MEANINGFUL for this company's domain may be
+#: reweighted around, within the floor. A factor that is UNAVAILABLE — because
+#: its own constituents were missing, or because the dividend feed is down —
+#: refuses outright, since a composite that quietly drops Income during a feed
+#: outage is a four-factor model wearing a five-factor name.
+#:
+#: The floor matters most here. A bank whose Quality is NOT_MEANINGFUL retains
+#: 80% and still composites; a company that loses Quality and Value retains
+#: 60% and just clears it; one that loses three is below and receives no
+#: composite rather than a number built from two-fifths of the model.
+COMPOSITE_MODELS: dict[str, FactorSpec] = {
+    version: FactorSpec(
+        "composite",
+        tuple(Constituent(f"{factor}_score", 1.0 / len(model), +1)
+              for factor in sorted(model)),
+        domain_reweight=True,
+        min_effective_weight_fraction=0.60)
+    for version, model in FACTOR_MODELS.items()
+}
+
+
+def composite_for(version: str) -> FactorSpec:
+    """Fail closed on an unknown version, as model_for does."""
+    try:
+        return COMPOSITE_MODELS[version]
+    except KeyError:
+        raise ValueError(
+            f"unknown factor model version {version!r}; known versions are "
+            f"{', '.join(sorted(COMPOSITE_MODELS))}") from None
 
 
 def model_for(version: str) -> dict[str, FactorSpec]:

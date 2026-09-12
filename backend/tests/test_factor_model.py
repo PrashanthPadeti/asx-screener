@@ -291,6 +291,99 @@ def test_v2_changes_exactly_two_factors_and_only_by_removal():
         assert not added, f"V2 {name} introduces {added} under a version bump"
 
 
+# ── The minimum semantic coverage floor ──────────────────────────────────────
+# Unlimited reweighting reproduces the defect it was meant to fix: a factor
+# keeps its name after most of its declared dimensions have gone. 0.60 with
+# five equal constituents means 3/5 scores and 2/5 does not.
+
+
+def retained(spec, *not_meaningful):
+    assessments = all_applicable(spec)
+    for metric in not_meaningful:
+        assessments[metric] = not_meaningful_assessment(metric)
+    return effective_weights(spec, assessments)
+
+
+def not_meaningful_assessment(metric):
+    return Assessment(metric, Applicability.NOT_MEANINGFUL, None,
+                      "out of domain", Domain.BANK, cause=Cause.DOMAIN)
+
+
+def test_a_bank_gets_no_v2_quality_score():
+    """The consequence, recorded rather than discovered.
+
+    debt_to_equity, net_margin and altman_z_score are all structurally NM for
+    a bank, leaving {roe, roce} — 40% of declared weight. V2's Quality is a
+    general-corporate methodology and a bank is outside its reach.
+
+    NOT_MEANINGFUL, not UNAVAILABLE: the bank's ROE and ROCE may be perfectly
+    healthy. Nothing is missing. The model simply has too few applicable
+    dimensions left to be itself.
+    """
+    eff = retained(quality(V2), "debt_to_equity", "net_margin",
+                   "altman_z_score")
+
+    assert not eff.usable
+    assert eff.state is Applicability.NOT_MEANINGFUL
+    assert eff.cause is Cause.DOMAIN
+    assert eff.weights == {}
+    assert "insufficient applicable factor weight" in eff.reason
+    assert "0.40" in eff.reason and "0.60" in eff.reason
+
+
+def test_an_explorer_gets_no_v2_value_score():
+    """429 companies on production, almost all pre-revenue explorers, scored
+    Value on {fcf_yield, price_to_book} after legitimately losing revenue,
+    earnings and EBITDA. That pair may describe an explorer; it is not the
+    five-signal Value model, and a future explorer Value methodology should be
+    designed rather than arrived at by attrition."""
+    eff = retained(model_for(V2)["value"], "pe_ratio", "price_to_sales",
+                   "ev_ebitda")
+
+    assert eff.state is Applicability.NOT_MEANINGFUL
+    assert eff.weights == {}
+
+
+def test_three_of_five_scores_with_explicit_thirds():
+    eff = retained(quality(V2), "debt_to_equity", "net_margin")
+
+    assert eff.usable and eff.reweighted
+    assert set(eff.weights) == {"roe", "roce", "altman_z_score"}
+    assert all(abs(w - 1 / 3) < 1e-9 for w in eff.weights.values())
+
+
+def test_four_of_five_scores_with_explicit_quarters():
+    eff = retained(quality(V2), "debt_to_equity")
+
+    assert eff.usable
+    assert all(abs(w - 0.25) < 1e-9 for w in eff.weights.values())
+
+
+def test_the_floor_does_not_apply_to_an_unavailable_constituent():
+    """Ordering matters. Four applicable constituents retain 80%, comfortably
+    above the floor — but one UNAVAILABLE refuses regardless, because missing
+    evidence and narrowed applicability are not interchangeable however much
+    weight survives."""
+    spec = quality(V2)
+    assessments = all_applicable(spec)
+    assessments["roe"] = unavailable("roe")
+
+    eff = effective_weights(spec, assessments)
+    assert eff.state is Applicability.UNAVAILABLE
+    assert eff.cause is Cause.SOURCE_MISSING
+
+
+def test_the_floor_is_declared_per_spec_and_validated():
+    assert model_for(V2)["quality"].min_effective_weight_fraction == 0.60
+    try:
+        FactorSpec("bad", (Constituent("a", 1.0, 1),),
+                   min_effective_weight_fraction=0.0)
+    except ValueError as exc:
+        assert "min_effective_weight_fraction" in str(exc)
+    else:
+        raise AssertionError("a floor of zero permits any residue")
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

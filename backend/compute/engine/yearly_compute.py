@@ -37,7 +37,7 @@ import os
 import logging
 import argparse
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Mapping, Optional
 
 import psycopg2
 import psycopg2.extensions
@@ -51,6 +51,9 @@ from pathlib import Path
 # The database credential lives in the environment, never in source.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
+# Pure period arithmetic, kept out of this module so it can be
+# exercised without a database credential.
+from compute.engine.periods import average_over  # noqa: E402
 
 
 # Cast PostgreSQL NUMERIC → Python float automatically
@@ -147,10 +150,30 @@ def _clamp(val: Optional[float], max_abs: float = 9_999.0) -> Optional[float]:
 
 
 def _avg(values: list, n: int) -> Optional[float]:
-    """Mean of last n non-None values from a list."""
+    """SUPERSEDED — positional and lossy. Use average_over().
+
+    Two independent defects lived in three lines. values[-n:] takes the last n
+    LIST ENTRIES, so a company reporting 2016, 2019, 2022 had its "3-year
+    average" computed across seven years. And the None values inside that
+    window were dropped before averaging, so avg_roe_3y could be a single
+    year's ROE labelled as three, indistinguishable from a genuine one.
+
+    Measured on production, the window half is small — one company of 1,595 on
+    a 3-year window, eight of 1,528 on 5-year — because an average reaches
+    back n-1 years where a CAGR reaches n. The coverage half is small for
+    roe, roa and roce (about 1%) and large for roic, where 537 of 1,594
+    contiguous windows hold fewer than three observations. That is roic's own
+    sparsity showing through, not the rule creating a problem: the system must
+    not manufacture an apparently robust three-year average from one
+    observation because the underlying metric is thin.
+
+    Kept for the record. Callers use average_over.
+    """
     vals = [_f(v) for v in values[-n:]]
     vals = [v for v in vals if v is not None]
     return round(sum(vals) / len(vals), 4) if vals else None
+
+
 
 
 # ── Data Fetchers ─────────────────────────────────────────────────────────────
@@ -454,6 +477,15 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
     rows   = []
 
     # Rolling lists (chronological order)
+    # Year-keyed, because an average over n years has to be able to name the
+    # years. The positional lists below remain for the helpers that genuinely
+    # want a sequence — eps volatility, fcf positive-year counts — rather than
+    # a fiscal window.
+    by_year: dict[str, dict[int, Optional[float]]] = {
+        name: {} for name in
+        ("roe", "roa", "roce", "roic", "gross_margin", "ebitda_margin",
+         "operating_margin", "net_margin", "eps_growth")}
+
     roe_l = []; roa_l  = []; roce_l = []
     gm_l  = []; em_l   = []; om_l   = []; nm_l = []
     epsg_l = []
@@ -644,9 +676,23 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         em_l  .append(ebitda_margin); om_l.append(ebit_margin)
         nm_l  .append(net_margin);    epsg_l.append(eps_g1)
 
+        # The same values, labelled by the year they belong to. A None is
+        # recorded rather than skipped: "this year has no ROIC" is a fact the
+        # averaging contract needs, and dropping it is what let a one-year
+        # mean call itself three.
+        by_year["roe"][fy] = roe
+        by_year["roa"][fy] = roa
+        by_year["roce"][fy] = roce
+        by_year["roic"][fy] = roic
+        by_year["gross_margin"][fy] = gross_margin
+        by_year["ebitda_margin"][fy] = ebitda_margin
+        by_year["operating_margin"][fy] = ebit_margin
+        by_year["net_margin"][fy] = net_margin
+        by_year["eps_growth"][fy] = eps_g1
+
         # ── ROIC rolling averages ─────────────────────────────────────────
-        avg_roic_3y = _avg(roic_l, 3)
-        avg_roic_5y = _avg(roic_l, 5)
+        avg_roic_3y = average_over(by_year["roic"], fy, 3)
+        avg_roic_5y = average_over(by_year["roic"], fy, 5)
 
         # ── Quick-win metrics ─────────────────────────────────────────────
         # 1. OCF / Net Profit (cash conversion quality)
@@ -716,7 +762,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # 7. Brand / Pricing Power proxy (0–3)
         #    Sustained high ROE + high ROIC + strong FCF generation
         _bps = 0
-        _avg_roe5  = _avg(roe_l, 5)
+        _avg_roe5  = average_over(by_year["roe"], fy, 5)
         _avg_roic5 = avg_roic_5y   # already computed above
         if _avg_roe5  is not None and _avg_roe5  > 0.15: _bps += 1
         if _avg_roic5 is not None and _avg_roic5 > 0.12: _bps += 1
@@ -838,14 +884,14 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             # BVPS CAGR
             cn("book_value_per_share", 3), cn("book_value_per_share", 5),
             # Rolling averages
-            _avg(roe_l, 3),  _avg(roe_l, 5),
-            _avg(roa_l, 3),  _avg(roa_l, 5),
-            _avg(roce_l, 3), _avg(roce_l, 5),
-            _avg(gm_l, 3),   _avg(gm_l, 5),
-            _avg(em_l, 3),   _avg(em_l, 5),
-            _avg(om_l, 3),   _avg(om_l, 5),
-            _avg(nm_l, 3),   _avg(nm_l, 5),
-            _avg(epsg_l, 3), _avg(epsg_l, 5),
+            average_over(by_year["roe"], fy, 3),  average_over(by_year["roe"], fy, 5),
+            average_over(by_year["roa"], fy, 3),  average_over(by_year["roa"], fy, 5),
+            average_over(by_year["roce"], fy, 3), average_over(by_year["roce"], fy, 5),
+            average_over(by_year["gross_margin"], fy, 3),   average_over(by_year["gross_margin"], fy, 5),
+            average_over(by_year["ebitda_margin"], fy, 3),   average_over(by_year["ebitda_margin"], fy, 5),
+            average_over(by_year["operating_margin"], fy, 3),   average_over(by_year["operating_margin"], fy, 5),
+            average_over(by_year["net_margin"], fy, 3),   average_over(by_year["net_margin"], fy, 5),
+            average_over(by_year["eps_growth"], fy, 3), average_over(by_year["eps_growth"], fy, 5),
             # Risk
             vol_1y, sharpe, max_dd,
             # Raw financials (for history tables)

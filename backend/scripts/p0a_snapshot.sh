@@ -111,9 +111,18 @@ $PSQL -x -c "
            count(grossed_up_yield)      AS grossed_up_yield_n,
            count(composite_score)       AS composite_score_n
       FROM screener.universe;" > "$OUT/counts.txt" 2>&1
+# Row count only: an earlier version selected max(as_of), a column invented
+# rather than looked up, and the query errored out. The table's real columns
+# are recorded instead, so the post-recompute comparison has a schema to work
+# from without guessing again.
 $PSQL -x -c "
-    SELECT count(*) AS benchmark_rows, max(as_of) AS last_as_of
-      FROM market.sector_benchmarks;" >> "$OUT/counts.txt" 2>&1
+    SELECT count(*) AS benchmark_rows FROM market.sector_benchmarks;" \
+    >> "$OUT/counts.txt" 2>&1
+$PSQL -c "
+    SELECT column_name, data_type
+      FROM information_schema.columns
+     WHERE table_schema='market' AND table_name='sector_benchmarks'
+     ORDER BY ordinal_position;" > "$OUT/sector_benchmarks_schema.txt" 2>&1
 
 # The specific values P0-A exists to correct, recorded before they change, so
 # the fix can be demonstrated rather than asserted.
@@ -137,8 +146,14 @@ if [ "$($PSQL -tAc "SELECT to_regclass('screener.compute_runs') IS NOT NULL;")" 
 fi
 
 echo; echo "dumping $TABLES ..."
+# Written to stdout and redirected by THIS shell rather than passed with -f.
+# pg_dump runs as the postgres user, which cannot write into a root-owned 700
+# directory — the first run failed with "Permission denied" on the output
+# file. Redirecting here keeps the dump's ownership and the directory's
+# permissions the operator's, and pg_dump only needs to produce bytes.
 # shellcheck disable=SC2086
-if sudo -u postgres pg_dump -d "$DBNAME" -Fc $TABLES -f "$OUT/p0a_pre_migration.dump" 2>"$OUT/dump.err"; then
+if sudo -u postgres pg_dump -d "$DBNAME" -Fc $TABLES \
+        > "$OUT/p0a_pre_migration.dump" 2>"$OUT/dump.err"; then
     ls -lh "$OUT/p0a_pre_migration.dump"
 else
     echo "ERROR: pg_dump failed — DO NOT PROCEED WITH THE MIGRATION" >&2
@@ -146,12 +161,23 @@ else
     exit 3
 fi
 
-# A dump that cannot be listed cannot be restored. Checking now is worth more
-# than discovering it during an incident.
-if ! sudo -u postgres pg_restore -l "$OUT/p0a_pre_migration.dump" > "$OUT/dump_toc.txt" 2>&1; then
-    echo "ERROR: the dump is not readable by pg_restore" >&2
+# A zero-length dump is a successful pg_dump that wrote nothing useful, which
+# a bare exit status would not catch.
+if [ ! -s "$OUT/p0a_pre_migration.dump" ]; then
+    echo "ERROR: the dump is empty — DO NOT PROCEED WITH THE MIGRATION" >&2
     exit 3
 fi
+
+# A dump that cannot be listed cannot be restored. Checking now is worth more
+# than discovering it during an incident. Run as the invoking user: pg_restore
+# -l reads the file and needs no database connection, and the postgres user
+# cannot read this directory either.
+if ! pg_restore -l "$OUT/p0a_pre_migration.dump" > "$OUT/dump_toc.txt" 2>&1; then
+    echo "ERROR: the dump is not readable by pg_restore" >&2
+    cat "$OUT/dump_toc.txt" >&2
+    exit 3
+fi
+echo "dump verified readable: $(grep -c . "$OUT/dump_toc.txt") TOC entries"
 
 cp migrations/add_metric_states_to_universe.sql \
    migrations/add_benchmark_states_to_sector_benchmarks.sql \

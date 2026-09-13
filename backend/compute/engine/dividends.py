@@ -75,6 +75,31 @@ RECONCILE_TOL = 0.0005
 # quiet month without clearing a broken feed.
 FEED_STALENESS_DAYS = 35
 
+#: The breadth floor, calibrated from evidence rather than chosen.
+#:
+#: Measured over 136 rolling 35-day windows across the repaired feed
+#: (2024-01-01 onward, stepped weekly):
+#:
+#:     worst window     68 rows / 66 issuers
+#:     5th percentile   86 rows / 85 issuers
+#:     median          218 rows / 201 issuers
+#:
+#: The observed outage held 0 rows in 35 days and 1 in 70. So 20 sits 3.4x
+#: below the quietest genuinely-healthy window and 20x above the failure it
+#: exists to catch — it cannot fire on a quiet fortnight or a holiday cluster,
+#: and could not have missed what happened here.
+#:
+#: Calibrated against the REPAIRED table deliberately: the broken one would
+#: have calibrated the floor to the outage. These numbers describe what a
+#: healthy feed looks like, not what this feed historically delivered — the
+#: reload added 56% more rows across every year, so the two are not the same
+#: thing.
+#:
+#: Both conditions are required. A feed returning 100 rows for three issuers
+#: is broken in a way a row count alone cannot see.
+MIN_RECENT_ROWS = 20
+MIN_RECENT_ISSUERS = 20
+
 
 class GrossUpPolicy(str, Enum):
     """How a payment's grossed-up amount is chosen.
@@ -443,17 +468,45 @@ class FeedHealth:
 
     @property
     def healthy(self) -> bool:
+        return self.failure is None
+
+    @property
+    def failure(self) -> Optional[str]:
+        """Which condition fails, or None. Freshness and breadth, both hard.
+
+        Freshness alone is a weak test, and always was: one stray fresh row
+        makes the watermark look current while issuer coverage stays broken.
+        Breadth is the second condition, and it is a floor rather than an
+        expectation — it exists to catch collapse, not to police a quiet
+        fortnight.
+        """
         lag = self.lag_days
         if lag is None:
             # An empty table, or one holding only future announcements. Not
             # evidence of universal non-payment -- 2,500 companies do not all
             # stop paying at once -- and unequivocally a source failure.
-            return False
-        # `0 <=` is defensive rather than reachable: latest_ex_date is now
-        # bounded to today by the query, so a negative lag would mean the
-        # clock disagrees with the database. Reporting healthy on that basis
-        # is exactly the failure this guard replaced.
-        return 0 <= lag <= FEED_STALENESS_DAYS
+            return "no ex-date has occurred"
+        if lag < 0:
+            # Defensive rather than reachable: latest_ex_date is bounded to
+            # today by the query, so a negative lag means the clock disagrees
+            # with the database. Reporting healthy on that basis is exactly
+            # the failure this replaced.
+            return f"latest ex-date is {-lag} days in the future"
+        if lag > FEED_STALENESS_DAYS:
+            return f"{lag} days behind (limit {FEED_STALENESS_DAYS})"
+
+        # Unknown breadth does not fail the feed: fetch_feed_health always
+        # supplies both counts, so None here means a hand-constructed object
+        # rather than a source that declined to answer. A test asserts the
+        # real constructor never leaves them unset.
+        if self.recent_rows is not None and self.recent_rows < MIN_RECENT_ROWS:
+            return (f"only {self.recent_rows} ex-dates in the last "
+                    f"{FEED_STALENESS_DAYS} days (floor {MIN_RECENT_ROWS})")
+        if (self.recent_issuers is not None
+                and self.recent_issuers < MIN_RECENT_ISSUERS):
+            return (f"only {self.recent_issuers} issuers in the last "
+                    f"{FEED_STALENESS_DAYS} days (floor {MIN_RECENT_ISSUERS})")
+        return None
 
     @property
     def reason(self) -> str:
@@ -462,8 +515,9 @@ class FeedHealth:
                 return (f"dividend feed holds no ex-date that has occurred; "
                         f"{self.future_announced} announced for future dates")
             return "dividend feed holds no ex-dates"
-        detail = (f"dividend feed incomplete — latest occurred ex-date "
-                  f"{self.latest_ex_date.isoformat()}, {self.lag_days} days behind")
+        detail = (f"dividend feed incomplete — {self.failure or 'usable'}; "
+                  f"latest occurred ex-date {self.latest_ex_date.isoformat()}, "
+                  f"{self.lag_days} days behind")
         if self.recent_rows is not None:
             detail += (f" ({self.recent_rows} rows / {self.recent_issuers} "
                        f"issuers in the last {FEED_STALENESS_DAYS} days)")

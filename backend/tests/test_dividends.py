@@ -24,6 +24,8 @@ from compute.engine.dividends import (  # noqa: E402
     CORP_TAX_RATE,
     DividendState,
     FeedHealth,
+    MIN_RECENT_ISSUERS,
+    MIN_RECENT_ROWS,
     GrossUpPolicy,
     Payment,
     dividend_metrics,
@@ -475,6 +477,61 @@ def test_a_negative_lag_is_never_healthy():
 
     assert h.lag_days < 0
     assert not h.healthy
+
+
+# ── Breadth: a floor calibrated from evidence ────────────────────────────────
+
+def test_the_quietest_real_window_is_still_healthy():
+    """The case a badly-chosen floor breaks. Across 136 rolling 35-day windows
+    of the repaired feed the worst held 68 rows / 66 issuers. A floor that
+    rejects that would fire every winter and teach an operator to ignore it."""
+    h = FeedHealth(latest_ex_date=date(2026, 9, 11), as_of=date(2026, 9, 13),
+                   recent_rows=68, recent_issuers=66)
+
+    assert h.healthy, h.failure
+
+
+def test_fresh_but_thin_is_not_healthy():
+    """Freshness alone was always weak: one stray fresh row makes the
+    watermark current while coverage stays broken. Breadth is the second hard
+    condition, not a corroborating nicety."""
+    h = FeedHealth(latest_ex_date=date(2026, 9, 11), as_of=date(2026, 9, 13),
+                   recent_rows=4, recent_issuers=3)
+
+    assert not h.healthy
+    assert "4 ex-dates" in h.failure
+
+
+def test_rows_without_issuers_is_its_own_failure():
+    """100 rows across three issuers is broken in a way a row count cannot
+    see, so both conditions are required rather than either."""
+    h = FeedHealth(latest_ex_date=date(2026, 9, 11), as_of=date(2026, 9, 13),
+                   recent_rows=100, recent_issuers=3)
+
+    assert not h.healthy
+    assert "issuers" in h.failure
+
+
+def test_the_floor_sits_well_below_observed_healthy_and_above_the_outage():
+    """The calibration itself, asserted so a future edit cannot quietly move
+    the floor into either failure mode.
+
+    worst healthy window  68 rows / 66 issuers
+    observed outage        0 rows in 35 days
+    """
+    assert MIN_RECENT_ROWS < 68 / 2, "must clear the quietest healthy window"
+    assert MIN_RECENT_ISSUERS < 66 / 2
+    assert MIN_RECENT_ROWS > 1, "must still reject the outage we measured"
+    assert MIN_RECENT_ISSUERS > 1
+
+
+def test_freshness_is_checked_before_breadth():
+    """A stale feed reports staleness, not thinness. Both are true of a dead
+    feed, and only the first tells an operator what happened."""
+    h = FeedHealth(latest_ex_date=date(2026, 8, 3), as_of=date(2026, 9, 13),
+                   recent_rows=0, recent_issuers=0)
+
+    assert "days behind" in h.failure
 
 
 if __name__ == "__main__":

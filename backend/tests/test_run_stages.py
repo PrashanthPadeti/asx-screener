@@ -321,6 +321,64 @@ def test_rows_written_is_no_longer_accepted_as_publication():
     assert "rows_written IS NOT NULL" not in sql
 
 
+# ── The driver's preconditions ───────────────────────────────────────────────
+
+def _driver():
+    import importlib.util, os
+    from pathlib import Path as _P
+    os.environ.setdefault("DATABASE_URL_SYNC", "postgresql://unused/unused")
+    path = _P(__file__).resolve().parents[1] / "scripts" / "p0a_canonical_run.py"
+    spec = importlib.util.spec_from_file_location("p0a_canonical_run", path)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as e:
+        raise Skipped(f"needs the compute stack: {e}")
+    return module
+
+
+def _health(*unhealthy, **detail):
+    from datetime import datetime, timezone
+    from compute.engine.metric_states import SourceHealth
+    return SourceHealth(run_at=datetime.now(timezone.utc),
+                        unhealthy_sources=tuple(unhealthy), detail=detail)
+
+
+def test_an_unhealthy_source_never_opens_a_run():
+    """Fail-closed, and before create_run rather than after.
+
+    A run under an unhealthy source withholds Income and the composite
+    universe-wide -- correctly -- but can never produce the contract the
+    driver exists to publish. Giving it a run identity would record an attempt
+    that was structurally incapable of succeeding.
+    """
+    drv = _driver()
+    try:
+        drv.require_publishable(_health("dividends", dividends="41 days behind"))
+    except drv.PreconditionFailed as e:
+        assert "dividends" in str(e)
+    else:
+        raise AssertionError("an unhealthy source must not open a run")
+
+
+def test_a_healthy_source_is_admitted():
+    drv = _driver()
+    drv.require_publishable(_health())
+
+
+def test_there_is_no_override_for_unhealthy_sources():
+    """If an unhealthy-source experiment is ever needed it belongs in a mode
+    structurally forbidden from finalising, not in a flag that relaxes this
+    precondition. A flag would be reached for under pressure."""
+    drv = _driver()
+    import inspect
+
+    source = inspect.getsource(drv)
+    for flag in ("allow-unhealthy", "allow_unhealthy", "ignore-health",
+                 "skip_health"):
+        assert flag not in source, f"{flag} weakens the health precondition"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

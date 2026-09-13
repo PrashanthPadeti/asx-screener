@@ -133,6 +133,17 @@ def main() -> int:
     print(f"  compute_run_id populated   : {row['with_run']:,}")
     print(f"  built at                   : {row['built_at']}")
 
+    sidecars = row["with_sidecar"]
+    runs_attributed = row["with_run"]
+    if sidecars == 0:
+        print("\n  *** NO SIDECAR WAS PERSISTED BY THIS RUN ***")
+        print("  Every 'unexplained' count in the coverage table below is")
+        print("  therefore 'no sidecar exists at all', NOT 'this metric lost")
+        print("  its state'. The assessments were computed -- the domain tally")
+        print("  is in the run log -- and then discarded at the writer.")
+        print("  Read the coverage table with that in mind: it is measuring")
+        print("  one defect, once, repeated per metric.")
+
     # ── Reporting history, the new observation ───────────────────────────────
     heading("REPORTING HISTORY (annual_periods)")
     print("  How many consecutive annual periods each company has reported.")
@@ -158,10 +169,30 @@ def main() -> int:
     print("  Gate A exists to catch: an unexplained blank.\n")
     print(f"  {'metric':32} {'ver':4} {'populated':>9} {'withheld':>9} {'unexplained':>11}")
 
+    # A governed metric whose column does not exist on screener.universe is
+    # its own finding, not a crash. It means the contract governs something
+    # the storage layer never provides, so no row can ever carry a value or a
+    # state for it — and the coverage table below would be answering a
+    # question about a column that isn't there.
+    cur.execute("""
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema='screener' AND table_name='universe';""")
+    universe_cols = {r[0] for r in cur.fetchall()}
+
     both = sorted(GOVERNED_METRICS[V2])
+    no_column = sorted(m for m in both if column_for(m) not in universe_cols)
+    if no_column:
+        print(f"\n  GOVERNED WITH NO COLUMN ON screener.universe ({len(no_column)}):")
+        for metric in no_column:
+            print(f"    {metric:32} (expected column: {column_for(metric)})")
+        print("    These cannot hold a value or a state. Excluded from the")
+        print("    coverage table below, and counted as findings.\n")
+
     unexplained_total = 0
     for metric in both:
         col = column_for(metric)
+        if col not in universe_cols:
+            continue
         cur.execute(f"""
             SELECT count(*) FILTER (WHERE u.{col} IS NOT NULL) AS populated,
                    count(*) FILTER (WHERE u.{col} IS NULL
@@ -268,6 +299,9 @@ def main() -> int:
         print(f"  {name:12} {r[name]:>6,}")
 
     heading("SUMMARY")
+    print(f"  sidecars persisted:                     {sidecars:,}")
+    print(f"  rows attributed to a compute run:       {runs_attributed:,}")
+    print(f"  governed metrics with no column:        {len(no_column)}")
     print(f"  unexplained blanks on governed metrics: {unexplained_total:,}")
     print(f"  semantic red flags raised:              {flagged}")
     print("  Publication remains disabled: this database is named by no")
@@ -282,7 +316,7 @@ def main() -> int:
 
     cur.close()
     conn.close()
-    return 1 if (unexplained_total or flagged) else 0
+    return 1 if (unexplained_total or flagged or no_column or not sidecars) else 0
 
 
 if __name__ == "__main__":

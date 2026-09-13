@@ -37,16 +37,37 @@ logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
 
+#: A full refresh may not drop the table below this fraction of what it is
+#: replacing. Loose on purpose: dividend history is append-mostly, so growth is
+#: normal and unbounded, while a sharp contraction means the inputs were
+#: incomplete rather than that the market stopped paying.
+SHRINK_FLOOR = 0.50
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--codes", nargs="+")
+    parser.add_argument("--allow-shrink", action="store_true",
+                        help="Permit a full refresh that would shrink the "
+                             "table below the %d%% floor. For a genuinely "
+                             "intended contraction only." % int(SHRINK_FLOOR * 100))
     args = parser.parse_args()
 
     is_full_run = not args.codes
 
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
+
+    # What is about to be replaced, measured before it is destroyed. This is
+    # the inexpensive baseline: the table's own current contents. A full
+    # refresh that would shrink it sharply is either a truncated raw zone or a
+    # source that has stopped answering, and neither should be allowed to
+    # overwrite a good dataset just because it technically produced rows.
+    prior_rows = prior_issuers = 0
+    if is_full_run:
+        cur.execute("SELECT count(*), count(DISTINCT asx_code) "
+                    "FROM market.dividends")
+        prior_rows, prior_issuers = cur.fetchone()
 
     if is_full_run:
         # NOT committed here. TRUNCATE is transactional in PostgreSQL, so it
@@ -140,14 +161,55 @@ def main():
     # is a false statement about 2,500 companies rather than a missing feed,
     # and the applicability contract would have no way to know: an empty table
     # and a table of genuine non-payers are identical.
-    if is_full_run and not transformed:
-        conn.rollback()
-        log.error("Full run produced no rows. Rolling back rather than "
-                  "committing an empty market.dividends. Check the raw zone: "
-                  "%s", "data/raw/eodhd/exchange=AU/dividends/historical/")
-        cur.close()
-        conn.close()
-        sys.exit(1)
+    if is_full_run:
+        new_issuers = len({t[0] for t in transformed})
+        log.info("── full refresh, before commit")
+        log.info("   staging rows read   : %s", f"{len(rows):,}")
+        log.info("   rows transformed    : %s", f"{len(transformed):,}")
+        log.info("   distinct issuers    : %s", f"{new_issuers:,}")
+        log.info("   replacing           : %s rows / %s issuers",
+                 f"{prior_rows:,}", f"{prior_issuers:,}")
+
+        if not transformed:
+            conn.rollback()
+            log.error("Full run produced no rows. Rolling back rather than "
+                      "committing an empty market.dividends. Check the raw "
+                      "zone: data/raw/eodhd/exchange=AU/dividends/historical/")
+            cur.close(); conn.close()
+            sys.exit(1)
+
+        # Technically non-zero is not the same as complete. A raw zone that is
+        # half-downloaded, or a staging load that stopped partway, produces a
+        # perfectly valid-looking set of rows that would silently replace a
+        # good dataset with a worse one -- and nothing downstream could tell,
+        # because a dividend that is absent and a dividend that never happened
+        # are the same NULL.
+        #
+        # The threshold is deliberately loose. The September 2026 repair grew
+        # the table 19,063 -> 29,804 (+56%), so growth is expected and never
+        # blocked; this only refuses a sharp contraction, which no legitimate
+        # refresh of an append-mostly history produces. Dividends are not
+        # revised away.
+        floor_rows = int(prior_rows * SHRINK_FLOOR)
+        floor_issuers = int(prior_issuers * SHRINK_FLOOR)
+        shrunk = (len(transformed) < floor_rows or new_issuers < floor_issuers)
+        if shrunk and not args.allow_shrink:
+            conn.rollback()
+            log.error(
+                "Full refresh would shrink market.dividends from %s rows / %s "
+                "issuers to %s / %s, below the %.0f%% floor. Rolling back. "
+                "A dividend history does not contract: check the raw zone is "
+                "complete and the staging load finished. Pass --allow-shrink "
+                "if the contraction is genuinely intended.",
+                f"{prior_rows:,}", f"{prior_issuers:,}",
+                f"{len(transformed):,}", f"{new_issuers:,}",
+                SHRINK_FLOOR * 100)
+            cur.close(); conn.close()
+            sys.exit(1)
+        if shrunk:
+            log.warning("Refresh shrinks the table and --allow-shrink was "
+                        "passed. Committing %s rows over %s.",
+                        f"{len(transformed):,}", f"{prior_rows:,}")
 
     conn.commit()
     cur.close()

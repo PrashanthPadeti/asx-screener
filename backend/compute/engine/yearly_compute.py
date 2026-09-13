@@ -476,12 +476,25 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
     now    = datetime.now(tz=timezone.utc)
     rows   = []
 
-    # Rolling lists (chronological order)
+    # Rolling series (chronological order)
     # Year-keyed, because an average over n years has to be able to name the
     # years. The positional lists below remain for the helpers that genuinely
     # want a sequence — eps volatility, fcf positive-year counts — rather than
     # a fiscal window.
-    by_year: dict[str, dict[int, Optional[float]]] = {
+    #
+    # NOT `by_year`. This was introduced as `by_year`, ten lines below the
+    # `by_year` above that maps fiscal_year -> the whole statement row, and
+    # silently rebound it. cn() reads that one — `by_year.get(fy - n)` — so
+    # after the shadowing it was looking an integer year up in a dict keyed by
+    # metric names, found nothing every time, and returned None for every
+    # horizon CAGR. revenue_cagr_5y went from 1,148 companies to 2, and
+    # growth_score from 1,592 to 0.
+    #
+    # Nothing failed. Two structures with compatible interfaces and different
+    # meanings answered each other's questions with a plausible None, and the
+    # fixture tests passed because average_over was handed the right dict
+    # directly and cn() was never exercised against a real frame.
+    metric_series: dict[str, dict[int, Optional[float]]] = {
         name: {} for name in
         ("roe", "roa", "roce", "roic", "gross_margin", "ebitda_margin",
          "operating_margin", "net_margin", "eps_growth")}
@@ -680,19 +693,19 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # recorded rather than skipped: "this year has no ROIC" is a fact the
         # averaging contract needs, and dropping it is what let a one-year
         # mean call itself three.
-        by_year["roe"][fy] = roe
-        by_year["roa"][fy] = roa
-        by_year["roce"][fy] = roce
-        by_year["roic"][fy] = roic
-        by_year["gross_margin"][fy] = gross_margin
-        by_year["ebitda_margin"][fy] = ebitda_margin
-        by_year["operating_margin"][fy] = ebit_margin
-        by_year["net_margin"][fy] = net_margin
-        by_year["eps_growth"][fy] = eps_g1
+        metric_series["roe"][fy] = roe
+        metric_series["roa"][fy] = roa
+        metric_series["roce"][fy] = roce
+        metric_series["roic"][fy] = roic
+        metric_series["gross_margin"][fy] = gross_margin
+        metric_series["ebitda_margin"][fy] = ebitda_margin
+        metric_series["operating_margin"][fy] = ebit_margin
+        metric_series["net_margin"][fy] = net_margin
+        metric_series["eps_growth"][fy] = eps_g1
 
         # ── ROIC rolling averages ─────────────────────────────────────────
-        avg_roic_3y = average_over(by_year["roic"], fy, 3)
-        avg_roic_5y = average_over(by_year["roic"], fy, 5)
+        avg_roic_3y = average_over(metric_series["roic"], fy, 3)
+        avg_roic_5y = average_over(metric_series["roic"], fy, 5)
 
         # ── Quick-win metrics ─────────────────────────────────────────────
         # 1. OCF / Net Profit (cash conversion quality)
@@ -762,7 +775,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # 7. Brand / Pricing Power proxy (0–3)
         #    Sustained high ROE + high ROIC + strong FCF generation
         _bps = 0
-        _avg_roe5  = average_over(by_year["roe"], fy, 5)
+        _avg_roe5  = average_over(metric_series["roe"], fy, 5)
         _avg_roic5 = avg_roic_5y   # already computed above
         if _avg_roe5  is not None and _avg_roe5  > 0.15: _bps += 1
         if _avg_roic5 is not None and _avg_roic5 > 0.12: _bps += 1
@@ -884,14 +897,14 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             # BVPS CAGR
             cn("book_value_per_share", 3), cn("book_value_per_share", 5),
             # Rolling averages
-            average_over(by_year["roe"], fy, 3),  average_over(by_year["roe"], fy, 5),
-            average_over(by_year["roa"], fy, 3),  average_over(by_year["roa"], fy, 5),
-            average_over(by_year["roce"], fy, 3), average_over(by_year["roce"], fy, 5),
-            average_over(by_year["gross_margin"], fy, 3),   average_over(by_year["gross_margin"], fy, 5),
-            average_over(by_year["ebitda_margin"], fy, 3),   average_over(by_year["ebitda_margin"], fy, 5),
-            average_over(by_year["operating_margin"], fy, 3),   average_over(by_year["operating_margin"], fy, 5),
-            average_over(by_year["net_margin"], fy, 3),   average_over(by_year["net_margin"], fy, 5),
-            average_over(by_year["eps_growth"], fy, 3), average_over(by_year["eps_growth"], fy, 5),
+            average_over(metric_series["roe"], fy, 3),  average_over(metric_series["roe"], fy, 5),
+            average_over(metric_series["roa"], fy, 3),  average_over(metric_series["roa"], fy, 5),
+            average_over(metric_series["roce"], fy, 3), average_over(metric_series["roce"], fy, 5),
+            average_over(metric_series["gross_margin"], fy, 3),   average_over(metric_series["gross_margin"], fy, 5),
+            average_over(metric_series["ebitda_margin"], fy, 3),   average_over(metric_series["ebitda_margin"], fy, 5),
+            average_over(metric_series["operating_margin"], fy, 3),   average_over(metric_series["operating_margin"], fy, 5),
+            average_over(metric_series["net_margin"], fy, 3),   average_over(metric_series["net_margin"], fy, 5),
+            average_over(metric_series["eps_growth"], fy, 3), average_over(metric_series["eps_growth"], fy, 5),
             # Risk
             vol_1y, sharpe, max_dd,
             # Raw financials (for history tables)

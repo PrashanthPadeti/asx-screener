@@ -349,7 +349,49 @@ def price_return(prices: pd.Series, end_date, years: int) -> Optional[float]:
 
 # ── Quality Scores ────────────────────────────────────────────────────────────
 
+class UnsupportedComputation(RuntimeError):
+    """A method that cannot be executed faithfully must not be executed."""
+
+
 def piotroski_f_score(row: dict, prev: Optional[dict]) -> Optional[int]:
+    """Refuses. The implementation below it is not a Piotroski F-Score.
+
+    daily_compute's version was disarmed and screener.universe still carried
+    1,598 scores, because the column is populated from market.yearly_metrics
+    and this is the implementation that fills it. One tripwire, two producers.
+
+    This one is materially better than daily_compute's -- it reads the real
+    prior-year row, so F3, F5, F6, F8 and F9 compare two years rather than one
+    balance sheet against itself. It shares the defect that matters:
+
+        a missing prior year, or a missing input, scores as a FAILED
+        criterion rather than as unassessable.
+
+    With prev=None every year-over-year test silently scores zero, so a
+    company in its first reported year caps at 4 out of 9 and that number is
+    published as its F-Score -- indistinguishable from a company that was
+    assessed on nine criteria and genuinely failed five. The same holds one
+    criterion at a time whenever an input is NULL.
+
+    A score that cannot fall below its floor for good reasons, and cannot rise
+    above a ceiling set by our data rather than by the company, is not the
+    measure it is named after. The persisted contract now refuses a numeric
+    piotroski_f_score outright (violations -> unsupported_computation_value),
+    so this raising is the producer half of a closure that no longer depends
+    on every producer being found.
+
+    The body is preserved below as _legacy_invalid_piotroski for the record
+    and for whoever implements the real thing.
+    """
+    raise UnsupportedComputation(
+        "the yearly Piotroski implementation scores a missing prior year, and "
+        "a missing input, as a failed criterion rather than as unassessable. "
+        "A first-year company caps at 4 of 9 and publishes it as a score. Do "
+        "not use it until every criterion can distinguish 'failed' from "
+        "'could not be assessed'.")
+
+
+def _legacy_invalid_piotroski(row: dict, prev: Optional[dict]) -> Optional[int]:
     ta = _f(row.get("total_assets"))
     if ta is None or ta == 0:
         return None
@@ -846,7 +888,12 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             revenue_predictability = None
 
         # ── Quality ───────────────────────────────────────────────────────
-        f_score = piotroski_f_score(row, prev)
+        # Not computed. piotroski_f_score() raises; calling it here would end
+        # the run rather than withhold one metric. The column is written NULL
+        # and the applicability contract supplies the reason —
+        # UNAVAILABLE / COMPUTATION_UNSUPPORTED — so the absence says "nobody
+        # can compute this" rather than "this company has no value".
+        f_score = None
         z_score = altman_z_score(row, mc)
 
         # ── Div consecutive (only for latest FY — expensive) ─────────────

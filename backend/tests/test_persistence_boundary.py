@@ -41,6 +41,7 @@ from compute.engine.applicability import (  # noqa: E402
     refresh_gate,
     usable_values,
 )
+from compute.engine.applicability import UNSUPPORTED_COMPUTATION  # noqa: E402
 from compute.engine.dividends import DividendSource, FeedHealth  # noqa: E402
 from compute.engine.metric_states import (  # noqa: E402
     GOVERNED_METRICS,
@@ -393,7 +394,13 @@ def test_a_known_version_still_validates_normally():
     """Fail-closed on unknown must not break the supported path."""
     governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]
     values = {m: None for m in governed}
-    states = {m: {"state": "unavailable", "cause": "source_missing"}
+    # Not every absence may claim the same cause. A metric this build cannot
+    # compute faithfully must say so specifically: "no value from the source"
+    # would blame the feed for our own missing implementation, and the
+    # persisted contract now rejects it.
+    states = {m: {"state": "unavailable",
+                  "cause": ("computation_unsupported"
+                            if m in UNSUPPORTED_COMPUTATION else "source_missing")}
               for m in governed}
     assert violations(values, states, LATEST_MODEL_VERSION) == []
 
@@ -545,7 +552,13 @@ def test_metrics_sensitive_beyond_v1_are_governed_by_a_later_version():
 def test_a_fully_governed_row_passes():
     governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]
     values = {m: None for m in governed}
-    states = {m: {"state": "unavailable", "cause": "source_missing"}
+    # Not every absence may claim the same cause. A metric this build cannot
+    # compute faithfully must say so specifically: "no value from the source"
+    # would blame the feed for our own missing implementation, and the
+    # persisted contract now rejects it.
+    states = {m: {"state": "unavailable",
+                  "cause": ("computation_unsupported"
+                            if m in UNSUPPORTED_COMPUTATION else "source_missing")}
               for m in governed}
     assert violations(values, states, LATEST_MODEL_VERSION) == []
 
@@ -749,6 +762,39 @@ def test_alphafive_refresh_is_declined_from_persisted_state():
     assert income.source_unhealthy
     assert not gate.permitted
     assert "last published computation" in gate.message
+
+
+def test_a_fabricated_score_is_refused_whatever_produced_it():
+    """The Piotroski closure, at the boundary rather than at a producer.
+
+    daily_compute was made to raise and screener.universe still carried 1,598
+    scores, because a second implementation in yearly_compute fills the column
+    via market.yearly_metrics. Disarming that one too closes the instance.
+    This closes the class: any producer that repopulates the column fails the
+    write, including one written next year by someone who never read this.
+    """
+    from compute.engine.applicability import UNSUPPORTED_COMPUTATION
+
+    for metric in UNSUPPORTED_COMPUTATION:
+        kinds_found = {v.kind for v in violations({metric: 6}, {}, "FACTOR_MODEL_V2")
+                       if v.metric == metric}
+        assert "unsupported_computation_value" in kinds_found, metric
+
+
+def test_a_null_is_not_enough_the_cause_must_say_who_failed():
+    """NULL with cause source_missing reads as "this company has no value".
+    The truth is that nobody can compute it, and those send an operator to
+    opposite places -- one to the feed, one to the implementation."""
+    from compute.engine.applicability import UNSUPPORTED_COMPUTATION
+
+    metric = next(iter(UNSUPPORTED_COMPUTATION))
+    wrong = {metric: {"state": "unavailable", "cause": "source_missing"}}
+    right = {metric: {"state": "unavailable", "cause": "computation_unsupported"}}
+
+    assert any(v.kind == "unsupported_computation_uncaused"
+               for v in violations({metric: None}, wrong, "FACTOR_MODEL_V2"))
+    assert not [v for v in violations({metric: None}, right, "FACTOR_MODEL_V2")
+                if v.metric == metric]
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────

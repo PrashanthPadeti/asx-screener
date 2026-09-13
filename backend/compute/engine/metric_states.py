@@ -61,6 +61,7 @@ from typing import Any, Iterable, Mapping, Optional
 from compute.engine.applicability import (
     ROLLING_AVERAGE_BASES,
     ROLLING_AVERAGE_WINDOWS,
+    UNSUPPORTED_COMPUTATION,
     Applicability,
     Assessment,
     Cause,
@@ -474,6 +475,37 @@ def violations(values: Mapping[str, Optional[float]],
     for metric in sorted(governed - set(values)):
         out.append(Violation(metric, "missing_governed",
                              f"governed by {model_version} but absent from the row"))
+
+    # ── A metric we cannot compute faithfully must arrive with no number ─────
+    #
+    # Closing this at the persisted boundary rather than only at a producer.
+    # piotroski_f_score was made to raise in daily_compute, and the universe
+    # still carried 1,598 of them -- because the column is populated from
+    # market.yearly_metrics, by a second implementation nobody had disarmed.
+    # Fixing that producer too would close the instance; this closes the class.
+    # Any future producer that computes an unsupported metric now fails the
+    # write instead of quietly repopulating the column.
+    #
+    # Deliberately not a contradictory_state: that kind describes a stale
+    # sidecar entry beside a good value. Here the value itself must not exist,
+    # whatever the sidecar says, so the sidecar's contents are not the point.
+    for metric in sorted(set(values) & governed & set(UNSUPPORTED_COMPUTATION)):
+        value = values[metric]
+        entry = states.get(metric) or {}
+        if value is not None:
+            out.append(Violation(
+                metric, "unsupported_computation_value",
+                f"value {value!r} present for a metric this build cannot "
+                f"compute faithfully — it must be NULL with cause "
+                f"{Cause.COMPUTATION_UNSUPPORTED.value}"))
+        elif entry.get("cause") != Cause.COMPUTATION_UNSUPPORTED.value:
+            # NULL alone is not enough. Without the cause the absence reads as
+            # "this company has no value", when the truth is that nobody can.
+            out.append(Violation(
+                metric, "unsupported_computation_uncaused",
+                f"null for an unsupported computation but recorded cause is "
+                f"{entry.get('cause')!r}, not "
+                f"{Cause.COMPUTATION_UNSUPPORTED.value!r}"))
 
     return sorted(out, key=lambda v: (v.kind, v.metric))
 

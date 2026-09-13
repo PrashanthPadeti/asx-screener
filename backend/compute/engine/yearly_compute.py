@@ -1125,6 +1125,11 @@ def main():
     parser.add_argument("--codes",    nargs="+", help="Specific ASX codes")
     parser.add_argument("--limit",    type=int,  help="Max stocks to process")
     parser.add_argument("--min-year", type=int,  help="Only upsert rows for fiscal_year >= N")
+    parser.add_argument("--keep-orphans", action="store_true",
+                        help="Do not prune yearly_metrics rows whose source "
+                             "(asx_code, fiscal_year) no longer exists. For "
+                             "inspecting what a prune would remove; leaves "
+                             "prior-run values readable by the universe build.")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
@@ -1178,6 +1183,54 @@ def main():
             conn.rollback()
 
     conn.commit()
+
+    # ── Prune rows whose source no longer exists ─────────────────────────────
+    #
+    #   No governed value may survive from a prior run merely because the
+    #   current computation produced no value.
+    #
+    # market.yearly_metrics is upserted on (asx_code, fiscal_year) and was
+    # never pruned, so a row outlived its source indefinitely. fetch_codes
+    # only selects codes that HAVE annual P&L, so a company that stops
+    # reporting is not processed at all and its old rows simply remain --
+    # and build_screener_universe reads the latest ym row without knowing
+    # which run produced it.
+    #
+    # Measured on the first discovery rebuild: 3,009 of 33,490 rows survived
+    # from before the run. ATH and ATM were served avg_roe_3y and avg_roe_5y
+    # while having zero annual_pnl rows, because their averages came from ym
+    # rows computed under V1's positional _avg. A value the current run did
+    # not produce, presented as though it had.
+    #
+    # Only on a full run. A --codes or --limit run has not rewritten the rest
+    # of the table, and a scoped run must not make a global deletion: the
+    # operator asked about three companies, not about the corpus.
+    scoped = bool(args.codes or args.limit or args.min_year)
+    if args.keep_orphans:
+        log.info("Prune skipped (--keep-orphans).")
+    elif scoped:
+        log.info("Prune skipped: scoped run (--codes/--limit/--min-year). "
+                 "Orphaned rows are only removed by a full recompute.")
+    else:
+        cur.execute("""
+            DELETE FROM market.yearly_metrics ym
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM financials.annual_pnl p
+                  WHERE p.asx_code    = ym.asx_code
+                    AND p.fiscal_year = ym.fiscal_year)
+            RETURNING ym.asx_code;""")
+        orphans = cur.fetchall()
+        conn.commit()
+        codes_removed = len({r[0] for r in orphans})
+        if orphans:
+            log.warning("Pruned %s yearly_metrics rows across %s codes whose "
+                        "(asx_code, fiscal_year) no longer exists in "
+                        "financials.annual_pnl. These were prior-run values "
+                        "with no current source.", f"{len(orphans):,}",
+                        f"{codes_removed:,}")
+        else:
+            log.info("Prune: no orphaned yearly_metrics rows.")
+
     cur.close()
     conn.close()
 

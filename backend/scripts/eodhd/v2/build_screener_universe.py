@@ -415,8 +415,16 @@ SELECT
     pnl1.eps                    AS eps_fy1,
 
     -- ── Income Statement FY0 / FY1 ───────────────────────────────────────────
-    -- 0 rather than NULL would be a claim; a company with no annual_pnl row
-    -- at all has no FY0 to anchor a run to, and the count is unknown.
+    -- 0, not NULL, for a company with no annual_pnl at all: the lateral's
+    -- COUNT(*) always returns a row, and 0 is the honest answer anyway --
+    -- we looked at its reporting record and there is none. NULL would say
+    -- "not assessed", which is a weaker and less useful claim.
+    --
+    -- This matters at the gate. ATH and ATM have no annual_pnl rows and were
+    -- nonetheless served avg_roe_3y, from prior-run yearly_metrics rows. With
+    -- annual_periods = 0 the period gate withholds them as
+    -- INSUFFICIENT_HISTORY, which is exactly right: no reporting history, so
+    -- no three-year average.
     hist.annual_periods,
 
     pnl0.revenue    AS revenue_fy0,

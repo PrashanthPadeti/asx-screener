@@ -25,7 +25,8 @@ Usage:
 import argparse
 import logging
 import os
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Mapping, Optional
 
 import psycopg2
 import psycopg2.extensions
@@ -44,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # is the exact ordering that took the pipeline down before.
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.applicability import (  # noqa: E402
-    Applicability, Assessment, Cause,
+    Applicability, Assessment, Cause, unhealthy,
 )
 from compute.engine.factor_applicability import (  # noqa: E402
     OBSERVATION_COLS,  # noqa: E402
@@ -60,8 +61,16 @@ from compute.engine.factor_applicability import (  # noqa: E402
 from compute.engine.factor_model import (  # noqa: E402
     FactorSpec, composite_for, effective_weights, model_for,
 )
-from compute.engine.metric_states import LATEST_MODEL_VERSION  # noqa: E402
-from compute.engine.universe_writer import column_for  # noqa: E402
+from compute.engine.metric_states import (  # noqa: E402
+    LATEST_MODEL_VERSION, SourceHealth,
+)
+from compute.engine.universe_writer import (  # noqa: E402
+    ComputeRun,
+    WriteRefused,
+    column_for,
+    commit_canonical,
+    persisted_governed,
+)
 
 #: The frame carries asx_code as a column; assessments are keyed by it.
 CODE_COLUMN = "asx_code"
@@ -596,7 +605,7 @@ def multibagger_band(score: Optional[float]) -> Optional[str]:
             return label
     return MB_BANDS[-1][1]
 
-def run(conn, dry_run: bool = False) -> int:
+def run(conn, dry_run: bool = False, run_id: Optional[int] = None) -> int:
     """Load universe, compute scores, upsert. Returns number of rows updated."""
     log.info("Loading screener.universe for scoring…")
 
@@ -608,6 +617,15 @@ def run(conn, dry_run: bool = False) -> int:
     # Gate 2 needs each metric's own denominator, or it cannot run
     # and every non-positive-denominator ratio passes as applicable.
     select_cols += [c for c in OBSERVATION_COLS.values() if c not in select_cols]
+
+    # Every column this model version persists, because this is now the
+    # canonical commit boundary: it re-emits all of them together with the
+    # sidecar and the attribution, in one statement per row. A column it does
+    # not read it cannot write, and a governed column it does not write keeps
+    # the previous run's value beside this run's states.
+    canonical_columns = persisted_governed(LATEST_MODEL_VERSION)
+    select_cols += [c for c in canonical_columns.values()
+                    if c not in select_cols]
     col_list = ", ".join(select_cols)
     cur.execute(f"""
         SELECT {col_list}
@@ -800,7 +818,126 @@ def run(conn, dry_run: bool = False) -> int:
     cur.close()
 
     log.info(f"  ✓ {len(update_rows):,} rows updated in screener.universe")
-    return len(update_rows)
+
+    # ── The canonical commit ─────────────────────────────────────────────────
+    # Everything above this point is PROVISIONAL. The build's governed columns
+    # and these score updates are inputs to canonicalisation, not contract
+    # rows: no resolver may treat them as authoritative until the transaction
+    # below commits values, states and attribution together.
+    #
+    # Without a run id there is nothing to attribute to, so the run stays
+    # provisional and nothing becomes servable. That is the correct default —
+    # a build that did not declare itself part of a canonical run has not
+    # earned publication.
+    if run_id is None:
+        log.warning("No --run-id: rows remain PROVISIONAL. No sidecar, no "
+                    "attribution, and no resolver will serve them.")
+        return len(update_rows)
+
+    # The feed's state, recorded once for the run rather than per company. A
+    # broken dividend feed is an exchange-wide fact, and writing it onto every
+    # row would let it disagree with itself halfway through.
+    source_health = SourceHealth(
+        run_at=datetime.now(timezone.utc),
+        unhealthy_sources=() if feed_health.healthy else ("dividends",),
+        detail={} if feed_health.healthy else {"dividends": feed_health.reason},
+        factor_model_version=LATEST_MODEL_VERSION,
+        run_id=run_id)
+
+    by_code = canonical_assessments(df, masked, factor_states,
+                                    masked.source_failed)
+    written = commit_canonical(
+        conn, ComputeRun(run_id, "composite_score", LATEST_MODEL_VERSION,
+                         source_health),
+        by_code,
+        required_stages=REQUIRED_STAGES,
+        details={"universe_rows": len(df),
+                 "dividend_feed_healthy": feed_health.healthy})
+
+    log.info("  ✓ canonical commit: %s rows published under run %s",
+             f"{written:,}", run_id)
+    return written
+
+
+#: Every full producer whose output the canonical writer re-emits. Both must
+#: have proven their own population, or the attribution would assert a
+#: coherence nobody established. yearly_compute alone is not enough: it can
+#: prove perfect coverage while the build silently misses rows, and the
+#: canonical writer would then faithfully publish stale provisional values —
+#: the same defect wearing a completeness certificate.
+REQUIRED_STAGES = ("yearly_compute", "universe_build")
+
+#: Computed here rather than read, so their assessments are built from this
+#: run's results and never from the previous run's columns — which the frame
+#: now also contains, because the canonical writer must read every governed
+#: column in order to re-emit it.
+SCORE_METRICS = frozenset({
+    "value_score", "quality_score", "growth_score",
+    "momentum_score", "income_score", "composite_score",
+})
+
+
+def _score_assessment(metric: str, value, code: str,
+                      factor_states: Mapping[str, Mapping],
+                      row_source_failed: bool) -> Assessment:
+    """Why a factor score is absent, taken from the model rather than guessed.
+
+    EffectiveWeights already records the state, cause and reason for a factor
+    the model declined to compute — a bank below the minimum semantic coverage
+    for V2 Quality, say. Reading it here keeps the methodology in one place.
+    Inventing a cause at the writer would be a second opinion about the model,
+    expressed where nobody would look for it.
+    """
+    if value is not None and not (isinstance(value, float) and np.isnan(value)):
+        return Assessment(metric, Applicability.APPLICABLE, float(value), "",
+                          None)
+
+    if row_source_failed:
+        return unhealthy(metric, "a constituent factor's source was unhealthy")
+
+    effective = factor_states.get(metric.removesuffix("_score"), {}).get(code)
+    if effective is not None and not effective.usable:
+        return Assessment(metric, effective.state, None, effective.reason,
+                          None, cause=effective.cause)
+
+    return Assessment(metric, Applicability.UNAVAILABLE, None,
+                      "not computed by this run", None,
+                      cause=Cause.SOURCE_MISSING)
+
+
+def canonical_assessments(df, masked, factor_states,
+                          source_failed) -> dict[str, dict[str, Assessment]]:
+    """Every governed metric, for every company, with nothing left implicit.
+
+    The canonical row is complete by definition: 72 of 72 under V2, each with
+    a value or a stated reason for its absence. A metric missing here would be
+    written as NULL with no sidecar entry — an unexplained null created by the
+    statement meant to prevent one — so the writer refuses rather than
+    completing the row on the caller's behalf.
+    """
+    mapping = persisted_governed(LATEST_MODEL_VERSION)
+    failed = source_failed.reindex(df.index).fillna(False).astype(bool)
+
+    out: dict[str, dict[str, Assessment]] = {}
+    for idx, row in df.iterrows():
+        code = row["asx_code"]
+        assessed = dict(masked.assessments.get(code, {}))
+
+        for metric in mapping:
+            if metric in SCORE_METRICS:
+                assessed[metric] = _score_assessment(
+                    metric, row.get(metric), code, factor_states,
+                    bool(failed.loc[idx]))
+            elif metric not in assessed:
+                # The frame carries every governed column, so applicability
+                # should have assessed it. Reaching here means a column was
+                # read and not assessed, which is an application defect and
+                # must not be published as though the company had no value.
+                raise WriteRefused(
+                    f"{code}: {metric} is governed and was read, but no "
+                    f"assessment was produced for it")
+        out[code] = assessed
+    return out
 
 
 def _to_smallint(v) -> Optional[int]:
@@ -813,11 +950,16 @@ def main():
     parser = argparse.ArgumentParser(description="Compute composite factor scores")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute scores without writing to DB")
+    parser.add_argument("--run-id", type=int,
+                        help="The compute run to publish under. Without it "
+                             "the scores are written but stay PROVISIONAL: no "
+                             "sidecar, no attribution, and no resolver will "
+                             "serve them.")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
     try:
-        n = run(conn, dry_run=args.dry_run)
+        n = run(conn, dry_run=args.dry_run, run_id=args.run_id)
     finally:
         conn.close()
 

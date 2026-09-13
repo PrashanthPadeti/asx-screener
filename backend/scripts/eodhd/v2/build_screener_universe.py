@@ -1767,12 +1767,36 @@ ON CONFLICT (asx_code) DO UPDATE SET
     roe_improving              = EXCLUDED.roe_improving,
     roce_improving             = EXCLUDED.roce_improving,
     universe_built_at       = NOW()
+RETURNING asx_code
+"""
+
+#: The build's source domain, asked of the database directly rather than
+#: reconstructed from what the upsert was handed.
+#:
+#: This is the independently derived expected population. It must not be built
+#: from the same list the INSERT ... SELECT consumes, or it would agree with
+#: the write by construction and prove nothing -- which is precisely how
+#: "1626 stocks | 0 skipped | 0 errors" was reported over 2,954 rows the run
+#: never touched. A counter, or an input list, describes only what the loop
+#: was shown.
+EXPECTED_CODES_SQL = """
+SELECT c.asx_code
+  FROM market.companies_current c
+  {code_filter}
 """
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--codes", nargs="+")
+    parser.add_argument("--run-id", type=int,
+                        help="The compute run this build belongs to. Given, "
+                             "the build records terminal stage evidence that "
+                             "it covered its own source population — which "
+                             "composite_score requires before it may write a "
+                             "canonical row. Omitted, the build still runs, "
+                             "and produces no evidence, so nothing can be "
+                             "published from it.")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
@@ -1797,9 +1821,22 @@ def main():
 
     sql = UPSERT_SQL.format(code_filter=code_filter)
 
+    # The expected population, asked of the database before the write and
+    # independently of it. Derived from the same source domain the upsert
+    # selects over, but as its own query — so the two can disagree.
+    cur.execute(EXPECTED_CODES_SQL.format(code_filter=code_filter), params)
+    expected_codes = {r[0] for r in cur.fetchall()}
+
     log.info(f"Building screener.universe {'for ' + str(args.codes) if args.codes else '(all stocks)'}…")
     cur.execute(sql, params)
-    n = cur.rowcount
+
+    # RETURNING, not rowcount and not the input list. It observes what the
+    # database actually accepted, which is stronger than reconstructing
+    # success afterwards. The upsert's DO UPDATE carries no WHERE, so nothing
+    # is silently skipped for being physically unchanged and the returned set
+    # is the evaluated population rather than the changed one.
+    written_codes = {r[0] for r in cur.fetchall()}
+    n = len(written_codes)
     conn.commit()
 
     # The upsert can only add or update — it never removes.  Clear out any
@@ -1815,6 +1852,33 @@ def main():
         log.info(f"Removed {cur.rowcount} non-equity securities "
                  f"({', '.join(EXCLUDED_TYPES)}) from screener.universe")
     conn.commit()
+
+    # ── Terminal stage evidence ──────────────────────────────────────────────
+    # yearly_compute proving perfect coverage is not enough on its own. If the
+    # build silently misses rows, the canonical writer faithfully re-emits
+    # stale provisional values — the same defect wearing a completeness
+    # certificate. Every full producer whose output the canonical writer reads
+    # has to prove its own population.
+    if args.run_id is not None:
+        from compute.engine.run_stages import StageResult, record_stage
+
+        result = StageResult(
+            "universe_build",
+            frozenset(expected_codes), frozenset(written_codes),
+            {"scoped_to_codes": bool(args.codes),
+             "excluded_types": list(EXCLUDED_TYPES)})
+        ok = record_stage(cur, args.run_id, result)
+        conn.commit()
+        log.info("stage universe_build: %s — %s", result.status, result.summary())
+        if not ok:
+            # Loud, and non-fatal here by design: the evidence is already
+            # committed, and composite_score will refuse to publish without a
+            # success row. Exiting non-zero as well so an orchestrator does
+            # not proceed believing the build succeeded.
+            log.error("universe_build did not cover its source population. "
+                      "No canonical run can be published from this build.")
+            cur.close(); conn.close()
+            sys.exit(1)
 
     # Post-processing: revenue_above_sector_median
     # True when a stock's revenue_growth_3y_cagr exceeds its sector's median

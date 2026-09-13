@@ -1184,6 +1184,12 @@ def main():
     parser.add_argument("--codes",    nargs="+", help="Specific ASX codes")
     parser.add_argument("--limit",    type=int,  help="Max stocks to process")
     parser.add_argument("--min-year", type=int,  help="Only upsert rows for fiscal_year >= N")
+    parser.add_argument("--run-id", type=int,
+                        help="The compute run this stage belongs to. Given, a "
+                             "FULL run records terminal stage evidence that it "
+                             "covered its own source population, which "
+                             "composite_score requires before writing a "
+                             "canonical row.")
     parser.add_argument("--keep-orphans", action="store_true",
                         help="Do not prune yearly_metrics rows whose source "
                              "(asx_code, fiscal_year) no longer exists. For "
@@ -1198,6 +1204,15 @@ def main():
     # against the same clock the rows are stamped with.
     cur.execute("SELECT now()")
     run_started = cur.fetchone()[0]
+
+    # The expected population, derived from the source and NOT from
+    # fetch_codes. Comparing a run against its own selection is circular: it
+    # agrees by construction and proves nothing, which is exactly how "1626
+    # stocks | 0 skipped | 0 errors" was reported over 2,954 untouched rows.
+    # fetch_codes is the thing under test here, not the standard.
+    cur.execute("SELECT DISTINCT asx_code FROM financials.annual_pnl")
+    expected_codes = {r[0] for r in cur.fetchall()}
+    written_codes: set[str] = set()
 
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
@@ -1234,6 +1249,7 @@ def main():
             n = upsert_rows(cur, rows)
             total_rows += n
             processed  += 1
+            written_codes.add(asx_code)
 
             if i % BATCH_COMMIT == 0:
                 conn.commit()
@@ -1270,6 +1286,7 @@ def main():
     # of the table, and a scoped run must not make a global deletion: the
     # operator asked about three companies, not about the corpus.
     scoped = bool(args.codes or args.limit or args.min_year)
+    orphans: list = []
     if args.keep_orphans:
         log.info("Prune skipped (--keep-orphans).")
     elif scoped:
@@ -1326,12 +1343,39 @@ def main():
             log.info("Coverage: every sourced yearly_metrics row was rewritten "
                      "by this run.")
 
+    # ── Terminal stage evidence ──────────────────────────────────────────────
+    # A scoped run proves nothing about the corpus and records nothing: its
+    # expected population is not the source population, and a stage row saying
+    # otherwise would be false.
+    stage_ok = True
+    if args.run_id is not None and not scoped:
+        from compute.engine.run_stages import StageResult, record_stage
+
+        result = StageResult(
+            "yearly_compute",
+            frozenset(expected_codes), frozenset(written_codes),
+            {"rows_upserted": total_rows, "errors": errors,
+             "pruned_orphans": len(orphans) if not args.keep_orphans
+                               and not scoped else None})
+        stage_ok = record_stage(cur, args.run_id, result)
+        conn.commit()
+        log.info("stage yearly_compute: %s — %s", result.status, result.summary())
+        if not stage_ok:
+            log.error("yearly_compute did not cover its source population. "
+                      "No canonical run can be published from this run.")
+    elif args.run_id is not None:
+        log.info("Stage evidence skipped: a scoped run's expected population "
+                 "is not the source population, and recording one would be a "
+                 "false claim about coverage.")
+
     cur.close()
     conn.close()
 
     log.info("─" * 60)
     log.info(f"Done! {processed} stocks | {skipped} skipped | "
              f"{errors} errors | {total_rows:,} rows upserted")
+    if not stage_ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

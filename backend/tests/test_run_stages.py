@@ -213,6 +213,43 @@ def test_a_complete_clean_run_publishes():
     assert any("compute_run_finalizations" in s for s, _ in cur.statements)
 
 
+# ── The 224-row incident, as an assertion ────────────────────────────────────
+
+def test_a_clean_looking_run_that_missed_rows_cannot_publish():
+    """The incident this whole mechanism exists for, end to end.
+
+    yearly_compute reported "1626 stocks | 0 skipped | 0 errors" and had left
+    2,954 sourced rows untouched. Every counter it kept was accurate; none of
+    them was evidence. Expected {A,B,C}, written {A,B}, no exception raised
+    anywhere -- the stage must record failed, and finalisation must be
+    impossible.
+    """
+    cur = FakeCursor(passed_stages=())
+
+    r = result("ABC DEF GHI".split(), "ABC DEF".split(), skipped=0, errors=0)
+    assert record_stage(cur, 9, r) is False
+
+    _, params = cur.statements[0]
+    assert params[2] == "failed"
+
+    # And nothing can be published on top of it.
+    try:
+        finalise(cur, 9, rows_written=2, persistence_violations=0,
+                 required_stages=["yearly_compute"])
+    except StageIncomplete:
+        pass
+    else:
+        raise AssertionError("a run that missed rows must not become servable")
+
+
+def test_zero_errors_is_not_a_coverage_claim():
+    """Explicitly: the absence of exceptions says nothing about whether the
+    intended population was processed."""
+    r = result("ABC DEF GHI".split(), "ABC".split(), errors=0, skipped=0)
+
+    assert not r.ok, "no exception was raised and two thirds went unprocessed"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

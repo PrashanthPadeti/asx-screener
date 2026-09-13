@@ -237,49 +237,78 @@ def main() -> int:
     # ── Semantic red flags ───────────────────────────────────────────────────
     # Not coverage. These are the values that would be wrong while looking
     # entirely ordinary, which is the class the whole rollout exists to remove.
-    heading("SEMANTIC RED FLAGS")
+    heading("SEMANTIC ANOMALIES")
+    print("  Two dimensions, reported separately, because collapsing them into")
+    print("  one boolean turns a single diagnosis into several defects.\n")
+    print("    stored       the raw stored value meets the anomalous condition")
+    print("    servable     ...and the metric's own state permits serving it\n")
+    print("  The architecture stores the observation and governs at projection,")
+    print("  so a stored anomaly is not by itself a customer-surface defect —")
+    print("  it is forensic evidence, and stays useful even once the contract")
+    print("  withholds the value. What must be zero is the servable column.\n")
+    print("  'servable' here evaluates the metric state ONLY. Real servability")
+    print("  also requires a supported model version, a finalised compute run,")
+    print("  and the row attributed to it. None of those exist in this run, so")
+    print("  the name is servable_by_metric_state and claims nothing more.\n")
+
+    # (label, canonical metric, the stored-anomaly predicate)
     checks = [
-        ("banks still carrying ev_to_ebitda", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND sector='Financials'
-               AND ev_to_ebitda IS NOT NULL"""),
-        ("ev_to_ebitda stored as exactly zero", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND ev_to_ebitda = 0"""),
-        ("negative equity with a positive ROE served", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND total_equity < 0 AND roe > 0"""),
-        ("piotroski_f_score still written", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND piotroski_f_score IS NOT NULL"""),
-        ("avg_roe_3y present with fewer than 3 periods", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND avg_roe_3y IS NOT NULL
-               AND annual_periods < 3"""),
-        ("avg_roe_5y present with fewer than 5 periods", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND avg_roe_5y IS NOT NULL
-               AND annual_periods < 5"""),
-        ("revenue CAGR beyond +1000%", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND revenue_growth_3y_cagr > 10"""),
-        ("composite scored while a factor's source failed", """
-            SELECT count(*) FROM screener.universe
-             WHERE status='active' AND composite_score IS NOT NULL
-               AND income_score IS NULL"""),
+        ("banks carrying ev_to_ebitda", "ev_ebitda",
+         "sector='Financials' AND ev_to_ebitda IS NOT NULL"),
+        ("ev_to_ebitda stored as exactly zero", "ev_ebitda",
+         "ev_to_ebitda = 0"),
+        ("negative equity beside a positive ROE", "roe",
+         "total_equity < 0 AND roe > 0"),
+        ("piotroski_f_score written at all", "piotroski_f_score",
+         "piotroski_f_score IS NOT NULL"),
+        ("avg_roe_3y with fewer than 3 periods", "avg_roe_3y",
+         "avg_roe_3y IS NOT NULL AND annual_periods < 3"),
+        ("avg_roe_5y with fewer than 5 periods", "avg_roe_5y",
+         "avg_roe_5y IS NOT NULL AND annual_periods < 5"),
+        ("revenue CAGR beyond +1000%", "revenue_cagr_3y",
+         "revenue_growth_3y_cagr > 10"),
+        ("composite scored while a factor's source failed", "composite_score",
+         "composite_score IS NOT NULL AND income_score IS NULL"),
     ]
-    # Every check is written so that zero is the only correct answer. A check
-    # whose expected value depends on the data would be an observation, and
-    # observations do not fail a run.
-    print(f"  {'check':52} {'rows':>7}   expect")
+
+    print(f"  {'anomaly':46} {'stored':>7} {'servable':>9}  diagnosis")
     flagged = 0
-    for label, sql in checks:
-        cur.execute(sql)
-        n = cur.fetchone()[0]
-        mark = "ok" if n == 0 else "<-- INVESTIGATE"
-        if n:
+    contract_absent_total = 0
+    for label, metric, predicate in checks:
+        # A row is servable on this metric when its sidecar exists and carries
+        # no entry for it: absent-from-the-sidecar means APPLICABLE. A NULL
+        # sidecar is not the same as an empty one — it means no run ever
+        # assessed the row, which the projector treats as withhold-everything.
+        cur.execute(f"""
+            SELECT count(*) AS stored,
+                   count(*) FILTER (
+                       WHERE metric_states IS NOT NULL
+                         AND NOT (metric_states ? %s)) AS servable,
+                   count(*) FILTER (WHERE metric_states IS NULL) AS no_contract
+              FROM screener.universe
+             WHERE status='active' AND ({predicate});""", (metric,))
+        r = cur.fetchone()
+        stored, servable, no_contract = r["stored"], r["servable"], r["no_contract"]
+
+        if stored == 0:
+            diagnosis = "clean"
+        elif servable:
+            diagnosis = "CUSTOMER-SURFACE DEFECT"
             flagged += 1
-        print(f"  {label:52} {n:>7,}   0  {mark}")
+        elif no_contract == stored:
+            diagnosis = "blocked: no applicability state on the row"
+            contract_absent_total += 1
+        else:
+            diagnosis = "withheld by its own state (forensic only)"
+        print(f"  {label:46} {stored:>7,} {servable:>9,}  {diagnosis}")
+
+    if contract_absent_total:
+        print(f"\n  {contract_absent_total} anomal{'y' if contract_absent_total == 1 else 'ies'} "
+              f"read as blocked only because no row carries an applicability")
+        print("  state. That is ONE defect — the sidecar is not persisted — not")
+        print("  one per anomaly. Until it is fixed these rows are neither")
+        print("  provably safe nor provably unsafe: the projector withholds them")
+        print("  for want of a contract, not because anything assessed them.")
 
     # ── Factor coverage ──────────────────────────────────────────────────────
     heading("FACTOR COVERAGE")
@@ -303,13 +332,16 @@ def main() -> int:
     print(f"  rows attributed to a compute run:       {runs_attributed:,}")
     print(f"  governed metrics with no column:        {len(no_column)}")
     print(f"  unexplained blanks on governed metrics: {unexplained_total:,}")
-    print(f"  semantic red flags raised:              {flagged}")
+    print(f"  customer-surface defects (servable):    {flagged}")
+    print(f"  anomalies blocked only by a missing state: {contract_absent_total}")
     print("  Publication remains disabled: this database is named by no")
     print("  application connection string.")
     print()
-    if unexplained_total or flagged:
-        print("  Non-zero. These are findings to classify -- expected")
-        print("  withdrawal or new defect -- before any production recompute.")
+    if unexplained_total or flagged or contract_absent_total:
+        print("  Non-zero. Findings to classify -- expected withdrawal or new")
+        print("  defect -- before any production recompute. Note that anomalies")
+        print("  blocked only by a missing state collapse into a single")
+        print("  diagnosis, not one finding each.")
     else:
         print("  Clean. Coverage changes are all accounted for by a declared")
         print("  cause, and no red flag fired.")

@@ -42,19 +42,31 @@ from typing import Iterable, Mapping, Optional
 SAMPLE_LIMIT = 25
 
 
-#: Every full producer whose output the canonical writer re-emits. Both must
+#: Every full producer whose output the canonical writer re-emits. All must
 #: have proven their own population before a run may be attributed or served.
 #:
-#: yearly_compute alone is not enough: it can prove perfect coverage while the
-#: build silently misses rows, and the canonical writer would then faithfully
-#: publish stale provisional values -- the same defect wearing a completeness
-#: certificate.
+#: No one of them is enough on its own. yearly_compute can prove perfect
+#: coverage while the build silently misses rows, and the canonical writer
+#: would then faithfully publish stale provisional values -- the same defect
+#: wearing a completeness certificate.
+#:
+#: daily_compute is here because build_screener_universe consumes
+#: market.computed_metrics. A finalised run cannot truthfully claim its
+#: required computed inputs were current while that producer sits outside the
+#: lifecycle with no equivalent proof: the run would certify rows assembled
+#: from stale computed inputs.
+#:
+#: Ordering follows the real dependencies -- yearly_compute and daily_compute
+#: both feed universe_build, so both must succeed before it runs -- but this
+#: tuple is a SET of requirements, not a sequence. The driver owns the order.
 #:
 #: Declared here rather than in composite_score so the resolver can require the
 #: same set without importing a module that needs psycopg2. The writer and the
 #: reader must agree on what "published" means, and two copies of this tuple
 #: would eventually disagree.
-REQUIRED_STAGES: tuple[str, ...] = ("yearly_compute", "universe_build")
+REQUIRED_STAGES: tuple[str, ...] = (
+    "yearly_compute", "daily_compute", "universe_build",
+)
 
 
 class StageIncomplete(RuntimeError):

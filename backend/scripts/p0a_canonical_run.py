@@ -14,6 +14,7 @@ from another once the rows exist.
     require publishable source health
     create_run(the health that was evaluated)
     yearly_compute(run_id)      -> require stage success
+    daily_compute(run_id)       -> require stage success
     universe_build(run_id)      -> require stage success
     composite_score(run_id)     -> canonical commit, validate, finalise
 
@@ -282,6 +283,13 @@ def main() -> int:
                   [PYBIN, "compute/engine/yearly_compute.py",
                    "--run-id", str(run.run_id)])
         require_stage(conn, run.run_id, "yearly_compute")
+
+        # Both feed universe_build, so both precede it. Their order relative
+        # to each other does not matter: neither reads the other's output.
+        run_stage("daily_compute",
+                  [PYBIN, "compute/engine/daily_compute.py",
+                   "--run-id", str(run.run_id)])
+        require_stage(conn, run.run_id, "daily_compute")
 
         run_stage("universe_build",
                   [PYBIN, "scripts/eodhd/v2/build_screener_universe.py",

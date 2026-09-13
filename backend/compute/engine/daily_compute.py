@@ -592,26 +592,52 @@ def upsert_metrics(cur, asx_code: str, price_date, metrics: dict):
 def main():
     parser = argparse.ArgumentParser(description="ASX Compute Engine — daily metrics")
     parser.add_argument("--codes", nargs="+", help="Specific ASX codes")
+    parser.add_argument("--run-id", type=int,
+                        help="The compute run this stage belongs to. Given, a "
+                             "FULL run records terminal stage evidence that it "
+                             "covered its own source domain — which the "
+                             "canonical writer requires before it may attribute "
+                             "a row to this run.")
     parser.add_argument("--limit", type=int, help="Max stocks to process")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
 
+    # The producer's source domain, stated once and used for both the work
+    # and the proof.
+    #
+    # A price and annual financials are what compute_metrics actually needs;
+    # a company with neither cannot be computed and is legitimately outside
+    # the domain. Listing status is NOT part of it, and used to be: the
+    # selection required market.companies.status = 'active' while
+    # build_screener_universe reads market.companies_current, which includes
+    # delisted codes. That is the identical mismatch that left 2,954
+    # yearly_metrics rows with a live source untouched -- a producer narrower
+    # than its own consumer, so the consumer reads rows the producer never
+    # rewrites.
+    SOURCE_DOMAIN_SQL = """
+        SELECT DISTINCT p.asx_code
+          FROM market.daily_prices p
+          JOIN financials.annual_pnl f ON f.asx_code = p.asx_code
+         ORDER BY p.asx_code
+    """
+
+    # Derived independently of the loop's selection, because comparing a run
+    # against its own selection is circular: it agrees by construction and
+    # proves nothing.
+    cur.execute(SOURCE_DOMAIN_SQL)
+    expected_codes = {r[0] for r in cur.fetchall()}
+    written_codes: set[str] = set()
+
     # Get codes to process
     if args.codes:
         codes = [c.upper() for c in args.codes]
     else:
-        sql = """
-            SELECT DISTINCT p.asx_code
-            FROM market.daily_prices p
-            JOIN market.companies c ON c.asx_code = p.asx_code
-            JOIN financials.annual_pnl f ON f.asx_code = p.asx_code
-            WHERE c.status = 'active'
-            ORDER BY p.asx_code
-        """
+        sql = SOURCE_DOMAIN_SQL
         if args.limit:
-            sql += f" LIMIT {args.limit}"
+            sql = sql.replace("ORDER BY p.asx_code",
+                              f"ORDER BY p.asx_code LIMIT {args.limit}")
         cur.execute(sql)
         codes = [r[0] for r in cur.fetchall()]
 
@@ -646,6 +672,7 @@ def main():
                                       dividend_source)
             upsert_metrics(cur, asx_code, price["price_date"], metrics)
             processed += 1
+            written_codes.add(asx_code)
 
             if i % 50 == 0:
                 conn.commit()
@@ -656,6 +683,33 @@ def main():
             log.warning(f"  {asx_code}: {e}")
 
     conn.commit()
+
+    # ── Terminal stage evidence ──────────────────────────────────────────────
+    # universe_build consumes market.computed_metrics, so a canonical run
+    # cannot truthfully claim its computed inputs were current while this
+    # producer sits outside the lifecycle with no completeness proof. A scoped
+    # run records nothing: its expected population is not the source domain,
+    # and a stage row saying otherwise would be a false claim.
+    scoped = bool(args.codes or args.limit)
+    stage_ok = True
+    if args.run_id is not None and not scoped:
+        from compute.engine.run_stages import StageResult, record_stage
+
+        result = StageResult(
+            "daily_compute",
+            frozenset(expected_codes), frozenset(written_codes),
+            {"skipped_no_price": skipped, "errors": errors,
+             "dividend_feed_healthy": feed_health.healthy})
+        stage_ok = record_stage(cur, args.run_id, result)
+        conn.commit()
+        log.info("stage daily_compute: %s — %s", result.status, result.summary())
+        if not stage_ok:
+            log.error("daily_compute did not cover its source domain. No "
+                      "canonical run can be published from this run.")
+    elif args.run_id is not None:
+        log.info("Stage evidence skipped: a scoped run's expected population "
+                 "is not the source domain.")
+
     cur.close()
     conn.close()
 

@@ -52,6 +52,64 @@ STORAGE_COLUMN: dict[str, str] = {
     "ev_ebitda": "ev_to_ebitda",
     "ev_ebit": "ev_to_ebit",
     "dividend_payout_ratio": "payout_ratio",
+
+    # The horizon CAGRs whose storage spelling predates the canonical naming.
+    # Their three-year forms are stored as "growth ... cagr" while every other
+    # horizon is stored as "cagr ... y", so the canonical name missed them and
+    # they read as governed-with-no-column. They are filterable fields: a
+    # predicate runs against these columns, which makes an unmapped alias the
+    # exact failure ev_to_ebitda already demonstrated -- the filter works and
+    # the governance does not.
+    "revenue_cagr_3y": "revenue_growth_3y_cagr",
+    "eps_cagr_3y": "eps_growth_3y_cagr",
+    "net_income_cagr_3y": "earnings_growth_3y_cagr",
+
+    # These two are judgements, not spellings, and are called out as such.
+    # The canonical name says what the metric is; the column says which window
+    # the stored figure covers, and there is only one candidate for each.
+    #
+    #   dividend_per_share -> dps_ttm    trailing twelve months, the only DPS
+    #                                    the universe carries
+    #   free_cash_flow     -> fcf_fy0    the fiscal-year figure; no fcf_ttm
+    #                                    column exists
+    #
+    # If either is meant to denote a different window, the fix is a new column
+    # rather than a different alias -- mapping a canonical name onto a column
+    # that answers a different question is the defect this table exists to
+    # prevent, performed deliberately.
+    "dividend_per_share": "dps_ttm",
+    "free_cash_flow": "fcf_fy0",
+}
+
+
+#: Governed nowhere, because there is nowhere to put them.
+#:
+#: A governed metric with no column can never hold a value or a state, so
+#: violations() reports missing_governed for it on every row, forever -- which
+#: would make Gate B's `violations() == 0` unreachable by construction. None of
+#: these is on ScreenerRow and none has a column, so none can be served or
+#: filtered: governing them was vacuous.
+#:
+#: Removing them from V1 is safe *now* and will not be later. No row anywhere
+#: is attributed to any model version -- compute_run_id and metric_states are
+#: both zero in production as well as in the scratch clone -- so the pin's
+#: premise, that rows already written under V1 are validated against it, is
+#: currently vacuous. After the first canonical run it stops being vacuous and
+#: this becomes impossible.
+NOT_PERSISTED: dict[str, str] = {
+    "grossed_up_dividend":
+        "a franking-inclusive dividend in dollars; the universe carries "
+        "grossed_up_yield, which is a different quantity, and no column for "
+        "this one",
+    "earnings_quality":
+        "no column; fcf_conversion is the stored expression of the same idea "
+        "and is governed in its place",
+    "gross_profit_cagr_3y":
+        "computed by yearly_compute.cn() into market.yearly_metrics but never "
+        "carried into screener.universe",
+    "gross_profit_cagr_5y":
+        "computed by yearly_compute.cn() into market.yearly_metrics but never "
+        "carried into screener.universe",
 }
 
 
@@ -61,8 +119,29 @@ def column_for(metric: str) -> str:
     return STORAGE_COLUMN.get(canonical, canonical)
 
 
+#: The inverse of STORAGE_COLUMN, built once and checked for collisions.
+#:
+#: normalise() recovers the canonical name for aliases the metric registry
+#: already knows -- ev_to_ebitda -> ev_ebitda -- but it cannot know the ones
+#: declared only here. revenue_growth_3y_cagr does not normalise to
+#: revenue_cagr_3y by any rule, so without an explicit inverse the round trip
+#: breaks in one direction only: the writer puts a value in the right column
+#: and the reader cannot tell which metric it belongs to.
+_CANONICAL_BY_COLUMN: dict[str, str] = {}
+for _metric, _column in STORAGE_COLUMN.items():
+    if _column in _CANONICAL_BY_COLUMN:
+        raise RuntimeError(
+            f"two canonical metrics claim column {_column}: "
+            f"{_CANONICAL_BY_COLUMN[_column]} and {_metric}. One column cannot "
+            f"answer for two metrics -- a read-back would have to guess.")
+    _CANONICAL_BY_COLUMN[_column] = _metric
+del _metric, _column
+
+
 def canonical_for(column: str) -> str:
     """The inverse, for reading a row back."""
+    if column in _CANONICAL_BY_COLUMN:
+        return _CANONICAL_BY_COLUMN[column]
     return normalise(column)
 
 

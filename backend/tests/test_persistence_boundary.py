@@ -400,7 +400,19 @@ def test_a_known_version_still_validates_normally():
 
 #: V1's governed set, as pinned. A literal, so that growing it is an edit
 #: somebody makes on purpose and not something a change elsewhere causes.
-V1_GOVERNED_COUNT = 42
+#:
+#: 42 -> 40. earnings_quality and grossed_up_dividend were removed after the
+#: discovery run showed they have no column anywhere: a governed metric with
+#: nowhere to live is missing_governed on every row forever, which makes Gate
+#: B's `violations() == 0` unreachable by construction.
+#:
+#: Amending a pinned set is normally forbidden. It is permissible here for one
+#: reason, which will not hold again: no row anywhere is attributed to any
+#: model version. compute_run_id and metric_states are both zero in production
+#: as well as in the clone, so "rows already written under V1" is currently an
+#: empty set. After the first canonical run it stops being empty and this
+#: becomes impossible.
+V1_GOVERNED_COUNT = 40
 
 
 def test_v1_is_a_literal_and_has_not_grown():
@@ -421,6 +433,74 @@ def test_v1_is_a_literal_and_has_not_grown():
         "state they were never asked to carry. Add to a new version instead.")
 
 
+def test_every_governed_metric_has_a_column_the_build_actually_writes():
+    """The silent-no-op class, closed by construction.
+
+    A governed metric whose canonical name does not resolve to a real column
+    cannot hold a value or a state. It does not fail loudly: it reports as
+    'governed, no column' if anyone happens to look, and as missing_governed
+    on every row if anyone runs violations(). The discovery run found nine of
+    them, five of which were alias gaps -- revenue_cagr_3y stored as
+    revenue_growth_3y_cagr -- and every one of those five is a filterable
+    field, so a predicate ran against a column the contract could not see.
+    That is precisely the ev_to_ebitda failure, four more times.
+
+    The authority is the canonical build's INSERT column list rather than
+    information_schema: a column that exists but is never written is no better
+    than one that does not exist, and this way the check needs no database.
+    """
+    import re
+    from pathlib import Path
+
+    from compute.engine.universe_writer import NOT_PERSISTED, column_for
+
+    root = Path(__file__).resolve().parents[1]
+
+    build = root / "scripts" / "eodhd" / "v2" / "build_screener_universe.py"
+    source = build.read_text(encoding="utf-8")
+    match = re.search(r"INSERT INTO screener\.universe\s*\((.*?)\)\s*SELECT",
+                      source, re.S)
+    assert match, "could not locate the screener.universe INSERT column list"
+    written = {c.strip() for c in
+               re.sub(r"--.*?$", "", match.group(1), flags=re.M).split(",")
+               if c.strip()}
+
+    # There are two canonical writers, not one. The build produces the row;
+    # composite_score updates the factor scores onto it afterwards. Checking
+    # only the build would report the six scores as homeless, which is how
+    # this test first failed -- the assertion was right and its notion of
+    # "written" was too narrow.
+    scorer = (root / "compute" / "engine" / "composite_score.py").read_text(encoding="utf-8")
+    written |= set(re.findall(r"^\s*(\w+)\s*=\s*data\.\w+", scorer, re.M))
+
+    homeless = {}
+    for version, metrics in GOVERNED_METRICS.items():
+        for metric in metrics:
+            if metric in NOT_PERSISTED:
+                continue
+            column = column_for(metric)
+            if column not in written:
+                homeless.setdefault(metric, (version, column))
+
+    assert not homeless, (
+        "governed metrics with no column the build writes: "
+        + ", ".join(f"{m} ({v}, expected {c})"
+                    for m, (v, c) in sorted(homeless.items()))
+        + ". Either add a STORAGE_COLUMN alias, add the column to the build, "
+          "or declare it in NOT_PERSISTED with a reason.")
+
+
+def test_nothing_declared_unpersisted_is_still_governed():
+    """NOT_PERSISTED is a statement that a metric is out of scope. Leaving it
+    in a governed set as well would mean both things are true at once, and the
+    violation it produces would be permanent."""
+    from compute.engine.universe_writer import NOT_PERSISTED
+
+    for version, metrics in GOVERNED_METRICS.items():
+        overlap = sorted(set(NOT_PERSISTED) & metrics)
+        assert not overlap, f"{overlap} are both governed in {version} and NOT_PERSISTED"
+
+
 def test_nothing_sensitive_escapes_governance_entirely():
     """The half of the original guard that was load-bearing. A sensitive
     metric governed by no version at all is served with no state and no way
@@ -430,9 +510,15 @@ def test_nothing_sensitive_escapes_governance_entirely():
     question about when it was introduced, not about whether it is covered.
     """
     from compute.engine.metric_registry import SENSITIVE
+    from compute.engine.universe_writer import NOT_PERSISTED
 
+    # A metric declared NOT_PERSISTED has no column and is on no response
+    # model, so there is no path by which a value of it reaches anyone. The
+    # guard exists to stop a sensitive value being *served* without its state;
+    # one that cannot be stored cannot be served, and demanding governance for
+    # it would require inventing a column to satisfy a test.
     governed_anywhere = frozenset().union(*GOVERNED_METRICS.values())
-    escaped = SENSITIVE - governed_anywhere
+    escaped = SENSITIVE - governed_anywhere - frozenset(NOT_PERSISTED)
     assert not escaped, (
         f"{sorted(escaped)} are sensitive but governed by no model version. "
         f"Add them to the latest version — a sensitive metric with no "
@@ -445,12 +531,13 @@ def test_metrics_sensitive_beyond_v1_are_governed_by_a_later_version():
     domain-sensitive for the same reason gross_margin is, and is governed
     from V2. It must not have leaked into V1 to get there."""
     from compute.engine.metric_registry import SENSITIVE
+    from compute.engine.universe_writer import NOT_PERSISTED
 
     v1 = GOVERNED_METRICS["FACTOR_MODEL_V1"]
     later = frozenset().union(*(
         s for v, s in GOVERNED_METRICS.items() if v != "FACTOR_MODEL_V1"))
 
-    for metric in sorted(SENSITIVE - v1):
+    for metric in sorted(SENSITIVE - v1 - frozenset(NOT_PERSISTED)):
         assert metric in later, (
             f"{metric} is sensitive, absent from V1, and in no later version")
 

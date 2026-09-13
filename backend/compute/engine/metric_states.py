@@ -253,7 +253,9 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
         "operating_margin", "inventory_turnover", "asset_turnover",
         "net_margin",
         "ev_ebitda", "ev_ebit", "net_debt_to_ebitda", "free_cash_flow",
-        "fcf_conversion", "earnings_quality", "price_to_sales",
+        # earnings_quality removed: no column anywhere, so it could only ever
+        # be missing_governed. See universe_writer.NOT_PERSISTED.
+        "fcf_conversion", "price_to_sales",
         "piotroski_f_score",
         # Margin *changes* inherit the domain of the margin they measure, and
         # the multibagger score ranks them cross-sectionally.
@@ -264,7 +266,9 @@ GOVERNED_METRICS: dict[str, frozenset[str]] = {
         "pe_ratio", "peg_ratio", "roce", "roic",
         # dividend methodology
         "dividend_yield", "grossed_up_yield", "franking_pct",
-        "dividend_per_share", "grossed_up_dividend", "dividend_payout_ratio",
+        # grossed_up_dividend removed for the same reason: grossed_up_yield is
+        # a different quantity and there is no column for the dollar amount.
+        "dividend_per_share", "dividend_payout_ratio",
         # factor layer
         "value_score", "quality_score", "growth_score", "momentum_score",
         "income_score", "composite_score",
@@ -282,7 +286,8 @@ HORIZON_CAGRS: frozenset[str] = frozenset({
     "eps_cagr_3y", "eps_cagr_5y",
     "ebitda_cagr_3y", "ebitda_cagr_5y",
     "fcf_cagr_3y", "fcf_cagr_5y",
-    "gross_profit_cagr_3y", "gross_profit_cagr_5y",
+    # gross_profit_cagr_3y/5y are computed into market.yearly_metrics and
+    # never carried into screener.universe, so they are not governed here.
     "bvps_cagr_3y", "bvps_cagr_5y",
 })
 

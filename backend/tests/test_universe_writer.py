@@ -85,6 +85,20 @@ def cba() -> dict:
                        Observation(invested_capital=5e10,
                                    periods_available=2, periods_required=5)),
     }
+
+    # A canonical row is complete by definition, so the fixture is too.
+    #
+    # These six carry the meaning; the rest are assessed as absent. Padding
+    # them is not ceremony: the writer now refuses a row that leaves any
+    # governed metric unassessed, because writing it would set those columns
+    # to NULL with no sidecar entry — an unexplained null in the database,
+    # created by the very statement meant to prevent one. Before this the
+    # fixture was a partial row, and every assertion below was made against a
+    # shape the canonical path will never produce.
+    from compute.engine.universe_writer import persisted_governed
+
+    for metric in persisted_governed(LATEST_MODEL_VERSION):
+        out.setdefault(metric, assess(metric, None, Domain.BANK))
     return out
 
 
@@ -193,9 +207,14 @@ def test_every_storage_column_round_trips_to_its_canonical_name():
 
 
 def test_the_statement_uses_physical_columns_and_canonical_parameters():
-    sql, params = build_update(
-        "CBA", {"ev_ebitda": assess("ev_ebitda", 9.0, Domain.GENERAL_CORPORATE,
-                                    Observation(ebitda=1e9))}, RUN)
+    # Built on the complete fixture: the canonical writer only ever emits a
+    # complete row, so asserting the column mapping against a one-metric dict
+    # would be asserting it against a statement that cannot occur.
+    assessments = cba()
+    assessments["ev_ebitda"] = assess("ev_ebitda", 9.0,
+                                      Domain.GENERAL_CORPORATE,
+                                      Observation(ebitda=1e9))
+    sql, params = build_update("CBA", assessments, RUN)
 
     assert "ev_to_ebitda = %(m_ev_ebitda)s" in sql, \
         "physical column, canonical parameter — a mapping slip shows up as a " \
@@ -356,6 +375,76 @@ def test_write_all_writes_every_company_under_one_run():
 
 
 # ── Standalone runner ─────────────────────────────────────────────────────────
+
+# ── The canonical SET list is derived, and complete ──────────────────────────
+
+def test_the_set_list_comes_from_the_registry_not_a_hand_written_list():
+    """A hand-maintained list of 72 columns is a second declaration of what is
+    governed, and the two diverge on the first metric added to a version --
+    silently, because a column missing from an UPDATE does not fail."""
+    from compute.engine.universe_writer import persisted_governed
+    from compute.engine.metric_states import GOVERNED_METRICS
+    from compute.engine.universe_writer import NOT_PERSISTED
+
+    mapping = persisted_governed("FACTOR_MODEL_V2")
+    expected = GOVERNED_METRICS["FACTOR_MODEL_V2"] - set(NOT_PERSISTED)
+
+    assert set(mapping) == set(expected)
+
+
+def test_no_two_metrics_may_claim_one_column():
+    from compute.engine.universe_writer import persisted_governed
+    mapping = persisted_governed("FACTOR_MODEL_V2")
+    assert len(set(mapping.values())) == len(mapping)
+
+
+def test_every_governed_column_is_assigned_even_when_the_value_is_absent():
+    """The stale-survival rule, at the writer.
+
+        "No value this run" must overwrite the previous run's value with NULL
+        and the current state. Omitting the column is forbidden.
+
+    2,954 yearly_metrics rows outlived the run that produced them because a
+    producer simply did not touch them. A column left out of an UPDATE does
+    not fail -- it keeps yesterday's number, which then sits beside today's
+    sidecar and reads as current.
+    """
+    from compute.engine.applicability import Domain, assess
+    from compute.engine.universe_writer import (
+        ComputeRun, build_update, persisted_governed)
+
+    mapping = persisted_governed("FACTOR_MODEL_V2")
+    # Every governed metric assessed, all of them absent from the source.
+    assessments = {m: assess(m, None, Domain.GENERAL_CORPORATE)
+                   for m in mapping}
+    run = ComputeRun(7, "test", "FACTOR_MODEL_V2")
+
+    sql, params = build_update("TST", assessments, run)
+
+    for column in mapping.values():
+        assert f"{column} = %(" in sql, f"{column} not assigned"
+    assert all(params[f"m_{m}"] is None for m in mapping)
+
+
+def test_a_governed_metric_the_run_never_assessed_refuses_the_write():
+    """It must abort, not arrive as SOURCE_MISSING. Reporting our own gap as
+    the company having no value is the conflation this contract removes."""
+    from compute.engine.applicability import Domain, assess
+    from compute.engine.universe_writer import (
+        ComputeRun, WriteRefused, build_update, persisted_governed)
+
+    mapping = persisted_governed("FACTOR_MODEL_V2")
+    partial = dict(sorted(mapping.items())[:-1])
+    assessments = {m: assess(m, None, Domain.GENERAL_CORPORATE) for m in partial}
+    run = ComputeRun(7, "test", "FACTOR_MODEL_V2")
+
+    try:
+        build_update("TST", assessments, run)
+    except WriteRefused as e:
+        assert "not assessed" in str(e)
+    else:
+        raise AssertionError("an unassessed governed metric must refuse the write")
+
 
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())

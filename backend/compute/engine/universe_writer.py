@@ -37,6 +37,7 @@ from compute.engine.metric_states import (
     encode,
     governed_for,
     persist_row,
+    violations,
 )
 
 
@@ -198,6 +199,59 @@ def finalise_run(cur, run: ComputeRun, rows_written: int) -> None:
 
 # ── Building the write ────────────────────────────────────────────────────────
 
+def persisted_governed(model_version: str) -> dict[str, str]:
+    """canonical metric -> storage column, for everything this version persists.
+
+    The canonical SET list is derived from the governed registry, never
+    hand-maintained. A hand-written list of 72 columns is a second declaration
+    of what is governed, and the two would diverge on the first metric added to
+    a model version -- silently, because a column missing from an UPDATE does
+    not fail, it leaves yesterday's value in place.
+
+    Two structural checks, both of which abort rather than degrade:
+      * no two canonical metrics may claim one storage column, or a read-back
+        has to guess which metric a value belongs to;
+      * NOT_PERSISTED members are excluded, because they have no column at all.
+    """
+    governed = governed_for(model_version)
+
+    mapping: dict[str, str] = {}
+    claimed: dict[str, str] = {}
+    for metric in sorted(governed):
+        if metric in NOT_PERSISTED:
+            continue
+        column = column_for(metric)
+        if column in claimed:
+            raise WriteRefused(
+                f"{claimed[column]} and {metric} both map to column {column}; "
+                f"one column cannot answer for two metrics")
+        claimed[column] = metric
+        mapping[metric] = column
+    return mapping
+
+
+def verify_storage(cur, model_version: str) -> None:
+    """Every column this version promises must exist. Checked once per run.
+
+    A promised column that is absent is an application defect and must stop the
+    run. It must never be allowed to present as SOURCE_MISSING: that would
+    report our own missing schema as the company having no value, which is the
+    precise conflation this contract exists to remove.
+    """
+    mapping = persisted_governed(model_version)
+    cur.execute("""
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'screener' AND table_name = 'universe';""")
+    present = {r[0] for r in cur.fetchall()}
+
+    absent = sorted({c for c in mapping.values() if c not in present})
+    if absent:
+        raise WriteRefused(
+            f"{model_version} governs metrics whose storage columns do not "
+            f"exist: {absent}. This is an application defect, not missing "
+            f"data, and must not be written as a source failure.")
+
+
 def build_update(asx_code: str, assessments: Mapping[str, Assessment],
                  run: ComputeRun) -> tuple[str, dict]:
     """One statement carrying numeric columns, the sidecar and the run.
@@ -217,6 +271,18 @@ def build_update(asx_code: str, assessments: Mapping[str, Assessment],
             f"{run.factor_model_version}; a metric this contract does not "
             f"cover cannot be written under it")
 
+    # Every governed metric must be assessed. A metric the canonical frame
+    # cannot speak for is an application defect: it must abort, not arrive as
+    # SOURCE_MISSING, which would blame the feed for our own gap.
+    mapping = persisted_governed(run.factor_model_version)
+    unassessed = sorted(m for m in mapping if normalise(m) not in
+                        {normalise(k) for k in assessments})
+    if unassessed:
+        raise WriteRefused(
+            f"{asx_code}: governed but not assessed by this run: {unassessed}. "
+            f"Writing the row would leave those columns holding the previous "
+            f"run's values while the sidecar describes this one.")
+
     values, states = persist_row(assessments)
     assert_complete(values, states)      # both contradiction directions
 
@@ -226,14 +292,20 @@ def build_update(asx_code: str, assessments: Mapping[str, Assessment],
                     "compute_run_id": run.run_id}
     sets: list[str] = []
 
-    for metric, value in sorted(values.items()):
-        column = column_for(metric)
-        # Parameter names use the canonical identity so a mapping mistake in
-        # STORAGE_COLUMN shows up as a mismatch rather than a silent overwrite
-        # of the wrong column.
+    # Driven by the registry, not by the keys of `values`. Every governed
+    # column is assigned on every canonical row, explicit NULL included.
+    #
+    #     "no value this run" must overwrite the previous run's value with
+    #     NULL and the current state. Omitting the column is forbidden.
+    #
+    # This is the writer-side half of the finding that 2,954 yearly_metrics
+    # rows outlived the run that produced them. A column left out of an UPDATE
+    # does not fail; it silently keeps yesterday's number, which then sits
+    # beside today's sidecar and reads as current.
+    for metric, column in sorted(mapping.items()):
         placeholder = f"m_{normalise(metric)}"
         sets.append(f"{column} = %({placeholder})s")
-        params[placeholder] = value
+        params[placeholder] = values.get(metric)
 
     sets.append("metric_states = %(metric_states)s::jsonb")
     sets.append("compute_run_id = %(compute_run_id)s")
@@ -257,6 +329,83 @@ def write_all(cur, by_code: Mapping[str, Mapping[str, Assessment]],
         write_row(cur, asx_code, assessments, run)
         written += 1
     return written
+
+
+def commit_canonical(conn, run: ComputeRun,
+                     by_code: Mapping[str, Mapping[str, Assessment]],
+                     *, required_stages: Sequence[str],
+                     readback_sample: int = 25,
+                     snapshot_id: Optional[str] = None,
+                     details: Optional[Mapping[str, object]] = None) -> int:
+    """The canonical commit boundary. The transaction IS the publication unit.
+
+    Everything the contract depends on happens inside one transaction, so the
+    universe is never half-canonical:
+
+        write every governed value, the sidecar and the attribution
+        validate what was written, against this run
+        insert the finalisation record
+        COMMIT
+
+    If validation fails the whole thing rolls back and no finalisation exists,
+    so the resolver finds no eligible run rather than a partially-published
+    one. The compute_runs row and the stage evidence are deliberately OUTSIDE
+    this transaction and already committed: a failed attempt must stay
+    visible as forensics. Losing the record of what was tried is how a
+    recurring failure becomes invisible.
+
+    Prerequisite stages are checked first. Attribution asserts that this run
+    wrote the row after its required producer populations were proven
+    complete, so writing it before that proof exists would make the claim
+    false -- and a false attribution is worse than none, because everything
+    downstream reads it as evidence of coherence.
+    """
+    from compute.engine.run_stages import finalise, require_stages
+
+    cur = conn.cursor()
+    try:
+        # Before any row is touched: the prerequisites, and the schema this
+        # version promises. Both abort rather than degrade.
+        require_stages(cur, run.run_id, required_stages)
+        verify_storage(cur, run.factor_model_version)
+
+        rows_written = write_all(cur, by_code, run)
+
+        # Validate what is actually in the table under this run, not what we
+        # believe we sent. read_back is scoped to the run id, so a row written
+        # by anything else cannot satisfy the check by accident.
+        bad = 0
+        sample = sorted(by_code)[:readback_sample]
+        for asx_code in sample:
+            restored = read_back(cur, asx_code, run)
+            if restored is None:
+                raise WriteRefused(
+                    f"{asx_code} is not attributable to run {run.run_id} "
+                    f"immediately after writing it")
+            values = {m: a.value for m, a in restored.items()}
+            states = encode(restored)
+            bad += len(violations(values, states, run.factor_model_version))
+
+        finalise_run(cur, run, rows_written)
+
+        # Refuses unless the stages passed and nothing violates. The insert is
+        # the publication boundary, and it is inside this transaction so it
+        # cannot outlive a rollback of the rows it vouches for.
+        finalise(cur, run.run_id,
+                 rows_written=rows_written,
+                 persistence_violations=bad,
+                 required_stages=required_stages,
+                 snapshot_id=snapshot_id,
+                 details={**dict(details or {}),
+                          "readback_sampled": len(sample)})
+
+        conn.commit()
+        return rows_written
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
 
 
 # ── Reading it back ───────────────────────────────────────────────────────────

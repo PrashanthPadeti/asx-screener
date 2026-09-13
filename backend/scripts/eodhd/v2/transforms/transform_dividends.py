@@ -49,9 +49,23 @@ def main():
     cur  = conn.cursor()
 
     if is_full_run:
-        log.info("Full run — truncating market.dividends …")
+        # NOT committed here. TRUNCATE is transactional in PostgreSQL, so it
+        # belongs in the same transaction as the inserts that replace what it
+        # removed.
+        #
+        # Committing the truncate on its own opens a window in which
+        # market.dividends is empty and durably so: a crash, a bad row, or a
+        # killed session between the two statements destroys the entire
+        # dividend history with nothing to roll back to. The table is the sole
+        # store — the raw zone could rebuild it, but only by re-running this
+        # same script, and only if someone realised what had happened.
+        #
+        # Nothing had gone wrong here yet. The window was simply open, and
+        # this is the script that was about to be run against production to
+        # repair a four-month outage.
+        log.info("Full run — truncating market.dividends (same transaction "
+                 "as the reload) …")
         cur.execute("TRUNCATE TABLE market.dividends")
-        conn.commit()
 
     if args.codes:
         placeholders = ",".join(["%s"] * len(args.codes))
@@ -73,9 +87,14 @@ def main():
     rows = cur.fetchall()
     log.info(f"Processing {len(rows):,} dividend records …")
 
+    # Bound before the branch. The empty-reload guard below reads it, and an
+    # empty staging table is precisely the case that must reach that guard --
+    # if `transformed` only existed when there was something to transform, the
+    # check for having transformed nothing would raise NameError instead.
+    transformed: list = []
+
     if rows:
         # Filter out rows where dividend amount is NULL (amount_per_share is NOT NULL)
-        transformed = []
         for r in rows:
             asx_code, ex_date, dividend, currency, period, decl_date, rec_date, pay_date, franking_pct = r
             if dividend is None:
@@ -110,6 +129,25 @@ def main():
                     pay_date         = EXCLUDED.pay_date
             """, transformed, page_size=2000)
             log.info(f"  Inserted {len(transformed):,} rows")
+
+    # A full run that produced nothing must not commit. With the truncate now
+    # inside this transaction, committing an empty reload would replace the
+    # entire dividend history with zero rows -- and the run would exit 0,
+    # because reading no files and transforming no rows is not an error to any
+    # code path above.
+    #
+    # The screener would then show every company as paying no dividend, which
+    # is a false statement about 2,500 companies rather than a missing feed,
+    # and the applicability contract would have no way to know: an empty table
+    # and a table of genuine non-payers are identical.
+    if is_full_run and not transformed:
+        conn.rollback()
+        log.error("Full run produced no rows. Rolling back rather than "
+                  "committing an empty market.dividends. Check the raw zone: "
+                  "%s", "data/raw/eodhd/exchange=AU/dividends/historical/")
+        cur.close()
+        conn.close()
+        sys.exit(1)
 
     conn.commit()
     cur.close()

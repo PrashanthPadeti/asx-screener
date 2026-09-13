@@ -534,6 +534,63 @@ def test_freshness_is_checked_before_breadth():
     assert "days behind" in h.failure
 
 
+# ── The ingestion chain is actually scheduled ────────────────────────────────
+
+def _weekly_pipeline_source() -> str:
+    from pathlib import Path as _P
+    return (_P(__file__).resolve().parents[1] / "scripts" / "eodhd" / "v2"
+            / "jobs" / "weekly_pipeline.py").read_text(encoding="utf-8")
+
+
+def test_the_dividend_chain_is_in_the_weekly_pipeline():
+    """The outage cause, as an assertion.
+
+    download_dividends ran every Sunday and filled the raw zone.
+    load_to_staging_dividends and transform_dividends existed only in
+    pipeline_runner.py, which is in no cron entry -- so market.dividends
+    advanced solely when someone ran that path by hand, and decayed from May
+    2026 when nobody did. The provider never stopped working.
+    """
+    src = _weekly_pipeline_source()
+
+    assert "load_to_staging_dividends.py" in src
+    assert "transform_dividends.py" in src
+    assert "assert_feed_health.py" in src
+
+
+def test_dividends_are_materialised_before_anything_computes_over_them():
+    """yearly_compute derives DPS from market.dividends and daily_compute
+    reads it for every yield metric. Loading after them would compute a week
+    behind the feed, every week, and look entirely normal doing it."""
+    src = _weekly_pipeline_source()
+
+    transform = src.index("transform_dividends.py")
+    assert_health = src.index("assert_feed_health.py")
+    yearly = src.index("yearly_compute.py")
+    staging = src.index("load_to_staging_dividends.py")
+
+    assert staging < transform, "staging load precedes the transform"
+    assert transform < assert_health, "health is asserted on the loaded table"
+    assert assert_health < yearly, "nothing computes over an unasserted feed"
+
+
+def test_the_scheduler_does_not_reimplement_the_health_thresholds():
+    """An operational definition of healthy living beside the financial one
+    drifts from it, silently: the scheduler would report success while the
+    engine withheld every dividend metric, and neither would be wrong by its
+    own lights."""
+    src = _weekly_pipeline_source()
+
+    # Usage, not mention: the pipeline's comments may name the function it
+    # delegates to, and this test failing on its own explanatory comment
+    # would be a guard that punishes documentation.
+    assert "fetch_feed_health(" not in src, "the pipeline must not classify"
+    assert "import fetch_feed_health" not in src
+    assert "FEED_STALENESS_DAYS" not in src
+    assert "MIN_RECENT_ROWS" not in src
+    assert "MIN_RECENT_ISSUERS" not in src
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

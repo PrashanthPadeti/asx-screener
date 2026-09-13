@@ -153,11 +153,19 @@ do_clone() {
     chmod 644 "$dump"
     ls -lh "$dump"
 
-    echo "restoring into $SCRATCH…"
+    echo "restoring into $SCRATCH… (single-threaded — see note)"
     # stderr is kept, not discarded. It is the only record of an index,
     # constraint, function or Timescale metadata object that failed while
     # every table row arrived — the class of failure row counts cannot see.
-    sudo -u postgres pg_restore -d "$SCRATCH" -j2 "$dump" 2> "$RESTORE_LOG"
+    #
+    # NOT parallel. -j reorders the restore, and _timescaledb_catalog tables
+    # carry foreign keys between them: dimension -> hypertable,
+    # dimension_slice -> chunk, compression_chunk_size -> chunk. A parallel
+    # restore loaded the children first and every one of those COPYs failed,
+    # which left all three hypertables as plain tables with zero chunks --
+    # while every user-table row count matched exactly. That is the whole
+    # reason restore stderr is not allowed to be ignored.
+    sudo -u postgres pg_restore -d "$SCRATCH" "$dump" 2> "$RESTORE_LOG"
     local restore_rc=$?
     chmod 644 "$RESTORE_LOG" 2>/dev/null
     echo "pg_restore exit: $restore_rc  (stderr -> $RESTORE_LOG)"
@@ -268,15 +276,25 @@ CRITICAL = [
 ]
 
 def q(db, sql):
+    """Value, or (None, reason). A bare None hid why market.daily_prices could
+    not be counted -- which was the single most diagnostic fact available."""
     r = subprocess.run(["sudo", "-u", "postgres", "psql", "-X", "-tA",
                         "-d", db, "-c", sql], capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else None
+    if r.returncode == 0:
+        return r.stdout.strip(), None
+    reason = " ".join(r.stderr.split())[:160] or f"exit {r.returncode}"
+    return None, reason
 
 bad = False
 for table in CRITICAL:
-    a, b = q(prod, f"SELECT count(*) FROM {table};"), q(scratch, f"SELECT count(*) FROM {table};")
+    (a, ea) = q(prod, f"SELECT count(*) FROM {table};")
+    (b, eb) = q(scratch, f"SELECT count(*) FROM {table};")
     if a is None or b is None:
-        print(f"  {table:38} UNREADABLE prod={a} scratch={b}")
+        print(f"  {table:38} UNREADABLE")
+        if ea:
+            print(f"    prod:    {ea}")
+        if eb:
+            print(f"    scratch: {eb}")
         bad = True
         continue
     same = a == b

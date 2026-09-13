@@ -181,12 +181,24 @@ def _avg(values: list, n: int) -> Optional[float]:
 def fetch_codes(cur, codes=None, limit=None) -> list:
     if codes:
         return [c.upper() for c in codes]
+    # Every code with annual P&L, active or not.
+    #
+    # This used to require market.companies.status = 'active', which made the
+    # recompute narrower than its own consumer. build_screener_universe reads
+    # market.companies_current, and all 224 delisted codes with annual P&L are
+    # in it -- so their yearly_metrics rows were read by the universe build and
+    # never rewritten by the engine that owns them. Measured on the first
+    # discovery rebuild: 2,954 rows with a live source that the run did not
+    # touch, still carrying V1's positional averages and CAGRs.
+    #
+    # A recompute that cannot cover what it reads cannot claim the rows it
+    # produces are coherent, whatever it writes into compute_run_id. Delisted
+    # financials are frozen, so recomputing them is cheap and makes the table
+    # mean one thing.
     sql = """
-        SELECT DISTINCT p.asx_code
-        FROM financials.annual_pnl p
-        JOIN market.companies c ON c.asx_code = p.asx_code
-        WHERE c.status = 'active'
-        ORDER BY p.asx_code
+        SELECT DISTINCT asx_code
+        FROM financials.annual_pnl
+        ORDER BY asx_code
     """
     if limit:
         sql += f" LIMIT {limit}"
@@ -1135,6 +1147,11 @@ def main():
     conn = psycopg2.connect(DB_URL)
     cur  = conn.cursor()
 
+    # Captured from the database, not the client, so the comparison below is
+    # against the same clock the rows are stamped with.
+    cur.execute("SELECT now()")
+    run_started = cur.fetchone()[0]
+
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
     log.info(f"Yearly compute — {total} stocks"
@@ -1230,6 +1247,37 @@ def main():
                         f"{codes_removed:,}")
         else:
             log.info("Prune: no orphaned yearly_metrics rows.")
+
+    # ── Did the run cover everything it reads? ───────────────────────────────
+    #
+    # The prune removes rows whose source is gone. This asks the other
+    # question, which is the one that actually bit: a row whose source is
+    # PRESENT and which this run did not rewrite. Nothing else reports that.
+    # The first discovery rebuild logged "1626 stocks | 0 skipped | 0 errors"
+    # -- a clean run by every signal it emitted -- while leaving 2,954 sourced
+    # rows untouched, because the codes were never selected in the first place.
+    # A run cannot notice work it did not know about, so the check is against
+    # the table rather than against the loop.
+    if not scoped:
+        cur.execute("""
+            SELECT count(*), count(DISTINCT ym.asx_code)
+              FROM market.yearly_metrics ym
+             WHERE ym.computed_at < %s
+               AND EXISTS (
+                   SELECT 1 FROM financials.annual_pnl p
+                    WHERE p.asx_code    = ym.asx_code
+                      AND p.fiscal_year = ym.fiscal_year);""", [run_started])
+        stale_rows, stale_codes = cur.fetchone()
+        if stale_rows:
+            log.error(
+                "COVERAGE GAP: %s rows across %s codes have a live source and "
+                "were not rewritten by this run. They still carry whatever a "
+                "previous run computed, and the universe build reads them "
+                "without knowing that. This run's output is not coherent.",
+                f"{stale_rows:,}", f"{stale_codes:,}")
+        else:
+            log.info("Coverage: every sourced yearly_metrics row was rewritten "
+                     "by this run.")
 
     cur.close()
     conn.close()

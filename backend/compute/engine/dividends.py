@@ -423,10 +423,17 @@ class FeedHealth:
     without changing this shape; they are not yet enforced.
     """
 
+    #: The latest ex-date that has ACTUALLY OCCURRED. Bounded to today by the
+    #: query, because announced future ex-dates are valid records and are not
+    #: evidence that the historical feed has been continuously observed.
     latest_ex_date: Optional[date]
     as_of: date
     recent_rows: Optional[int] = None
     recent_issuers: Optional[int] = None
+    #: Announced but not yet ex. Diagnostic only: reported so an operator can
+    #: see why a table's MAX(ex_date) is in the future, never used to reduce
+    #: lag.
+    future_announced: Optional[int] = None
 
     @property
     def lag_days(self) -> Optional[int]:
@@ -437,14 +444,32 @@ class FeedHealth:
     @property
     def healthy(self) -> bool:
         lag = self.lag_days
-        return lag is not None and lag <= FEED_STALENESS_DAYS
+        if lag is None:
+            # An empty table, or one holding only future announcements. Not
+            # evidence of universal non-payment -- 2,500 companies do not all
+            # stop paying at once -- and unequivocally a source failure.
+            return False
+        # `0 <=` is defensive rather than reachable: latest_ex_date is now
+        # bounded to today by the query, so a negative lag would mean the
+        # clock disagrees with the database. Reporting healthy on that basis
+        # is exactly the failure this guard replaced.
+        return 0 <= lag <= FEED_STALENESS_DAYS
 
     @property
     def reason(self) -> str:
         if self.latest_ex_date is None:
+            if self.future_announced:
+                return (f"dividend feed holds no ex-date that has occurred; "
+                        f"{self.future_announced} announced for future dates")
             return "dividend feed holds no ex-dates"
-        return (f"dividend feed incomplete — latest ex-date "
-                f"{self.latest_ex_date.isoformat()}, {self.lag_days} days behind")
+        detail = (f"dividend feed incomplete — latest occurred ex-date "
+                  f"{self.latest_ex_date.isoformat()}, {self.lag_days} days behind")
+        if self.recent_rows is not None:
+            detail += (f" ({self.recent_rows} rows / {self.recent_issuers} "
+                       f"issuers in the last {FEED_STALENESS_DAYS} days)")
+        if self.future_announced:
+            detail += f"; {self.future_announced} future announcements on file"
+        return detail
 
 
 class DividendSource:

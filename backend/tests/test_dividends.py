@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compute.engine.dividends import (  # noqa: E402
     CORP_TAX_RATE,
     DividendState,
+    FeedHealth,
     GrossUpPolicy,
     Payment,
     dividend_metrics,
@@ -413,6 +414,68 @@ def test_reconcile_rejects_the_shapes_seen_in_production():
 
 
 # ── Standalone runner, matching the existing tests' convention ────────────────
+
+# ── An announcement is not an observation ────────────────────────────────────
+
+def test_future_announcements_do_not_make_a_stale_feed_healthy():
+    """The defect the September 2026 reload exposed.
+
+    MAX(ex_date) and the breadth counters were both unbounded above, and the
+    table legitimately holds announced future ex-dates -- out to 2026-12-16
+    after the reload. Unbounded, the watermark was that December date, the lag
+    came out at -94 days, and -94 <= 35 reported healthy.
+
+    Strictly worse than the original defect: a feed that had recorded nothing
+    since May would have passed on the strength of dividends that have not
+    happened yet.
+    """
+    h = FeedHealth(latest_ex_date=date(2026, 8, 3), as_of=date(2026, 9, 13),
+                   recent_rows=0, recent_issuers=0, future_announced=412)
+
+    assert not h.healthy
+    assert h.lag_days == 41
+    assert "41 days behind" in h.reason
+    assert "412 future announcements" in h.reason
+
+
+def test_a_table_of_only_future_announcements_is_unhealthy():
+    """No ex-date has occurred, so nothing has been observed. Healthy would
+    mean the feed is current on the strength of records about the future."""
+    h = FeedHealth(latest_ex_date=None, as_of=date(2026, 9, 13),
+                   recent_rows=0, recent_issuers=0, future_announced=412)
+
+    assert not h.healthy
+    assert "no ex-date that has occurred" in h.reason
+
+
+def test_an_empty_table_is_a_source_failure_not_universal_non_payment():
+    """2,500 companies do not all stop paying dividends at once. An empty
+    table is unequivocally unhealthy -- and the transform now refuses to
+    commit one, so both ends of that hold."""
+    h = FeedHealth(latest_ex_date=None, as_of=date(2026, 9, 13),
+                   recent_rows=0, recent_issuers=0, future_announced=0)
+
+    assert not h.healthy
+    assert "holds no ex-dates" in h.reason
+
+
+def test_a_repaired_feed_is_healthy_on_occurred_evidence():
+    h = FeedHealth(latest_ex_date=date(2026, 9, 3), as_of=date(2026, 9, 13),
+                   recent_rows=96, recent_issuers=93, future_announced=412)
+
+    assert h.healthy
+    assert h.lag_days == 10
+
+
+def test_a_negative_lag_is_never_healthy():
+    """Defensive rather than reachable: the query bounds latest_ex_date to
+    today, so a negative lag would mean the clock disagrees with the database.
+    Reporting healthy on that basis is precisely what was wrong before."""
+    h = FeedHealth(latest_ex_date=date(2026, 12, 16), as_of=date(2026, 9, 13))
+
+    assert h.lag_days < 0
+    assert not h.healthy
+
 
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())

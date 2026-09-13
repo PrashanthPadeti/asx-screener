@@ -62,7 +62,7 @@ from compute.engine.metric_states import (  # noqa: E402
 )
 from compute.engine.run_stages import REQUIRED_STAGES, stages_passed  # noqa: E402
 from compute.engine.universe_writer import (  # noqa: E402
-    create_run, verify_storage,
+    create_run, persisted_governed, verify_storage,
 )
 
 logging.basicConfig(level=logging.INFO,
@@ -165,6 +165,48 @@ def verify_schema(cur) -> None:
     log.info("  %-45s ok", f"storage columns for {LATEST_MODEL_VERSION}")
 
 
+#: What the driver must be running under. Stated here rather than derived from
+#: the constant it is checking, so a change to that constant fails this rather
+#: than silently redefining what "correct" means.
+EXPECTED_MODEL = "FACTOR_MODEL_V2"
+EXPECTED_GOVERNED = 72
+EXPECTED_STAGES = ("yearly_compute", "daily_compute", "universe_build")
+
+
+def verify_activation() -> dict:
+    """The contract this run would execute under, printed and asserted.
+
+    A one-line change to LATEST_MODEL_VERSION is visually small and moves
+    every canonical path between a 40-metric contract and a 72-metric one.
+    The run has to say which it is executing before it computes anything --
+    otherwise a discovery run could exercise V1 end to end, finalise cleanly,
+    and prove nothing about the contract it was built to test.
+    """
+    mapping = persisted_governed(LATEST_MODEL_VERSION)
+    facts = {"model": LATEST_MODEL_VERSION,
+             "governed": len(mapping),
+             "stages": tuple(REQUIRED_STAGES)}
+
+    log.info("model version              : %s", facts["model"])
+    log.info("persisted governed metrics : %s", facts["governed"])
+    log.info("required stages            : %s", ", ".join(facts["stages"]))
+
+    wrong = []
+    if facts["model"] != EXPECTED_MODEL:
+        wrong.append(f"model is {facts['model']}, expected {EXPECTED_MODEL}")
+    if facts["governed"] != EXPECTED_GOVERNED:
+        wrong.append(f"{facts['governed']} governed metrics, expected "
+                     f"{EXPECTED_GOVERNED}")
+    if facts["stages"] != EXPECTED_STAGES:
+        wrong.append(f"required stages are {facts['stages']}, expected "
+                     f"{EXPECTED_STAGES}")
+    if wrong:
+        raise PreconditionFailed(
+            "the activated contract is not the one this driver expects: "
+            + "; ".join(wrong))
+    return facts
+
+
 # ── Source health, evaluated once ────────────────────────────────────────────
 
 def assess_source_health(cur, run_id=None) -> SourceHealth:
@@ -258,6 +300,7 @@ def main() -> int:
     # ── Preconditions. A failure here creates nothing. ───────────────────────
     log.info("── preconditions")
     try:
+        verify_activation()
         verify_schema(cur)
         health = assess_source_health(cur)
         log.info("  source health: %s",

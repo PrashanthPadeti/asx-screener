@@ -338,7 +338,27 @@ GOVERNED_METRICS["FACTOR_MODEL_V2"] = (
     GOVERNED_METRICS["FACTOR_MODEL_V1"] | HORIZON_CAGRS | ROLLING_AVERAGES
 )
 
-LATEST_MODEL_VERSION = "FACTOR_MODEL_V1"
+# ── V2 becomes the canonical candidate ───────────────────────────────────────
+#
+# Everything before this point built V2. This makes it the contract the
+# canonical path actually runs under. The constant is read by composite_score
+# for the governed column set, the factor model and every assessment; by the
+# writer for the attribution it stamps; and by the resolver for the semantics
+# it is willing to interpret. Until now they all resolved to V1, so the whole
+# V2 contract -- 72 governed metrics against V1's 40, exact fiscal windows,
+# the five-signal Quality, the effective-weight floor -- was built and never
+# executed.
+#
+# Candidate, not frozen. The immutability rule is about PRODUCTION rows
+# referencing a model version: once a production run is finalised under V2,
+# V2 stops being amendable and a semantic change needs V3. A scratch discovery
+# run does not trigger that, and must not -- discovery exists precisely so V2
+# can still change when the run finds a defect. The preflight against
+# production is what decides which regime applies:
+#
+#     no production row or finalisation references V2  -> still amendable
+#     the first production V2 run is finalised         -> frozen; changes go to V3
+LATEST_MODEL_VERSION = "FACTOR_MODEL_V2"
 
 #: Sentinel for "this caller is not validating a version at all" — the
 #: in-memory, pre-write check, where no version has been assigned yet.

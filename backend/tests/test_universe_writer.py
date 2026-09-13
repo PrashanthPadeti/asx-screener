@@ -301,27 +301,50 @@ def test_read_back_reproduces_the_states_not_merely_the_nulls():
     assert after["roce"].state is Applicability.INSUFFICIENT_DATA
 
 
-def test_ungoverned_growth_metrics_carry_no_state():
-    """A gap worth naming rather than discovering later.
+def test_the_v1_cagr_gap_is_exactly_what_v2_closed():
+    """A gap named under V1, and the record that V2 filled it.
 
-    revenue_cagr_5y, eps_growth_3y_cagr and the other CAGRs have a genuine
-    INSUFFICIENT_DATA dimension — a five-year figure computed from three years
-    of history is not the same claim as one computed from five. None of them
-    is in the V1 governed set, so none carries a state, and the writer
-    correctly refuses to persist one under this contract. Closing that is a
-    V2 decision, not something to slip into V1 after the freeze.
+    revenue_cagr_5y, eps_growth_3y_cagr and the other horizon CAGRs have a
+    genuine INSUFFICIENT_DATA dimension: a five-year figure computed from three
+    years of history is not the same claim as one computed from five. None of
+    them was in the V1 governed set, so none carried a state, and the writer
+    refused to persist one under that contract.
+
+    This test asserted that refusal against LATEST_MODEL_VERSION and failed the
+    moment V2 was activated -- correctly. Its own docstring said closing the
+    gap was a V2 decision. So it now asserts both halves against the versions
+    they belong to, rather than against whichever happens to be current:
+    ungoverned under V1, governed under V2.
     """
-    for metric in ("revenue_cagr_5y", "eps_growth_3y_cagr",
-                   "revenue_growth_3y_cagr"):
-        assert metric not in GOVERNED, f"{metric} joined V1 unnoticed"
+    CAGRS = ("revenue_cagr_5y", "eps_growth_3y_cagr", "revenue_growth_3y_cagr")
+    v1 = GOVERNED_METRICS["FACTOR_MODEL_V1"]
+    v2 = GOVERNED_METRICS["FACTOR_MODEL_V2"]
 
-        try:
-            build_update("X", {metric: assess(metric, 0.3,
-                                              Domain.GENERAL_CORPORATE)}, RUN)
-        except WriteRefused:
-            pass
-        else:
-            raise AssertionError(f"{metric} is ungoverned and must be refused")
+    for metric in CAGRS:
+        # canonical_for, not normalise: two of these three are storage column
+        # spellings, and only the writer's own inverse map knows that
+        # eps_growth_3y_cagr is eps_cagr_3y. Using normalise here compared a
+        # column name against a set of canonical names and reported the metric
+        # as ungoverned when it is governed under another name -- the alias
+        # confusion this whole translation layer exists to prevent, committed
+        # inside its own test.
+        canonical = canonical_for(metric)
+        assert canonical not in v1, f"{metric} joined V1 after the pin"
+        assert canonical in v2, f"{metric} must be governed by V2"
+
+
+def test_a_metric_outside_the_active_contract_is_still_refused():
+    """The refusal itself, which is what the original test was protecting.
+    Asserted with a name no version governs, so activating V3 will not turn
+    this into a test about V3's contents."""
+    try:
+        build_update("X", {"some_metric_no_version_governs":
+                           assess("some_metric_no_version_governs", 0.3,
+                                  Domain.GENERAL_CORPORATE)}, RUN)
+    except WriteRefused:
+        pass
+    else:
+        raise AssertionError("an ungoverned metric must be refused")
 
 
 def test_read_back_is_scoped_to_the_run_that_wrote_the_row():

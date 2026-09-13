@@ -797,6 +797,66 @@ def test_a_null_is_not_enough_the_cause_must_say_who_failed():
                 if v.metric == metric]
 
 
+# ── The V2 activation, asserted structurally ─────────────────────────────────
+#
+# A one-line constant change is visually small and semantically enormous: it
+# moves every canonical path from a 40-metric contract to a 72-metric one.
+# These assertions exist so the flip cannot be ambiguous about what it did.
+
+#: V1's governed set, pinned as a literal rather than a count. A count catches
+#: growth and shrinkage; it does not catch a substitution, and a set that
+#: swapped one metric for another would keep the same size while changing what
+#: every V1-attributed row was validated against.
+V1_PINNED = frozenset({
+    'altman_z_score', 'asset_turnover', 'book_value_per_share', 'composite_score',
+    'current_ratio', 'debt_to_equity', 'dividend_payout_ratio', 'dividend_per_share',
+    'dividend_yield', 'ev_ebit', 'ev_ebitda', 'fcf_conversion',
+    'franking_pct', 'free_cash_flow', 'gross_margin', 'gross_margin_expanding',
+    'gross_margin_expansion', 'grossed_up_yield', 'growth_score', 'income_score',
+    'interest_coverage', 'inventory_turnover', 'momentum_score', 'net_debt_to_ebitda',
+    'net_margin', 'operating_margin', 'operating_margin_expanding', 'operating_margin_expansion',
+    'pe_ratio', 'peg_ratio', 'piotroski_f_score', 'price_to_book',
+    'price_to_sales', 'quality_score', 'quick_ratio', 'roce',
+    'roe', 'roic', 'value_score', 'working_capital',
+})
+
+#: What V2 must resolve to. Not derived from the code it is checking.
+V2_PERSISTED_COUNT = 72
+
+
+def test_v2_is_the_canonical_candidate():
+    assert LATEST_MODEL_VERSION == "FACTOR_MODEL_V2"
+
+
+def test_activating_v2_did_not_move_v1():
+    """V1 is what rows already attributed to it are validated against. The flip
+    changes which contract is current; it must not change what V1 means."""
+    assert GOVERNED_METRICS["FACTOR_MODEL_V1"] == V1_PINNED
+
+
+def test_v2_resolves_to_the_expected_persisted_contract():
+    """72 metrics, each with its own column, every column resolvable.
+
+    The count alone would pass on a set that governs 72 things and cannot
+    store three of them, so all three properties are asserted together.
+    """
+    from compute.engine.universe_writer import NOT_PERSISTED, persisted_governed
+
+    mapping = persisted_governed("FACTOR_MODEL_V2")
+
+    assert len(mapping) == V2_PERSISTED_COUNT
+    assert len(set(mapping.values())) == len(mapping), "injective: one column per metric"
+    assert not (set(mapping) & set(NOT_PERSISTED)), "nothing governed is unpersistable"
+    assert GOVERNED_METRICS["FACTOR_MODEL_V2"] - set(NOT_PERSISTED) == set(mapping)
+
+
+def test_v2_is_a_superset_of_v1():
+    """A later version adds; it does not quietly drop what an earlier one
+    governed. A metric leaving the contract stops being checked, and nothing
+    downstream would report the difference."""
+    assert V1_PINNED <= GOVERNED_METRICS["FACTOR_MODEL_V2"]
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

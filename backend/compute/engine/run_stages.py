@@ -42,6 +42,21 @@ from typing import Iterable, Mapping, Optional
 SAMPLE_LIMIT = 25
 
 
+#: Every full producer whose output the canonical writer re-emits. Both must
+#: have proven their own population before a run may be attributed or served.
+#:
+#: yearly_compute alone is not enough: it can prove perfect coverage while the
+#: build silently misses rows, and the canonical writer would then faithfully
+#: publish stale provisional values -- the same defect wearing a completeness
+#: certificate.
+#:
+#: Declared here rather than in composite_score so the resolver can require the
+#: same set without importing a module that needs psycopg2. The writer and the
+#: reader must agree on what "published" means, and two copies of this tuple
+#: would eventually disagree.
+REQUIRED_STAGES: tuple[str, ...] = ("yearly_compute", "universe_build")
+
+
 class StageIncomplete(RuntimeError):
     """A stage did not cover its source population, so nothing may publish."""
 

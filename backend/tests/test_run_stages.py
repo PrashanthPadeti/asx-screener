@@ -42,6 +42,10 @@ from compute.engine.run_stages import (  # noqa: E402
 )
 
 
+class Skipped(Exception):
+    """This check could not run here. Reported as SKIP, never as PASS."""
+
+
 def result(expected, written, **details) -> StageResult:
     return StageResult("yearly_compute", frozenset(expected), frozenset(written),
                        details or None)
@@ -250,14 +254,85 @@ def test_zero_errors_is_not_a_coverage_claim():
     assert not r.ok, "no exception was raised and two thirds went unprocessed"
 
 
+# ── Neither half may masquerade as publication ───────────────────────────────
+#
+# These assert the resolver's SQL rather than calling it: _validated_scope
+# needs an async SQLAlchemy session, and what matters here is that the query
+# demands both conditions conjunctively. A resolver that required only one of
+# them would still pass every test that exercised a fully-correct run.
+
+def _resolver_sql() -> str:
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parents[1]
+           / "app" / "api" / "v1" / "routes" / "screener.py").read_text(encoding="utf-8")
+    import re as _re
+    m = _re.search(r"VALIDATED_RUNS_SQL_TEXT = \"\"\"(.*?)\"\"\"", src, _re.S)
+    assert m, "could not locate VALIDATED_RUNS_SQL_TEXT"
+    return " ".join(m.group(1).split())
+
+
+def test_stage_successes_without_finalisation_are_not_publication():
+    """compute_run exists, all stages SUCCESS, rows carry compute_run_id, and
+    no finalisation row. The run must be refused: stage evidence says the
+    inputs were complete, not that the canonical write validated."""
+    sql = _resolver_sql()
+
+    assert "compute_run_finalizations" in sql, (
+        "the resolver must require a finalisation record; stage successes "
+        "alone describe the inputs, not the published row")
+    assert "JOIN screener.compute_run_finalizations" in sql, (
+        "an INNER join, so a run without finalisation cannot appear at all")
+
+
+def test_finalisation_without_every_required_stage_is_not_publication():
+    """The converse. A finalisation row exists and a required stage is missing
+    or failed — the run must still be refused."""
+    sql = _resolver_sql()
+
+    assert "compute_run_stages" in sql and "status" in sql
+    assert "NOT EXISTS" in sql, (
+        "written as 'no required stage lacks a success row'. Counting success "
+        "rows instead would accept two successes for one stage and none for "
+        "the other")
+    assert "persistence_violations = 0" in sql
+
+
+def test_the_resolver_requires_the_same_stages_the_writer_proves():
+    """Two copies of the required set would eventually disagree about what
+    published means, and the disagreement would be silent in both directions.
+
+    Needs fastapi, so it reports SKIPPED where the API stack is not installed
+    rather than passing. A skipped test that prints PASS is the failure mode
+    this whole effort keeps running into."""
+    try:
+        from app.api.v1.routes import screener as route
+    except ModuleNotFoundError as e:
+        raise Skipped(f"needs the API stack: {e}")
+
+    assert route.REQUIRED_STAGES is REQUIRED_STAGES
+
+
+def test_rows_written_is_no_longer_accepted_as_publication():
+    """It used to be. The run sets it while still executing, so a run that
+    wrote every row and then failed validation looked identical to one that
+    succeeded."""
+    sql = _resolver_sql()
+
+    assert "rows_written IS NOT NULL" not in sql
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
     failures = []
+    skipped = []
     for name, fn in tests:
         try:
             fn()
             print(f"  PASS  {name}")
+        except Skipped as e:
+            skipped.append(name)
+            print(f"  SKIP  {name}  - {e}")
         except AssertionError as e:
             failures.append(name)
             print(f"  FAIL  {name}  - {e}")
@@ -265,5 +340,10 @@ if __name__ == "__main__":
             failures.append(name)
             print(f"  ERROR {name}  - {type(e).__name__}: {e}")
 
-    print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
+    # Skipped checks are excluded from the denominator rather than counted as
+    # passes. "22/22 passed" over a check that never ran is the same lie this
+    # suite exists to catch, told about itself.
+    ran = len(tests) - len(skipped)
+    print(f"\n{ran - len(failures)}/{ran} passed"
+          + (f", {len(skipped)} SKIPPED" if skipped else ""))
     sys.exit(1 if failures else 0)

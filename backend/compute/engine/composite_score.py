@@ -859,13 +859,10 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None) -> int:
     return written
 
 
-#: Every full producer whose output the canonical writer re-emits. Both must
-#: have proven their own population, or the attribution would assert a
-#: coherence nobody established. yearly_compute alone is not enough: it can
-#: prove perfect coverage while the build silently misses rows, and the
-#: canonical writer would then faithfully publish stale provisional values —
-#: the same defect wearing a completeness certificate.
-REQUIRED_STAGES = ("yearly_compute", "universe_build")
+# REQUIRED_STAGES lives in run_stages so the resolver can require the same set
+# without importing this module, which needs psycopg2. Two copies of it would
+# eventually disagree about what "published" means.
+from compute.engine.run_stages import REQUIRED_STAGES  # noqa: E402,F401
 
 #: Computed here rather than read, so their assessments are built from this
 #: run's results and never from the previous run's columns — which the frame

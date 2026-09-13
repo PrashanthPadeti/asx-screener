@@ -42,6 +42,9 @@ from app.core.parsed_query import (
 from app.core.row_projection import expected_outputs, project_row
 from app.core.screener_fields import UnknownField, build_registry
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
+# The writer and the reader must agree on what "published" means, so the
+# required stage set is imported rather than restated here.
+from compute.engine.run_stages import REQUIRED_STAGES
 from compute.engine.screen_predicates import CriterionType
 from compute.engine.screen_sql import (
     CompileError, RunScope, ValidatedRun, plan_screen,
@@ -49,13 +52,51 @@ from compute.engine.screen_sql import (
 
 # The resolver's query, inlined here so the route uses one definition of
 # "validated" rather than inventing its own.
+# A compute_runs row is evidence that work was ATTEMPTED. It is not evidence
+# that anything may be served.
+#
+# This used to accept `rows_written IS NOT NULL`, which the run sets while it
+# is still executing — so a run that wrote every row and then failed validation
+# looked identical to one that succeeded. A run is eligible only with:
+#
+#     a factor model this build can interpret
+#     a success record for EVERY required producer stage
+#     a finalisation record
+#     zero persistence violations at finalisation
+#
+# The stage check is written as "no required stage lacks a success row" rather
+# than a count, because counting success rows would accept two successes for
+# one stage and none for the other. Absence of a stage row is not permission:
+# a stage that never ran has no failed row either.
 VALIDATED_RUNS_SQL_TEXT = """
-    SELECT id, factor_model_version, unhealthy_sources, detail
-      FROM screener.compute_runs
-     WHERE factor_model_version = ANY(:supported)
-       AND rows_written IS NOT NULL
-     ORDER BY run_at DESC
+    SELECT r.id, r.factor_model_version, r.unhealthy_sources, r.detail
+      FROM screener.compute_runs r
+      JOIN screener.compute_run_finalizations f ON f.run_id = r.id
+     WHERE r.factor_model_version = ANY(:supported)
+       AND f.persistence_violations = 0
+       AND NOT EXISTS (
+           SELECT 1 FROM unnest(CAST(:required_stages AS text[])) AS req(name)
+            WHERE NOT EXISTS (
+                SELECT 1 FROM screener.compute_run_stages s
+                 WHERE s.run_id     = r.id
+                   AND s.stage_name = req.name
+                   AND s.status     = 'success'))
+     ORDER BY r.run_at DESC
      LIMIT :limit
+"""
+
+# Asked only when the query above returns nothing, to tell an operator which
+# of several very different situations they are in. "No validated snapshot"
+# covers "the migration has not run", "nothing has been computed", "a run was
+# attempted and never published" and "a run published under a model this build
+# cannot read" — and those need different responses.
+ATTEMPTED_RUNS_SQL_TEXT = """
+    SELECT count(*)                                        AS attempted,
+           count(*) FILTER (WHERE f.run_id IS NOT NULL)    AS finalised,
+           count(*) FILTER (WHERE r.factor_model_version = ANY(:supported))
+                                                           AS supported_version
+      FROM screener.compute_runs r
+      LEFT JOIN screener.compute_run_finalizations f ON f.run_id = r.id
 """
 
 FREE_STOCK_LIMIT = 500   # max rows visible to free / unauthenticated users
@@ -813,6 +854,46 @@ async def resolve_snapshot(db) -> Snapshot:
     return Snapshot(scope, reason)
 
 
+async def _why_no_validated_run(db) -> str:
+    """Which of several different situations produced "no snapshot".
+
+    An operator reading a 503 needs to distinguish "nothing has been computed"
+    from "a run was attempted and never published" — the first is a schedule
+    question and the second is a correctness one. Answering both with the same
+    sentence sends people to the wrong place.
+
+    Best-effort: a failure here must not turn a clean 503 into a 500, so the
+    generic answer is returned rather than raised.
+    """
+    try:
+        row = (await db.execute(text(ATTEMPTED_RUNS_SQL_TEXT),
+                                {"supported": list(GOVERNED_METRICS.keys())})
+               ).fetchone()
+    except SQLAlchemyError:
+        await db.rollback()
+        return ("no validated compute run; the canonical recompute has not "
+                "run on this database.")
+
+    attempted, finalised, supported = (row[0] or 0), (row[1] or 0), (row[2] or 0)
+
+    if not attempted:
+        return ("no compute run has been attempted; the canonical recompute "
+                "has not run on this database.")
+    if not supported:
+        return (f"{attempted} compute run(s) exist, none under a factor model "
+                f"this build can interpret. Serving them would mean reading "
+                f"values whose semantics are unknown.")
+    if not finalised:
+        return (f"{attempted} compute run(s) were attempted and none reached "
+                f"publication. A run is published only after every required "
+                f"producer stage proved it covered its own source population "
+                f"and the persisted rows validated. The runs and their stage "
+                f"evidence are in screener.compute_run_stages.")
+    return ("compute runs exist and are finalised, but none satisfies the "
+            "publication contract for this build — check required stage "
+            "successes and persistence_violations on the newest run.")
+
+
 async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
     """One resolution, shared, returning (scope, why-it-is-absent).
 
@@ -824,6 +905,7 @@ async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
     try:
         rows = await db.execute(text(VALIDATED_RUNS_SQL_TEXT),
                                 {"supported": list(GOVERNED_METRICS.keys()),
+                                 "required_stages": list(REQUIRED_STAGES),
                                  "limit": 8})
         fetched = rows.fetchall()
     except SQLAlchemyError as exc:
@@ -848,8 +930,7 @@ async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
                              detail=r[3])
                 for r in fetched]
         if not runs:
-            return None, ("no completed compute run under a supported factor "
-                          "model; the canonical recompute has not run.")
+            return None, await _why_no_validated_run(db)
         newest = runs[0].contract_key
         return RunScope.from_validated_runs(
             [r for r in runs if r.contract_key == newest]), ""

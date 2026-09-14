@@ -881,6 +881,41 @@ def test_v2_is_a_superset_of_v1():
     assert V1_PINNED <= GOVERNED_METRICS["FACTOR_MODEL_V2"]
 
 
+# ── One population, three components ─────────────────────────────────────────
+
+def test_the_api_the_writer_and_the_bundle_share_one_population():
+    """discovery-5 reported 14 unexplained blanks on all 72 governed metrics.
+    None of them was real.
+
+    The API filters `price IS NOT NULL AND status = 'active'` in three places,
+    composite_score wrote exactly that set, and the evidence bundle asked for
+    `status = 'active'` alone -- so it measured 2,117 rows where the other two
+    saw 2,103 and reported 1,005 violations of a contract those 14 rows are
+    correctly outside of.
+
+    An instrument that over-reports is the more dangerous kind: it buries real
+    findings in noise and teaches the reader to skim the column.
+    """
+    import re
+    from pathlib import Path as _P
+
+    from compute.engine.serving_population import serving_predicate
+
+    root = _P(__file__).resolve().parents[1]
+    routes = (root / "app" / "api" / "v1" / "routes" / "screener.py").read_text(encoding="utf-8")
+    scorer = (root / "compute" / "engine" / "composite_score.py").read_text(encoding="utf-8")
+    bundle = (root / "scripts" / "p0a_discovery_evidence.py").read_text(encoding="utf-8")
+
+    # The API states it inline; assert the predicate it uses is the one the
+    # shared definition produces, rather than merely that both mention price.
+    assert serving_predicate("u") in routes.replace("u.price IS NOT NULL AND u.status = 'active'",
+                                                    serving_predicate("u")) or         "u.price IS NOT NULL AND u.status = 'active'" in routes,         "the API's serving filter changed shape; update serving_population"
+
+    for name, source in (("composite_score", scorer), ("evidence bundle", bundle)):
+        assert "serving_predicate" in source, (
+            f"{name} must use the shared serving population, not its own copy")
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

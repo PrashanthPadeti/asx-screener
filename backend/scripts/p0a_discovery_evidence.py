@@ -41,6 +41,9 @@ import psycopg2.extras  # noqa: E402
 
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.metric_states import GOVERNED_METRICS  # noqa: E402
+from compute.engine.serving_population import (  # noqa: E402
+    SERVING_POPULATION, serving_predicate,
+)
 from compute.engine.universe_writer import column_for  # noqa: E402
 
 V1, V2 = "FACTOR_MODEL_V1", "FACTOR_MODEL_V2"
@@ -119,12 +122,14 @@ def main() -> int:
     print("     Expected. Not a V2 effect. Blocks V2 publication, not this run.")
 
     cur.execute("""
-        SELECT count(*) AS universe, count(*) FILTER (WHERE status='active') AS active,
+        SELECT count(*) AS universe,
+               count(*) FILTER (WHERE status='active') AS active,
+               count(*) FILTER (WHERE {serving}) AS servable,
                count(annual_periods) AS with_periods,
                count(metric_states)  AS with_sidecar,
                count(compute_run_id) AS with_run,
                max(universe_built_at) AS built_at
-          FROM screener.universe;""")
+          FROM screener.universe;""".format(serving=serving_predicate()))
     row = cur.fetchone()
     print(f"\n  universe rows              : {row['universe']:,} "
           f"({row['active']:,} active)")
@@ -157,8 +162,8 @@ def main() -> int:
                     WHEN annual_periods < 10 THEN '5-9  (3y and 5y)'
                     ELSE '10+' END AS band,
                count(*) AS companies
-          FROM screener.universe WHERE status='active'
-         GROUP BY 1 ORDER BY 1;""")
+          FROM screener.universe WHERE {serving}
+         GROUP BY 1 ORDER BY 1;""".format(serving=serving_predicate()))
     for r in cur.fetchall():
         print(f"  {r['band']:24} {r['companies']:>6,}")
 
@@ -201,7 +206,8 @@ def main() -> int:
                                      AND NOT (coalesce(u.metric_states,'{{}}'::jsonb) ? %s)
                                    ) AS unexplained
               FROM screener.universe u
-             WHERE u.status='active';""", (metric, metric))
+             WHERE {serving};""".format(serving=serving_predicate("u")),
+            (metric, metric))
         r = cur.fetchone()
         ver = "V1" if metric in GOVERNED_METRICS[V1] else "V2"
         flag = "" if r["unexplained"] == 0 else "  <-- UNEXPLAINED"
@@ -219,8 +225,9 @@ def main() -> int:
                coalesce(s.value->>'cause','(none)') AS cause, count(*) AS n
           FROM screener.universe u,
                LATERAL jsonb_each(u.metric_states) s
-         WHERE u.status='active'
-         GROUP BY 1,2,3 ORDER BY 4 DESC, 1;""")
+         WHERE {serving}
+         GROUP BY 1,2,3 ORDER BY 4 DESC, 1;""".format(
+             serving=serving_predicate("u")))
     rows = cur.fetchall()
     by_cause: Counter = Counter()
     for r in rows:
@@ -286,7 +293,7 @@ def main() -> int:
                          AND NOT (metric_states ? %s)) AS servable,
                    count(*) FILTER (WHERE metric_states IS NULL) AS no_contract
               FROM screener.universe
-             WHERE status='active' AND ({predicate});""", (metric,))
+             WHERE {serving} AND ({predicate});""", (metric,))
         r = cur.fetchone()
         stored, servable, no_contract = r["stored"], r["servable"], r["no_contract"]
 
@@ -319,7 +326,8 @@ def main() -> int:
                count(*) FILTER (WHERE momentum_score IS NOT NULL)  AS momentum,
                count(*) FILTER (WHERE income_score IS NOT NULL)    AS income,
                count(*) FILTER (WHERE composite_score IS NOT NULL) AS composite
-          FROM screener.universe WHERE status='active';""")
+          FROM screener.universe WHERE {serving};""".format(
+              serving=serving_predicate()))
     r = cur.fetchone()
     print("  Compare against the V1 production figures recorded before the")
     print("  freeze. A fall is only a finding once its cause table above")

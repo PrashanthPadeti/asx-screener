@@ -627,11 +627,14 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None) -> int:
     select_cols += [c for c in canonical_columns.values()
                     if c not in select_cols]
     col_list = ", ".join(select_cols)
+    # The serving population, from the one definition all three components
+    # share. The canonical writer must cover exactly what the API can return:
+    # narrower leaves served rows with no contract, wider writes contracts for
+    # rows nobody can see and reports them as gaps.
     cur.execute(f"""
         SELECT {col_list}
         FROM screener.universe
-        WHERE status = 'active'
-          AND price IS NOT NULL
+        WHERE {serving_predicate()}
     """)
     rows = cur.fetchall()
 
@@ -863,6 +866,7 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None) -> int:
 # without importing this module, which needs psycopg2. Two copies of it would
 # eventually disagree about what "published" means.
 from compute.engine.run_stages import REQUIRED_STAGES  # noqa: E402,F401
+from compute.engine.serving_population import serving_predicate  # noqa: E402
 
 #: Computed here rather than read, so their assessments are built from this
 #: run's results and never from the previous run's columns — which the frame

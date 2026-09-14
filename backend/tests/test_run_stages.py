@@ -54,8 +54,9 @@ def result(expected, written, **details) -> StageResult:
 class FakeCursor:
     """Records statements and answers the one SELECT the helpers make."""
 
-    def __init__(self, passed_stages=()):
+    def __init__(self, passed_stages=(), published=()):
         self.passed = set(passed_stages)
+        self.published = set(published)
         self.statements = []
         self._rows = []
 
@@ -64,6 +65,8 @@ class FakeCursor:
         if "FROM screener.compute_run_stages" in sql:
             wanted = params[1]
             self._rows = [(s,) for s in wanted if s in self.passed]
+        elif "FROM screener.compute_run_finalizations" in sql:
+            self._rows = [(1,)] if params[0] in self.published else []
         else:
             self._rows = []
 
@@ -377,6 +380,29 @@ def test_there_is_no_override_for_unhealthy_sources():
     for flag in ("allow-unhealthy", "allow_unhealthy", "ignore-health",
                  "skip_health"):
         assert flag not in source, f"{flag} weakens the health precondition"
+
+
+def test_a_published_run_cannot_be_published_again():
+    """A run is finalised exactly once.
+
+    The primary key would refuse it regardless, but as a raw UniqueViolation
+    from inside the driver -- which reads as a fault rather than as the design
+    working. It surfaced exactly that way when a producer was re-run against a
+    published run to re-measure a change.
+
+    Re-running under a published run id is editing history beneath an identity
+    others may already have read. The append-only rule exists to make that
+    impossible, and the refusal should say so.
+    """
+    cur = FakeCursor(passed_stages={"yearly_compute"}, published={7})
+    try:
+        finalise(cur, 7, rows_written=2117, persistence_violations=0,
+                 required_stages=["yearly_compute"])
+    except StageIncomplete as e:
+        assert "already finalised" in str(e)
+        assert "start a new run" in str(e)
+    else:
+        raise AssertionError("a published run must not be re-published")
 
 
 if __name__ == "__main__":

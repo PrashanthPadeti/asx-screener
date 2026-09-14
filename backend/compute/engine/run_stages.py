@@ -202,6 +202,22 @@ def finalise(cur, run_id: int, *, rows_written: int,
     """
     require_stages(cur, run_id, required_stages)
 
+    # Already published. The primary key would refuse this anyway, but as a
+    # raw UniqueViolation from inside psycopg2 -- which reads as a driver
+    # fault rather than as the design working.
+    #
+    # A run is finalised exactly once. Re-running a producer against a
+    # published run to re-measure something is editing history under an
+    # identity other people may already have read, and the append-only rule
+    # exists precisely to make that impossible. A retry is a new run.
+    if is_published(cur, run_id):
+        raise StageIncomplete(
+            f"run {run_id} is already finalised and cannot be published "
+            f"again. Its rows, stage evidence and finalisation record stand "
+            f"as written. To measure a change, start a new run -- re-running "
+            f"a producer under a published run id would rewrite history "
+            f"beneath an identity that has already been read.")
+
     if persistence_violations:
         raise StageIncomplete(
             f"run {run_id} produced {persistence_violations:,} persistence "

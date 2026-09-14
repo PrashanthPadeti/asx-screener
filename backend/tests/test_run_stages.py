@@ -458,6 +458,35 @@ def test_the_bundle_binds_its_predicates_before_using_them():
                 "raises NameError before any SQL is sent")
 
 
+def test_the_bundle_does_not_keep_its_own_copy_of_a_judgement_it_audits():
+    """An instrument that re-derives what it is measuring can disagree with
+    the run and still sound authoritative.
+
+    The bundle did exactly that twice. It carried a private serving population
+    (status='active', against the writer's status='active' AND price IS NOT
+    NULL) and reported 1,005 phantom violations. Then it carried a private
+    feed-freshness query -- an unbounded max(ex_date), which counts announced
+    future ex-dates -- and printed "-93 days stale" beside an assertion that
+    Income was withheld as SOURCE_UNHEALTHY, a cause its own withdrawal table
+    showed occurring zero times.
+
+    Both were reasonable-looking SQL. Neither was the definition in force.
+    """
+    src = _bundle_source()
+
+    assert "fetch_feed_health(" in src, (
+        "the bundle must read feed health from the engine, not re-derive it")
+
+    for prefix, body in _sql_literals(src):
+        lowered = body.lower()
+        if "market.dividends" in lowered:
+            assert "max(ex_date)" not in lowered, (
+                "the bundle is computing a dividend watermark of its own. "
+                "fetch_feed_health bounds the window above by CURRENT_DATE "
+                "and counts future announcements separately; a local "
+                "max(ex_date) does neither and reports negative staleness.")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

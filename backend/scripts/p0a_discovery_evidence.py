@@ -40,6 +40,8 @@ import psycopg2  # noqa: E402
 import psycopg2.extras  # noqa: E402
 
 from app.core.db import get_database_url_sync  # noqa: E402
+from compute.engine.daily_compute import fetch_feed_health  # noqa: E402
+from compute.engine.dividends import FEED_STALENESS_DAYS  # noqa: E402
 from compute.engine.metric_states import GOVERNED_METRICS  # noqa: E402
 from compute.engine.serving_population import (  # noqa: E402
     SERVING_POPULATION, serving_predicate,
@@ -111,22 +113,50 @@ def main() -> int:
     print("  canonical recompute, and it is a separate gate.")
 
     # ── Stated conditions of the run ─────────────────────────────────────────
-    # Reported first and unprompted. The dividend feed is unhealthy, so Income
-    # is withheld universe-wide -- which will look like a catastrophic coverage
-    # regression to anyone reading the factor table without this in front of
-    # them. It is a correctly-reported source outage, not a V2 effect, and it
-    # does not belong in the same column as a methodology change.
+    # Reported first and unprompted, because a source outage looks exactly
+    # like a methodology regression in the factor table and must not share a
+    # column with one.
+    #
+    # This block used to assert the outage rather than measure it. It printed
+    # "Income is withheld universe-wide as UNAVAILABLE/SOURCE_UNHEALTHY"
+    # unconditionally -- prose left over from the period when that was true --
+    # while its own withdrawal table, thirty lines below, showed that cause
+    # occurring zero times. And it derived staleness from an unbounded
+    # max(ex_date), which counts announced future ex-dates: after the
+    # September 2026 reload that produced "2026-12-16 (-93 days stale)", a
+    # negative staleness that should have been unprintable.
+    #
+    # Both faults are the same fault. The engine already decides this, once,
+    # in fetch_feed_health -- bounded above by CURRENT_DATE, with future
+    # announcements counted separately because an announcement is not an
+    # observation. A second copy of the judgement in the instrument that
+    # audits it is worse than no copy: it can disagree with the run it is
+    # describing and still sound authoritative.
     heading("STATED CONDITIONS")
-    cur.execute("""
-        SELECT max(ex_date) AS last_ex_date,
-               current_date - max(ex_date) AS days_stale,
-               count(*) AS rows
-          FROM market.dividends;""")
-    row = cur.fetchone()
-    print(f"  dividend feed last ex-date : {row['last_ex_date']} "
-          f"({row['days_stale']} days stale, {row['rows']:,} rows)")
-    print("  => Income is withheld universe-wide as UNAVAILABLE/SOURCE_UNHEALTHY.")
-    print("     Expected. Not a V2 effect. Blocks V2 publication, not this run.")
+    health = fetch_feed_health(cur)
+    cur.execute("SELECT count(*) AS rows FROM market.dividends;")
+    total_rows = cur.fetchone()["rows"]
+
+    print(f"  dividend feed              : "
+          f"{'HEALTHY' if health.healthy else 'UNHEALTHY'}")
+    print(f"  latest occurred ex-date    : {health.latest_ex_date} "
+          f"({health.lag_days} days behind, {total_rows:,} rows on file)")
+    print(f"  breadth in last {FEED_STALENESS_DAYS} days     : "
+          f"{health.recent_rows:,} rows / {health.recent_issuers:,} issuers")
+    if health.future_announced:
+        print(f"  announced, not yet occurred: {health.future_announced:,} "
+              f"(counted separately; not freshness evidence)")
+    if health.healthy:
+        print("  => Income is computed. A non-payer over a fully observed "
+              "window scores")
+        print("     on a zero yield; it is not withheld. Any Income shortfall "
+              "below is")
+        print("     a finding, not a stated condition.")
+    else:
+        print(f"  => {health.reason}")
+        print("  => Income is withheld universe-wide as "
+              "UNAVAILABLE/SOURCE_UNHEALTHY.")
+        print("     A correctly-reported source outage, not a V2 effect.")
 
     cur.execute(f"""
         SELECT count(*) AS universe,

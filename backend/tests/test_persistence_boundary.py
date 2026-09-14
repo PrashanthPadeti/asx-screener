@@ -781,6 +781,30 @@ def test_a_fabricated_score_is_refused_whatever_produced_it():
         assert "unsupported_computation_value" in kinds_found, metric
 
 
+def test_domain_outranks_an_unsupported_computation():
+    """discovery-5 refused five real rows over this.
+
+    piotroski_f_score is suppressed by DOMAIN_RULES for mining explorers and
+    deposit-funded balance sheets, and gate 1 runs before the
+    unsupported-computation check -- so an explorer's row legitimately carries
+    NOT_MEANINGFUL / domain. That is a stronger statement than "nobody can
+    compute this" and the one an operator should see.
+
+    Demanding computation_unsupported unconditionally contradicted the
+    ordering the whole contract rests on.
+    """
+    from compute.engine.applicability import Domain, assess
+
+    a = assess("piotroski_f_score", None, Domain.MINING_EXPLORER)
+    assert a.cause is Cause.DOMAIN, "gate 1 decides first"
+
+    values = {"piotroski_f_score": None}
+    states = {"piotroski_f_score": {"state": a.state.value,
+                                    "cause": a.cause.value}}
+    assert not [v for v in violations(values, states, "FACTOR_MODEL_V2")
+                if v.metric == "piotroski_f_score"]
+
+
 def test_a_null_is_not_enough_the_cause_must_say_who_failed():
     """NULL with cause source_missing reads as "this company has no value".
     The truth is that nobody can compute it, and those send an operator to

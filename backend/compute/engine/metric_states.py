@@ -448,6 +448,18 @@ class Violation:
 ROW = "<row>"
 
 
+#: The causes an unsupported-computation metric may legitimately carry.
+#:
+#: assess() runs the domain gate, then the unsupported-computation check, then
+#: the observation gate -- so a metric we cannot compute faithfully reaches the
+#: sidecar with exactly one of these. Any other cause means a later gate, or a
+#: producer, blamed the source for our own missing implementation.
+_UNSUPPORTED_CAUSES: frozenset[str] = frozenset({
+    Cause.COMPUTATION_UNSUPPORTED.value,
+    Cause.DOMAIN.value,
+})
+
+
 def violations(values: Mapping[str, Optional[float]],
                states: Optional[Mapping[str, Mapping]] = None,
                model_version: Any = UNSPECIFIED) -> list[Violation]:
@@ -518,14 +530,29 @@ def violations(values: Mapping[str, Optional[float]],
                 f"value {value!r} present for a metric this build cannot "
                 f"compute faithfully — it must be NULL with cause "
                 f"{Cause.COMPUTATION_UNSUPPORTED.value}"))
-        elif entry.get("cause") != Cause.COMPUTATION_UNSUPPORTED.value:
+        elif entry.get("cause") not in _UNSUPPORTED_CAUSES:
             # NULL alone is not enough. Without the cause the absence reads as
             # "this company has no value", when the truth is that nobody can.
+            #
+            # DOMAIN is admitted beside COMPUTATION_UNSUPPORTED because gate 1
+            # runs first and outranks. piotroski_f_score is suppressed for
+            # mining explorers and deposit-funded balance sheets, so an
+            # explorer's row legitimately carries NOT_MEANINGFUL / domain --
+            # a stronger and more useful statement than "nobody can compute
+            # this", and the one an operator should see.
+            #
+            # Requiring COMPUTATION_UNSUPPORTED unconditionally contradicted
+            # that ordering and refused five real rows in the read-back
+            # sample. Given assess()'s order -- domain, then unsupported, then
+            # observation -- these two are the only causes an unsupported
+            # metric can carry; any other means something blamed the source
+            # for our missing implementation, which is what this rule exists
+            # to catch.
             out.append(Violation(
                 metric, "unsupported_computation_uncaused",
                 f"null for an unsupported computation but recorded cause is "
-                f"{entry.get('cause')!r}, not "
-                f"{Cause.COMPUTATION_UNSUPPORTED.value!r}"))
+                f"{entry.get('cause')!r}; expected one of "
+                f"{sorted(_UNSUPPORTED_CAUSES)}"))
 
     return sorted(out, key=lambda v: (v.kind, v.metric))
 

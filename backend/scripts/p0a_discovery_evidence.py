@@ -69,6 +69,13 @@ def main() -> int:
               "they came from.", file=sys.stderr)
         return 2
 
+    # One idiom for every query below: f-string interpolation of predicates
+    # bound here, before the first use. Mixing f-strings with .format() in one
+    # expression evaluates the braces at definition time, which is how
+    # {serving} raised NameError before .format could supply it.
+    serving = serving_predicate()
+    serving_u = serving_predicate("u")
+
     print("run type: TARGETED V2 DISCOVERY REBUILD")
     print(f"database: {db}")
     print(f"revision: {os.environ.get('DISCOVERY_REV', '(see run log)')}")
@@ -121,7 +128,7 @@ def main() -> int:
     print("  => Income is withheld universe-wide as UNAVAILABLE/SOURCE_UNHEALTHY.")
     print("     Expected. Not a V2 effect. Blocks V2 publication, not this run.")
 
-    cur.execute("""
+    cur.execute(f"""
         SELECT count(*) AS universe,
                count(*) FILTER (WHERE status='active') AS active,
                count(*) FILTER (WHERE {serving}) AS servable,
@@ -129,7 +136,7 @@ def main() -> int:
                count(metric_states)  AS with_sidecar,
                count(compute_run_id) AS with_run,
                max(universe_built_at) AS built_at
-          FROM screener.universe;""".format(serving=serving_predicate()))
+          FROM screener.universe;""")
     row = cur.fetchone()
     print(f"\n  universe rows              : {row['universe']:,} "
           f"({row['active']:,} active)")
@@ -155,7 +162,7 @@ def main() -> int:
     print("  This is what separates INSUFFICIENT_HISTORY from SOURCE_MISSING,")
     print("  so its distribution decides how much of the avg_* withdrawal is")
     print("  the companies' record and how much is our feed.\n")
-    cur.execute("""
+    cur.execute(f"""
         SELECT CASE WHEN annual_periods IS NULL THEN 'unknown (no FY0)'
                     WHEN annual_periods < 3 THEN '0-2  (no 3y average)'
                     WHEN annual_periods < 5 THEN '3-4  (3y only)'
@@ -163,7 +170,7 @@ def main() -> int:
                     ELSE '10+' END AS band,
                count(*) AS companies
           FROM screener.universe WHERE {serving}
-         GROUP BY 1 ORDER BY 1;""".format(serving=serving_predicate()))
+         GROUP BY 1 ORDER BY 1;""")
     for r in cur.fetchall():
         print(f"  {r['band']:24} {r['companies']:>6,}")
 
@@ -206,8 +213,7 @@ def main() -> int:
                                      AND NOT (coalesce(u.metric_states,'{{}}'::jsonb) ? %s)
                                    ) AS unexplained
               FROM screener.universe u
-             WHERE {serving};""".format(serving=serving_predicate("u")),
-            (metric, metric))
+             WHERE {serving_u};""", (metric, metric))
         r = cur.fetchone()
         ver = "V1" if metric in GOVERNED_METRICS[V1] else "V2"
         flag = "" if r["unexplained"] == 0 else "  <-- UNEXPLAINED"
@@ -220,14 +226,13 @@ def main() -> int:
     print("  Every withheld value carries a state and a cause. A cause that")
     print("  does not correspond to a rule we declared is a defect, however")
     print("  reasonable the coverage number looks.\n")
-    cur.execute("""
+    cur.execute(f"""
         SELECT s.key AS metric, s.value->>'state' AS state,
                coalesce(s.value->>'cause','(none)') AS cause, count(*) AS n
           FROM screener.universe u,
                LATERAL jsonb_each(u.metric_states) s
-         WHERE {serving}
-         GROUP BY 1,2,3 ORDER BY 4 DESC, 1;""".format(
-             serving=serving_predicate("u")))
+         WHERE {serving_u}
+         GROUP BY 1,2,3 ORDER BY 4 DESC, 1;""")
     rows = cur.fetchall()
     by_cause: Counter = Counter()
     for r in rows:
@@ -319,15 +324,14 @@ def main() -> int:
 
     # ── Factor coverage ──────────────────────────────────────────────────────
     heading("FACTOR COVERAGE")
-    cur.execute("""
+    cur.execute(f"""
         SELECT count(*) FILTER (WHERE value_score IS NOT NULL)     AS value,
                count(*) FILTER (WHERE quality_score IS NOT NULL)   AS quality,
                count(*) FILTER (WHERE growth_score IS NOT NULL)    AS growth,
                count(*) FILTER (WHERE momentum_score IS NOT NULL)  AS momentum,
                count(*) FILTER (WHERE income_score IS NOT NULL)    AS income,
                count(*) FILTER (WHERE composite_score IS NOT NULL) AS composite
-          FROM screener.universe WHERE {serving};""".format(
-              serving=serving_predicate()))
+          FROM screener.universe WHERE {serving};""")
     r = cur.fetchone()
     print("  Compare against the V1 production figures recorded before the")
     print("  freeze. A fall is only a finding once its cause table above")

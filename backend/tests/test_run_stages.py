@@ -405,6 +405,59 @@ def test_a_published_run_cannot_be_published_again():
         raise AssertionError("a published run must not be re-published")
 
 
+# ── The evidence bundle has no tests of its own ──────────────────────────────
+#
+# It needs a populated scratch database to run, so it is exercised only by a
+# 25-minute discovery run -- and it has now failed twice at the moment its
+# output was most wanted, both times on string construction rather than on
+# anything it was measuring. These are static checks: cheap, and they catch
+# the class.
+
+def _bundle_source() -> str:
+    from pathlib import Path as _P
+    return (_P(__file__).resolve().parents[1] / "scripts"
+            / "p0a_discovery_evidence.py").read_text(encoding="utf-8")
+
+
+def _sql_literals(src: str):
+    """The triple-quoted bodies, with their f-prefix. Comments and prose are
+    excluded deliberately: an earlier version of the check below matched the
+    comment explaining the bug rather than the code containing it."""
+    import re
+    return [(m.group(1), m.group(2))
+            for m in re.finditer(r'(f?)"""(.*?)"""', src, re.S)]
+
+
+def test_every_interpolating_query_is_an_f_string():
+    """An f-string that also calls .format() evaluates its braces at
+    definition time, so the placeholder .format was meant to fill raises
+    NameError first. Mixing the two idioms in one expression is the defect;
+    using one consistently is the fix."""
+    import re
+
+    offenders = [body.strip().splitlines()[0][:60]
+                 for prefix, body in _sql_literals(_bundle_source())
+                 if re.search(r"\{(serving|serving_u|col|predicate)\b", body)
+                 and prefix != "f"]
+
+    assert not offenders, (
+        f"SQL interpolating a predicate without an f-string prefix: "
+        f"{offenders}. The braces reach Postgres literally.")
+
+
+def test_the_bundle_binds_its_predicates_before_using_them():
+    """The second half of the same failure: the bindings were introduced
+    halfway down the function, after the queries referencing them."""
+    src = _bundle_source()
+    bind = src.index("serving = serving_predicate()")
+
+    for prefix, body in _sql_literals(src):
+        if "{serving" in body:
+            assert src.index(body) > bind, (
+                "a query interpolates a predicate that is not yet bound; it "
+                "raises NameError before any SQL is sent")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

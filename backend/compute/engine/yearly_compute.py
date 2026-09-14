@@ -312,7 +312,19 @@ def fetch_all_prices(cur, asx_code: str) -> pd.Series:
     """, [asx_code])
     rows = cur.fetchall()
     if not rows:
-        return pd.Series(dtype=float)
+        # An empty DatetimeIndex, not the default RangeIndex.
+        #
+        # pd.Series(dtype=float) carries a RangeIndex, so every downstream
+        # `prices.index >= pd.Timestamp(...)` raises TypeError rather than
+        # returning an empty window. Eighteen companies with no price rows at
+        # all failed the whole of build_yearly_rows this way, and the
+        # exception was caught per company and logged as a warning -- so the
+        # run reported "0 skipped" while eighteen codes produced nothing.
+        #
+        # An empty series of the right shape gives the honest answer instead:
+        # no prices, therefore an empty window, therefore no price-derived
+        # metric for that year.
+        return pd.Series(dtype=float, index=pd.DatetimeIndex([]), name="close")
 
     dates  = pd.to_datetime([r[0] for r in rows])
     closes = [float(r[1]) if r[1] is not None else np.nan for r in rows]
@@ -1210,9 +1222,23 @@ def main():
     # agrees by construction and proves nothing, which is exactly how "1626
     # stocks | 0 skipped | 0 errors" was reported over 2,954 untouched rows.
     # fetch_codes is the thing under test here, not the standard.
-    cur.execute("SELECT DISTINCT asx_code FROM financials.annual_pnl")
-    expected_codes = {r[0] for r in cur.fetchall()}
-    written_codes: set[str] = set()
+    # Keyed (asx_code, fiscal_year), because that is the grain of the table
+    # this producer owns.
+    #
+    # It used to be codes alone, and the first V2 run showed why that is not
+    # the same proof: 1,859 of 1,877 codes were written, so the stage reported
+    # 18 missing -- while 6,823 rows across 361 codes still carried whatever a
+    # previous run computed. A company is "processed" when the loop touches
+    # it, and build_yearly_rows emits a row only for the years it can compute,
+    # so a code can be fully processed and still leave older fiscal years
+    # stale.
+    #
+    # The population a producer must prove is the population it is
+    # responsible for, at the grain it stores. Anything coarser proves
+    # something adjacent to the claim.
+    cur.execute("SELECT asx_code, fiscal_year FROM financials.annual_pnl")
+    expected_rows = {f"{code}:{year}" for code, year in cur.fetchall()}
+    written_rows: set[str] = set()
 
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
@@ -1249,7 +1275,8 @@ def main():
             n = upsert_rows(cur, rows)
             total_rows += n
             processed  += 1
-            written_codes.add(asx_code)
+            # r[1] is fiscal_year in the positional tuple the upsert takes.
+            written_rows.update(f"{asx_code}:{r[1]}" for r in rows)
 
             if i % BATCH_COMMIT == 0:
                 conn.commit()
@@ -1353,7 +1380,7 @@ def main():
 
         result = StageResult(
             "yearly_compute",
-            frozenset(expected_codes), frozenset(written_codes),
+            frozenset(expected_rows), frozenset(written_rows),
             {"rows_upserted": total_rows, "errors": errors,
              "pruned_orphans": len(orphans) if not args.keep_orphans
                                and not scoped else None})

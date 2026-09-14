@@ -60,6 +60,10 @@ WORKDIR=${WORKDIR:-/var/backups/p0a/discovery}
 ALLOWLIST="$HERE/p0a_restore_allowlist.txt"
 RESTORE_LOG="$WORKDIR/restore.err"
 SENTINEL="$WORKDIR/production_sentinel.txt"
+#: Written only when preflight passes, and read by `run`. The sentinel file is
+#: written either way -- capturing production's state is useful even on a
+#: failed preflight -- so its existence cannot stand for acceptance.
+PREFLIGHT_OK="$WORKDIR/preflight.ok"
 
 #: Read by no pipeline stage — derived from the code, not assumed. Between
 #: them 1.7GB of the 7.4GB database.
@@ -489,7 +493,12 @@ except Exception: print('unreadable')" 2>/dev/null)
     sed 's/^/    /' "$SENTINEL"
 
     echo
+    rm -f "$PREFLIGHT_OK"
     if [ $bad -eq 0 ]; then
+        {
+            git rev-parse HEAD 2>/dev/null || echo unknown
+            date -u +%FT%TZ
+        } > "$PREFLIGHT_OK"
         echo "PREFLIGHT PASSED — the acceptance boundary holds"
     else
         echo "PREFLIGHT FAILED — do not run" >&2
@@ -521,6 +530,29 @@ do_sentinel() {
 
 do_run() {
     echo "=== run: the canonical driver against $SCRATCH ==="
+
+    # The acceptance boundary is a gate, not advice.
+    #
+    # discovery-2 was started after preflight reported FAILED, because nothing
+    # required it to have passed. The freeze check is the whole reason
+    # preflight exists: a production writer active during the run makes any
+    # production change unattributable, and the sentinel comparison afterwards
+    # would then be measuring two things at once.
+    if [ ! -f "$PREFLIGHT_OK" ]; then
+        echo "REFUSING: no passing preflight. Run:" >&2
+        echo "  $0 preflight" >&2
+        return 2
+    fi
+    local marked current
+    marked=$(head -1 "$PREFLIGHT_OK")
+    current=$(git rev-parse HEAD 2>/dev/null)
+    if [ -n "$current" ] && [ "$marked" != "$current" ]; then
+        echo "REFUSING: preflight passed at $marked, the tree is now $current." >&2
+        echo "          Re-run preflight against the code that will execute." >&2
+        return 2
+    fi
+    echo "preflight: passed at $(tail -1 "$PREFLIGHT_OK") for $marked"
+
     echo "RECOMPUTED: computed_metrics, yearly_metrics, universe, factor scores,"
     echo "            sector_benchmarks"
     echo "HELD CONSTANT (cloned): daily_metrics, weekly, monthly, quarterly,"

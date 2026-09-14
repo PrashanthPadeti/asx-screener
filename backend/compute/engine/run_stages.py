@@ -204,9 +204,12 @@ def finalise(cur, run_id: int, *, rows_written: int,
 
     if persistence_violations:
         raise StageIncomplete(
-            f"run {run_id} wrote {persistence_violations:,} rows that violate "
-            f"the persistence contract. Publishing it would serve values the "
-            f"contract itself says are unexplained.")
+            f"run {run_id} produced {persistence_violations:,} persistence "
+            f"contract violations in its read-back sample. Publishing it would "
+            f"serve values the contract itself says are unexplained. The "
+            f"offending metrics are named in the run log immediately above "
+            f"this line -- they are not recoverable afterwards, because the "
+            f"rows roll back with the refusal.")
 
     cur.execute("""
         INSERT INTO screener.compute_run_finalizations (

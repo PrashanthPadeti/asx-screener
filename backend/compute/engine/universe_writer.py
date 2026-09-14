@@ -22,6 +22,7 @@ wrapper around it.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable, Mapping, Optional, Sequence
@@ -39,6 +40,12 @@ from compute.engine.metric_states import (
     persist_row,
     violations,
 )
+
+
+log = logging.getLogger(__name__)
+
+#: How many offending rows to name before truncating the report.
+SAMPLE_LIMIT = 25
 
 
 class WriteRefused(Exception):
@@ -433,7 +440,17 @@ def commit_canonical(conn, run: ComputeRun,
         # Validate what is actually in the table under this run, not what we
         # believe we sent. read_back is scoped to the run id, so a row written
         # by anything else cannot satisfy the check by accident.
-        bad = 0
+        # The violations themselves, not a tally of them.
+        #
+        # This counted `bad += len(violations(...))` and kept nothing else, so
+        # a refusal said "5 rows violate the contract" and the rollback then
+        # destroyed the rows that would have explained it. A validator whose
+        # failure cannot be diagnosed after the fact sends you back for another
+        # 25-minute run to learn what it already knew.
+        #
+        # The count is also what the message got wrong: it is violations
+        # summed across sampled rows, which is not the same as rows.
+        found: list[tuple[str, object]] = []
         sample = sorted(by_code)[:readback_sample]
         for asx_code in sample:
             restored = read_back(cur, asx_code, run)
@@ -443,8 +460,22 @@ def commit_canonical(conn, run: ComputeRun,
                     f"immediately after writing it")
             values = {m: a.value for m, a in restored.items()}
             states = encode(restored)
-            bad += len(violations(values, states, run.factor_model_version))
+            found.extend(
+                (asx_code, v)
+                for v in violations(values, states, run.factor_model_version))
 
+        if found:
+            offenders = sorted({code for code, _ in found})
+            log.error("Read-back validation failed: %s violations across %s of "
+                      "%s sampled rows.", len(found), len(offenders), len(sample))
+            for code, v in found[:SAMPLE_LIMIT]:
+                log.error("  %-6s %-28s %-28s %s",
+                          code, getattr(v, "metric", "?"),
+                          getattr(v, "kind", "?"), v)
+            if len(found) > SAMPLE_LIMIT:
+                log.error("  ... and %s more", len(found) - SAMPLE_LIMIT)
+
+        bad = len(found)
         finalise_run(cur, run, rows_written)
 
         # Refuses unless the stages passed and nothing violates. The insert is

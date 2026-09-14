@@ -364,26 +364,59 @@ SELECT
     END AS graham_number,
 
     -- ── Dividends ────────────────────────────────────────────────────────────
+    -- Every dividend field comes from market.computed_metrics, which is the
+    -- only writer that went through compute.engine.dividends: the TTM window,
+    -- the per-payment gross-up, the feed-health refusal, and the distinction
+    -- between "paid nothing over an observed period" and "we did not observe
+    -- the period" all live there and nowhere else.
+    --
+    -- They previously came from market.valuation_snapshot (a weekly EODHD
+    -- refresh) and from a single latest row of market.dividends. Neither
+    -- passes through that module, so four of the five governed dividend
+    -- fields were assembled outside the contract and then republished under a
+    -- run id -- the missed-source class exactly: a value that no stage in the
+    -- run computed, wearing the run's attribution and looking current.
+    --
+    -- It was measurable. In discovery-6 grossed_up_yield -- the one field
+    -- already reading cm -- covered 1,597 rows, while dividend_yield covered
+    -- 464 and dps_ttm 461, because valuation_snapshot is held constant by a
+    -- discovery run. dividend_metrics sets all five keys together on one
+    -- code path; they cannot disagree by 1,133 unless they have different
+    -- sources.
+    --
+    -- No COALESCE fallback to vs or ym. A fallback is what makes a value the
+    -- run did not compute indistinguishable from one it did. If cm has no row
+    -- the field is absent, the contract records why, and that is the answer.
+    --
     -- Yields are ratios (dps / price) held in NUMERIC(8,6), so a value >= 100
     -- (i.e. 100x, a nonsense yield) both overflows the column and is meaningless.
     -- It arises when a price collapses after a large capital return, leaving
     -- trailing dividends divided by a near-zero price.  NULL is the honest value.
     -- NB: no literal percent sign in this comment — psycopg2 reads it as a
     -- parameter placeholder and the query is executed via cur.execute(sql, params).
-    CASE WHEN ABS(vs.dividend_yield) < 100 THEN vs.dividend_yield END AS dividend_yield,
-    vs.dividend_per_share   AS dps_ttm,
+    CASE WHEN ABS(cm.dividend_yield) < 100 THEN cm.dividend_yield END AS dividend_yield,
+    cm.dividend_per_share   AS dps_ttm,
+    -- ex_div_date is a date, not a governed measure: the latest ex-date is the
+    -- correct answer for it and the lateral stays.
     div_latest.ex_date,
-    div_latest.franking_pct,
-    -- payout_ratio: prefer direct eps; fall back to yearly_metrics derived eps
+    -- franking_pct was the franking of whichever payment happened to be most
+    -- recent -- including one outside the TTM window, and including one for a
+    -- company that has since stopped paying. cm.franking_pct is the franking
+    -- of the window actually measured, and is NULL for a non-payer because
+    -- there is no payment to frank.
+    cm.franking_pct,
+    -- payout_ratio: numerator from the governed TTM figure, so a company that
+    -- paid nothing out of positive earnings reports 0 rather than nothing.
+    -- The eps denominator and both overflow guards are unchanged.
     -- Guard: only compute when |ratio| < 10^7 to avoid NUMERIC(12,4) overflow
     -- (tiny eps near zero would produce an astronomically large ratio)
     CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL
               AND COALESCE(pnl0.eps, ym.eps) > 0
-              AND vs.dividend_per_share IS NOT NULL
+              AND cm.dividend_per_share IS NOT NULL
               -- guard must match the NUMERIC(8,4) column range (max 9999.9999):
               -- a payout ratio above ~9999x means near-zero EPS, i.e. garbage → NULL
-              AND ABS(vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 9999
-         THEN ROUND((vs.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4)
+              AND ABS(cm.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 9999
+         THEN ROUND((cm.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4)
     END AS payout_ratio,
 
     -- ── Profitability TTM ─────────────────────────────────────────────────────
@@ -403,8 +436,12 @@ SELECT
     ym.ocf_margin                                            AS ocf_margin,
     ym.fcf_margin                                            AS fcf_margin,
     ym.capex_intensity                                       AS capex_intensity,
-    CASE WHEN ABS(COALESCE(cm.grossed_up_yield, ym.franked_yield)) < 100
-         THEN COALESCE(cm.grossed_up_yield, ym.franked_yield) END AS grossed_up_yield,
+    -- ym.franked_yield is a fiscal-year figure computed from annual dividend
+    -- rows without the TTM window or the feed-health refusal. As a fallback it
+    -- silently substituted an ungoverned number for a governed one, which is
+    -- the same defect as the vs.* sources above and not visible in any count.
+    CASE WHEN ABS(cm.grossed_up_yield) < 100
+         THEN cm.grossed_up_yield END AS grossed_up_yield,
     COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield,
 
     -- ── EPS ──────────────────────────────────────────────────────────────────
@@ -997,7 +1034,10 @@ LEFT JOIN market.valuation_snapshot vs ON vs.asx_code = c.asx_code
 
 -- ── Latest ex-dividend date ───────────────────────────────────────────────────
 LEFT JOIN LATERAL (
-    SELECT ex_date, franking_pct FROM market.dividends
+    -- ex_date only. This lateral also supplied franking_pct until the
+    -- governed source replaced it; leaving the column selected would invite
+    -- it back as a fallback for a value that must not have one.
+    SELECT ex_date FROM market.dividends
     WHERE asx_code = c.asx_code
     ORDER BY ex_date DESC
     LIMIT 1
@@ -1171,6 +1211,11 @@ LEFT JOIN LATERAL (
 -- ── Computed metrics (daily compute — freshest ratios & margins) ──────────────
 LEFT JOIN LATERAL (
     SELECT roe, roa, roce, opm, npm, gpm, ebitda_margin,
+           -- The five fields compute.engine.dividends writes as a set, taken
+           -- as a set. Selecting only grossed_up_yield here was the whole
+           -- reason the other four came from ungoverned sources: the governed
+           -- values were computed, persisted, and then not read.
+           dividend_yield, dividend_per_share, franking_pct,
            grossed_up_yield, fcf_yield,
            revenue_growth_1y, revenue_growth_3y,
            profit_growth_1y,  profit_growth_3y

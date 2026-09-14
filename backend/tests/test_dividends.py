@@ -625,6 +625,90 @@ def test_the_scheduler_does_not_reimplement_the_health_thresholds():
     assert "MIN_RECENT_ISSUERS" not in src
 
 
+# ── The contract has to reach the column, not just the function ──────────────
+#
+# dividend_metrics was correct and its output was persisted, and the served
+# numbers still came from somewhere else. build_screener_universe took
+# dividend_yield and dps_ttm from market.valuation_snapshot, franking_pct from
+# a single latest row of market.dividends, and grossed_up_yield from
+# computed_metrics with a fallback to ym.franked_yield. Four of the five
+# governed fields never touched this module.
+#
+# Nothing counted it. Every coverage number looked plausible on its own; the
+# defect was only visible as an asymmetry between two fields that this module
+# always writes together -- 1,597 against 464 in discovery-6.
+#
+# These guards are textual because the thing being asserted is textual: which
+# relation a column is selected from. A test that computed values would pass
+# against the wrong source, which is exactly what happened.
+
+_BUILDER = (Path(__file__).resolve().parents[1]
+            / "scripts" / "eodhd" / "v2" / "build_screener_universe.py")
+
+#: The fields dividend_metrics returns as a set, under the names they carry in
+#: market.computed_metrics. Kept here rather than imported so that renaming a
+#: key in the module cannot silently empty this list.
+GOVERNED_DIVIDEND_FIELDS = (
+    "dividend_yield", "dividend_per_share", "franking_pct",
+    "grossed_up_dividend", "grossed_up_yield",
+)
+
+
+def _builder_sql() -> str:
+    """The builder's source with comment lines removed.
+
+    Comments discuss the rejected sources by name -- correctly, that is what
+    they are for -- and an earlier guard of mine matched its own explanation
+    instead of the code. Strip them before asserting on SQL text.
+    """
+    lines = []
+    for line in _BUILDER.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("--") or stripped.startswith("#"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_no_governed_dividend_field_is_read_from_an_ungoverned_relation():
+    """valuation_snapshot, yearly_metrics and a raw latest dividend row are
+    all real tables with plausible values. None of them applied the TTM
+    window, the gross-up policy, or the feed-health refusal."""
+    sql = _builder_sql()
+    forbidden = [
+        "vs.dividend_yield", "vs.dividend_per_share", "vs.franking_pct",
+        "vs.grossed_up_yield", "ym.franked_yield", "div_latest.franking_pct",
+    ]
+    found = [f for f in forbidden if f in sql]
+
+    assert not found, (
+        f"build_screener_universe reads a governed dividend field from an "
+        f"ungoverned source: {found}. These must come from cm.* -- the one "
+        f"writer that went through compute.engine.dividends.")
+
+
+def test_the_builder_reads_the_dividend_fields_it_needs_from_computed_metrics():
+    """The inverse, and the half that actually failed: the values were
+    computed and persisted, and then simply not selected."""
+    sql = _builder_sql()
+    missing = [f for f in ("dividend_yield", "dividend_per_share",
+                           "franking_pct", "grossed_up_yield")
+               if f"cm.{f}" not in sql]
+
+    assert not missing, (
+        f"governed dividend fields not read from computed_metrics: {missing}")
+
+
+def test_dividend_metrics_still_returns_exactly_the_governed_field_set():
+    """If a sixth field appears here, the guard above stops covering it. The
+    two lists are only useful while they describe the same set."""
+    keys = set(dividend_metrics([], 10.0))
+
+    assert keys == set(GOVERNED_DIVIDEND_FIELDS), (
+        f"dividend_metrics returns {sorted(keys)}, guard covers "
+        f"{sorted(GOVERNED_DIVIDEND_FIELDS)}")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

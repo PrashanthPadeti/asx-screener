@@ -419,6 +419,42 @@ def dividend_metrics(rows: Iterable[dict] | Sequence[Payment],
         "grossed_up_yield": None,
     }
 
+    # ── Observed nothing is not the same as observed nothing ────────────────
+    #
+    #     No dividend paid in a healthy, fully observed period is EVIDENCE.
+    #     Failure to observe the period is MISSING evidence.
+    #
+    # Every non-APPLICABLE state used to return `empty`, so a company that
+    # demonstrably paid nothing over a complete window came back as NULL and
+    # the contract read it as UNAVAILABLE / SOURCE_MISSING -- "we could not
+    # get the data" -- when the truth was "we looked, and there were none".
+    #
+    # That is not a cosmetic mislabel. An UNAVAILABLE constituent may not be
+    # reweighted out of a factor, so every non-payer lost its Income score and
+    # then its composite: 252 of 2,103 in the first end-to-end V2 run, against
+    # 1,888 in production. The engine was refusing to score companies because
+    # it had mistaken a fact about them for a gap in our data.
+    #
+    # A zero yield is the economically correct answer for a non-payer and
+    # ranks accordingly -- low, which is the evidence Income exists to carry.
+    if res.state in (DividendState.NO_PAYMENTS_IN_WINDOW,
+                     DividendState.NO_DIVIDEND_HISTORY):
+        priced = bool(close) and close > 0
+        return {
+            # Neither of these needs a price: the company paid nothing, and
+            # that is true whatever it trades at.
+            "dividend_per_share": 0.0,
+            "grossed_up_dividend": 0.0,
+            # These do. Without a valid price the yield is genuinely
+            # uncomputable, and stays absent rather than being called zero.
+            "dividend_yield": 0.0 if priced else None,
+            "grossed_up_yield": 0.0 if priced else None,
+            # Nothing was paid, so there is nothing to frank. Not zero --
+            # zero percent franked is a claim about a payment that happened.
+            # The state layer records NOT_MEANINGFUL / OBSERVATION.
+            "franking_pct": None,
+        }
+
     if not res.ok or not close or close <= 0:
         return empty
 
@@ -567,13 +603,38 @@ class DividendSource:
         composite refuses to reweight and a canonical strategy refuses to
         refresh, instead of quietly becoming a four-factor model.
         """
-        from compute.engine.applicability import assess, unhealthy
+        from compute.engine.applicability import (
+            Applicability, Assessment, Cause, assess, unhealthy,
+        )
 
         values = self.metrics(rows, close, as_of=as_of)
         if not self.healthy:
             return {m: unhealthy(m, self.health.reason, domain) for m in values}
-        return {m: assess(m, v, domain) if domain is not None
-                else _plain(m, v) for m, v in values.items()}
+
+        out = {m: assess(m, v, domain) if domain is not None
+               else _plain(m, v) for m, v in values.items()}
+
+        # franking_pct for a company that paid nothing.
+        #
+        # A NULL here would otherwise be read as SOURCE_MISSING -- the feed
+        # failed to tell us the franking level -- when the feed told us
+        # something more definite: there was no payment. Zero would be worse
+        # still, because "0% franked" is a claim about a distribution that
+        # happened, and would rank beside genuinely unfranked payers.
+        #
+        # NOT_MEANINGFUL / OBSERVATION says the metric does not apply to these
+        # values, which is what lets the declared model reweight it out of
+        # Income rather than refusing the factor.
+        res = ttm_dividends(rows, as_of=as_of or self.health.as_of,
+                            policy=self.policy, tax_rate=self.tax_rate,
+                            feed_as_of=self.health.latest_ex_date)
+        if res.state in (DividendState.NO_PAYMENTS_IN_WINDOW,
+                         DividendState.NO_DIVIDEND_HISTORY):
+            out["franking_pct"] = Assessment(
+                "franking_pct", Applicability.NOT_MEANINGFUL, None,
+                "no dividend was paid in the window, so there is nothing to "
+                "frank", domain, cause=Cause.OBSERVATION)
+        return out
 
 
 def _plain(metric: str, value):

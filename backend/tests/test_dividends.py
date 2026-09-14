@@ -349,9 +349,43 @@ def test_every_field_is_present_on_every_path():
         assert set(m) == set(FIELDS), f"missing keys for close={close}"
 
 
-def test_a_company_that_stopped_paying_writes_nulls():
+def test_a_company_that_stopped_paying_writes_an_observed_zero():
+    """Superseded by the observed-vs-unobserved distinction, and it was this
+    test that encoded the conflation.
+
+    It asserted all-NULL for a company that stopped paying. The protection it
+    was really carrying -- the OEL bug, where an omitted key left a stale 480%
+    grossed-up yield in place -- is test_every_field_is_present_on_every_path,
+    which is unaffected. What this one additionally asserted was that "paid
+    nothing" and "could not observe" should look identical, and they must not:
+
+        No dividend paid in a healthy, fully observed period is EVIDENCE.
+        Failure to observe the period is MISSING evidence.
+
+    The old shape cost every non-payer its Income score and then its composite,
+    because an UNAVAILABLE constituent may not be reweighted.
+    """
     m = dividend_metrics([row("2023-06-01", 1.00)], close=10.0, as_of=AS_OF)
-    assert all(m[f] is None for f in FIELDS)
+
+    assert m["dividend_per_share"] == 0.0
+    assert m["dividend_yield"] == 0.0
+    assert m["grossed_up_dividend"] == 0.0
+    assert m["grossed_up_yield"] == 0.0
+    # Nothing was paid, so there is nothing to frank. Zero would be a claim
+    # about a distribution that did not happen.
+    assert m["franking_pct"] is None
+    assert set(m) == set(FIELDS), "every field still written, OEL protection"
+
+
+def test_an_unobservable_window_still_writes_nothing():
+    """The other side of the distinction. Without a valid price the yield is
+    genuinely uncomputable and stays absent rather than being called zero --
+    while the payment facts, which need no price, are still stated."""
+    m = dividend_metrics([], close=None, as_of=AS_OF)
+
+    assert m["dividend_yield"] is None
+    assert m["grossed_up_yield"] is None
+    assert m["dividend_per_share"] == 0.0, "no price needed to know it paid none"
 
 
 # ── The invariant the screener row must satisfy ───────────────────────────────

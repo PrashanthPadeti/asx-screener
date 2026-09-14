@@ -42,7 +42,7 @@
 #   p0a_discovery.sh verify     counts, hypertable shape, restore errors
 #   p0a_discovery.sh role       report on (and create) a scratch-only role
 #   p0a_discovery.sh preflight  the acceptance boundary, + sentinel capture
-#   p0a_discovery.sh run        the five stages, scratch only
+#   p0a_discovery.sh run        the canonical driver, scratch only
 #   p0a_discovery.sh sentinel   re-compare the production sentinel
 #   p0a_discovery.sh evidence   the evidence bundle
 #   p0a_discovery.sh all        clone, verify, preflight, run, sentinel, evidence
@@ -520,52 +520,55 @@ do_sentinel() {
 # ── run ───────────────────────────────────────────────────────────────────────
 
 do_run() {
-    echo "=== run: five stages against $SCRATCH ==="
+    echo "=== run: the canonical driver against $SCRATCH ==="
     echo "RECOMPUTED: computed_metrics, yearly_metrics, universe, factor scores,"
     echo "            sector_benchmarks"
     echo "HELD CONSTANT (cloned): daily_metrics, weekly, monthly, quarterly,"
     echo "            halfyearly, period_metrics, prices, dividends, financials"
+    echo
 
-    local url_sync url_async
+    # Delegates to p0a_canonical_run.py rather than driving the stages itself.
+    #
+    # This used to invoke the five scripts directly with no run id, which is
+    # precisely the second lifecycle the driver exists to prevent: a path that
+    # computes everything and produces no attributable run, beside one that
+    # does. Two ways to execute the pipeline is how an alternate publication
+    # route grows back, and the resolver cannot tell them apart once rows
+    # exist. The discovery run must exercise the SAME lifecycle production
+    # will use, or it is not evidence about production.
+    #
+    # The driver owns ordering, stage requirements, the health precondition
+    # and finalisation. Everything here does is point it at scratch and prove
+    # it went there.
+    local url_sync url_async reached
     url_sync=$(scratch_url "$DATABASE_URL_SYNC") || return 2
     url_async=$(scratch_url "$DATABASE_URL") || return 2
 
-    local -a STAGES=(
-        "compute/engine/daily_compute.py"
-        "compute/engine/yearly_compute.py"
-        "scripts/eodhd/v2/build_screener_universe.py"
-        "compute/engine/composite_score.py"
-        "compute/engine/sector_benchmarks.py"
-    )
+    reached=$(observed_db "$url_sync")
+    echo "driver will run against: $reached"
+    if [ "$reached" != "$SCRATCH" ]; then
+        echo "REFUSING: resolver reached '$reached', not '$SCRATCH'." >&2
+        return 2
+    fi
 
-    for stage in "${STAGES[@]}"; do
-        echo
-        # Observed before EVERY stage. Environment inheritance is expected to
-        # be stable; P0-A's whole history says to check anyway.
-        local reached
-        reached=$(observed_db "$url_sync")
-        echo "--- $stage   [writes to: $reached]"
-        if [ "$reached" != "$SCRATCH" ]; then
-            echo "REFUSING: resolver reached '$reached', not '$SCRATCH'." >&2
-            echo "          Stopping before this stage. Earlier stages wrote to" >&2
-            echo "          the scratch database; run 'sentinel' to confirm." >&2
-            return 2
-        fi
+    # Exported, not per-command: the driver spawns each stage as a subprocess
+    # and they inherit this environment. The driver re-checks the database
+    # identity before every stage regardless.
+    DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async"         "$PYBIN" scripts/p0a_canonical_run.py --execute
+    local rc=$?
 
-        local t0=$SECONDS
-        if DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" \
-               "$PYBIN" "$stage"; then
-            echo "--- $stage OK ($((SECONDS - t0))s)"
-        else
-            local rc=$?
-            echo "--- $stage FAILED rc=$rc after $((SECONDS - t0))s" >&2
-            echo "    Stopping: later stages read what this one writes, so" >&2
-            echo "    continuing would produce evidence about a partial run." >&2
-            return $rc
-        fi
-    done
+    if [ $rc -ne 0 ]; then
+        echo >&2
+        echo "The canonical run did not publish (rc=$rc). Its run row and any" >&2
+        echo "stage evidence remain in $SCRATCH as forensics; no finalisation" >&2
+        echo "exists, so no resolver would select it. Read the stage evidence:" >&2
+        echo "  SELECT stage_name, status, expected_count, written_count," >&2
+        echo "         missing_count, extra_count, details" >&2
+        echo "    FROM screener.compute_run_stages ORDER BY run_id, stage_name;" >&2
+        return $rc
+    fi
     echo
-    echo "all stages complete"
+    echo "canonical run published"
 }
 
 # ── evidence ──────────────────────────────────────────────────────────────────

@@ -460,14 +460,30 @@ do_preflight() {
     local health
     health=$(curl -s --max-time 5 http://127.0.0.1:8000/health 2>/dev/null)
     local frozen jobs
-    frozen=$(printf '%s' "$health" | "$PYBIN" -c "
-import json,sys
-try: print(json.load(sys.stdin).get('frozen'))
-except Exception: print('unreadable')" 2>/dev/null)
-    jobs=$(printf '%s' "$health" | "$PYBIN" -c "
-import json,sys
-try: print(json.load(sys.stdin).get('jobs'))
-except Exception: print('unreadable')" 2>/dev/null)
+    # The keys are nested under "schedulers", not at the top level:
+    #   {"status":"ok",...,"schedulers":{"frozen":true,"jobs":0}}
+    #
+    # Read flat, both came back None and preflight reported NOT FROZEN while
+    # the freeze was fully in force. A check that cannot read its input
+    # reported the very condition it exists to detect -- and because it fails
+    # closed, it looked like diligence. Failing closed is right; failing
+    # closed for a reason that is not true is a false alarm that trains an
+    # operator to run anyway, which is exactly what happened.
+    #
+    # Both shapes are accepted so an older build does not re-break this, and
+    # an unreadable response still yields the literal "unreadable" rather than
+    # a value that could pass a comparison.
+    read -r frozen jobs <<EOF
+$(printf '%s' "$health" | "$PYBIN" -c "
+import json, sys
+try:
+    payload = json.load(sys.stdin)
+except Exception:
+    print('unreadable unreadable'); raise SystemExit
+sched = payload.get('schedulers') or {}
+print(sched.get('frozen', payload.get('frozen', 'absent')),
+      sched.get('jobs', payload.get('jobs', 'absent')))" 2>/dev/null)
+EOF
     echo "  in-process frozen:        $frozen"
     echo "  in-process jobs:          $jobs"
     if [ "$frozen" != "True" ] || [ "$jobs" != "0" ]; then

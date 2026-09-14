@@ -469,6 +469,45 @@ def test_a_governed_metric_the_run_never_assessed_refuses_the_write():
         raise AssertionError("an unassessed governed metric must refuse the write")
 
 
+# ── A flag is not a ratio ────────────────────────────────────────────────────
+
+def test_boolean_metrics_reach_their_columns_as_booleans():
+    """discovery-4's failure, inside write_all on the real UPDATE:
+
+        DatatypeMismatch: column "operating_margin_expanding" is of type
+        boolean but expression is of type numeric
+
+    The contract models Assessment.value as Optional[float], which is right
+    for every ratio and wrong for a flag. composite_score coerces every
+    non-text column with pd.to_numeric, so True became 1.0 and the writer
+    emitted numeric into a boolean column. The float is carried through the
+    contract and cast back at the one place a value becomes a column.
+    """
+    from compute.engine.universe_writer import BOOLEAN_METRICS, storage_value
+
+    for metric in BOOLEAN_METRICS:
+        assert storage_value(metric, 1.0) is True
+        assert storage_value(metric, 0.0) is False
+        assert storage_value(metric, None) is None, "absent stays absent"
+
+    assert storage_value("roe", 0.18) == 0.18, "ratios are untouched"
+    assert isinstance(storage_value("roe", 0.18), float)
+
+
+def test_the_written_parameters_carry_the_column_type():
+    """Asserted on the statement build_update produces, not on the helper --
+    the helper being right does not prove the writer calls it."""
+    from compute.engine.universe_writer import BOOLEAN_METRICS
+
+    _, params = build_update("CBA", cba(), RUN)
+
+    for metric in BOOLEAN_METRICS:
+        if metric in GOVERNED:
+            value = params[f"m_{metric}"]
+            assert value is None or isinstance(value, bool), (
+                f"{metric} reached the statement as {type(value).__name__}")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

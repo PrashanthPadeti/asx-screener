@@ -114,10 +114,51 @@ NOT_PERSISTED: dict[str, str] = {
 }
 
 
+#: Governed metrics whose storage column is BOOLEAN.
+#:
+#: The applicability contract models Assessment.value as Optional[float],
+#: which is right for every ratio and wrong for a flag. composite_score coerces
+#: every non-text column with pd.to_numeric, so True became 1.0, the assessment
+#: carried 1.0, and the writer emitted numeric into a boolean column:
+#:
+#:     DatatypeMismatch: column "operating_margin_expanding" is of type
+#:     boolean but expression is of type numeric
+#:
+#: A boolean metric has never had a type that survives the round trip. Rather
+#: than widen Assessment.value -- which would touch every gate, every cause and
+#: every consumer to serve two metrics -- the float is carried through the
+#: contract and cast back at the single point where a value becomes a column.
+#: 1.0 and 0.0 are exact in binary floating point, so nothing is lost.
+#:
+#: verify_storage checks this declaration against the database in BOTH
+#: directions, so a governed boolean that is not declared here, or a declared
+#: one whose column stops being boolean, fails preflight rather than 24 minutes
+#: into a run.
+BOOLEAN_METRICS: frozenset[str] = frozenset({
+    "gross_margin_expanding",
+    "operating_margin_expanding",
+})
+
+
 def column_for(metric: str) -> str:
     """The physical column a canonical metric is stored in."""
     canonical = normalise(metric)
     return STORAGE_COLUMN.get(canonical, canonical)
+
+
+def storage_value(metric: str, value):
+    """The value as its column's type wants it.
+
+    The one place a contract value becomes a column value. Booleans are the
+    only divergence today; keeping the conversion here rather than in the
+    caller means a second one cannot be applied inconsistently by whichever
+    writer happens to be running.
+    """
+    if value is None:
+        return None
+    if normalise(metric) in BOOLEAN_METRICS:
+        return bool(value)
+    return value
 
 
 #: The inverse of STORAGE_COLUMN, built once and checked for collisions.
@@ -240,9 +281,10 @@ def verify_storage(cur, model_version: str) -> None:
     """
     mapping = persisted_governed(model_version)
     cur.execute("""
-        SELECT column_name FROM information_schema.columns
+        SELECT column_name, data_type FROM information_schema.columns
          WHERE table_schema = 'screener' AND table_name = 'universe';""")
-    present = {r[0] for r in cur.fetchall()}
+    types = dict(cur.fetchall())
+    present = set(types)
 
     absent = sorted({c for c in mapping.values() if c not in present})
     if absent:
@@ -250,6 +292,23 @@ def verify_storage(cur, model_version: str) -> None:
             f"{model_version} governs metrics whose storage columns do not "
             f"exist: {absent}. This is an application defect, not missing "
             f"data, and must not be written as a source failure.")
+
+    # Both directions, because either mismatch writes the wrong type and both
+    # fail mid-run rather than at preflight.
+    wrong = []
+    for metric, column in mapping.items():
+        is_bool_column = types.get(column) == "boolean"
+        declared = normalise(metric) in BOOLEAN_METRICS
+        if is_bool_column and not declared:
+            wrong.append(f"{metric} -> {column} is boolean but not declared "
+                         f"in BOOLEAN_METRICS")
+        elif declared and not is_bool_column:
+            wrong.append(f"{metric} -> {column} is declared boolean but the "
+                         f"column is {types.get(column)}")
+    if wrong:
+        raise WriteRefused(
+            "storage type declarations disagree with the database: "
+            + "; ".join(sorted(wrong)))
 
 
 def build_update(asx_code: str, assessments: Mapping[str, Assessment],
@@ -305,7 +364,7 @@ def build_update(asx_code: str, assessments: Mapping[str, Assessment],
     for metric, column in sorted(mapping.items()):
         placeholder = f"m_{normalise(metric)}"
         sets.append(f"{column} = %({placeholder})s")
-        params[placeholder] = values.get(metric)
+        params[placeholder] = storage_value(metric, values.get(metric))
 
     sets.append("metric_states = %(metric_states)s::jsonb")
     sets.append("compute_run_id = %(compute_run_id)s")

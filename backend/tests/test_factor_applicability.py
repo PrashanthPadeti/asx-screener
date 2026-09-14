@@ -366,6 +366,72 @@ def test_zero_equity_is_an_observation_not_a_missing_one():
     assert _state(masked, "ZERO", "roe").cause is Cause.OBSERVATION
 
 
+# ── Every governed column must become an assessment ──────────────────────────
+
+def test_every_persisted_governed_column_is_assessed():
+    """The defect that stopped discovery-3, as a unit test.
+
+    apply_applicability translated frame columns with normalise(), which knows
+    the metric registry's aliases and nothing about the ones declared only in
+    universe_writer.STORAGE_COLUMN. Five columns -- dps_ttm, fcf_fy0, and the
+    three-year CAGRs stored as revenue_growth_3y_cagr, eps_growth_3y_cagr and
+    earnings_growth_3y_cagr -- were read into the frame, matched no governed
+    name, and were never assessed.
+
+    Nothing failed at that point. The canonical writer refused the first row
+    it tried to write, 23 minutes into a run, with "dividend_per_share is
+    governed and was read, but no assessment was produced for it". Correct,
+    and very late.
+
+    This asserts the property directly: hand the frame every column the model
+    persists, and every governed metric must come back with an assessment.
+    """
+    import pandas as pd
+
+    from compute.engine.factor_applicability import (
+        DOMAIN_COLS, OBSERVATION_COLS, apply_applicability,
+    )
+    from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
+    from compute.engine.universe_writer import persisted_governed
+
+    mapping = persisted_governed(LATEST_MODEL_VERSION)
+
+    row = {"asx_code": "TST"}
+    row.update({col: 1.0 for col in mapping.values()})
+    row.update({col: 1.0 for col in OBSERVATION_COLS.values()})
+    row.update({c: None for c in DOMAIN_COLS if c not in row})
+    row["sector"] = "Industrials"
+
+    masked = apply_applicability(pd.DataFrame([row]))
+    assessed = set(masked.assessments["TST"])
+
+    missing = sorted(set(mapping) - assessed)
+    assert not missing, (
+        f"governed, present in the frame, and unassessed: {missing}. The "
+        f"canonical writer refuses a row in this state, so this is a run "
+        f"failure rather than a coverage gap.")
+
+
+def test_the_frame_translation_is_the_single_boundary():
+    """canonical_for is a superset of normalise. Using the narrower one
+    anywhere a column name becomes a metric identity reintroduces the
+    ev_to_ebitda defect one layer along -- which is what happened."""
+    from compute.engine.metric_registry import normalise
+    from compute.engine.metric_states import LATEST_MODEL_VERSION
+    from compute.engine.universe_writer import canonical_for, persisted_governed
+
+    mapping = persisted_governed(LATEST_MODEL_VERSION)
+
+    for metric, column in mapping.items():
+        assert canonical_for(column) == metric, f"{column} -> {metric}"
+
+    # And the narrower function genuinely does not suffice, so this test is
+    # about a real difference rather than a redundant one.
+    assert any(normalise(c) != m for m, c in mapping.items()), (
+        "if normalise were sufficient everywhere, this guard would be "
+        "asserting nothing")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

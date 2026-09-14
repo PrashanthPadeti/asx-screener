@@ -44,7 +44,8 @@ import pandas as pd
 
 from compute.engine.applicability import Observation, assess, unhealthy
 from compute.engine.domain_resolver import resolve_domain
-from compute.engine.metric_registry import normalise
+from compute.engine.metric_registry import normalise  # noqa: F401
+from compute.engine.universe_writer import canonical_for
 from compute.engine.metric_states import (
     GOVERNED_METRICS,
     LATEST_MODEL_VERSION,
@@ -152,7 +153,25 @@ def apply_applicability(df: pd.DataFrame,
     # where it was being prevented. The frame keeps its own spelling; the
     # assessment is keyed canonically, because that is what a peer engine and
     # the sidecar both look up.
-    metric_cols = [(c, normalise(c)) for c in df.columns]
+    # canonical_for, not normalise.
+    #
+    # normalise knows the metric registry's aliases -- ev_to_ebitda ->
+    # ev_ebitda -- and nothing about the ones declared only in
+    # universe_writer.STORAGE_COLUMN: dps_ttm -> dividend_per_share,
+    # fcf_fy0 -> free_cash_flow, and the three-year CAGRs stored as
+    # revenue_growth_3y_cagr, eps_growth_3y_cagr, earnings_growth_3y_cagr.
+    #
+    # Under normalise those five columns were read into the frame, failed to
+    # match any governed name, and were never assessed. The canonical writer
+    # then refused every row, correctly: "dividend_per_share is governed and
+    # was read, but no assessment was produced for it".
+    #
+    # canonical_for consults the writer's inverse map first and falls back to
+    # normalise, so it is a superset. One translation function, used
+    # everywhere a column name becomes a metric identity -- which is the whole
+    # point of having a single translation boundary, and the ev_to_ebitda
+    # defect repeating itself one layer along when there are two.
+    metric_cols = [(c, canonical_for(c)) for c in df.columns]
     metric_cols = [(c, canon) for c, canon in metric_cols if canon in governed]
 
     feed_broken = dividend_source is not None and not dividend_source.healthy

@@ -76,6 +76,8 @@ class ReadBackReport:
     intended: int = 0
     written: int = 0
     read_back: int = 0
+    governed_metrics: int = 0
+    elapsed_seconds: float = 0.0
     missing: list[str] = field(default_factory=list)      # intended, not in DB
     unexpected: list[str] = field(default_factory=list)   # in DB, not intended
     mismatched: list[tuple[str, str, object, object]] = field(default_factory=list)
@@ -108,6 +110,28 @@ class ReadBackReport:
         if self.contract:
             parts.append(f"{len(self.contract):,} contract violations")
         return "read-back FAILED: " + "; ".join(parts)
+
+    def proof_block(self) -> list[str]:
+        """The publication proof, as lines to log.
+
+        Every number is derived from this run: the intended population comes
+        from the canonical assessments the run built, never from a literal.
+        2,103 is today's baseline, not an expectation — a validator that
+        checked against a hard-coded count would pass a run that silently
+        halved the universe.
+        """
+        attribution = len(self.missing) + len(self.unexpected)
+        payload = len(self.mismatched) + len(self.hash_differs)
+        return [
+            f"canonical intent rows:      {self.intended:,}",
+            f"read-back rows:             {self.read_back:,}",
+            f"governed metrics:           {self.governed_metrics}",
+            f"run attribution errors:     {attribution}",
+            f"state/value contradictions: {len(self.contract)}",
+            f"payload mismatches:         {payload}",
+            f"read-back validation:       {'PASS' if self.ok else 'FAIL'}",
+            f"validator elapsed:          {self.elapsed_seconds:.2f}s",
+        ]
 
     def log_detail(self) -> None:
         """Name the failures. A refusal that cannot be diagnosed costs a run."""
@@ -249,6 +273,9 @@ def verify_population(cur, by_code: Mapping[str, Mapping[str, object]],
         column_for, governed_for, normalise,
     )
 
+    import time
+    started = time.monotonic()
+
     metrics = sorted(governed_for(run.factor_model_version))
     columns = [column_for(m) for m in metrics]
     scales = column_scales(cur, columns)
@@ -256,7 +283,8 @@ def verify_population(cur, by_code: Mapping[str, Mapping[str, object]],
     def column_of(metric: str) -> str:
         return column_for(normalise(metric))
 
-    report = ReadBackReport(intended=len(by_code), written=rows_written)
+    report = ReadBackReport(intended=len(by_code), written=rows_written,
+                            governed_metrics=len(metrics))
 
     # Scoped to this run. A row written by anything else cannot satisfy the
     # check by accident, and a row this run failed to write cannot be covered
@@ -298,6 +326,7 @@ def verify_population(cur, by_code: Mapping[str, Mapping[str, object]],
                                           run.factor_model_version))
 
     report.missing = sorted(set(by_code) - seen)
+    report.elapsed_seconds = time.monotonic() - started
     return report
 
 

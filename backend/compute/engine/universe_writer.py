@@ -469,10 +469,15 @@ def commit_canonical(conn, run: ComputeRun,
         from compute.engine.canonical_readback import verify_population
 
         report = verify_population(cur, by_code, run, rows_written)
+
+        # The proof, printed whether it passes or fails. A publication whose
+        # evidence only appears on failure is a publication nobody can audit
+        # afterwards, and "0 violations" alone never said which population the
+        # zero was measured over.
+        for line in report.proof_block():
+            log.info("  %s", line)
         if not report.ok:
             report.log_detail()
-        else:
-            log.info("  %s", report.summary())
 
         bad = report.failure_count
         finalise_run(cur, run, rows_written)
@@ -494,7 +499,10 @@ def commit_canonical(conn, run: ComputeRun,
                           "readback_scope": "full_population",
                           "readback_intended": report.intended,
                           "readback_verified": report.read_back,
-                          "readback_failures": report.failure_count})
+                          "readback_failures": report.failure_count,
+                          "readback_governed_metrics": report.governed_metrics,
+                          "readback_elapsed_seconds":
+                              round(report.elapsed_seconds, 3)})
 
         conn.commit()
         return rows_written

@@ -280,6 +280,55 @@ def test_the_report_distinguishes_its_failure_kinds():
     assert "field mismatches" in r2.summary()
 
 
+def test_the_proof_block_derives_its_population_from_the_run():
+    """No literal expectations in the evidence.
+
+    2,103 is today's baseline, not a requirement. A proof block checking
+    against a hard-coded count would pass a run that silently halved the
+    universe — the very failure the read-back exists to catch, reintroduced
+    in the thing that reports on it.
+    """
+    import re
+
+    src = (Path(__file__).resolve().parents[1]
+           / "compute" / "engine" / "canonical_readback.py")
+    lines = [ln for ln in src.read_text(encoding="utf-8").splitlines()
+             if not ln.strip().startswith("#")]
+    body = "\n".join(lines).split("def proof_block")[1].split("\n    def ")[0]
+    # The docstring explains the rule by quoting the number it forbids, so it
+    # must come out before matching. This guard failed on its own explanation
+    # first time — the fourth prose-versus-code miss of the day, and the
+    # reason every textual check in this repo strips comments before asserting.
+    body = re.sub(r'"""[\s\S]*?"""', "", body)
+
+    assert not re.search(r"\b\d{3,}\b", body), (
+        "the proof block contains a literal count; every number must be "
+        "derived from the run")
+    for field in ("self.intended", "self.read_back", "self.governed_metrics",
+                  "self.elapsed_seconds"):
+        assert field in body, f"{field} is not reported in the proof block"
+
+
+def test_the_proof_block_reports_both_outcomes():
+    """Printed on pass as well as on failure.
+
+    Evidence that only appears when something breaks cannot be audited
+    afterwards — and "0 violations" alone never said which population the
+    zero was measured over, which is exactly the ambiguity this block removes.
+    """
+    ok = ReadBackReport(intended=10, written=10, read_back=10,
+                        governed_metrics=72, elapsed_seconds=0.5)
+    block = "\n".join(ok.proof_block())
+    assert "PASS" in block and "10" in block and "0.50s" in block
+
+    bad = ReadBackReport(intended=10, written=10, read_back=9,
+                         governed_metrics=72)
+    bad.missing = ["ZZZ"]
+    block = "\n".join(bad.proof_block())
+    assert "FAIL" in block
+    assert "run attribution errors:     1" in block
+
+
 def test_scales_are_read_from_the_database_not_assumed():
     """A single rounding constant would be right for NUMERIC(10,6) and
     silently wrong for NUMERIC(12,4), SMALLINT and BOOLEAN."""

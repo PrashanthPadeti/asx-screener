@@ -384,8 +384,32 @@ def main() -> int:
         # counted.
         ("revenue CAGR beyond +1000%", "revenue_cagr_3y",
          "revenue_growth_3y_cagr > 10", SOURCING),
+        # "Source failed" means UNAVAILABLE, and the predicate now says so.
+        #
+        # It used to read `income_score IS NULL`, which was equivalent while
+        # Income could only ever be absent for want of data. Once the contract
+        # started answering NOT_MEANINGFUL / domain -- 969 rows in
+        # discovery-13, Income genuinely not describing those companies'
+        # economics -- the proxy broke. It reported 335 CUSTOMER-SURFACE
+        # DEFECTS that were the declared model reweighting a domain-
+        # inapplicable constituent out, which is policy working, not failing.
+        #
+        # The distinction is the entire point of the applicability contract:
+        #
+        #   NOT_MEANINGFUL  may be reweighted out, as declared policy.
+        #   UNAVAILABLE     may not. Reweighting publishes a different model
+        #                   under this one's name.
+        #
+        # So the check reads the state, not the column, and covers every
+        # factor rather than Income alone -- any of them can now reach
+        # UNAVAILABLE, and a proxy that names one is a proxy again.
         ("composite scored while a factor's source failed", "composite_score",
-         "composite_score IS NOT NULL AND income_score IS NULL"),
+         """composite_score IS NOT NULL AND (
+                metric_states->'value_score'->>'state'    = 'unavailable'
+             OR metric_states->'quality_score'->>'state'  = 'unavailable'
+             OR metric_states->'growth_score'->>'state'   = 'unavailable'
+             OR metric_states->'momentum_score'->>'state' = 'unavailable'
+             OR metric_states->'income_score'->>'state'   = 'unavailable')"""),
     ]
 
     print(f"  {'anomaly':46} {'stored':>7} {'servable':>9}  diagnosis")
@@ -439,6 +463,25 @@ def main() -> int:
     print("  (resolved domain, via domain_resolver — not sector text. REIT is")
     print("   deliberately outside FINANCIAL, so a REIT multiple is not a")
     print("   finding here.)")
+
+    # The legitimate counterpart of the check above. A composite scored while
+    # a constituent is NOT_MEANINGFUL is the declared reweighting policy
+    # working; reported so the number is visible rather than merely absent
+    # from the defect list, and so a change in it is noticed.
+    cur.execute(f"""
+        SELECT count(*) FROM screener.universe
+         WHERE {serving} AND composite_score IS NOT NULL AND (
+                metric_states->'value_score'->>'state'    = 'not_meaningful'
+             OR metric_states->'quality_score'->>'state'  = 'not_meaningful'
+             OR metric_states->'growth_score'->>'state'   = 'not_meaningful'
+             OR metric_states->'momentum_score'->>'state' = 'not_meaningful'
+             OR metric_states->'income_score'->>'state'   = 'not_meaningful');""")
+    reweighted = cur.fetchone()["count"]
+    if reweighted:
+        print(f"\n  {reweighted:,} composites scored on a reduced basis because a")
+        print("  constituent factor is NOT_MEANINGFUL for that company. That is")
+        print("  declared policy, not a defect — an UNAVAILABLE constituent is")
+        print("  the one that may not be reweighted out, and it is counted above.")
 
     if sourcing_notes:
         print("\n  Sourcing observations — reported, not counted as defects:")

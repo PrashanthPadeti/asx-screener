@@ -138,6 +138,48 @@ def test_the_free_branch_is_driven_by_a_bound_boolean():
             "the ambiguous comparison is back — bind :is_free instead")
 
 
+def test_a_locked_plan_never_takes_its_access_status_from_stripe():
+    """subscription_status is an access gate, not a billing field.
+
+    require_plan() refuses anything outside ('active', 'trialing'), so writing
+    Stripe's 'canceled' or 'past_due' onto an account under a manual grant
+    revokes the grant through the back door — plan still reads 'premium' and
+    the customer still cannot use it. The first draft of the lock branch did
+    exactly that by copying :status through, which is why this is a test and
+    not a comment.
+    """
+    src = (ROUTES / "stripe_routes.py").read_text(encoding="utf-8")
+
+    for stmt in _statements(src):
+        # The locked branches are the ones that preserve a granted end date
+        # or explicitly retain the plan on cancellation.
+        locked = ("GREATEST(" in stmt and "subscription_ends_at" in stmt)
+        if not locked:
+            continue
+        assert ":status" not in stmt, (
+            "a locked-plan update binds Stripe's status into "
+            "subscription_status; that silently revokes granted access")
+        assert "subscription_status    = 'active'" in stmt \
+            or "subscription_status         = 'active'" in stmt \
+            or "subscription_status = 'active'" in stmt, (
+            "a locked-plan update must assert active access explicitly")
+
+
+def test_the_lock_check_cannot_break_the_webhook():
+    """_plan_is_locked must fail open.
+
+    If migration 065 is not applied, the column does not exist. A lock check
+    that propagated that error would turn every subscription webhook into a
+    500 — which is precisely the outage this file was written for, recreated
+    by the fix for it.
+    """
+    src = (ROUTES / "stripe_routes.py").read_text(encoding="utf-8")
+    body = src.split("async def _plan_is_locked")[1].split("\nasync def ")[0]
+
+    assert "except Exception" in body, "_plan_is_locked must catch"
+    assert "return False" in body, "_plan_is_locked must fail open, not raise"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

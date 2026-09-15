@@ -110,8 +110,37 @@ def _read_subscription(sub: dict) -> dict:
     }
 
 
+async def _plan_is_locked(db: AsyncSession, cid: str) -> bool:
+    """Whether a manual grant currently outranks Stripe for this customer.
+
+    Fails OPEN on a missing column: if migration 065 has not been applied the
+    answer is "not locked", which is the behaviour that existed before. A
+    billing webhook must not start returning 500 because a migration is
+    outstanding -- that is the shape of the outage this whole change set
+    exists to clean up.
+    """
+    try:
+        row = await db.execute(
+            text("""SELECT 1 FROM users.users
+                     WHERE stripe_customer_id = :cid
+                       AND plan_locked_until IS NOT NULL
+                       AND plan_locked_until > NOW()"""),
+            {"cid": cid},
+        )
+        return row.fetchone() is not None
+    except Exception as e:
+        log.warning(f"plan lock check unavailable ({e}); treating as unlocked")
+        await db.rollback()
+        return False
+
+
 async def _write_subscription(db: AsyncSession, f: dict) -> None:
-    """Persist the resolved subscription against the Stripe customer."""
+    """Persist the resolved subscription against the Stripe customer.
+
+    Three branches, in priority order: an unrecognised price never touches the
+    plan tier; a manual grant outranks Stripe until it expires; otherwise
+    Stripe is authoritative.
+    """
     if f["plan"] is None:
         # Unrecognised price ID: refresh the subscription bookkeeping but never
         # touch the plan tier, billing_period or seat_limit.
@@ -127,6 +156,38 @@ async def _write_subscription(db: AsyncSession, f: dict) -> None:
             """),
             {"status": f["sub_status"], "ends": f["ends"],
              "sub_id": f["sub_id"], "cid": f["cid"]},
+        )
+    elif await _plan_is_locked(db, f["cid"]):
+        # A human granted this plan and said until when. Record everything
+        # factual about the subscription -- it is still true, and billing needs
+        # it -- but do not recompute the entitlement from the price map, and
+        # never shorten the granted end date.
+        #
+        # GREATEST, not assignment: if Stripe's period runs past the grant
+        # (they kept paying beyond it) the later date is the honest one.
+        # subscription_status is NOT copied from Stripe here, and that is
+        # deliberate. It is not a billing field -- require_plan() gates access
+        # on it, so writing Stripe's 'canceled' or 'past_due' onto a granted
+        # account would revoke the grant through the back door while plan
+        # still read 'premium'. The grant is a promise about access, so while
+        # it holds, access is active.
+        await db.execute(
+            text("""
+                UPDATE users.users
+                SET subscription_status    = 'active',
+                    stripe_subscription_id = :sub_id,
+                    subscription_ends_at   = GREATEST(
+                        subscription_ends_at, to_timestamp(:ends)),
+                    subscription_inactive_since = NULL,
+                    data_deletion_scheduled_at  = NULL
+                WHERE stripe_customer_id = :cid
+            """),
+            {"ends": f["ends"], "sub_id": f["sub_id"], "cid": f["cid"]},
+        )
+        log.info(
+            f"Plan locked for customer {f['cid']} — Stripe says "
+            f"'{f['plan']}' but a manual grant is in force; entitlement "
+            f"left as granted, subscription bookkeeping updated."
         )
     else:
         # :is_free is computed here rather than asked of the database as
@@ -673,6 +734,31 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
             {"cid": cid},
         )
         user_row = result.fetchone()
+
+        # A courtesy grant must outlive the subscription that occasioned it.
+        # Someone compensated for an outage with three years of Premium does
+        # not lose it by cancelling the paid plan they were unhappy with --
+        # that would revoke the apology along with the subscription.
+        if await _plan_is_locked(db, cid):
+            await db.execute(
+                text("""
+                    UPDATE users.users
+                    SET subscription_status         = 'active',
+                        stripe_subscription_id      = NULL,
+                        subscription_inactive_since = NULL,
+                        data_deletion_scheduled_at  = NULL
+                    WHERE stripe_customer_id = :cid
+                """),
+                {"cid": cid},
+            )
+            await db.commit()
+            log.info(
+                f"Subscription {sub_id} cancelled for customer {cid} — plan "
+                f"retained under a manual grant, not downgraded to free. "
+                f"stripe_subscription_id cleared so a future purchase starts "
+                f"a fresh subscription."
+            )
+            return {"status": "ok"}
 
         await db.execute(
             text("""

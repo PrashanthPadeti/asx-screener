@@ -58,7 +58,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Mapping, Optional, Sequence
 
 log = logging.getLogger(__name__)
@@ -169,7 +169,22 @@ def quantise(value, scale: Optional[int]):
     if isinstance(value, bool) or scale is None:
         return value
     try:
-        return str(Decimal(str(value)).quantize(Decimal(1).scaleb(-scale)))
+        # ROUND_HALF_UP, not Python's default.
+        #
+        # Decimal.quantize() defaults to ROUND_HALF_EVEN (banker's rounding);
+        # PostgreSQL NUMERIC rounds half AWAY FROM ZERO. They agree everywhere
+        # except exact ties, and on ties they disagree whenever the preceding
+        # digit is even — so 0.1234565 at scale 6 is 0.123456 in Python and
+        # 0.123457 in PostgreSQL.
+        #
+        # That difference is invisible to any test with a fake cursor, and in
+        # production it would surface as payload mismatches on whichever rows
+        # happened to land on a boundary: a validator blocking publication for
+        # its own rounding rather than for a defect, discovered at 25 minutes
+        # a cycle. scripts/p0a_quantise_probe.py asks the database which mode
+        # it uses rather than trusting this comment.
+        return str(Decimal(str(value)).quantize(
+            Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP))
     except (InvalidOperation, ValueError):
         # A value the column could not hold is a defect worth surfacing as a
         # mismatch rather than an exception: the comparison below will name

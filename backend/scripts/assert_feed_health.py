@@ -40,9 +40,13 @@ sys.path.insert(0, str(BACKEND))
 import psycopg2  # noqa: E402
 
 from app.core.db import get_database_url_sync  # noqa: E402
-from compute.engine.daily_compute import fetch_feed_health  # noqa: E402
+# Imported from dividends, not daily_compute. Same function either way -- the
+# latter re-exports it -- but importing it from the module that owns the
+# concept means this script needs none of the compute engine, and works
+# unchanged on a branch where that engine differs.
 from compute.engine.dividends import (  # noqa: E402
     FEED_STALENESS_DAYS, MIN_RECENT_ISSUERS, MIN_RECENT_ROWS,
+    fetch_feed_health,
 )
 
 logging.basicConfig(level=logging.INFO,

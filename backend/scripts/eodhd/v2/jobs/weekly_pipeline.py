@@ -7,6 +7,10 @@ Steps:
   1. Load staging from raw fundamentals  → all staging tables (from Sunday's download)
   2. Transform valuation snapshot        → market.valuation_snapshot
   3. Transform analyst ratings           → market.analyst_ratings
+  3b. Dividends: load → transform → ASSERT FEED HEALTHY
+      The three steps whose absence let market.dividends age four months
+      while the raw downloads kept arriving. The assertion fails the job,
+      so a committed transform over a stale feed is not a success.
   4. Compute yearly metrics              → market.yearly_metrics
   5. Compute half-yearly metrics         → market.halfyearly_metrics
   6. Compute weekly metrics              → market.weekly_metrics (incremental, last week)
@@ -125,19 +129,6 @@ def main():
         PYTHON, str(SCRIPTS / "load_to_staging_fundamentals.py"),
     ])
 
-    # ── Step 1b: Load staging dividends ───────────────────────────────────────
-    # The missing link. download_dividends.py has been running every Sunday via
-    # weekly_refresh and filling the raw zone; nothing scheduled ever loaded it.
-    # These two stages existed only in pipeline_runner.py, which is in no cron
-    # entry, so market.dividends advanced solely when someone ran that path by
-    # hand — and decayed from May 2026 when nobody did.
-    #
-    # Before the compute steps, not after: yearly_compute derives DPS from
-    # market.dividends, and daily_compute reads it for every yield metric.
-    run("Step 1b: Load staging dividends", [
-        PYTHON, str(SCRIPTS / "load_to_staging_dividends.py"),
-    ])
-
     # ── Step 2: Transform valuation snapshot ──────────────────────────────────
     run("Step 2: Transform → market.valuation_snapshot", [
         PYTHON, str(SCRIPTS / "transforms" / "transform_valuation.py"),
@@ -148,25 +139,37 @@ def main():
         PYTHON, str(SCRIPTS / "transforms" / "transform_analyst_ratings.py"),
     ])
 
-    # ── Step 3b: Transform dividends ──────────────────────────────────────────
-    # A truncate-and-reload, atomic with its own guards: an empty result rolls
-    # back, and a refresh that would shrink the table below half its current
-    # size refuses rather than replacing a good dataset with a truncated one.
-    run("Step 3b: Transform → market.dividends", [
+    # ── Step 3b: Dividends — load → transform → assert healthy ────────────────
+    #
+    # These three were missing, and their absence was the outage.
+    #
+    # weekly_refresh.py downloads dividend JSON every Sunday and always has:
+    # the raw acquisition never stopped. Nothing loaded those files into
+    # staging, and nothing transformed staging into market.dividends. So the
+    # raw zone stayed current while the table the engine reads aged from May to
+    # September 2026 — four months — and every dividend metric on the site
+    # decayed with it, silently, because no job was failing. A pipeline cannot
+    # report a step it does not have.
+    #
+    # Repaired by hand in September 2026: 19,063 -> 29,804 rows, 750 -> 1,235
+    # issuers. 485 issuers had no dividend history at all. That repair is not
+    # durable until it is scheduled, which is what these steps are.
+    #
+    # The assertion is the point, not the load. `run()` exits on any non-zero
+    # step, so a committed transform followed by an unhealthy feed fails the
+    # weekly job — which is the distinction that was missing throughout:
+    # a producer's transaction committing is not successful output.
+    run("Step 3b-i: Load dividends → staging_au.dividends", [
+        PYTHON, str(SCRIPTS / "load_to_staging_dividends.py"),
+    ])
+    run("Step 3b-ii: Transform → market.dividends", [
         PYTHON, str(SCRIPTS / "transforms" / "transform_dividends.py"),
     ])
-
-    # ── Step 3c: Assert the feed is usable ────────────────────────────────────
-    # The transform committing is not successful output. This step is what
-    # separates "the load exited 0" from "the feed can be computed over", and
-    # it calls the same fetch_feed_health the factor engine uses — reproducing
-    # the thresholds here would let the scheduler's definition of healthy drift
-    # from the engine's, silently and in whichever direction is worse.
-    #
-    # It fails the pipeline rather than restoring anything. A newly loaded
-    # table can be materially better than what it replaced even when this
-    # assertion fails, so rollback is an operator decision after inspection.
-    run("Step 3c: Assert dividend feed health", [
+    # No --warn-only. The classifier is the same one the factor engine uses to
+    # decide whether to withhold Income, so "healthy" means here exactly what
+    # it means there. A second operational definition would drift from the
+    # financial one and neither would be wrong by its own lights.
+    run("Step 3b-iii: Assert dividend feed healthy", [
         PYTHON, str(BASE_DIR / "scripts" / "assert_feed_health.py"),
     ])
 

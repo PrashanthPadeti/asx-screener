@@ -396,6 +396,10 @@ class Observation:
     #: we could not look. Those have opposite consequences downstream, which
     #: is the whole reason this field exists rather than a boolean.
     dividends_observed: Optional[float] = None
+    #: Consecutive fiscal years with a dividend, counting back from the latest.
+    #: yearly_compute returns an int and stops at the first year with none, so
+    #: 0 is a real answer for a non-payer, not a missing one.
+    dividend_years: Optional[int] = None
 
 
 #: metric -> (Observation field that must be positive, why it matters)
@@ -450,6 +454,42 @@ PERIOD_REQUIREMENT: dict[str, int] = {
 }
 
 
+#: Metrics that describe a dividend, and therefore describe nothing at all for
+#: a company that paid none. The value is the reason, phrased for the operator
+#: who reads it.
+#:
+#: Swept as a family rather than fixed one at a time, because each was the same
+#: mistake in a different column and each cost a 25-minute rebuild to find:
+#: franking_pct withheld Income across the universe in discovery-7,
+#: dividend_payout_ratio took over as the binding constraint in discovery-8,
+#: and dividend_cagr_3y in discovery-10 — 1,735 of the 1,738 rows with no
+#: Income score. Three rounds of the same diagnosis.
+#:
+#: The distinction each one was getting wrong: UNAVAILABLE / SOURCE_MISSING
+#: claims our feed failed, and cannot be reweighted out of a factor.
+#: NOT_MEANINGFUL / OBSERVATION says the metric does not apply to this company,
+#: and can. The feed had not failed. The company simply pays no dividend.
+DIVIDEND_DERIVED: dict[str, str] = {
+    "franking_pct":
+        "no dividend was paid in the window, so there is nothing to frank",
+    "dividend_cagr_3y":
+        "no dividend was paid, so there is no dividend growth rate",
+    "dividend_cagr_5y":
+        "no dividend was paid, so there is no dividend growth rate",
+}
+
+#: Dividend windows measured in *paying* years, not reporting years.
+#:
+#: PERIOD_REQUIREMENT cannot serve here: it counts consecutive annual reporting
+#: periods, so a company that has reported for ten years and paid for one
+#: passes it and then falls through to SOURCE_MISSING. What a dividend CAGR
+#: needs is consecutive years of dividends.
+DIVIDEND_PERIOD_REQUIREMENT: dict[str, int] = {
+    "dividend_cagr_3y": 3,
+    "dividend_cagr_5y": 5,
+}
+
+
 def observation_gate(metric: str, value: Optional[float],
                      obs: Optional[Observation]) -> Optional[tuple[Applicability, str]]:
     """Gate 2. Returns None when the observation passes."""
@@ -479,6 +519,24 @@ def observation_gate(metric: str, value: Optional[float],
                         f"{obs.periods_available} of {obs.periods_required} "
                         f"periods available")
 
+        # A dividend growth rate needs dividends to have grown from something.
+        #
+        # Checked before the non-payer rule below only in the sense that both
+        # are tried; the non-payer answer wins when it applies, because a
+        # company that paid nothing has no dividend history to be insufficient.
+        # For a company that HAS paid, briefly, the honest answer is different:
+        # wait, and the window will exist. Collapsing those two into one cause
+        # would tell an operator to go looking at the feed in both cases.
+        required_years = DIVIDEND_PERIOD_REQUIREMENT.get(metric)
+        if (required_years is not None and value is None
+                and obs.dividends_observed is not None
+                and obs.dividends_observed > 0
+                and obs.dividend_years is not None
+                and obs.dividend_years < required_years):
+            return (Applicability.INSUFFICIENT_DATA,
+                    f"{obs.dividend_years} consecutive years of dividends, "
+                    f"{required_years} required for this window")
+
         # Nothing paid means nothing to frank.
         #
         # compute.engine.dividends already reaches this conclusion, but only
@@ -499,12 +557,11 @@ def observation_gate(metric: str, value: Optional[float],
         # value now comes from the governed dividend module. A zero that means
         # "no payments in a healthy, fully observed window" supports this
         # conclusion; a zero that merely means "no row" would not.
-        if (metric == "franking_pct" and value is None
+        if (metric in DIVIDEND_DERIVED and value is None
                 and obs.dividends_observed is not None
                 and obs.dividends_observed == 0):
             return (Applicability.NOT_MEANINGFUL,
-                    "no dividend was paid in the window, so there is nothing "
-                    "to frank")
+                    DIVIDEND_DERIVED[metric])
 
     if value is None:
         return (Applicability.UNAVAILABLE, "no value from source")

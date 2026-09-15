@@ -92,6 +92,10 @@ OBSERVATION_COLS: dict[str, str] = {
     # value was neither governed nor current, and a zero from it would not
     # have supported any conclusion.
     "dividends_observed": "dps_ttm",
+    # Consecutive paying years, which is what a dividend CAGR's window is
+    # measured in. annual_periods counts reporting years and would pass a
+    # company that has reported for a decade and paid for one.
+    "dividend_years": "dividend_consecutive_yrs",
 }
 
 #: The income family. When the dividend feed is unhealthy these are withheld

@@ -689,6 +689,68 @@ def test_a_franking_value_is_never_overridden_by_the_rule():
     assert a.value == 100.0
 
 
+def _assess_div(metric, value, observed, years):
+    from compute.engine.applicability import Domain, Observation, assess
+    return assess(metric, value, Domain.GENERAL_CORPORATE,
+                  Observation(dividends_observed=observed,
+                              dividend_years=years))
+
+
+def test_a_non_payer_has_no_dividend_growth_rate():
+    """discovery-10: dividend_cagr_3y was NULL on 1,735 of the 1,738 rows with
+    no Income score — the third constituent in this family to withhold the
+    whole factor by claiming a source failure."""
+    from compute.engine.applicability import Applicability, Cause
+    a = _assess_div("dividend_cagr_3y", None, 0.0, 0)
+
+    assert a.state is Applicability.NOT_MEANINGFUL
+    assert a.cause is Cause.OBSERVATION
+
+
+def test_a_short_paying_history_says_wait_not_missing():
+    """The distinction PERIOD_REQUIREMENT cannot make. It counts consecutive
+    annual REPORTING periods, so a company that has reported for ten years and
+    paid for two passes it and lands on SOURCE_MISSING — sending an operator
+    to check a feed that is working. A dividend window is measured in paying
+    years."""
+    from compute.engine.applicability import Applicability, Cause
+    a = _assess_div("dividend_cagr_3y", None, 0.30, 2)
+
+    assert a.state is Applicability.INSUFFICIENT_DATA
+    assert a.cause is Cause.INSUFFICIENT_HISTORY
+
+
+def test_a_long_payer_with_no_value_is_still_a_real_gap():
+    """Five years of dividends and no CAGR is our problem, and must keep
+    saying so. Neither new rule may swallow it."""
+    from compute.engine.applicability import Applicability, Cause
+    a = _assess_div("dividend_cagr_3y", None, 0.30, 5)
+
+    assert a.state is Applicability.UNAVAILABLE
+    assert a.cause is Cause.SOURCE_MISSING
+
+
+def test_the_non_payer_answer_outranks_the_short_history_answer():
+    """Both rules match a non-payer: dps is 0 and paying years is 0. The
+    meaningful answer wins, because 'wait for more dividend history' is
+    advice about a dividend the company does not pay."""
+    from compute.engine.applicability import Applicability
+    a = _assess_div("dividend_cagr_3y", None, 0.0, 0)
+
+    assert a.state is Applicability.NOT_MEANINGFUL
+
+
+def test_every_dividend_window_is_measured_in_paying_years():
+    """A hand-written entry claiming a 3-year window on a _5y column would
+    withhold two fewer years than the name promises, and nothing else would
+    notice — the same guard the rolling averages already carry."""
+    from compute.engine.applicability import DIVIDEND_PERIOD_REQUIREMENT
+
+    for metric, required in DIVIDEND_PERIOD_REQUIREMENT.items():
+        assert metric.endswith(f"_{required}y"), (
+            f"{metric} requires {required} paying years")
+
+
 def test_the_factor_engine_actually_loads_the_observation():
     """The rule is inert unless dps_ttm reaches the frame. OBSERVATION_COLS is
     what puts it there -- composite_score appends its values to select_cols --
@@ -698,6 +760,9 @@ def test_the_factor_engine_actually_loads_the_observation():
     assert OBSERVATION_COLS.get("dividends_observed") == "dps_ttm", (
         "franking_pct's observation gate reads Observation.dividends_observed; "
         "without this mapping it is always None and the gate never fires")
+    assert OBSERVATION_COLS.get("dividend_years") == "dividend_consecutive_yrs", (
+        "the dividend CAGR window is measured in paying years; without this "
+        "mapping the gate is inert and every short payer reads SOURCE_MISSING")
 
 
 # ── The contract has to reach the column, not just the function ──────────────

@@ -90,9 +90,14 @@ export default function AccountPage() {
 }
 
 function AccountPageInner() {
-  const { user, loading } = useAuth()
+  const { user, loading, refreshTokens } = useAuth()
   const searchParams      = useSearchParams()
   const upgradeStatus     = searchParams.get('upgrade')
+
+  // Where the post-checkout reconciliation got to. 'failed' does not mean the
+  // payment failed — it means we could not confirm the upgrade, which is a
+  // different thing to tell someone who has just been charged.
+  const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'done' | 'failed'>('idle')
 
   const [billing, setBilling]   = useState<'monthly' | 'yearly'>('monthly')
   const [checkoutPlan, setCheckoutPlan] = useState<string | null>(null)
@@ -118,6 +123,47 @@ function AccountPageInner() {
       setPushAlerts(user.push_alerts_enabled ?? true)
     }
   }, [user])
+
+  // ── Post-checkout reconciliation ──────────────────────────────────────────
+  //
+  // Returning here with ?upgrade=success means Stripe took the money. It does
+  // NOT mean our database knows. Until now the page asserted the upgrade on
+  // the query parameter alone, so a customer whose webhook was lost was told
+  // "Your subscription is now active" by a page that was simultaneously
+  // showing them the Free plan.
+  //
+  // So ask the backend to reconcile against Stripe, and only claim success
+  // once the account actually says so. The webhook normally wins this race;
+  // the retries are for when it is merely slow, and the sync call is what
+  // saves the customer when it never arrives.
+  useEffect(() => {
+    if (upgradeStatus !== 'success') return
+    let cancelled = false
+
+    ;(async () => {
+      setSyncState('syncing')
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (cancelled) return
+        try {
+          const { data } = await api.post('/api/v1/billing/sync', {})
+          if (data?.synced && data.plan && data.plan !== 'free') {
+            // The plan lives in the signed token, so the row changing is not
+            // enough — the token has to be reissued before the UI can see it.
+            await refreshTokens()
+            if (!cancelled) setSyncState('done')
+            return
+          }
+        } catch {
+          // Non-fatal: a failed sync attempt is retried, and the customer is
+          // told the truth if every attempt fails.
+        }
+        await new Promise((r) => setTimeout(r, 2000))
+      }
+      if (!cancelled) setSyncState('failed')
+    })()
+
+    return () => { cancelled = true }
+  }, [upgradeStatus, refreshTokens])
 
   async function handleCheckout(planId: 'pro' | 'premium') {
     setCheckoutPlan(planId)
@@ -220,11 +266,32 @@ function AccountPageInner() {
         Account Settings
       </h1>
 
-      {/* Success banner */}
-      {upgradeStatus === 'success' && (
+      {/* Success banner — only once the account actually reflects the upgrade */}
+      {upgradeStatus === 'success' && syncState === 'syncing' && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-700">
+          <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+          Payment received — confirming your subscription…
+        </div>
+      )}
+
+      {upgradeStatus === 'success' && syncState === 'done' && user.plan !== 'free' && (
         <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border border-green-200 rounded-xl text-sm text-green-700">
           <CheckCircle2 className="w-4 h-4 shrink-0" />
           Your subscription is now active. Welcome to {user.plan === 'premium' ? 'Premium' : 'Pro'}!
+        </div>
+      )}
+
+      {/* Charged, but we could not confirm it. Never claim success here: this
+          is the state a customer was left in, silently, on 15 Sep 2026. */}
+      {upgradeStatus === 'success' && syncState === 'failed' && (
+        <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-800">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <span>
+            Your payment went through, but we couldn&apos;t confirm the upgrade on
+            your account yet. <strong>Please don&apos;t pay again</strong> — that would
+            create a second subscription. Try refreshing in a minute, and if it
+            still shows Free, contact support and we&apos;ll sort it out.
+          </span>
         </div>
       )}
 

@@ -129,6 +129,29 @@ async def _write_subscription(db: AsyncSession, f: dict) -> None:
              "sub_id": f["sub_id"], "cid": f["cid"]},
         )
     else:
+        # :is_free is computed here rather than asked of the database as
+        # `:plan = 'free'`.
+        #
+        # That comparison is what took subscription upgrades down completely.
+        # Binding :plan twice — once assigned to a VARCHAR(20) column, once
+        # compared against a bare literal — made PostgreSQL deduce two types
+        # for one placeholder:
+        #
+        #   asyncpg.exceptions.AmbiguousParameterError:
+        #     inconsistent types deduced for parameter $1
+        #     DETAIL: text versus character varying
+        #
+        # The statement could not even be prepared, so every
+        # customer.subscription.created and .updated event returned 500 while
+        # the other webhook branches returned 200. No account could be
+        # upgraded by any route, and because a failed upgrade leaves
+        # stripe_subscription_id NULL, /checkout then treated each retry as a
+        # new subscriber and started another paid subscription.
+        #
+        # A bound boolean removes the deduction entirely. The rule this
+        # follows: never bind one parameter into both an assignment and a
+        # predicate in the same statement — compute the predicate in Python
+        # and bind its result.
         await db.execute(
             text("""
                 UPDATE users.users
@@ -138,13 +161,14 @@ async def _write_subscription(db: AsyncSession, f: dict) -> None:
                     billing_period            = :bp,
                     seat_limit                = :seats,
                     stripe_subscription_id    = :sub_id,
-                    subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
-                    data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
+                    subscription_inactive_since = CASE WHEN :is_free THEN NOW() ELSE NULL END,
+                    data_deletion_scheduled_at  = CASE WHEN :is_free THEN NOW() + INTERVAL '12 months' ELSE NULL END
                 WHERE stripe_customer_id = :cid
             """),
             {"plan": f["plan"], "status": f["sub_status"], "ends": f["ends"],
              "bp": f["billing_period"], "seats": f["seat_limit"],
-             "sub_id": f["sub_id"], "cid": f["cid"]},
+             "sub_id": f["sub_id"], "cid": f["cid"],
+             "is_free": f["plan"] == "free"},
         )
     await db.commit()
 

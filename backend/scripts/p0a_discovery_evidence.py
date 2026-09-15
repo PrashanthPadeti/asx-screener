@@ -293,7 +293,15 @@ def main() -> int:
     print("  and the row attributed to it. None of those exist in this run, so")
     print("  the name is servable_by_metric_state and claims nothing more.\n")
 
-    # (label, canonical metric, the stored-anomaly predicate)
+    # (label, canonical metric, stored-anomaly predicate[, severity])
+    #
+    # DEFECT   a servable row breaches a rule the contract declares. Counts
+    #          toward the run's failure, because the contract is supposed to
+    #          have withheld it and did not.
+    # SOURCING an observation worth reporting that no declared rule covers.
+    #          Reported in its own right and never counted, because failing a
+    #          run for it would train everyone to ignore the failure.
+    DEFECT, SOURCING = "defect", "sourcing"
     checks = [
         ("banks carrying ev_to_ebitda", "ev_ebitda",
          "sector='Financials' AND ev_to_ebitda IS NOT NULL"),
@@ -307,8 +315,22 @@ def main() -> int:
          "avg_roe_3y IS NOT NULL AND annual_periods < 3"),
         ("avg_roe_5y with fewer than 5 periods", "avg_roe_5y",
          "avg_roe_5y IS NOT NULL AND annual_periods < 5"),
+        # Demoted to a sourcing observation, deliberately.
+        #
+        # A 3-year revenue CAGR above 1000% is not a contract breach. It is
+        # arithmetically correct for a company going from near-zero revenue to
+        # a real number -- an explorer's first shipment, a biotech's first
+        # product -- and the applicability contract has no rule it violates,
+        # so no state can withhold it and calling it a CUSTOMER-SURFACE DEFECT
+        # made the run fail for something the contract never claimed to catch.
+        #
+        # A magnitude threshold is the wrong instrument for the real question,
+        # which is whether the denominator year was a true observation or a
+        # sourcing artifact. That needs the prior-year revenue, not a ceiling
+        # on the ratio. Until such a check exists this is reported and not
+        # counted.
         ("revenue CAGR beyond +1000%", "revenue_cagr_3y",
-         "revenue_growth_3y_cagr > 10"),
+         "revenue_growth_3y_cagr > 10", SOURCING),
         ("composite scored while a factor's source failed", "composite_score",
          "composite_score IS NOT NULL AND income_score IS NULL"),
     ]
@@ -316,7 +338,10 @@ def main() -> int:
     print(f"  {'anomaly':46} {'stored':>7} {'servable':>9}  diagnosis")
     flagged = 0
     contract_absent_total = 0
-    for label, metric, predicate in checks:
+    sourcing_notes = []
+    for check in checks:
+        label, metric, predicate = check[0], check[1], check[2]
+        severity = check[3] if len(check) > 3 else DEFECT
         # A row is servable on this metric when its sidecar exists and carries
         # no entry for it: absent-from-the-sidecar means APPLICABLE. A NULL
         # sidecar is not the same as an empty one — it means no run ever
@@ -334,6 +359,11 @@ def main() -> int:
 
         if stored == 0:
             diagnosis = "clean"
+        elif severity == SOURCING:
+            # Reported, never counted. See the note on the check itself.
+            diagnosis = "sourcing observation (not a contract breach)"
+            if servable:
+                sourcing_notes.append((label, servable))
         elif servable:
             diagnosis = "CUSTOMER-SURFACE DEFECT"
             flagged += 1
@@ -343,6 +373,14 @@ def main() -> int:
         else:
             diagnosis = "withheld by its own state (forensic only)"
         print(f"  {label:46} {stored:>7,} {servable:>9,}  {diagnosis}")
+
+    if sourcing_notes:
+        print("\n  Sourcing observations — reported, not counted as defects:")
+        for label, n in sourcing_notes:
+            print(f"    {n:,} rows: {label}")
+        print("  No declared rule covers these, so no applicability state can")
+        print("  withhold them. Failing the run for a rule we never wrote would")
+        print("  teach everyone to ignore the failure.")
 
     if contract_absent_total:
         print(f"\n  {contract_absent_total} anomal{'y' if contract_absent_total == 1 else 'ies'} "

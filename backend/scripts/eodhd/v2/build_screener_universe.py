@@ -348,10 +348,24 @@ SELECT
     vs.price_to_book,
     vs.price_to_sales,
     vs.enterprise_value     AS ev,
-    vs.ev_to_ebitda,
+    -- ev_to_ebitda and ev_to_ebit come from market.computed_metrics, the same
+    -- reason the dividend fields do.
+    --
+    -- valuation_snapshot is EODHD's weekly refresh and contains literal
+    -- zeros: discovery-7 found 41 rows with ev_to_ebitda = 0 that the
+    -- contract could not withhold, because a zero is a value and the
+    -- negative-EBITDA gate only fires when ebitda_ttm is present to check.
+    -- A check that cannot run has not failed, so an ungoverned zero beside a
+    -- missing denominator reached the customer surface as a real multiple --
+    -- and an EV/EBITDA of zero reads as free.
+    --
+    -- daily_compute writes these only when the denominator is positive
+    -- (`if m["enterprise_value"] and ebitda and float(ebitda) > 0`), so the
+    -- governed source cannot produce a zero at all. The absence it produces
+    -- instead is honest and the contract records why.
+    CASE WHEN cm.ev_ebitda > 0 THEN cm.ev_ebitda END AS ev_to_ebitda,
     vs.ev_to_revenue,
-    -- ev_to_ebit: from yearly_metrics (computed by yearly_compute)
-    ym.ev_ebit              AS ev_to_ebit,
+    CASE WHEN cm.ev_ebit <> 0 THEN cm.ev_ebit END AS ev_to_ebit,
     -- price_to_fcf: use yearly_compute's pre-computed p_fcf_ratio (reliable,
     -- already guards against negative/zero FCF and extreme values)
     ym.p_fcf_ratio          AS price_to_fcf,
@@ -1217,6 +1231,10 @@ LEFT JOIN LATERAL (
            -- values were computed, persisted, and then not read.
            dividend_yield, dividend_per_share, franking_pct,
            grossed_up_yield, fcf_yield,
+           -- Governed EV multiples: daily_compute writes these only when the
+           -- denominator is positive, so they cannot carry the zeros
+           -- valuation_snapshot does.
+           ev_ebitda, ev_ebit,
            revenue_growth_1y, revenue_growth_3y,
            profit_growth_1y,  profit_growth_3y
     FROM market.computed_metrics

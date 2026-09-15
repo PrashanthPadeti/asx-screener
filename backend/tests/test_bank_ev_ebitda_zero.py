@@ -345,6 +345,70 @@ def test_a_rule_declared_on_the_storage_spelling_is_refused():
         raise AssertionError("a storage spelling must not be accepted")
 
 
+# ── Where the zero came from in the first place ──────────────────────────────
+#
+# Everything above closes containment and persistence for a zero that already
+# exists. Neither asks why one exists, and discovery-7 answered that: 41 rows
+# carried ev_to_ebitda = 0 because build_screener_universe read
+# vs.ev_to_ebitda -- market.valuation_snapshot, EODHD's weekly refresh, which
+# contains literal zeros and passes through no contract at all.
+#
+# The contract could not withhold them. POSITIVE_DENOMINATOR guards ev_ebitda
+# on ebitda, but that gate only fires when ebitda_ttm is present to check, and
+# a check that cannot run has not failed. An ungoverned zero beside a missing
+# denominator is therefore APPLICABLE -- and an EV/EBITDA of zero reads as
+# free.
+#
+# daily_compute cannot produce a zero: it writes ev_ebitda only when
+# enterprise_value and ebitda are both positive. So the durable fix is
+# provenance, not another gate. Same defect the dividend fields had, found the
+# same way, in the same file.
+
+_BUILDER = (Path(__file__).resolve().parents[1]
+            / "scripts" / "eodhd" / "v2" / "build_screener_universe.py")
+
+
+def _builder_code() -> str:
+    """Builder source without comment lines -- the comments name the rejected
+    sources deliberately, and a guard that matches its own explanation is a
+    mistake this repo has already made twice."""
+    return "\n".join(
+        ln for ln in _BUILDER.read_text(encoding="utf-8").splitlines()
+        if not ln.strip().startswith("--"))
+
+
+def test_the_ev_multiples_are_not_read_from_an_ungoverned_snapshot():
+    """vs.* and ym.* are real tables with plausible numbers. Neither applies
+    the positive-denominator rule that makes an EV multiple mean anything."""
+    code = _builder_code()
+    found = [s for s in ("vs.ev_to_ebitda", "vs.ev_ebitda", "ym.ev_ebit")
+             if s in code]
+
+    assert not found, (
+        f"build_screener_universe reads an EV multiple from an ungoverned "
+        f"source: {found}. These must come from cm.* — daily_compute writes "
+        f"them only when the denominator is positive.")
+
+
+def test_the_ev_multiples_are_read_from_computed_metrics():
+    """The half that actually failed: the governed values were computed and
+    persisted, and then simply not selected."""
+    code = _builder_code()
+    missing = [m for m in ("cm.ev_ebitda", "cm.ev_ebit") if m not in code]
+
+    assert not missing, f"EV multiples not read from computed_metrics: {missing}"
+
+
+def test_a_zero_ev_multiple_cannot_survive_the_builder():
+    """Belt and braces on the provenance change: even if a zero reached
+    computed_metrics, the projection refuses it. A zero EV/EBITDA is never a
+    real multiple — it is a missing denominator wearing a number."""
+    code = _builder_code()
+
+    assert "CASE WHEN cm.ev_ebitda > 0 THEN cm.ev_ebitda END" in code, (
+        "the builder must not pass a non-positive ev_ebitda through")
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

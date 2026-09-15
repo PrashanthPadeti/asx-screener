@@ -1349,6 +1349,19 @@ class UserUpdateBody(BaseModel):
     plan: Optional[str]                = None
     subscription_status: Optional[str] = None
     name: Optional[str]                = None
+    # Promotional access grant, in months from now. This is how an offer gets
+    # applied to someone who subscribed during the offer period: set the plan
+    # they paid for and the months they are owed, in one call.
+    #
+    # It sets subscription_ends_at and clears the retention countdown, because
+    # a granted account that still carries subscription_inactive_since is
+    # scheduled for data deletion while the customer believes they are paid up.
+    #
+    # Note that nothing in the application enforces subscription_ends_at today
+    # -- it is read by this admin view and the account page and by nothing
+    # else. A grant therefore does not lapse on its own.
+    access_months: Optional[int]       = None
+    billing_period: Optional[str]      = None
 
 
 @router.patch("/users/{user_id}")
@@ -1364,6 +1377,14 @@ async def update_user(
         raise HTTPException(status_code=400, detail=f"Invalid plan. Valid: {VALID_PLANS}")
     if body.subscription_status and body.subscription_status not in VALID_STATUSES:
         raise HTTPException(status_code=400, detail=f"Invalid status. Valid: {VALID_STATUSES}")
+    if body.billing_period and body.billing_period not in ("monthly", "yearly"):
+        raise HTTPException(status_code=400, detail="billing_period must be 'monthly' or 'yearly'")
+    if body.access_months is not None and not (1 <= body.access_months <= 60):
+        # An upper bound because this is a hand-typed field on a page that
+        # grants paid access. A slipped digit should be refused here rather
+        # than discovered as a decade of free Premium.
+        raise HTTPException(status_code=400,
+                            detail="access_months must be between 1 and 60")
 
     # Fetch current values before update so we can log what changed
     before = (await db.execute(
@@ -1385,6 +1406,22 @@ async def update_user(
     if body.name is not None:
         set_parts.append("name = :name")
         params["name"] = body.name
+    if body.billing_period is not None:
+        set_parts.append("billing_period = :bp")
+        params["bp"] = body.billing_period
+    if body.access_months is not None:
+        # make_interval takes a bound parameter; NOW() + INTERVAL ':n months'
+        # is a string literal and would not interpolate.
+        set_parts.append(
+            "subscription_ends_at = NOW() + make_interval(months => :months)")
+        params["months"] = body.access_months
+        # A grant is an active subscription for retention purposes even though
+        # no Stripe invoice produced it.
+        set_parts.append("subscription_inactive_since = NULL")
+        set_parts.append("data_deletion_scheduled_at  = NULL")
+        set_parts.append("deletion_reminder_30d_sent  = FALSE")
+        set_parts.append("deletion_reminder_7d_sent   = FALSE")
+        set_parts.append("deletion_reminder_1d_sent   = FALSE")
 
     if not set_parts:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -1393,7 +1430,8 @@ async def update_user(
         UPDATE users.users
         SET {', '.join(set_parts)}
         WHERE id = :uid
-        RETURNING id, email, plan, subscription_status, name
+        RETURNING id, email, plan, subscription_status, name,
+                  billing_period, subscription_ends_at
     """), params)
     row = result.fetchone()
 
@@ -1404,8 +1442,12 @@ async def update_user(
     # Write to subscription_events whenever plan or status is manually changed
     plan_changed   = body.plan is not None and body.plan != before.plan
     status_changed = body.subscription_status is not None and body.subscription_status != before.subscription_status
+    # A promotional grant is an entitlement change even when the plan name does
+    # not move -- extending Premium by a year is exactly the thing an audit
+    # trail needs to show, and it would otherwise leave no record at all.
+    granted        = body.access_months is not None
 
-    if plan_changed or status_changed:
+    if plan_changed or status_changed or granted:
         old_plan   = before.plan or "free"
         new_plan   = body.plan if body.plan is not None else old_plan
         old_status = before.subscription_status or "inactive"
@@ -1437,7 +1479,11 @@ async def update_user(
                     "uid":       user_id,
                     "old_plan":  old_plan,
                     "new_plan":  new_plan,
-                    "admin_ref": f"admin:{admin['email']}|{old_status}→{new_status}",
+                    # A third segment is safe: get_user parses [0] and [1] only.
+                    "admin_ref": (
+                        f"admin:{admin['email']}|{old_status}→{new_status}"
+                        + (f"|grant:{body.access_months}mo" if granted else "")
+                    ),
                 })
             log.info(
                 f"Admin override audit written: user={user_id} plan={old_plan}→{new_plan} "
@@ -1449,11 +1495,22 @@ async def update_user(
     await db.commit()
 
     return {
-        "id":                  str(row.id),
-        "email":               row.email,
-        "plan":                row.plan,
-        "subscription_status": row.subscription_status,
-        "name":                row.name,
+        "id":                   str(row.id),
+        "email":                row.email,
+        "plan":                 row.plan,
+        "subscription_status":  row.subscription_status,
+        "name":                 row.name,
+        "billing_period":       row.billing_period,
+        "subscription_ends_at": _iso(row.subscription_ends_at),
+        # The caller has just changed entitlement in the database, but the
+        # user's access is decided by their signed JWT (app.core.deps trusts
+        # the token and does not re-read the row). Say so, rather than let an
+        # admin watch a correct change appear not to work.
+        "takes_effect": (
+            "on the user's next token refresh (within "
+            f"{settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes), or immediately "
+            "if they sign out and back in"
+        ),
     }
 
 

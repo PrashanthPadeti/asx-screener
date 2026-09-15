@@ -59,6 +59,148 @@ def _build_price_plan_map() -> dict[str, tuple[str, int, str]]:
     }.items() if k}  # skip empty price IDs
 
 
+# ── Applying a subscription to an account ─────────────────────────────────────
+#
+# Entitlement used to exist in exactly one place: the webhook handler. That
+# made webhook delivery a single point of failure for something the customer
+# has already paid for -- and when it failed there was no path back. The
+# account stayed on free, /checkout saw a NULL stripe_subscription_id, took the
+# "new subscriber" branch, and created a SECOND subscription. Observed in
+# production on 15 Sep 2026: one customer, two live subscriptions, two charges
+# 23 minutes apart, still on free.
+#
+# So the logic lives here instead, and two callers use it: the webhook (fast
+# path) and /billing/sync (repair path). Not a copy each -- a copy each is how
+# the repair path drifts from the thing it is repairing.
+
+
+def _read_subscription(sub: dict) -> dict:
+    """Resolve a Stripe subscription object into the fields we store.
+
+    ``plan`` is None when the price ID is not in our map -- almost always a
+    missing or stale STRIPE_* price ID in .env. The caller must then leave the
+    plan tier alone: never downgrade a paying customer over a config gap.
+    """
+    sub_status = sub["status"]
+    price_id   = sub["items"]["data"][0]["price"]["id"] if sub.get("items") else ""
+    plan_info  = _build_price_plan_map().get(price_id)
+    is_active  = sub_status in ("active", "trialing")
+
+    if is_active and plan_info:
+        plan, seat_limit, billing_period = plan_info
+    elif is_active:
+        plan = seat_limit = billing_period = None
+        log.error(
+            f"Stripe price_id '{price_id}' not found in price map — leaving plan "
+            f"unchanged for customer {sub.get('customer')}. Check STRIPE_* price "
+            f"IDs in .env."
+        )
+    else:
+        plan, seat_limit, billing_period = "free", 1, "monthly"
+
+    return {
+        "sub_id":         sub["id"],
+        "sub_status":     sub_status,
+        "cid":            sub["customer"],
+        "ends":           sub.get("current_period_end"),
+        "plan":           plan,
+        "seat_limit":     seat_limit,
+        "billing_period": billing_period,
+        "price_id":       price_id,
+    }
+
+
+async def _write_subscription(db: AsyncSession, f: dict) -> None:
+    """Persist the resolved subscription against the Stripe customer."""
+    if f["plan"] is None:
+        # Unrecognised price ID: refresh the subscription bookkeeping but never
+        # touch the plan tier, billing_period or seat_limit.
+        await db.execute(
+            text("""
+                UPDATE users.users
+                SET subscription_status       = :status,
+                    subscription_ends_at      = to_timestamp(:ends),
+                    stripe_subscription_id    = :sub_id,
+                    subscription_inactive_since = NULL,
+                    data_deletion_scheduled_at  = NULL
+                WHERE stripe_customer_id = :cid
+            """),
+            {"status": f["sub_status"], "ends": f["ends"],
+             "sub_id": f["sub_id"], "cid": f["cid"]},
+        )
+    else:
+        await db.execute(
+            text("""
+                UPDATE users.users
+                SET plan                      = :plan,
+                    subscription_status       = :status,
+                    subscription_ends_at      = to_timestamp(:ends),
+                    billing_period            = :bp,
+                    seat_limit                = :seats,
+                    stripe_subscription_id    = :sub_id,
+                    subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
+                    data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
+                WHERE stripe_customer_id = :cid
+            """),
+            {"plan": f["plan"], "status": f["sub_status"], "ends": f["ends"],
+             "bp": f["billing_period"], "seats": f["seat_limit"],
+             "sub_id": f["sub_id"], "cid": f["cid"]},
+        )
+    await db.commit()
+
+
+async def _claim_founding_member(db: AsyncSession, user_row, f: dict) -> int | None:
+    """Claim the next founding-member slot, if the offer still has room.
+
+    Returns the slot number granted, or None. Safe to call more than once for
+    the same user: the caller checks is_founding_member first, and the claim
+    itself is a single atomic statement bounded by the limit.
+    """
+    founding_limit = getattr(settings, "FOUNDING_MEMBER_LIMIT", 100)
+    if not (founding_limit > 0 and user_row
+            and f["plan"] not in (None, "free")
+            and f["sub_status"] in ("active", "trialing")
+            and not getattr(user_row, "is_founding_member", False)):
+        return None
+    try:
+        claim_result = await db.execute(text("""
+            WITH next_slot AS (
+                SELECT COALESCE(MAX(founding_member_number), 0) + 1 AS slot_num
+                FROM users.users
+                WHERE is_founding_member = TRUE
+            )
+            UPDATE users.users
+            SET is_founding_member     = TRUE,
+                founding_member_number = (SELECT slot_num FROM next_slot),
+                subscription_ends_at   = CASE
+                    WHEN :billing_period = 'monthly'
+                        THEN NOW() + INTERVAL '6 months'
+                    ELSE
+                        NOW() + INTERVAL '3 years'
+                END
+            WHERE id = :uid
+              AND (SELECT slot_num FROM next_slot) <= :limit
+            RETURNING founding_member_number
+        """), {
+            "billing_period": f["billing_period"],
+            "uid":   user_row.id,
+            "limit": founding_limit,
+        })
+        await db.commit()
+        slot = claim_result.scalar()
+        if slot:
+            log.info(f"Founding member #{slot} granted to user {user_row.id} "
+                     f"(plan={f['plan']} interval={f['billing_period']})")
+        else:
+            log.info(f"Founding member limit ({founding_limit}) already reached — "
+                     f"no bonus for user {user_row.id}")
+        return slot
+    except Exception as fm_err:
+        log.warning(f"Founding member bonus failed (non-fatal): {fm_err}")
+        await db.rollback()
+        return None
+
+
 # ── Plans endpoint ────────────────────────────────────────────────────────────
 
 @router.get("/founding-member-status")
@@ -204,6 +346,66 @@ async def create_checkout(
         )
         await db.commit()
 
+    # ── Last guard before creating a second subscription ─────────────────────
+    #
+    # Everything above decided "new subscriber" from OUR row. If that row is
+    # stale -- which is precisely what a lost webhook leaves behind -- the
+    # decision is wrong and the cost lands on the customer: a second live
+    # subscription and a second monthly charge, for a plan they already bought.
+    # That happened on 15 Sep 2026: two subscriptions 23 minutes apart, while
+    # the account showed free.
+    #
+    # So ask Stripe, which knows, rather than trusting the cache we already
+    # know can be stale. A subscription found here is adopted into our row and
+    # modified in place, never duplicated.
+    try:
+        existing = _stripe.Subscription.list(
+            customer=customer_id, status="active", limit=10)
+        live = list(existing.data) or []
+    except Exception as e:
+        # Do not block a legitimate purchase because the check failed; log it
+        # and fall through. This guard prevents a duplicate, it is not the
+        # authority on whether checkout may proceed.
+        log.warning(f"Pre-checkout subscription check failed for {customer_id}: {e}")
+        live = []
+
+    if live:
+        adopted = sorted(live, key=lambda s: s["created"])[0]
+        log.warning(
+            f"Pre-checkout guard: customer {customer_id} already has "
+            f"{len(live)} active subscription(s) {[s['id'] for s in live]} "
+            f"while our row had stripe_subscription_id={sub_id!r}. Modifying "
+            f"{adopted['id']} in place instead of creating another."
+        )
+        try:
+            item_id = adopted["items"]["data"][0]["id"]
+            _stripe.Subscription.modify(
+                adopted["id"],
+                items=[{"id": item_id, "price": price_id}],
+                proration_behavior="create_prorations",
+                metadata={"user_id": str(current_user["id"]), "seats": str(body.seats)},
+            )
+            await db.execute(
+                text("""UPDATE users.users SET stripe_subscription_id = :sid
+                        WHERE id = :uid"""),
+                {"sid": adopted["id"], "uid": current_user["id"]},
+            )
+            await db.commit()
+            return {"url": f"{base_url}/account?upgrade=success"}
+        except Exception as e:
+            log.error(
+                f"Could not modify adopted subscription {adopted['id']}: {e}. "
+                f"Refusing to create a duplicate — sending the customer to the "
+                f"billing portal instead."
+            )
+            # Deliberately not falling through to Checkout. Failing to change a
+            # subscription is recoverable; charging twice is not.
+            raise HTTPException(
+                status_code=409,
+                detail="You already have an active subscription. Please use "
+                       "Manage Billing to change your plan, or contact support.",
+            )
+
     try:
         session = _stripe.checkout.Session.create(
             customer=customer_id,
@@ -224,6 +426,119 @@ async def create_checkout(
         log.error(f"Stripe error during checkout: {e}")
         raise HTTPException(status_code=502, detail=f"Payment provider error: {e.user_message or 'Please try again shortly'}")
     return {"url": session.url}
+
+
+# ── Sync: repair an account from Stripe ───────────────────────────────────────
+
+
+@router.post("/sync")
+async def sync_subscription(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reconcile this account against Stripe, and apply whatever Stripe says.
+
+    Stripe is the record of what the customer paid for; our row is a cache of
+    it. Until now that cache could only ever be written by an inbound webhook,
+    so a webhook that was never delivered -- a wrong STRIPE_WEBHOOK_SECRET, an
+    endpoint registered in test mode only, an outage -- left a paying customer
+    on free with no way back except a manual database edit.
+
+    Safe to call repeatedly: it reads the live subscription and applies the
+    same mapping the webhook applies, so calling it when nothing is wrong
+    writes the values that are already there.
+
+    It will not invent a subscription. If Stripe has no active subscription
+    for this customer, the account is left exactly as it is -- this endpoint
+    repairs a missed source, it does not grant entitlement.
+    """
+    if not settings.STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="Billing not configured")
+
+    import stripe as _stripe
+    _stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    result = await db.execute(
+        text("""SELECT id, email, plan, is_founding_member, stripe_customer_id
+                FROM users.users WHERE id = :id"""),
+        {"id": current_user["id"]},
+    )
+    user_row = result.fetchone()
+    if not user_row:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    cid = user_row.stripe_customer_id
+    if not cid:
+        # The customer row is created by /checkout before the session, so a
+        # missing one normally means they never started checkout. Look them up
+        # by email anyway: a customer created through a payment link or the
+        # Stripe dashboard has no user_id metadata and would otherwise be
+        # invisible to us forever.
+        try:
+            found = _stripe.Customer.list(email=user_row.email, limit=1)
+            cid = found.data[0].id if found.data else None
+        except Exception as e:
+            log.warning(f"Stripe customer lookup failed for {user_row.email}: {e}")
+            cid = None
+        if not cid:
+            return {"synced": False, "reason": "no_stripe_customer",
+                    "plan": user_row.plan}
+        await db.execute(
+            text("UPDATE users.users SET stripe_customer_id = :cid WHERE id = :uid"),
+            {"cid": cid, "uid": user_row.id},
+        )
+        await db.commit()
+        log.info(f"Sync linked Stripe customer {cid} to user {user_row.id} by email")
+
+    try:
+        subs = _stripe.Subscription.list(customer=cid, status="all", limit=100)
+    except Exception as e:
+        log.error(f"Stripe subscription list failed for customer {cid}: {e}")
+        raise HTTPException(status_code=502, detail="Could not reach payment provider")
+
+    live = [s for s in subs.data if s["status"] in ("active", "trialing")]
+    if not live:
+        return {"synced": False, "reason": "no_active_subscription",
+                "plan": user_row.plan}
+
+    # More than one live subscription means the customer is being billed twice
+    # -- the exact damage a lost webhook causes, because /checkout reads a NULL
+    # stripe_subscription_id and starts a second one. We cannot cancel or
+    # refund from here; that is a decision with money attached. Report it
+    # loudly, apply the earliest (the one they meant to buy), and let an
+    # operator resolve the duplicate.
+    if len(live) > 1:
+        log.error(
+            f"DUPLICATE SUBSCRIPTIONS: customer {cid} (user {user_row.id}, "
+            f"{user_row.email}) has {len(live)} active subscriptions: "
+            f"{[s['id'] for s in live]}. The customer is being charged more "
+            f"than once. Needs manual cancellation and refund in Stripe."
+        )
+
+    chosen = sorted(live, key=lambda s: s["created"])[0]
+    f = _read_subscription(chosen)
+    await _write_subscription(db, f)
+    await _claim_founding_member(db, user_row, f)
+
+    log.info(
+        f"Sync applied subscription {f['sub_id']} to user {user_row.id}: "
+        f"plan='{f['plan']}' status='{f['sub_status']}' "
+        f"interval='{f['billing_period']}'"
+    )
+    return {
+        "synced": True,
+        "plan": f["plan"] if f["plan"] is not None else user_row.plan,
+        "status": f["sub_status"],
+        "billing_period": f["billing_period"],
+        "duplicate_subscriptions": len(live) if len(live) > 1 else 0,
+        # Same caveat as the admin grant: access is decided by the signed JWT,
+        # so the caller must refresh before the new plan is visible.
+        "takes_effect": (
+            "on the next token refresh (within "
+            f"{settings.ACCESS_TOKEN_EXPIRE_MINUTES} minutes), or immediately "
+            "on sign out and back in"
+        ),
+    }
 
 
 # ── Customer Portal ───────────────────────────────────────────────────────────
@@ -292,137 +607,36 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
 
     # ── Subscription created / updated ────────────────────────────────────────
     if event_type in ("customer.subscription.created", "customer.subscription.updated"):
-        sub        = event["data"]["object"]
-        sub_id     = sub["id"]
-        sub_status = sub["status"]
-        cid        = sub["customer"]
-        ends       = sub.get("current_period_end")
-        metadata   = sub.get("metadata", {})
-        seats      = int(metadata.get("seats", 1))
-
-        price_id  = sub["items"]["data"][0]["price"]["id"] if sub.get("items") else ""
-        price_map = _build_price_plan_map()
-        plan_info = price_map.get(price_id)
-
-        is_active = sub_status in ("active", "trialing")
-
-        if is_active and plan_info:
-            plan, seat_limit, billing_period = plan_info
-        elif is_active:
-            # Active subscription, but the price ID isn't in our map — almost always a
-            # missing or stale STRIPE_* price ID in .env.  Never downgrade a paying
-            # customer because of a config gap: leave the plan alone and log loudly.
-            plan = seat_limit = billing_period = None
-            log.error(
-                f"Stripe price_id '{price_id}' not found in price map — leaving plan "
-                f"unchanged for customer {cid}. Check STRIPE_* price IDs in .env."
-            )
-        else:
-            plan, seat_limit, billing_period = "free", 1, "monthly"
+        sub = event["data"]["object"]
+        f   = _read_subscription(sub)
 
         result = await db.execute(
             text("SELECT id, plan, is_founding_member FROM users.users WHERE stripe_customer_id = :cid"),
-            {"cid": cid},
+            {"cid": f["cid"]},
         )
         user_row = result.fetchone()
 
         if not user_row:
             log.error(
-                f"Stripe {event_type}: no user found with stripe_customer_id={cid} — "
-                f"subscription {sub_id} not applied to any account."
+                f"Stripe {event_type}: no user found with stripe_customer_id={f['cid']} — "
+                f"subscription {f['sub_id']} not applied to any account."
             )
 
-        if plan is None:
-            # Unrecognised price ID: refresh the subscription bookkeeping but never
-            # touch the plan tier, billing_period or seat_limit.
-            await db.execute(
-                text("""
-                    UPDATE users.users
-                    SET subscription_status       = :status,
-                        subscription_ends_at      = to_timestamp(:ends),
-                        stripe_subscription_id    = :sub_id,
-                        subscription_inactive_since = NULL,
-                        data_deletion_scheduled_at  = NULL
-                    WHERE stripe_customer_id = :cid
-                """),
-                {"status": sub_status, "ends": ends, "sub_id": sub_id, "cid": cid},
-            )
-        else:
-            await db.execute(
-                text("""
-                    UPDATE users.users
-                    SET plan                      = :plan,
-                        subscription_status       = :status,
-                        subscription_ends_at      = to_timestamp(:ends),
-                        billing_period            = :bp,
-                        seat_limit                = :seats,
-                        stripe_subscription_id    = :sub_id,
-                        subscription_inactive_since = CASE WHEN :plan = 'free' THEN NOW() ELSE NULL END,
-                        data_deletion_scheduled_at  = CASE WHEN :plan = 'free' THEN NOW() + INTERVAL '12 months' ELSE NULL END
-                    WHERE stripe_customer_id = :cid
-                """),
-                {"plan": plan, "status": sub_status, "ends": ends,
-                 "bp": billing_period, "seats": seat_limit, "sub_id": sub_id, "cid": cid},
-            )
-        await db.commit()
-        effective_plan = plan if plan is not None else (user_row.plan if user_row else None)
+        await _write_subscription(db, f)
+
+        effective_plan = f["plan"] if f["plan"] is not None else (user_row.plan if user_row else None)
         if user_row:
             await _log_event(str(user_row.id), event_type, user_row.plan, effective_plan, event["id"])
             await db.commit()
         log.info(
-            f"Subscription {sub_id} updated: plan='{effective_plan}'"
-            f"{' (unchanged — unknown price)' if plan is None else ''} "
-            f"status='{sub_status}' interval='{billing_period}' for customer {cid}"
+            f"Subscription {f['sub_id']} updated: plan='{effective_plan}'"
+            f"{' (unchanged — unknown price)' if f['plan'] is None else ''} "
+            f"status='{f['sub_status']}' interval='{f['billing_period']}' for customer {f['cid']}"
         )
 
         # ── Founding Member bonus (new subscriptions only, active plan only) ──
-        founding_limit = getattr(settings, "FOUNDING_MEMBER_LIMIT", 100)
-        is_new_sub     = event_type == "customer.subscription.created"
-        is_paid_plan   = plan not in (None, "free")
-        already_member = getattr(user_row, "is_founding_member", False) if user_row else False
-
-        if (founding_limit > 0 and is_new_sub and is_paid_plan
-                and sub_status in ("active", "trialing") and user_row and not already_member):
-            try:
-                # Atomically claim the next founding-member slot (if any remain)
-                claim_result = await db.execute(text("""
-                    WITH next_slot AS (
-                        SELECT COALESCE(MAX(founding_member_number), 0) + 1 AS slot_num
-                        FROM users.users
-                        WHERE is_founding_member = TRUE
-                    )
-                    UPDATE users.users
-                    SET is_founding_member     = TRUE,
-                        founding_member_number = (SELECT slot_num FROM next_slot),
-                        subscription_ends_at   = CASE
-                            WHEN :billing_period = 'monthly'
-                                THEN NOW() + INTERVAL '6 months'
-                            ELSE
-                                NOW() + INTERVAL '3 years'
-                        END
-                    WHERE id = :uid
-                      AND (SELECT slot_num FROM next_slot) <= :limit
-                    RETURNING founding_member_number
-                """), {
-                    "billing_period": billing_period,
-                    "uid":   user_row.id,
-                    "limit": founding_limit,
-                })
-                await db.commit()
-                slot = claim_result.scalar()
-                if slot:
-                    log.info(
-                        f"Founding member #{slot} granted to user {user_row.id} "
-                        f"(plan={plan} interval={billing_period})"
-                    )
-                else:
-                    log.info(
-                        f"Founding member limit ({founding_limit}) already reached — "
-                        f"no bonus for user {user_row.id}"
-                    )
-            except Exception as fm_err:
-                log.warning(f"Founding member bonus failed (non-fatal): {fm_err}")
-                await db.rollback()
+        if event_type == "customer.subscription.created":
+            await _claim_founding_member(db, user_row, f)
 
     # ── Subscription cancelled ────────────────────────────────────────────────
     elif event_type == "customer.subscription.deleted":

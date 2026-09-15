@@ -432,6 +432,45 @@ def test_the_frame_translation_is_the_single_boundary():
         "asserting nothing")
 
 
+def test_every_declared_constituent_is_assessed():
+    """A metric the model scores on must have a contract, whether or not
+    anyone chose to persist it.
+
+    This filtered on GOVERNED_METRICS alone, which is the list of what the
+    sidecar stores -- a storage question quietly deciding a semantic one.
+    Twelve of the declared model's 26 constituents fell outside it and were
+    scored with no assessment: the entire momentum family, four growth
+    signals, fcf_yield, and the two dividend constituents whose correct new
+    rules discovery-11 proved unreachable.
+
+    An inert gate passes every test that only asks whether a value was
+    withheld. This repo has now been caught by that twice, so the invariant
+    is asserted directly rather than inferred from a coverage number.
+    """
+    from compute.engine.factor_applicability import _model_constituents
+    from compute.engine.metric_states import (
+        GOVERNED_METRICS, LATEST_MODEL_VERSION)
+
+    version = LATEST_MODEL_VERSION
+    governed = set(GOVERNED_METRICS[version])
+    constituents = _model_constituents(version)
+
+    # The assertion is not "constituents are governed" -- they need not be
+    # stored. It is that apply_applicability's assessable set covers them.
+    assessable = governed | constituents
+
+    missing = sorted(constituents - assessable)
+    assert not missing, f"declared but unassessable: {missing}"
+
+    # And that the union is genuinely wider than governed alone, so a future
+    # refactor that drops the union silently is caught rather than passing
+    # vacuously.
+    assert constituents - governed, (
+        "no constituent lies outside GOVERNED_METRICS any more — if that is "
+        "deliberate, delete this half of the test; if it is a refactor that "
+        "collapsed the union, it has reintroduced the inert-gate defect")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

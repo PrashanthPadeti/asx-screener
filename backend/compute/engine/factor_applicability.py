@@ -145,6 +145,18 @@ def _numeric(value) -> Optional[float]:
         return None
 
 
+def _model_constituents(model_version: str) -> set:
+    """Every canonical metric the declared model scores on.
+
+    Imported inside the function: factor_model is a peer of this module and a
+    top-level import would make the dependency circular.
+    """
+    from compute.engine.factor_model import model_for
+    return {c.metric
+            for spec in model_for(model_version).values()
+            for c in spec.constituents}
+
+
 def apply_applicability(df: pd.DataFrame,
                         dividend_source=None,
                         model_version: str = LATEST_MODEL_VERSION) -> Masked:
@@ -182,8 +194,29 @@ def apply_applicability(df: pd.DataFrame,
     # everywhere a column name becomes a metric identity -- which is the whole
     # point of having a single translation boundary, and the ev_to_ebitda
     # defect repeating itself one layer along when there are two.
+    # Assess everything the contract OR the model depends on.
+    #
+    # This filtered on `governed` alone, and governed means "persisted in the
+    # sidecar". That is a storage question, and it was silently deciding a
+    # semantic one: a metric absent from GOVERNED_METRICS was never assessed
+    # at all, so the model scored it with no contract.
+    #
+    # Two of Income's six declared constituents were in that position --
+    # dividend_cagr_3y and dividend_consecutive_yrs -- which is why
+    # discovery-11 came back byte-identical to discovery-10 after a correct
+    # fix to the dividend CAGR rules. The rules were right and unreachable.
+    # An inert gate passes every test that only asks whether the value was
+    # withheld, and this codebase has now been caught by that twice: the
+    # period gate before annual_periods existed, and this.
+    #
+    # The invariant, stated so it cannot rot: a metric the declared model
+    # names as a constituent must be assessed, whether or not anyone chose to
+    # persist it. Persistence stays governed-only -- the sidecar is unchanged
+    # -- because what to store and what to reason about are different
+    # questions and conflating them is what caused this.
+    assessable = set(governed) | _model_constituents(model_version)
     metric_cols = [(c, canonical_for(c)) for c in df.columns]
-    metric_cols = [(c, canon) for c, canon in metric_cols if canon in governed]
+    metric_cols = [(c, canon) for c, canon in metric_cols if canon in assessable]
 
     feed_broken = dividend_source is not None and not dividend_source.healthy
     feed_reason = dividend_source.health.reason if feed_broken else ""

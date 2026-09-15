@@ -113,9 +113,27 @@ async def pipeline_status(
         "type": "cron",
         "job_id": "daily_metrics",
         "last_run": _pipeline_last_success,
+        # Counted by DATA date, not by the microsecond the last row happened
+        # to be written.
+        #
+        # This read `computed_at = (SELECT MAX(computed_at) ...)`. computed_at
+        # is set per row at insert, so MAX(computed_at) is a single microsecond
+        # and the equality matched exactly one row — the last one written. The
+        # monitor reported "Rows: 1" for a producer that had just written 1,524,
+        # every day, and had done so for as long as the page existed.
+        #
+        # That is not cosmetic. This page is the coverage surface an operator
+        # reads to decide whether a producer ran properly, and P0-A's whole
+        # discipline is that a producer must prove its population. A monitor
+        # that understates one by three orders of magnitude trains people to
+        # ignore it.
+        #
+        # time::date matches how the producer writes (one row per
+        # (time, asx_code), time being the price date) and how EOD Price
+        # Download two entries above already counts.
         "row_count": await _scalar(db, """
             SELECT COUNT(*) FROM market.computed_metrics
-            WHERE computed_at = (SELECT MAX(computed_at) FROM market.computed_metrics)
+            WHERE time::date = (SELECT MAX(time)::date FROM market.computed_metrics)
         """),
         "table": "market.computed_metrics",
         "description": "P/E, EV, returns, yield + RSI/MACD/MA technical indicators",

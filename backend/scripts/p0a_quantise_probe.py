@@ -147,13 +147,24 @@ def main() -> int:
             # DEC2FLOAT adapter is registered, and both must normalise alike.
             probed += 1
             ours = quantise(value, scale)
-            round_tripped = quantise(pg, scale)
-            if ours != round_tripped:
-                disagreements.append(
-                    f"  NUMERIC({precision},{scale})  input={value!r:>24}  "
-                    f"intent_norm={ours}  readback_norm={round_tripped}  "
-                    f"(pg returned {type(pg).__name__})")
+
+            # BOTH representations psycopg2 can hand back. Ordinarily NUMERIC
+            # arrives as Decimal; composite_score registers a global DEC2FLOAT
+            # adapter, so the canonical run sees float instead. The validator
+            # must normalise either into the same canonical string, or it
+            # would compare two spellings of one number and call them
+            # different.
+            for label, readback in (("Decimal", pg), ("float", float(pg))):
+                round_tripped = quantise(readback, scale)
+                if ours != round_tripped:
+                    disagreements.append(
+                        f"  NUMERIC({precision},{scale})  input={value!r:>24}  "
+                        f"intent_norm={ours}  readback_norm={round_tripped}  "
+                        f"(as {label})")
+                    break
+            else:
                 continue
+            continue
 
             he = str(Decimal(str(value)).quantize(
                 Decimal(1).scaleb(-scale), rounding=ROUND_HALF_EVEN))

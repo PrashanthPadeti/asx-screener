@@ -141,6 +141,47 @@ def test_full_precision_intent_does_not_fail_against_a_quantised_column():
     assert report.ok, f"precision reconciliation failed: {report.summary()}"
 
 
+def test_ties_round_away_from_zero_as_postgresql_does():
+    """Decimal.quantize() defaults to ROUND_HALF_EVEN; PostgreSQL NUMERIC
+    rounds half away from zero. They agree everywhere except exact ties, and
+    on ties they differ whenever the preceding digit is even.
+
+    Confirmed against the database by scripts/p0a_quantise_probe.py:
+    ROUND_HALF_UP matches, ROUND_HALF_EVEN does not. No fixture here can
+    establish that — which is why the probe exists — but this holds the
+    conclusion in place.
+    """
+    assert quantise(0.1234565, 6) == "0.123457"   # HALF_EVEN would give ...456
+    assert quantise(0.12345, 4) == "0.1235"       # HALF_EVEN would give 0.1234
+    assert quantise(-0.1234565, 6) == "-0.123457"  # away from zero, not toward
+    assert quantise(-1.5, 0) == "-2"
+
+
+def test_negative_zero_is_not_a_different_number():
+    """The probe's second finding, on eight of eight persisted types.
+
+    Decimal preserves the sign through rounding, so -0.0049 at scale 2 is
+    Decimal('-0.00'); PostgreSQL normalises the sign away and returns 0.00.
+    Comparing the strings would report a payload mismatch for any metric whose
+    intent is a small negative that rounds to zero — a near-flat negative
+    return, a marginally negative margin — and publication would be blocked by
+    the validator's own arithmetic.
+    """
+    from decimal import Decimal as D
+
+    for value, scale in ((-0.0049, 2), (-4.9e-07, 6), (-0.49, 0), (-4.9e-05, 4)):
+        intent = quantise(value, scale)
+        assert not intent.startswith("-"), (
+            f"quantise({value!r}, {scale}) kept a negative zero: {intent}")
+        # And it must equal what the database side normalises to, whether
+        # psycopg2 hands back Decimal or float.
+        assert intent == quantise(D(0).quantize(D(1).scaleb(-scale)), scale)
+        assert intent == quantise(0.0, scale)
+
+    # A genuine negative must keep its sign.
+    assert quantise(-0.25, 2) == "-0.25"
+
+
 def test_a_real_difference_is_still_caught():
     """Quantisation must reconcile precision, not substance."""
     codes = ["AAA"]

@@ -183,8 +183,20 @@ def quantise(value, scale: Optional[int]):
         # its own rounding rather than for a defect, discovered at 25 minutes
         # a cycle. scripts/p0a_quantise_probe.py asks the database which mode
         # it uses rather than trusting this comment.
-        return str(Decimal(str(value)).quantize(
-            Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP))
+        q = Decimal(str(value)).quantize(
+            Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+        # Negative zero is not a different number.
+        #
+        # Decimal preserves the sign through rounding, so -0.0049 at scale 2
+        # becomes Decimal('-0.00'); PostgreSQL normalises the sign away and
+        # returns 0.00. Same value, two representations, and comparing the
+        # strings would report a payload mismatch on any metric whose intent
+        # is a small negative that rounds to zero — a near-flat negative
+        # return, a marginally negative margin. The probe found this on eight
+        # of eight persisted types.
+        if q.is_zero():
+            q = q.copy_abs()
+        return str(q)
     except (InvalidOperation, ValueError):
         # A value the column could not hold is a defect worth surfacing as a
         # mismatch rather than an exception: the comparison below will name

@@ -918,6 +918,43 @@ def test_the_api_the_writer_and_the_bundle_share_one_population():
 
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
+def test_assessing_more_than_we_persist_is_the_intended_shape():
+    """Two correct rules meeting at a boundary, and the boundary is the fix.
+
+    apply_applicability assesses every metric the declared model scores on,
+    because a constituent ranked with no contract is ranked on a number
+    nothing has vouched for. The canonical writer refuses any metric its
+    contract does not cover, because writing one would persist a value under
+    a contract that says nothing about it. Both are right.
+
+    Between them sits canonical_assessments, which must hand the writer the
+    persistable subset. It did not, and discovery-12 refused eleven metrics
+    at the final statement of a 25-minute run -- correctly, and expensively.
+
+    The assertion is directional: the assessed set must be strictly WIDER
+    than the writable set. Equality would mean the union in
+    apply_applicability has been collapsed back and the inert-gate defect has
+    returned.
+    """
+    from compute.engine.factor_applicability import _model_constituents
+    from compute.engine.metric_states import LATEST_MODEL_VERSION
+    from compute.engine.universe_writer import governed_for
+
+    writable = set(governed_for(LATEST_MODEL_VERSION))
+    assessed = writable | _model_constituents(LATEST_MODEL_VERSION)
+
+    assert assessed > writable, (
+        "the assessed set is no wider than the writable set; "
+        "apply_applicability has stopped covering declared constituents")
+
+    # And the difference must be constituents, not stray columns: anything
+    # assessed but unwritable has to be something the model actually scores on.
+    extra = assessed - writable
+    assert extra <= _model_constituents(LATEST_MODEL_VERSION), (
+        f"assessed but neither writable nor a declared constituent: "
+        f"{sorted(extra - _model_constituents(LATEST_MODEL_VERSION))}")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

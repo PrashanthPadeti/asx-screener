@@ -69,6 +69,7 @@ from compute.engine.universe_writer import (  # noqa: E402
     WriteRefused,
     column_for,
     commit_canonical,
+    governed_for,
     persisted_governed,
 )
 
@@ -919,10 +920,26 @@ def canonical_assessments(df, masked, factor_states,
     mapping = persisted_governed(LATEST_MODEL_VERSION)
     failed = source_failed.reindex(df.index).fillna(False).astype(bool)
 
+    # Assessments now cover more than the canonical row does, and that is
+    # deliberate: apply_applicability assesses every metric the declared model
+    # scores on, whether or not the sidecar persists it. Twelve constituents
+    # -- the whole momentum family among them -- previously reached the
+    # ranking with no contract at all because this set was drawn from
+    # GOVERNED_METRICS, which is a storage list.
+    #
+    # The writer's rule is the complement of that and equally right: a metric
+    # its contract does not cover cannot be written under it. So the filter
+    # belongs here, at the boundary between reasoning and persistence, and not
+    # by loosening either rule. Without it discovery-12 refused eleven
+    # metrics at the last statement of a 25-minute run -- correctly, and
+    # expensively.
+    writable = governed_for(LATEST_MODEL_VERSION)
+
     out: dict[str, dict[str, Assessment]] = {}
     for idx, row in df.iterrows():
         code = row["asx_code"]
-        assessed = dict(masked.assessments.get(code, {}))
+        assessed = {m: a for m, a in masked.assessments.get(code, {}).items()
+                    if m in writable}
 
         for metric in mapping:
             if metric in SCORE_METRICS:

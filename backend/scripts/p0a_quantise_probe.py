@@ -49,24 +49,40 @@ from compute.engine.universe_writer import (  # noqa: E402
 )
 
 
-def boundary_values(scale: int) -> list[float]:
+def boundary_values(precision: int, scale: int) -> list[float]:
     """Values that sit exactly on, just below and just above a rounding tie.
 
     A tie is the only place two rounding modes can disagree, so probing
     anything else would pass under either and prove nothing.
+
+    Bounded by the type's own capacity. NUMERIC(p,s) holds p-s integer digits,
+    so NUMERIC(8,6) must stay under 100 — a fixed set of bases overflowed it
+    and killed the probe before it measured anything. The persisted scales run
+    from 0 to 6 and precisions from 5 to 18, so the generator has to read the
+    type rather than assume a shape.
     """
-    half = 5 * 10 ** -(scale + 1)
+    max_int_digits = precision - scale
+    limit = Decimal(10) ** max_int_digits
+    half = Decimal(5) * Decimal(10) ** -(scale + 1)
+    eps = Decimal(10) ** -(scale + 2)
+
     out: list[float] = []
-    for base in (0.0, 0.1, 1.0, 12.34, 999.0):
+    for base in (Decimal(0), Decimal("0.1"), Decimal(1),
+                 Decimal("12.34"), Decimal(999)):
         for sign in (1, -1):
-            out.append(sign * (base + half))                    # exact tie
-            out.append(sign * (base + half + 10 ** -(scale + 2)))  # just above
-            out.append(sign * (base + half - 10 ** -(scale + 2)))  # just below
+            for delta in (half, half + eps, half - eps):
+                value = sign * (base + delta)
+                # Margin of one unit: the value must still fit AFTER rounding up.
+                if abs(value) < limit - 1:
+                    out.append(float(value))
+
     # A tie landing on an even last digit and one on an odd last digit, since
-    # ROUND_HALF_EVEN only differs on one of them.
-    out.append(float(f"0.{'0' * (scale - 1)}25"))
-    out.append(float(f"0.{'0' * (scale - 1)}35"))
-    return out
+    # ROUND_HALF_EVEN only differs on one of them. Meaningless at scale 0.
+    if scale >= 1:
+        out.append(float(Decimal(f"0.{'0' * (scale - 1)}25")))
+        out.append(float(Decimal(f"0.{'0' * (scale - 1)}35")))
+
+    return sorted(set(out))
 
 
 def main() -> int:
@@ -98,15 +114,30 @@ def main() -> int:
           f"{', '.join(f'NUMERIC({p},{s})' for p, s in types)}\n")
 
     disagreements: list[str] = []
+    skipped: list[str] = []
+    probed = 0
     half_even_ok = half_up_ok = True
 
     for precision, scale in types:
-        for value in boundary_values(scale):
+        for value in boundary_values(precision, scale):
             # Exactly the path the writer takes: a Python float parameter,
             # adapted by psycopg2, cast by the column's type.
-            cur.execute(f"SELECT (%s::float8)::numeric({precision},{scale})",
-                        (value,))
-            pg = cur.fetchone()[0]
+            try:
+                cur.execute(
+                    f"SELECT (%s::float8)::numeric({precision},{scale})",
+                    (value,))
+                pg = cur.fetchone()[0]
+            except psycopg2.Error as e:
+                # A value this type cannot hold is a defect in the generator,
+                # not a finding about rounding. Record it and carry on: a probe
+                # that dies on one input measures nothing about the rest, which
+                # is how the first version of this script reported nothing at
+                # all after NUMERIC(8,6) rejected 999.
+                conn.rollback()
+                skipped.append(
+                    f"  NUMERIC({precision},{scale})  input={value!r} "
+                    f"rejected: {str(e).splitlines()[0]}")
+                continue
 
             # The validator's actual comparison, end to end: intent quantised
             # on one side, the stored value read back and quantised on the
@@ -114,6 +145,7 @@ def main() -> int:
             # that normalisation produces the same canonical representation as
             # intent" — psycopg2 may hand back Decimal, or float if a
             # DEC2FLOAT adapter is registered, and both must normalise alike.
+            probed += 1
             ours = quantise(value, scale)
             round_tripped = quantise(pg, scale)
             if ours != round_tripped:
@@ -137,9 +169,23 @@ def main() -> int:
                     f"  NUMERIC({precision},{scale})  input={value!r:>24}  "
                     f"postgres={pg}  quantise={ours}")
 
+    print(f"values probed                      : {probed}")
     print(f"ROUND_HALF_EVEN matches PostgreSQL : {half_even_ok}")
     print(f"ROUND_HALF_UP   matches PostgreSQL : {half_up_ok}")
-    print(f"current quantise() disagreements   : {len(disagreements)}\n")
+    print(f"current quantise() disagreements   : {len(disagreements)}")
+    print(f"values the type rejected (skipped) : {len(skipped)}\n")
+
+    for line in skipped[:10]:
+        print(line)
+    if skipped:
+        print()
+
+    if probed == 0:
+        print("FAIL — nothing was probed. The generator produced no value any "
+              "of these types would accept, so this run proves nothing.")
+        cur.close()
+        conn.close()
+        return 1
 
     for line in disagreements[:40]:
         print(line)

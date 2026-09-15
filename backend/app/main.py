@@ -5,12 +5,42 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
+import os
+import sys
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Nothing configured the root logger before this. With no handler on it,
+# Python's last-resort handler emits WARNING and above to stderr and DISCARDS
+# everything below -- so every log.info() this application writes went nowhere
+# in production. Not some of them: all of them, across billing, compute and the
+# schedulers.
+#
+# That was not a cosmetic gap. During the 15 Sep 2026 billing outage the
+# webhook logged "Stripe event: {type}" on every single request and none of it
+# reached the log file, so diagnosis rested entirely on the traceback uvicorn
+# happened to print at ERROR. Hours of a customer-facing outage were invisible
+# in the one place an operator looks.
+#
+# Read from the environment rather than Settings deliberately: Settings uses
+# extra="forbid", and a new field there means a new .env key on every
+# deployment that lacks it. This needs no key to work and accepts one if given.
+#
+# stdout, because asx-backend.service has StandardOutput=append: pointing at
+# logs/backend.log. uvicorn's own loggers set propagate=False, so its access
+# lines are not duplicated by this.
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, _LOG_LEVEL, logging.INFO),
+    format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+)
 
 # Global rate limiter — keyed by client IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])

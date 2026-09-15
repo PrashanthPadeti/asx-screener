@@ -165,14 +165,26 @@ def main():
         conn.commit()
         log.info("staging_au.dividends truncated.")
 
-    done = failed = total_rows = stocks_with_divs = 0
+    # Named for what they actually count.
+    #
+    # These were `stocks_with_divs` and `total_rows`, and neither was true.
+    # One file per code per download date means 3,556 files carry 1,236 codes,
+    # so "3,555 stocks with dividends" was 3,555 FILES; and rows offered to
+    # execute_values are deduplicated by ON CONFLICT (asx_code, date), so
+    # "103,714 rows" landed as 29,804. Both figures sat in the job log beside a
+    # table a third the size, which on 16 Sep 2026 read as two-thirds of all
+    # issuers being silently dropped. It cost a full investigation to establish
+    # that nothing was wrong.
+    done = failed = rows_offered = files_with_rows = 0
+    codes_seen: set[str] = set()
 
     for i, path in enumerate(files, 1):
         try:
             n = load_file(cur, path)
             if n > 0:
-                stocks_with_divs += 1
-                total_rows += n
+                files_with_rows += 1
+                rows_offered += n
+                codes_seen.add(path.name.split(".AU_")[0])
             done += 1
         except Exception as e:
             conn.rollback()
@@ -183,15 +195,55 @@ def main():
 
         if i % BATCH_COMMIT == 0:
             conn.commit()
-            log.info(f"  [{i:4d}/{total}]  stocks_with_divs={stocks_with_divs}  "
-                     f"rows={total_rows:,}  err={failed}")
+            log.info(f"  [{i:4d}/{total}]  files_with_rows={files_with_rows}  "
+                     f"codes={len(codes_seen)}  rows_offered={rows_offered:,}  "
+                     f"err={failed}")
 
     conn.commit()
+
+    # Prove the population, do not report the loop.
+    #
+    # The expected set is derived from the filenames of files that actually
+    # yielded rows, independently of anything the loop tallied, and compared
+    # against what the table holds. A counter cannot distinguish "wrote every
+    # code" from "wrote the ones it was admitted to see", which is why this is
+    # a query rather than a summary line.
+    cur.execute("SELECT DISTINCT asx_code FROM staging_au.dividends")
+    persisted = {r[0] for r in cur.fetchall()}
+    missing = sorted(codes_seen - persisted)
+
+    cur.execute("SELECT count(*) FROM staging_au.dividends")
+    rows_persisted = cur.fetchone()[0]
+
     cur.close()
     conn.close()
-    log.info(f"DONE — {stocks_with_divs} stocks with dividends | "
-             f"{total_rows:,} rows | {failed} errors")
+
+    log.info("DONE — %s files parsed, %s carried rows, %s distinct codes",
+             f"{done:,}", f"{files_with_rows:,}", f"{len(codes_seen):,}")
+    log.info("      %s rows offered -> %s persisted "
+             "(the difference is ON CONFLICT (asx_code, date) deduplication, "
+             "not loss)", f"{rows_offered:,}", f"{rows_persisted:,}")
+    log.info("      %s codes persisted, %s errors",
+             f"{len(persisted):,}", failed)
+
+    if missing:
+        log.error("COVERAGE FAILURE: %s codes had rows parsed but are absent "
+                  "from staging_au.dividends: %s%s", len(missing),
+                  ", ".join(missing[:25]),
+                  " ..." if len(missing) > 25 else "")
+        return 1
+    if failed:
+        log.error("%s files failed to parse; staging is incomplete. A code "
+                  "whose only file failed appears in neither set above, so "
+                  "this is the check that catches it.", failed)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # sys.exit(main()), not main(). The bare call discarded the return value,
+    # so the coverage check above could return 1 and the process would still
+    # exit 0 — and weekly_pipeline's run() decides success from the exit code.
+    # A completeness proof nothing reads is a completeness proof that does not
+    # exist.
+    sys.exit(main())

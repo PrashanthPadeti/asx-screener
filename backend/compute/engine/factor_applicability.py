@@ -85,6 +85,13 @@ OBSERVATION_COLS: dict[str, str] = {
     "revenue": "revenue_ttm",
     "ebitda": "ebitda_ttm",
     "periods_available": "annual_periods",
+    # The observed TTM dividend, which is what separates "this company paid
+    # nothing" from "we have no dividend data for this company". Only
+    # trustworthy since build_screener_universe began taking dps_ttm from
+    # market.computed_metrics -- while it came from valuation_snapshot the
+    # value was neither governed nor current, and a zero from it would not
+    # have supported any conclusion.
+    "dividends_observed": "dps_ttm",
 }
 
 #: The income family. When the dividend feed is unhealthy these are withheld

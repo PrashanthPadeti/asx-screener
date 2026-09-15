@@ -390,6 +390,12 @@ class Observation:
     invested_capital: Optional[float] = None
     periods_available: Optional[int] = None
     periods_required: Optional[int] = None
+    #: Trailing-twelve-month dividend per share, as *observed*. 0.0 is the
+    #: meaningful value here, not a missing one: it says we looked across a
+    #: healthy, fully observed window and the company paid nothing. None says
+    #: we could not look. Those have opposite consequences downstream, which
+    #: is the whole reason this field exists rather than a boolean.
+    dividends_observed: Optional[float] = None
 
 
 #: metric -> (Observation field that must be positive, why it matters)
@@ -463,6 +469,33 @@ def observation_gate(metric: str, value: Optional[float],
                 return (Applicability.INSUFFICIENT_DATA,
                         f"{obs.periods_available} of {obs.periods_required} "
                         f"periods available")
+
+        # Nothing paid means nothing to frank.
+        #
+        # compute.engine.dividends already reaches this conclusion, but only
+        # where it holds the raw payment rows. The factor engine reads a
+        # universe row and has no access to them, so a NULL franking_pct
+        # arrived here as UNAVAILABLE / SOURCE_MISSING -- "the feed failed to
+        # tell us the franking level" -- when the feed had told us something
+        # more definite: there was no payment to frank.
+        #
+        # That mislabel was expensive. An UNAVAILABLE constituent may not be
+        # reweighted out of a factor, so it withheld Income for every
+        # non-payer, and the composite with it: 321 and 252 of 2,103 in
+        # discovery-7, against 1,888 in production. The engine was refusing to
+        # score companies because it had mistaken a fact about them for a gap
+        # in our data.
+        #
+        # dps_ttm == 0 is the evidence, and it is only trustworthy because the
+        # value now comes from the governed dividend module. A zero that means
+        # "no payments in a healthy, fully observed window" supports this
+        # conclusion; a zero that merely means "no row" would not.
+        if (metric == "franking_pct" and value is None
+                and obs.dividends_observed is not None
+                and obs.dividends_observed == 0):
+            return (Applicability.NOT_MEANINGFUL,
+                    "no dividend was paid in the window, so there is nothing "
+                    "to frank")
 
     if value is None:
         return (Applicability.UNAVAILABLE, "no value from source")

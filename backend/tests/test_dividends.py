@@ -625,6 +625,81 @@ def test_the_scheduler_does_not_reimplement_the_health_thresholds():
     assert "MIN_RECENT_ISSUERS" not in src
 
 
+# ── The same rule, one layer up, where the factor engine reads it ────────────
+#
+# DividendSource.assessments already concludes that a non-payer's franking_pct
+# is NOT_MEANINGFUL / OBSERVATION. But it can only reach that conclusion where
+# it holds the raw payment rows, and the factor engine does not: it reads a
+# universe row. So a NULL franking_pct arrived at ranking as UNAVAILABLE /
+# SOURCE_MISSING.
+#
+# That is not a cosmetic mislabel. An UNAVAILABLE constituent may not be
+# reweighted out of a factor, so it withheld Income for every non-payer and
+# the composite with it -- 321 and 252 of 2,103 in discovery-7, against 1,888
+# in production -- while dividend_yield and dividend_per_share were by then
+# correctly populated on 1,597 rows. The dividend data was right and the score
+# was still refused.
+#
+# dps_ttm == 0 carries the evidence, and the observation gate now reads it.
+
+def _assess_franking(value, observed):
+    from compute.engine.applicability import Domain, Observation, assess
+    return assess("franking_pct", value, Domain.GENERAL_CORPORATE,
+                  Observation(dividends_observed=observed))
+
+
+def test_a_non_payer_has_nothing_to_frank():
+    """The case that was withholding Income across the universe."""
+    from compute.engine.applicability import Applicability, Cause
+    a = _assess_franking(None, 0.0)
+
+    assert a.state is Applicability.NOT_MEANINGFUL
+    assert a.cause is Cause.OBSERVATION
+    assert not a.ok
+
+
+def test_an_unobserved_dividend_is_still_source_missing():
+    """The distinction the whole change rests on. A zero says we looked and
+    found nothing; None says we could not look. Collapsing them would trade
+    one wrong answer for another, and this one would be worse -- it would
+    manufacture a factor score out of absent data."""
+    from compute.engine.applicability import Applicability, Cause
+    a = _assess_franking(None, None)
+
+    assert a.state is Applicability.UNAVAILABLE
+    assert a.cause is Cause.SOURCE_MISSING
+
+
+def test_a_payer_missing_franking_is_still_source_missing():
+    """A company that demonstrably paid, with no franking figure, is a real
+    gap in the feed and must keep saying so."""
+    from compute.engine.applicability import Applicability, Cause
+    a = _assess_franking(None, 0.45)
+
+    assert a.state is Applicability.UNAVAILABLE
+    assert a.cause is Cause.SOURCE_MISSING
+
+
+def test_a_franking_value_is_never_overridden_by_the_rule():
+    """The gate withholds; it must not reach a value that exists."""
+    from compute.engine.applicability import Applicability
+    a = _assess_franking(100.0, 0.0)
+
+    assert a.state is Applicability.APPLICABLE
+    assert a.value == 100.0
+
+
+def test_the_factor_engine_actually_loads_the_observation():
+    """The rule is inert unless dps_ttm reaches the frame. OBSERVATION_COLS is
+    what puts it there -- composite_score appends its values to select_cols --
+    so an entry missing here means the gate silently never fires."""
+    from compute.engine.factor_applicability import OBSERVATION_COLS
+
+    assert OBSERVATION_COLS.get("dividends_observed") == "dps_ttm", (
+        "franking_pct's observation gate reads Observation.dividends_observed; "
+        "without this mapping it is always None and the gate never fires")
+
+
 # ── The contract has to reach the column, not just the function ──────────────
 #
 # dividend_metrics was correct and its output was persisted, and the served

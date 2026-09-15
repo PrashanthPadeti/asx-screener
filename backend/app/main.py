@@ -218,9 +218,30 @@ async def lifespan(app: FastAPI):
                       id="anomaly_detect", replace_existing=True)
 
     # Anomaly alert emails — daily at 8:35pm AEST (15 min after anomaly detection)
-    scheduler.add_job(send_anomaly_alerts,
-                      CronTrigger(hour=20, minute=35, timezone="Australia/Sydney"),
-                      id="anomaly_alerts", replace_existing=True)
+    #
+    # Registered ONLY when deliberately enabled. This is the outbound path for
+    # anomaly flags, and the active anomaly set is known to contain
+    # defect-derived ones until the detector applicability repair and
+    # re-detection sequence complete (P0-A-7).
+    #
+    # The control has to live here rather than in the freeze script, because
+    # the freeze script's job is to stop schedulers and its thaw restores them
+    # all. Anything relying on `thaw` remembering to leave one job out is a
+    # reminder, not an exclusion -- and it would fail for anyone who restarts
+    # the service by any other route.
+    if settings.ANOMALY_ALERTS_ENABLED:
+        scheduler.add_job(send_anomaly_alerts,
+                          CronTrigger(hour=20, minute=35, timezone="Australia/Sydney"),
+                          id="anomaly_alerts", replace_existing=True)
+        logger.warning(
+            "ANOMALY ALERT EMAILS ARE ENABLED — outbound anomaly alerts will "
+            "be sent at 20:35 AEST. This must only be on once the detector's "
+            "re-detection sequence has run and the active flag set has been "
+            "verified free of defect-derived anomalies.")
+    else:
+        logger.info(
+            "Anomaly alert emails disabled (ANOMALY_ALERTS_ENABLED is off). "
+            "Detection still runs and records flags; nothing is emailed.")
 
     # Capital raise scanner — daily at 7:30am AEST (after announcement fetch settles)
     scheduler.add_job(scan_capital_raises,
@@ -350,6 +371,11 @@ async def health():
         "schedulers": {
             "frozen": getattr(app.state, "schedulers_frozen", None),
             "jobs":   getattr(app.state, "scheduler_jobs", None),
+            # Reported separately from "frozen" because it is controlled
+            # separately. Thawing restores the schedulers and must not restore
+            # this; surfacing it here is what lets an operator verify that
+            # after a thaw rather than take it on trust.
+            "anomaly_alerts": settings.ANOMALY_ALERTS_ENABLED,
         },
     }
 

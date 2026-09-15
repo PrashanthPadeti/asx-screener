@@ -30,6 +30,24 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     # Stripe
+    # ── Outbound anomaly alerts ───────────────────────────────────────────────
+    # Independently controlled, and OFF unless deliberately opted in.
+    #
+    # p0a_freeze.sh thaw restores every scheduler at once. Its header claimed
+    # the anomaly alert worker was "excluded from thaw deliberately"; its
+    # implementation restored it and printed a reminder asking a human to stop
+    # the job before the next 20:35 run. A comment is not an exclusion, and a
+    # reminder is not a control.
+    #
+    # Until the detector's applicability repair and re-detection sequence are
+    # complete, the active anomaly set is known to contain defect-derived
+    # flags -- doubled grossed-up yields, off-domain Piotroski scores. Those
+    # must not reach a customer's inbox because somebody restarted a service.
+    #
+    # Turning this on is a release decision with its own gate (P0-A-7), not a
+    # side effect of thawing.
+    ANOMALY_ALERTS_ENABLED: bool = False
+
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
 

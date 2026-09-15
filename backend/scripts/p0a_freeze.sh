@@ -18,11 +18,18 @@
 # The API keeps serving throughout. Freezing is not a maintenance outage — it
 # stops computation, not traffic.
 #
-# What this does NOT do: the anomaly alert worker stays frozen after the
-# rollout. It is excluded from `thaw` deliberately and comes back only through
-# its own detector/re-detection sequence. Its daily crash is currently the
-# only thing preventing defect-derived alerts from reaching inboxes, and a
-# thaw that "restores everything" would undo that by accident.
+# The anomaly alert worker is NOT controlled here, and this script used to
+# claim otherwise. The header said it was "excluded from thaw deliberately"
+# while thaw() restored every scheduler and printed a reminder asking a human
+# to stop the job before the next 20:35 run. A comment is not an exclusion and
+# a reminder is not a control -- and neither would help anyone who restarted
+# the service by some other route.
+#
+# The exclusion is now executable and lives with the job: app/main.py declines
+# to register anomaly_alerts unless ANOMALY_ALERTS_ENABLED is on, and
+# send_anomaly_alerts refuses to send even if called directly. Default off.
+# Turning it on is a release decision with its own gate, not a side effect of
+# thawing. `status` below reports the real state rather than asserting one.
 
 set -u
 
@@ -78,6 +85,27 @@ status() {
               fi ;;
         *)    echo "scheduler: $jobs jobs, frozen=$flag  <- NOT frozen" ;;
     esac
+
+    # Read from the running process, not from .env: what matters is what the
+    # service loaded, and an .env edit without a restart would report a
+    # control that is not in force.
+    local alerts
+    alerts=$(anomaly_alerts_flag)
+    case "${alerts:-}" in
+        "")     echo "anomaly alerts: unknown (health endpoint unreachable)" ;;
+        null)   echo "anomaly alerts: null (deployed code predates this field)" ;;
+        false)  echo "anomaly alerts: DISABLED  <- outbound email path is closed" ;;
+        true)   echo "anomaly alerts: ENABLED   <- emails WILL be sent at 20:35" ;;
+        *)      echo "anomaly alerts: $alerts" ;;
+    esac
+}
+
+# Whether the running process will send outbound anomaly alerts. Independent
+# of freeze state by design: thawing restores schedulers, and this must not
+# come back with them.
+anomaly_alerts_flag() {
+    curl -fsS --max-time 10 "$HEALTH_URL" 2>/dev/null \
+        | sed -nE 's/.*"anomaly_alerts"[[:space:]]*:[[:space:]]*(true|false|null).*/\1/p'
 }
 
 # How many jobs the RUNNING scheduler holds. Ground truth from the process
@@ -254,9 +282,9 @@ thaw() {
     echo
     status
     echo
-    echo "REMINDER: the anomaly alert worker is now scheduled again. If its"
-    echo "detector/re-detection sequence is not complete, stop it before the"
-    echo "next 8:35pm run."
+    echo "Outbound anomaly alerts are governed by ANOMALY_ALERTS_ENABLED, not"
+    echo "by this script. The line above reports their real state. Detection"
+    echo "still runs and records flags either way; only the email path is gated."
 }
 
 case "$1" in

@@ -400,7 +400,6 @@ def write_all(cur, by_code: Mapping[str, Mapping[str, Assessment]],
 def commit_canonical(conn, run: ComputeRun,
                      by_code: Mapping[str, Mapping[str, Assessment]],
                      *, required_stages: Sequence[str],
-                     readback_sample: int = 25,
                      snapshot_id: Optional[str] = None,
                      details: Optional[Mapping[str, object]] = None) -> int:
     """The canonical commit boundary. The transaction IS the publication unit.
@@ -450,32 +449,32 @@ def commit_canonical(conn, run: ComputeRun,
         #
         # The count is also what the message got wrong: it is violations
         # summed across sampled rows, which is not the same as rows.
-        found: list[tuple[str, object]] = []
-        sample = sorted(by_code)[:readback_sample]
-        for asx_code in sample:
-            restored = read_back(cur, asx_code, run)
-            if restored is None:
-                raise WriteRefused(
-                    f"{asx_code} is not attributable to run {run.run_id} "
-                    f"immediately after writing it")
-            values = {m: a.value for m, a in restored.items()}
-            states = encode(restored)
-            found.extend(
-                (asx_code, v)
-                for v in violations(values, states, run.factor_model_version))
+        # FULL population, not a sample.
+        #
+        # This read 25 codes — 1.2% of the serving population — and 1.2% is a
+        # spot check whatever it is called. It could not answer the question
+        # publication depends on: did the write land, in full, for everyone.
+        #
+        # verify_population compares the payload this run intended against the
+        # payload the database holds, per row, for every row, and additionally
+        # proves the three things a per-row check cannot see: that the
+        # intended, written and attributable populations are the same set;
+        # that nothing else is attributed to this run; and that nothing
+        # intended is absent.
+        #
+        # That last property is what closes stale prior-run survival. A value
+        # this run failed to write, which simply persisted from run N-1, is
+        # indistinguishable in the final row from one this run wrote — unless
+        # the final row is compared against what this run meant to write.
+        from compute.engine.canonical_readback import verify_population
 
-        if found:
-            offenders = sorted({code for code, _ in found})
-            log.error("Read-back validation failed: %s violations across %s of "
-                      "%s sampled rows.", len(found), len(offenders), len(sample))
-            for code, v in found[:SAMPLE_LIMIT]:
-                log.error("  %-6s %-28s %-28s %s",
-                          code, getattr(v, "metric", "?"),
-                          getattr(v, "kind", "?"), v)
-            if len(found) > SAMPLE_LIMIT:
-                log.error("  ... and %s more", len(found) - SAMPLE_LIMIT)
+        report = verify_population(cur, by_code, run, rows_written)
+        if not report.ok:
+            report.log_detail()
+        else:
+            log.info("  %s", report.summary())
 
-        bad = len(found)
+        bad = report.failure_count
         finalise_run(cur, run, rows_written)
 
         # Refuses unless the stages passed and nothing violates. The insert is
@@ -487,7 +486,15 @@ def commit_canonical(conn, run: ComputeRun,
                  required_stages=required_stages,
                  snapshot_id=snapshot_id,
                  details={**dict(details or {}),
-                          "readback_sampled": len(sample)})
+                          # Named so the finalisation record says which kind
+                          # of proof stands behind it. "sampled: 25" and
+                          # "verified: 2103 of 2103" are different claims and
+                          # a reader must not have to know the code to tell
+                          # them apart.
+                          "readback_scope": "full_population",
+                          "readback_intended": report.intended,
+                          "readback_verified": report.read_back,
+                          "readback_failures": report.failure_count})
 
         conn.commit()
         return rows_written

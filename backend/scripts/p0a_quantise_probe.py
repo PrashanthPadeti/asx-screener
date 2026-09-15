@@ -115,7 +115,7 @@ def main() -> int:
 
     disagreements: list[str] = []
     skipped: list[str] = []
-    probed = 0
+    probed = discriminating = 0
     half_even_ok = half_up_ok = True
 
     for precision, scale in types:
@@ -154,6 +154,30 @@ def main() -> int:
             # must normalise either into the same canonical string, or it
             # would compare two spellings of one number and call them
             # different.
+            # Which rounding mode does this database actually use? Measured on
+            # every probed value, independently of what quantise() does, so
+            # the answer stands even when the quantiser is wrong.
+            he = Decimal(str(value)).quantize(
+                Decimal(1).scaleb(-scale), rounding=ROUND_HALF_EVEN)
+            hu = Decimal(str(value)).quantize(
+                Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP)
+            if he != pg:
+                half_even_ok = False
+            if hu != pg:
+                half_up_ok = False
+            if he != hu:
+                # A value where the two modes give different answers. Only
+                # these can tell the modes apart; without at least one, both
+                # flags report True and the comparison has established
+                # nothing. Counted so the probe can say so rather than
+                # implying agreement it never tested.
+                discriminating += 1
+
+            # And does intent normalise to the same canonical string as the
+            # value that went through PostgreSQL and came back — in BOTH
+            # representations psycopg2 can return? NUMERIC ordinarily arrives
+            # as Decimal, but composite_score registers a global DEC2FLOAT
+            # adapter, so the canonical run sees float.
             for label, readback in (("Decimal", pg), ("float", float(pg))):
                 round_tripped = quantise(readback, scale)
                 if ours != round_tripped:
@@ -162,25 +186,9 @@ def main() -> int:
                         f"intent_norm={ours}  readback_norm={round_tripped}  "
                         f"(as {label})")
                     break
-            else:
-                continue
-            continue
-
-            he = str(Decimal(str(value)).quantize(
-                Decimal(1).scaleb(-scale), rounding=ROUND_HALF_EVEN))
-            hu = str(Decimal(str(value)).quantize(
-                Decimal(1).scaleb(-scale), rounding=ROUND_HALF_UP))
-
-            if Decimal(he) != pg:
-                half_even_ok = False
-            if Decimal(hu) != pg:
-                half_up_ok = False
-            if Decimal(ours) != pg:
-                disagreements.append(
-                    f"  NUMERIC({precision},{scale})  input={value!r:>24}  "
-                    f"postgres={pg}  quantise={ours}")
 
     print(f"values probed                      : {probed}")
+    print(f"  of which distinguish the modes   : {discriminating}")
     print(f"ROUND_HALF_EVEN matches PostgreSQL : {half_even_ok}")
     print(f"ROUND_HALF_UP   matches PostgreSQL : {half_up_ok}")
     print(f"current quantise() disagreements   : {len(disagreements)}")
@@ -190,6 +198,15 @@ def main() -> int:
         print(line)
     if skipped:
         print()
+
+    if discriminating == 0:
+        print("FAIL — no probed value distinguishes ROUND_HALF_EVEN from "
+              "ROUND_HALF_UP, so reporting that both match establishes "
+              "nothing about which mode PostgreSQL uses. The generator is "
+              "producing no ties.")
+        cur.close()
+        conn.close()
+        return 1
 
     if probed == 0:
         print("FAIL — nothing was probed. The generator produced no value any "

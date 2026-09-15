@@ -447,15 +447,31 @@ def test_every_interpolating_query_is_an_f_string():
 
 def test_the_bundle_binds_its_predicates_before_using_them():
     """The second half of the same failure: the bindings were introduced
-    halfway down the function, after the queries referencing them."""
+    halfway down the function, after the queries referencing them.
+
+    "Bound" means either the module-level assignment or a parameter of the
+    enclosing function -- the first version of this guard knew only the
+    assignment and so failed a helper that correctly takes `serving` as an
+    argument. A guard that rejects correct code gets switched off, which
+    costs more than the bug it was written for.
+    """
+    import re
     src = _bundle_source()
     bind = src.index("serving = serving_predicate()")
 
+    def bound_by_signature(pos: int) -> bool:
+        """Does the nearest preceding def take `serving` as a parameter?"""
+        defs = [m for m in re.finditer(r"^def .*?\(.*?\).*?:", src,
+                                       re.M | re.S) if m.start() < pos]
+        return bool(defs) and "serving" in defs[-1].group(0)
+
     for prefix, body in _sql_literals(src):
-        if "{serving" in body:
-            assert src.index(body) > bind, (
-                "a query interpolates a predicate that is not yet bound; it "
-                "raises NameError before any SQL is sent")
+        if "{serving" not in body:
+            continue
+        pos = src.index(body)
+        assert pos > bind or bound_by_signature(pos), (
+            "a query interpolates a predicate that is not yet bound; it "
+            "raises NameError before any SQL is sent")
 
 
 def test_the_bundle_does_not_keep_its_own_copy_of_a_judgement_it_audits():

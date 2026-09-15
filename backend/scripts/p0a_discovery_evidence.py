@@ -57,6 +57,55 @@ def heading(text: str) -> None:
     print(f"\n{text}\n{RULE}")
 
 
+def _financial_ev_multiple_check(cur, serving: str) -> dict:
+    """Rows whose RESOLVED domain suppresses ev_ebitda, yet serve a value.
+
+    This check used to read ``sector='Financials'``, and that was the wrong
+    instrument. Sector and industry are different taxonomies from different
+    parts of the same feed, and they disagree: discovery-7's eleven "banks"
+    included a miner (``is_miner=t``, industry Metals & Mining), a software
+    company, an energy holding company and three rows with no industry at all.
+    Meanwhile the one row that genuinely resolves to ``Domain.BANK`` --
+    N1H, Thrifts & Mortgage Finance -- was not in the serving population and
+    so was never at risk.
+
+    Reporting five defects that were not defects is not a harmless
+    conservatism. It spends the reader's attention on noise and, worse, it
+    hides the shape of the real question: whether a row whose *resolved*
+    domain says a metric is meaningless is nonetheless serving it.
+
+    So the check resolves the domain the same way the engine does, by calling
+    the same function. A predicate that restated the industry mapping in SQL
+    would be a second copy of the judgement, and a second copy is how the
+    original defect arose.
+    """
+    from compute.engine.applicability import FINANCIAL
+    from compute.engine.domain_resolver import resolve_domain
+
+    cur.execute(f"""
+        SELECT asx_code, sector, industry, is_reit, is_miner, revenue_ttm,
+               ev_to_ebitda, metric_states
+          FROM screener.universe
+         WHERE {serving} AND ev_to_ebitda IS NOT NULL;""")
+
+    offenders, suppressed = [], 0
+    for row in cur.fetchall():
+        domain = resolve_domain(row).domain
+        if domain not in FINANCIAL:
+            continue
+        states = row["metric_states"]
+        # Absent from a present sidecar means APPLICABLE — servable. A NULL
+        # sidecar means no run assessed the row, which the projector treats as
+        # withhold-everything, so it is not servable and not this check's
+        # finding.
+        if states is not None and "ev_ebitda" not in states:
+            offenders.append((row["asx_code"], domain.value,
+                              row["ev_to_ebitda"]))
+        else:
+            suppressed += 1
+    return {"offenders": offenders, "suppressed": suppressed}
+
+
 def main() -> int:
     url = get_database_url_sync()
     conn = psycopg2.connect(url)
@@ -293,6 +342,8 @@ def main() -> int:
     print("  and the row attributed to it. None of those exist in this run, so")
     print("  the name is servable_by_metric_state and claims nothing more.\n")
 
+    financial_ev = _financial_ev_multiple_check(cur, serving)
+
     # (label, canonical metric, stored-anomaly predicate[, severity])
     #
     # DEFECT   a servable row breaches a rule the contract declares. Counts
@@ -303,8 +354,10 @@ def main() -> int:
     #          run for it would train everyone to ignore the failure.
     DEFECT, SOURCING = "defect", "sourcing"
     checks = [
-        ("banks carrying ev_to_ebitda", "ev_ebitda",
-         "sector='Financials' AND ev_to_ebitda IS NOT NULL"),
+        # NOTE: the financial-domain check for ev_to_ebitda is NOT here. It
+        # cannot be expressed as a SQL predicate without restating the domain
+        # resolver in SQL, and a second copy of that judgement is exactly what
+        # made this check wrong. See _financial_ev_multiple_check below.
         ("ev_to_ebitda stored as exactly zero", "ev_ebitda",
          "ev_to_ebitda = 0"),
         ("negative equity beside a positive ROE", "roe",
@@ -373,6 +426,19 @@ def main() -> int:
         else:
             diagnosis = "withheld by its own state (forensic only)"
         print(f"  {label:46} {stored:>7,} {servable:>9,}  {diagnosis}")
+
+    # The resolved-domain check, rendered in the same shape as the rest.
+    fin_n = len(financial_ev["offenders"])
+    print(f"  {'financial domain serving ev_to_ebitda':46} "
+          f"{fin_n + financial_ev['suppressed']:>7,} {fin_n:>9,}  "
+          f"{'CUSTOMER-SURFACE DEFECT' if fin_n else 'clean'}")
+    if fin_n:
+        flagged += 1
+        for code, domain, value in financial_ev["offenders"]:
+            print(f"      {code:6s} {domain:18s} ev_to_ebitda={value}")
+    print("  (resolved domain, via domain_resolver — not sector text. REIT is")
+    print("   deliberately outside FINANCIAL, so a REIT multiple is not a")
+    print("   finding here.)")
 
     if sourcing_notes:
         print("\n  Sourcing observations — reported, not counted as defects:")

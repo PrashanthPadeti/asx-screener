@@ -29,7 +29,27 @@ ALERT_SEVERITIES = ("high", "medium")
 
 
 async def send_anomaly_alerts() -> None:
-    """Main entry point called by APScheduler."""
+    """Main entry point called by APScheduler.
+
+    The second half of the control, and the half that does not depend on how
+    this was invoked. app/main.py declines to register the job unless
+    ANOMALY_ALERTS_ENABLED is on; this refuses to send even if something calls
+    it directly -- a manual run, a REPL, a future scheduler, a test harness
+    pointed at production.
+
+    One flag, checked at both the registration boundary and the send boundary,
+    because the thing being prevented is an email reaching a customer and
+    there is no undo for that.
+    """
+    from app.core.config import settings
+
+    if not settings.ANOMALY_ALERTS_ENABLED:
+        log.warning(
+            "send_anomaly_alerts called while ANOMALY_ALERTS_ENABLED is off — "
+            "refusing. The active anomaly set may contain defect-derived "
+            "flags; enabling this is a release decision, not an invocation.")
+        return
+
     async with AsyncSessionLocal() as db:
         try:
             await _run(db)

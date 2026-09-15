@@ -40,6 +40,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.dividends import (  # noqa: E402
     FEED_STALENESS_DAYS, DividendSource, FeedHealth,
+    # fetch_feed_health now lives beside the thresholds and the dataclass
+    # it returns. Re-exported here because composite_score,
+    # sector_benchmarks and several scripts import it from this module,
+    # and moving a symbol is not a reason to break its callers.
+    fetch_feed_health,  # noqa: F401
 )
 
 
@@ -142,52 +147,6 @@ def fetch_company(cur, asx_code: str) -> dict:
     if not row:
         return {}
     return {"shares_outstanding": row[0], "is_reit": row[1], "is_miner": row[2]}
-
-
-def fetch_feed_health(cur, as_of=None) -> FeedHealth:
-    """The dividend feed's watermark, read once per run.
-
-    Exchange-wide rather than per company: one issuer's gap is
-    indistinguishable from a skipped dividend, but a feed that has recorded
-    nothing for weeks is unambiguous. Measured on production in September
-    2026 this returned 2026-08-03 with zero rows in the preceding 30 days,
-    which is what a trailing-twelve-month window cannot honestly be computed
-    over.
-    """
-    # Every window is bounded ABOVE by today. Both were open-ended, and the
-    # dividend table legitimately contains announced future ex-dates -- after
-    # the September 2026 reload it held rows out to 2026-12-16. Unbounded,
-    # MAX(ex_date) returned that December date, the lag came out at -94 days,
-    # and -94 <= 35 reported the feed as healthy. The breadth counters had the
-    # same hole, so future announcements were inflating them too.
-    #
-    # That is the inverse of the original defect and strictly worse: a table
-    # that had recorded nothing since May would have looked healthy on the
-    # strength of announcements for dividends that have not happened yet.
-    #
-    # Future rows are kept -- they are valid records and the screener shows
-    # them -- but they are counted separately and contribute nothing to the
-    # freshness evidence. An announcement is not an observation.
-    #
-    # The breadth window now uses FEED_STALENESS_DAYS rather than a hardcoded
-    # 30, which disagreed with the 35-day threshold it was meant to support.
-    cur.execute("""
-        SELECT MAX(ex_date) FILTER (WHERE ex_date <= CURRENT_DATE),
-               COUNT(*) FILTER (
-                   WHERE ex_date <= CURRENT_DATE
-                     AND ex_date >  CURRENT_DATE - %(window)s::int),
-               COUNT(DISTINCT asx_code) FILTER (
-                   WHERE ex_date <= CURRENT_DATE
-                     AND ex_date >  CURRENT_DATE - %(window)s::int),
-               COUNT(*) FILTER (WHERE ex_date > CURRENT_DATE)
-        FROM market.dividends
-    """, {"window": FEED_STALENESS_DAYS})
-    latest_past, recent_rows, recent_issuers, future = cur.fetchone()
-    return FeedHealth(latest_ex_date=latest_past,
-                      as_of=as_of or datetime.now(timezone.utc).date(),
-                      recent_rows=recent_rows,
-                      recent_issuers=recent_issuers,
-                      future_announced=future)
 
 
 def fetch_dividends(cur, asx_code: str) -> list:

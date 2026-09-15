@@ -412,6 +412,15 @@ POSITIVE_DENOMINATOR: dict[str, tuple[str, str]] = {
     "price_to_book": ("equity", "negative book value inverts the multiple"),
     "pe_ratio": ("earnings", "a negative P/E is not a cheap P/E"),
     "peg_ratio": ("earnings", "a negative P/E is not a cheap P/E"),
+    # A payout ratio on negative earnings is not a high payout ratio; it has
+    # no sign that means anything. Withholding it was already happening --
+    # discovery-8 showed 1,533 rows -- but as UNAVAILABLE / SOURCE_MISSING,
+    # which claims our feed failed when the truth is that the company lost
+    # money. That cause is not reweightable, so it withheld Income for every
+    # loss-making company exactly as franking_pct did for every non-payer.
+    "dividend_payout_ratio": ("earnings",
+                              "a payout ratio on negative or zero earnings "
+                              "has no meaningful sign"),
     "roce": ("invested_capital", "negative capital employed inverts the ratio"),
     "roic": ("invested_capital", "negative invested capital inverts the ratio"),
     "price_to_sales": ("revenue", "no revenue to price against"),

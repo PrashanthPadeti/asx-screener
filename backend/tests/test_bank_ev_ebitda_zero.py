@@ -377,35 +377,43 @@ def _builder_code() -> str:
         if not ln.strip().startswith("--"))
 
 
-def test_the_ev_multiples_are_not_read_from_an_ungoverned_snapshot():
-    """vs.* and ym.* are real tables with plausible numbers. Neither applies
-    the positive-denominator rule that makes an EV multiple mean anything."""
+def test_the_ev_multiples_are_not_read_from_the_ungoverned_snapshot():
+    """market.valuation_snapshot is EODHD's weekly refresh. This run clones
+    it and holds it constant, and it applies no positive-denominator rule —
+    which is how 41 literal zeros reached the serving population."""
     code = _builder_code()
-    found = [s for s in ("vs.ev_to_ebitda", "vs.ev_ebitda", "ym.ev_ebit")
+    found = [s for s in ("vs.ev_to_ebitda", "vs.ev_ebitda", "vs.ev_ebit")
              if s in code]
 
     assert not found, (
-        f"build_screener_universe reads an EV multiple from an ungoverned "
-        f"source: {found}. These must come from cm.* — daily_compute writes "
-        f"them only when the denominator is positive.")
+        f"build_screener_universe reads an EV multiple from "
+        f"valuation_snapshot: {found}. These must come from a governed "
+        f"producer.")
 
 
-def test_the_ev_multiples_are_read_from_computed_metrics():
-    """The half that actually failed: the governed values were computed and
-    persisted, and then simply not selected."""
+def test_the_ev_multiples_are_read_from_a_governed_producer():
+    """yearly_metrics is RECOMPUTED under test by yearly_compute, a required
+    stage with a completeness proof.
+
+    The first repair pointed these at cm.* instead and cost ~800 rows of
+    ev_ebit coverage, dragging value_score from 1,068 to 747. That was a
+    mistake about provenance: ym.* was governed all along, and daily_compute's
+    TTM equivalents are far narrower. The distinction that matters is
+    governed-versus-ungoverned, not which governed producer.
+    """
     code = _builder_code()
-    missing = [m for m in ("cm.ev_ebitda", "cm.ev_ebit") if m not in code]
+    missing = [m for m in ("ym.ev_ebitda", "ym.ev_ebit") if m not in code]
 
-    assert not missing, f"EV multiples not read from computed_metrics: {missing}"
+    assert not missing, f"EV multiples not read from yearly_metrics: {missing}"
 
 
 def test_a_zero_ev_multiple_cannot_survive_the_builder():
-    """Belt and braces on the provenance change: even if a zero reached
-    computed_metrics, the projection refuses it. A zero EV/EBITDA is never a
-    real multiple — it is a missing denominator wearing a number."""
+    """Belt and braces, independent of which producer supplies the value. A
+    zero EV/EBITDA is never a real multiple — it is a missing denominator
+    wearing a number."""
     code = _builder_code()
 
-    assert "CASE WHEN cm.ev_ebitda > 0 THEN cm.ev_ebitda END" in code, (
+    assert "CASE WHEN ym.ev_ebitda > 0 THEN ym.ev_ebitda END" in code, (
         "the builder must not pass a non-positive ev_ebitda through")
 
 

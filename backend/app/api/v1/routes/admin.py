@@ -1415,6 +1415,18 @@ async def update_user(
         set_parts.append(
             "subscription_ends_at = NOW() + make_interval(months => :months)")
         params["months"] = body.access_months
+        # The grant protects itself. Without this, the customer's next Stripe
+        # subscription event recomputes plan from the price map and
+        # subscription_ends_at from Stripe's period end, and the grant is
+        # silently gone -- discovered, if ever, as a support ticket months
+        # later. See migration 065.
+        set_parts.append(
+            "plan_locked_until = NOW() + make_interval(months => :months)")
+        set_parts.append("plan_locked_reason = :lock_reason")
+        params["lock_reason"] = (
+            f"{body.access_months}mo {body.plan or 'plan'} granted by "
+            f"{admin['email']}"
+        )
         # A grant is an active subscription for retention purposes even though
         # no Stripe invoice produced it.
         set_parts.append("subscription_inactive_since = NULL")

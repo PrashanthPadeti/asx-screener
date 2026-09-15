@@ -1318,7 +1318,7 @@ LEFT JOIN LATERAL (
            -- Quality proxy scores
            brand_proxy_score, capital_efficiency_score, earnings_stability_score,
            -- Per-share & valuation derived (used for COALESCE + payout_ratio)
-           eps, bvps, graham_number, ev_ebit, p_fcf_ratio,
+           eps, bvps, graham_number, ev_ebit, ev_ebitda, p_fcf_ratio,
            -- Efficiency & leverage (Group 3 columns)
            roic, asset_turnover, interest_coverage, net_debt_to_ebitda,
            -- Margins / efficiency (new columns)

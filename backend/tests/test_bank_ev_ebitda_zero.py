@@ -417,6 +417,78 @@ def test_a_zero_ev_multiple_cannot_survive_the_builder():
         "the builder must not pass a non-positive ev_ebitda through")
 
 
+def _lateral_columns() -> dict:
+    """alias -> the column names its LATERAL subquery actually selects.
+
+    Only laterals whose SELECT list is a plain comma-separated column list are
+    parsed; anything with an expression, CASE or function call is skipped
+    rather than guessed at, because a guard that quietly mis-parses is worse
+    than no guard. The test below asserts the important aliases were parsed,
+    so a parser that starts skipping everything fails loudly.
+    """
+    import re
+    src = _BUILDER.read_text(encoding="utf-8")
+    out = {}
+    pattern = re.compile(
+        r"LEFT JOIN LATERAL \(\s*SELECT\s+(.*?)\s+FROM\s+[\w.]+(.*?)\)\s*(\w+)\s+ON TRUE",
+        re.S)
+    for m in pattern.finditer(src):
+        select_list, _, alias = m.group(1), m.group(2), m.group(3)
+        # Comments come out FIRST, before any splitting. English prose contains
+        # commas -- "computed, persisted, and then not read" -- so splitting on
+        # commas first tears a comment in half and leaves the fragment looking
+        # like a column expression. That is how this parser first reported the
+        # cm lateral as unparseable.
+        select_list = re.sub(r"--[^\n]*", "", select_list)
+        cols, ok = set(), True
+        for part in select_list.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            part = part.split("::")[0].strip()      # shares_outstanding::BIGINT
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", part):
+                cols.add(part)
+            else:
+                ok = False                          # expression — do not guess
+                break
+        if ok and cols:
+            out[alias] = cols
+    return out
+
+
+def test_every_lateral_column_referenced_is_actually_selected():
+    """A column referenced off a lateral alias but absent from its SELECT list
+    is an undefined-column error that takes the whole builder query down.
+
+    This is not hypothetical. discovery-9 spent 25 minutes computing
+    yearly_compute and daily_compute to completion, then crashed
+    universe_build on `ym.ev_ebitda` — which yearly_metrics has, but the ym
+    lateral did not select. The run correctly refused to publish and left its
+    evidence behind, and the cost of finding it was a full rebuild.
+
+    Nothing else catches this: the SQL is a valid Python string, and only
+    PostgreSQL parsing it objects.
+    """
+    import re
+    src = _builder_code()
+    laterals = _lateral_columns()
+
+    assert {"ym", "cm"} <= set(laterals), (
+        f"the lateral parser stopped recognising key aliases (found "
+        f"{sorted(laterals)}); fix the parser rather than the assertion")
+
+    missing = []
+    for alias, cols in laterals.items():
+        for ref in set(re.findall(rf"\b{alias}\.([A-Za-z_][A-Za-z0-9_]*)", src)):
+            if ref not in cols:
+                missing.append(f"{alias}.{ref}")
+
+    assert not missing, (
+        f"referenced but not selected by the lateral: {sorted(missing)}. "
+        f"PostgreSQL rejects the whole query, so universe_build cannot even "
+        f"record a failed stage.")
+
+
 # ── Standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

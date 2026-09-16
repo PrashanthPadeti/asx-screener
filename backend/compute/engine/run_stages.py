@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Mapping, Optional
 
 #: How many keys of each kind to keep on the record. The hashes carry the
@@ -131,6 +131,16 @@ class StageResult:
     #: from a count is not evidence.
     grain: str = "asx_code"
 
+    #: Set when the stage failed for a reason that is NOT set inequality, so
+    #: the two are not the same question.
+    #:
+    #: transform_prices makes this concrete: if staging legitimately halves,
+    #: the rebuilt target matches it exactly -- the populations are equal and
+    #: the proof passes -- and the shrink guard still refuses the replacement.
+    #: Deriving failure from set equality alone would call that stage a
+    #: success, which is the opposite of what happened.
+    failure_class: Optional[str] = None
+
     @property
     def missing(self) -> frozenset[str]:
         """Expected and not written. The missed-source class."""
@@ -145,7 +155,7 @@ class StageResult:
 
     @property
     def ok(self) -> bool:
-        return not self.missing and not self.extra
+        return not self.missing and not self.extra and not self.failure_class
 
     @property
     def status(self) -> str:
@@ -160,6 +170,10 @@ class StageResult:
             parts.append(f"{len(self.missing):,} expected but not written")
         if self.extra:
             parts.append(f"{len(self.extra):,} written but not expected")
+        if self.failure_class and not parts:
+            # The populations agreed and the stage still failed. Saying only
+            # "0 missing; 0 extra" here would read as a success.
+            parts.append(self.failure_class)
         return f"{self.stage_name}: {'; '.join(parts)} (by {self.grain})"
 
     def payload(self) -> dict:
@@ -172,6 +186,8 @@ class StageResult:
         """
         out: dict[str, object] = dict(self.details or {})
         out["grain"] = self.grain
+        if self.failure_class:
+            out["failure_class"] = self.failure_class
         for name, keys in (("missing", self.missing), ("extra", self.extra)):
             if keys:
                 out[f"{name}_sample"] = sorted(
@@ -256,6 +272,109 @@ def report_population(cur, run_id: Optional[int], result: Optional[StageResult],
         log.info("stage %s: %s — %s",
                  result.stage_name, result.status, result.summary())
     return result.ok
+
+
+def record_failed_stage_after_rollback(
+        dsn: str, run_id: Optional[int], result: StageResult, log, *,
+        failure_class: str, failure_message: str) -> bool:
+    """Persist FAILED stage evidence that a producer's own rollback destroyed.
+
+    A producer that holds its transaction open so a proof can gate the commit
+    has a gap in its evidence: when it refuses, the stage row it wrote rolls
+    back with the data. Publication stays blocked either way -- require_stages
+    asks for the POSITIVE record -- but absence conflates two very different
+    facts:
+
+        the stage never ran
+        the stage ran, proved a failure, and rolled its work back
+
+    We already decided that absence is not permission. This makes failure
+    equally explicit.
+
+    Call this ONLY after the producer transaction has rolled back. Recording
+    beforehand would put the evidence inside the transaction that is about to
+    discard it, which is the situation this exists to fix. The connection it
+    opens writes evidence and nothing else -- it must never be used to mutate
+    producer data, because an autonomous connection is precisely the thing that
+    can outlive the rollback it is describing.
+
+    The caller exits non-zero regardless of what this returns. A failure to
+    record evidence must never mask the producer failure it was describing.
+    """
+    import psycopg2  # local: the resolver imports this module without psycopg2
+
+    if not failure_class:
+        raise ValueError(
+            f"{result.stage_name}: a FAILED row needs a failure_class. "
+            f"Set equality alone does not classify the failure -- a stage can "
+            f"refuse with its populations in perfect agreement.")
+
+    if run_id is None:
+        log.error("No run id: the %s failure (%s) cannot be attributed to a "
+                  "run, so no stage evidence was recorded. The non-zero exit "
+                  "and the proof above are the only record.",
+                  result.stage_name, failure_class)
+        return False
+
+    failed = replace(
+        result,
+        failure_class=failure_class,
+        details={
+            **dict(result.details or {}),
+            "failure_message": failure_message,
+            # The forensic meaning, stated rather than inferred. A reader of
+            # this row must not have to wonder whether the target was left
+            # half-written.
+            "data_rolled_back": True,
+        })
+    assert not failed.ok, "a classified failure must not record as success"
+
+    conn = None
+    try:
+        conn = psycopg2.connect(dsn)
+
+        # The same isolation gate every writer passes. This connection was
+        # built from a DSN rather than inherited, so "it must be the same
+        # database" is exactly the assumption that has to be checked: writing
+        # a scratch run's failure into production's evidence table would
+        # corrupt the record this whole mechanism exists to keep trustworthy.
+        from compute.engine.runtime_envelope import prove as prove_envelope
+        prove_envelope(f"{result.stage_name}:evidence", conn)
+
+        cur = conn.cursor()
+
+        # A run's stage evidence is terminal and append-only. If a row already
+        # exists for this stage under this run, it stands: a retry is a new
+        # run, never an edit to an identity someone may already have read.
+        cur.execute("""
+            SELECT status FROM screener.compute_run_stages
+             WHERE run_id = %s AND stage_name = %s;""",
+            (run_id, result.stage_name))
+        existing = cur.fetchone()
+        if existing:
+            log.error("run %s already carries a '%s' row for %s; leaving it "
+                      "as written. A retry is a new run, not an edit.",
+                      run_id, existing[0], result.stage_name)
+            return False
+
+        record_stage(cur, run_id, failed)
+        conn.commit()
+        log.error("recorded FAILED stage evidence for %s under run %s "
+                  "(%s); the producer's own writes were rolled back.",
+                  result.stage_name, run_id, failure_class)
+        return True
+
+    except Exception as exc:
+        # Never mask the original producer failure with this one.
+        log.error("could not record FAILED stage evidence for %s under run "
+                  "%s: %s. The producer failure above stands and the process "
+                  "still exits non-zero; publication remains blocked because "
+                  "there is no success row.",
+                  result.stage_name, run_id, exc)
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def stages_passed(cur, run_id: int, required: Iterable[str]) -> list[str]:

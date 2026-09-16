@@ -201,6 +201,183 @@ def test_samples_are_bounded_and_say_so_when_truncated():
     assert payload["missing_truncated"] is True
 
 
+# ── FAILED evidence that outlives the rollback ───────────────────────────────
+
+def _failed_result(**kw):
+    return StageResult("transform_prices",
+                       frozenset({("BHP", 3, "a")}), frozenset(),
+                       {"full_run": True}, grain="asx_code+row_count", **kw)
+
+
+def test_a_stage_can_fail_with_its_populations_in_agreement():
+    """The shrink case.
+
+    If staging legitimately halves, the rebuilt target matches it exactly — 0
+    missing, 0 extra — and the replacement is still refused. Deriving failure
+    from set equality alone would record that stage as a success.
+    """
+    agreed = frozenset({("BHP", 3, "a")})
+    passing = StageResult("transform_prices", agreed, agreed)
+    assert passing.ok and passing.status == "success"
+
+    refused = StageResult("transform_prices", agreed, agreed,
+                          failure_class="shrink_refused")
+    assert not refused.ok and refused.status == "failed"
+    assert "shrink_refused" in refused.summary(), (
+        "a stage that failed with equal populations must not summarise as "
+        "'0 missing; 0 extra', which reads as success")
+    assert refused.payload()["failure_class"] == "shrink_refused"
+
+
+def test_recording_a_failure_demands_a_classification():
+    from compute.engine.run_stages import record_failed_stage_after_rollback
+    try:
+        record_failed_stage_after_rollback(
+            "dsn", 7, _failed_result(), Log(),
+            failure_class="", failure_message="something went wrong")
+    except ValueError as e:
+        assert "failure_class" in str(e)
+    else:
+        raise AssertionError("an unclassified failure was accepted")
+
+
+def test_no_run_id_means_no_attribution_but_still_a_loud_log():
+    from compute.engine.run_stages import record_failed_stage_after_rollback
+    log = Log()
+    assert not record_failed_stage_after_rollback(
+        "dsn", None, _failed_result(), log,
+        failure_class="population_not_covered", failure_message="mismatch")
+    assert "cannot be attributed" in log.text()
+
+
+def test_a_broken_evidence_write_never_masks_the_producer_failure():
+    """The secondary connection is best-effort by design.
+
+    It returns False and logs; the caller still exits non-zero, and publication
+    stays blocked because there is no success row either way.
+    """
+    from compute.engine.run_stages import record_failed_stage_after_rollback
+    log = Log()
+    # An unreachable DSN: psycopg2.connect raises inside the helper.
+    ok = record_failed_stage_after_rollback(
+        "postgresql://nobody@127.0.0.1:1/nonexistent?connect_timeout=1",
+        7, _failed_result(), log,
+        failure_class="population_not_covered", failure_message="mismatch")
+    assert ok is False
+    assert "could not record FAILED stage evidence" in log.text()
+    assert "publication remains blocked" in log.text()
+
+
+class FakeCursor:
+    """Answers the envelope's question, then the immutability check."""
+
+    def __init__(self, existing_status=None):
+        self.existing = existing_status
+        self.statements = []
+        self._answer = None
+
+    def execute(self, sql, params=None):
+        self.statements.append((" ".join(sql.split())[:60], params))
+        if "current_database()" in sql:
+            self._answer = ("asx_screener",)
+        elif "SELECT status" in sql:
+            self._answer = (self.existing,) if self.existing else None
+        else:
+            self._answer = None
+
+    def fetchone(self):
+        return self._answer
+
+    def close(self):
+        pass
+
+
+class FakeConn:
+    def __init__(self, cursor):
+        self._cursor = cursor
+        self.committed = self.closed = False
+
+    def cursor(self):
+        return self._cursor
+
+    def commit(self):
+        self.committed = True
+
+    def close(self):
+        self.closed = True
+
+
+def _with_fake_driver(cursor):
+    """Swap psycopg2.connect for the duration of one call."""
+    import psycopg2
+    conn = FakeConn(cursor)
+    real = psycopg2.connect
+    psycopg2.connect = lambda dsn: conn
+    return conn, (lambda: setattr(psycopg2, "connect", real))
+
+
+def test_failed_evidence_is_written_on_its_own_connection_and_committed():
+    from compute.engine.run_stages import record_failed_stage_after_rollback
+    cur = FakeCursor()
+    conn, restore = _with_fake_driver(cur)
+    log = Log()
+    try:
+        ok = record_failed_stage_after_rollback(
+            "dsn", 7, _failed_result(), log,
+            failure_class="population_not_covered",
+            failure_message="the rebuilt population does not match staging")
+    finally:
+        restore()
+
+    assert ok is True
+    assert conn.committed, "failure evidence was not committed"
+    assert conn.closed, "the evidence connection was left open"
+
+    sql = " ".join(s for s, _ in cur.statements)
+    assert "current_database()" in sql, (
+        "the evidence connection was built from a DSN and never proved which "
+        "database it reached; a scratch run could write into production's "
+        "evidence table")
+    assert "INSERT INTO screener.compute_run_stages" in sql
+
+    inserted = next(p for s, p in cur.statements if s.startswith("INSERT"))
+    assert inserted[2] == "failed"
+
+
+def test_an_existing_stage_row_is_never_overwritten():
+    """A retry is a new run, not an edit to an identity already read."""
+    from compute.engine.run_stages import record_failed_stage_after_rollback
+    for existing in ("success", "failed"):
+        cur = FakeCursor(existing_status=existing)
+        _conn, restore = _with_fake_driver(cur)
+        log = Log()
+        try:
+            ok = record_failed_stage_after_rollback(
+                "dsn", 7, _failed_result(), log,
+                failure_class="empty_rebuild", failure_message="no rows")
+        finally:
+            restore()
+        assert ok is False
+        assert not any(s.startswith("INSERT") for s, _ in cur.statements), (
+            f"a '{existing}' row was overwritten")
+        assert "retry is a new run" in log.text(), (
+            f"the refusal did not explain itself: {log.text()!r}")
+
+
+def test_the_failed_payload_says_the_data_was_rolled_back():
+    """A reader of the row must not have to wonder whether the target was left
+    half-written."""
+    from dataclasses import replace
+    failed = replace(_failed_result(), failure_class="empty_rebuild",
+                     details={"full_run": True, "data_rolled_back": True,
+                              "failure_message": "the rebuild produced no rows"})
+    payload = failed.payload()
+    assert payload["data_rolled_back"] is True
+    assert payload["failure_class"] == "empty_rebuild"
+    assert payload["failure_message"]
+    assert not failed.ok
+
+
 # ── Full replacement is old-complete or new-complete, never partial ──────────
 
 TRANSFORM_PRICES = (Path(__file__).resolve().parents[1]
@@ -268,18 +445,41 @@ def test_a_failing_code_aborts_the_full_run_rather_than_skipping_it():
         "a per-code failure during a full run does not abort the run")
 
 
-def test_every_refusal_restores_the_previous_state():
-    """Empty rebuild, sharp shrink, and a failed population proof must each
-    roll back — a refusal that leaves the truncate committed is not a refusal.
+def test_every_refusal_routes_through_the_one_rollback_path():
+    """Empty rebuild, sharp shrink and an uncovered population are three
+    failure classes with one exit: a refusal that leaves the TRUNCATE
+    committed is not a refusal.
+
+    Asserted as "there is exactly one way out", rather than checking each
+    message for a nearby rollback — a fourth refusal added later with its own
+    bespoke exit would pass that check and still commit.
     """
-    src = " ".join(_code_lines())
-    for refusal in ("the rebuild produced no rows",
-                    "would shrink",
-                    "does not match"):
-        idx = src.index(refusal)
-        # The rollback precedes the message it explains.
-        assert "conn.rollback()" in src[max(0, idx - 400):idx], (
-            f"the {refusal!r} refusal does not roll back")
+    lines = _code_lines()
+    classes = [l for l in lines if 'failure = ("' in l]
+    assert len(classes) >= 3, f"expected three failure classes, found {classes}"
+
+    returns = [l.strip() for l in lines
+               if l.strip().startswith("return ") and "refuse(" in l]
+    assert len(returns) == 1, (
+        f"a full run has {len(returns)} refusal exits; each extra one is a "
+        f"path that can skip the rollback")
+
+
+def test_the_refusal_rolls_back_before_it_records_why():
+    """Evidence must describe a replacement that definitively did not happen.
+
+    Recording first would put the FAILED row inside the transaction that is
+    about to discard it — which is the gap this whole mechanism closes.
+    """
+    lines = _code_lines()
+    start = next(i for i, l in enumerate(lines) if l.startswith("def refuse("))
+    body = lines[start:start + 30]
+
+    rollback = next(i for i, l in enumerate(body) if "conn.rollback()" in l)
+    record = next(i for i, l in enumerate(body)
+                  if "record_failed_stage_after_rollback(" in l and "import" not in l)
+    assert rollback < record, (
+        "failure evidence is written before the rollback that makes it true")
 
 
 def test_the_proof_gates_the_commit_rather_than_describing_it():

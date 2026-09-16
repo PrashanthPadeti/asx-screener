@@ -270,63 +270,48 @@ def main():
     # For a full run everything so far is still uncommitted, so these checks
     # decide whether the replacement happens at all rather than describing one
     # that already did.
+    #
+    # The population proof runs BEFORE the guards, so that every refusal below
+    # carries the same fully computed evidence. It costs two GROUP BY passes on
+    # a rebuild that is about to be rejected -- which is exactly the run whose
+    # evidence is worth the most.
+    details = {"codes_failed": failed, "full_run": is_full_run}
+    result = build_population_result(cur, args, details)
+    ok = prove_population(cur, args, result)
+
     if is_full_run:
         cur.execute("SELECT count(*), count(DISTINCT asx_code) "
                     "FROM market.daily_prices")
         new_rows, new_codes = cur.fetchone()
-
-        if new_rows == 0:
-            conn.rollback()
-            log.error("REFUSING to commit: the rebuild produced no rows. "
-                      "market.daily_prices is unchanged (%s rows).",
-                      f"{prior_rows:,}")
-            cur.close(); conn.close()
-            return 1
+        details.update(prior_rows=prior_rows, prior_codes=prior_codes,
+                       new_rows=new_rows, new_codes=new_codes)
 
         # The shrink guard, on the same reasoning as market.dividends: a source
         # that has stopped answering can still technically produce rows, and it
         # must not be allowed to overwrite a good dataset just because it did.
         shrunk = (prior_rows and new_rows < prior_rows * SHRINK_FLOOR) or \
                  (prior_codes and new_codes < prior_codes * SHRINK_FLOOR)
-        if shrunk and not args.allow_shrink:
-            conn.rollback()
-            log.error("REFUSING to commit: rebuild would shrink "
-                      "market.daily_prices from %s rows / %s codes to "
-                      "%s rows / %s codes. market.daily_prices is unchanged. "
-                      "Check the raw zone and the staging load; pass "
-                      "--allow-shrink if the contraction is genuine.",
-                      f"{prior_rows:,}", f"{prior_codes:,}",
-                      f"{new_rows:,}", f"{new_codes:,}")
-            cur.close(); conn.close()
-            return 1
-        if shrunk:
+        if shrunk and args.allow_shrink:
             log.warning("Rebuild shrinks the table and --allow-shrink was "
                         "given: %s → %s rows.",
                         f"{prior_rows:,}", f"{new_rows:,}")
+            shrunk = False
 
-    ok = prove_population(cur, args, {"codes_failed": failed,
-                                      "full_run": is_full_run})
+        failure = None
+        if new_rows == 0:
+            failure = ("empty_rebuild",
+                       "the rebuild produced no rows")
+        elif shrunk:
+            failure = ("shrink_refused",
+                       f"rebuild would shrink market.daily_prices from "
+                       f"{prior_rows:,} rows / {prior_codes:,} codes to "
+                       f"{new_rows:,} rows / {new_codes:,} codes")
+        elif not ok:
+            failure = ("population_not_covered",
+                       "the rebuilt population does not match staging")
 
-    if is_full_run and not ok:
-        # The whole point of holding the transaction open. The proof is a
-        # precondition of the replacement, not a report on one that already
-        # happened -- a proof that can only tell you afterwards that the
-        # rebuild was incomplete cannot undo it.
-        #
-        # The stage row prove_population just wrote rolls back with everything
-        # else, so a refused full run leaves no failed stage row. That is the
-        # correct trade here and not a silent one: the refusal is on the exit
-        # code and in the log above, and require_stages asks for the POSITIVE
-        # record, so an absent row blocks publication exactly as a failed one
-        # would. Recording the failure durably would need a second connection,
-        # which is a change to make deliberately, not as a side effect of this
-        # one.
-        conn.rollback()
-        log.error("REFUSING to commit: the rebuilt population does not match "
-                  "staging. market.daily_prices is unchanged (%s rows).",
-                  f"{prior_rows:,}")
-        cur.close(); conn.close()
-        return 1
+        if failure:
+            return refuse(conn, cur, result, prior_rows, args.run_id, *failure)
 
     conn.commit()
     log.info("Committed.")
@@ -335,7 +320,45 @@ def main():
     return 0 if ok else 1
 
 
-def prove_population(cur, args, details: dict) -> bool:
+def refuse(conn, cur, result, prior_rows, run_id, failure_class, message) -> int:
+    """Roll back to the previous complete state, then record why.
+
+    The order is the whole point. The rollback comes first, so the evidence
+    describes a replacement that definitively did not happen; only then does a
+    second, independent connection persist the FAILED row the rollback
+    destroyed. Recording beforehand would put the evidence inside the
+    transaction that is about to discard it.
+
+    A failure to record evidence never masks the refusal it was describing:
+    the exit code is 1 either way, and publication stays blocked because there
+    is still no success row.
+    """
+    from compute.engine.run_stages import record_failed_stage_after_rollback
+
+    conn.rollback()
+    log.error("REFUSING to commit: %s. market.daily_prices is unchanged "
+              "(%s rows).", message, f"{prior_rows:,}")
+    cur.close()
+    conn.close()
+
+    if result is not None:
+        record_failed_stage_after_rollback(
+            DB_URL, run_id, result, log,
+            failure_class=failure_class, failure_message=message)
+    return 1
+
+
+def prove_population(cur, args, result) -> bool:
+    """Print the proof and record it. `result` is None for a scoped run."""
+    from compute.engine.run_stages import report_population
+
+    return report_population(
+        cur, args.run_id, result, log,
+        scoped_reason=("a scoped run's expected population is not the source "
+                       "domain" if result is None else ""))
+
+
+def build_population_result(cur, args, details: dict):
     """Does market.daily_prices now hold exactly what staging holds?
 
     Asked of the TARGET AFTER the write, both directions, over the same window
@@ -350,13 +373,10 @@ def prove_population(cur, args, details: dict) -> bool:
     the window lacks today's date and the member differs, however much correct
     history sits beside it.
     """
-    from compute.engine.run_stages import StageResult, report_population
+    from compute.engine.run_stages import StageResult
 
     if args.codes:
-        return report_population(
-            cur, getattr(args, "run_id", None), None, log,
-            scoped_reason="a scoped run's expected population is not the "
-                          "source domain")
+        return None
 
     # The same date window applied to both sides. Applying it to one side only
     # would report every row outside the window as a difference.
@@ -378,11 +398,10 @@ def prove_population(cur, args, details: dict) -> bool:
     cur.execute(_digest_sql("market.daily_prices", STAGING_DATE, tgt_w), params)
     written = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
-    result = StageResult(
+    return StageResult(
         "transform_prices",
         frozenset(expected), frozenset(written), details,
         grain="asx_code+row_count+date_set_digest")
-    return report_population(cur, getattr(args, "run_id", None), result, log)
 
 
 if __name__ == "__main__":

@@ -182,6 +182,55 @@ def test_negative_zero_is_not_a_different_number():
     assert quantise(-0.25, 2) == "-0.25"
 
 
+def test_a_boolean_metric_from_pandas_matches_a_boolean_from_postgresql():
+    """discovery-14, exactly: 892 rows, zero field mismatches, 892 hash
+    differences, and a canonical run refused on the strength of it.
+
+    BOOLEAN_METRICS arrive from pandas as floats — gross_margin_expanding is
+    1.0, not True — and PostgreSQL returns a real boolean. 1.0 == True in
+    Python, so the field check called them equal; json.dumps rendered 1.0
+    against true, so the hash called them different. The validator disagreed
+    with itself and the disagreement was reported as a persistence failure.
+    """
+    from compute.engine.universe_writer import BOOLEAN_METRICS
+
+    boolean = sorted(BOOLEAN_METRICS)[0]
+    scales = {column_for(boolean): None}          # BOOLEAN has no scale
+    col = lambda m: column_for(m)                  # noqa: E731
+
+    mk = lambda v: {boolean: Assessment(            # noqa: E731
+        boolean, Applicability.APPLICABLE, v, "", Domain.GENERAL_CORPORATE)}
+
+    intent = row_payload(mk(1.0), [boolean], scales, col)    # pandas float
+    stored = row_payload(mk(True), [boolean], scales, col)   # PostgreSQL bool
+
+    assert intent == stored, "field comparison must still agree"
+    assert payload_hash(intent) == payload_hash(stored), (
+        "a pandas float and the boolean it becomes must hash identically")
+
+    # And False must not collapse into True.
+    assert payload_hash(row_payload(mk(0.0), [boolean], scales, col)) \
+        != payload_hash(intent)
+
+
+def test_a_hash_difference_with_no_field_difference_is_named_as_our_defect():
+    """The triage rule, encoded in the instrument.
+
+    A hash difference where every field compares equal cannot be the database
+    being wrong — it is this module contradicting itself. Reporting it beside
+    genuine persistence failures is how a night gets spent debugging the
+    writer.
+    """
+    r = ReadBackReport(intended=1, written=1, read_back=1, governed_metrics=72)
+    r.renderer_inconsistent = ["AAA"]
+
+    assert not r.ok
+    summary = r.summary()
+    assert "VALIDATOR-INTERNAL" in summary
+    assert "instrument defect" in summary
+    assert "payload hash differences" not in summary
+
+
 def test_a_real_difference_is_still_caught():
     """Quantisation must reconcile precision, not substance."""
     codes = ["AAA"]

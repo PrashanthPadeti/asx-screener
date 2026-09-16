@@ -83,16 +83,22 @@ class ReadBackReport:
     mismatched: list[tuple[str, str, object, object]] = field(default_factory=list)
     contract: list[tuple[str, object]] = field(default_factory=list)
     hash_differs: list[str] = field(default_factory=list)
+    #: Rows whose hash differs while every field compares equal. That is this
+    #: module contradicting itself, not the database being wrong, and it is
+    #: counted separately so nobody spends a night debugging the writer.
+    renderer_inconsistent: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return not (self.missing or self.unexpected or self.mismatched
-                    or self.contract or self.hash_differs)
+                    or self.contract or self.hash_differs
+                    or self.renderer_inconsistent)
 
     @property
     def failure_count(self) -> int:
         return (len(self.missing) + len(self.unexpected) + len(self.mismatched)
-                + len(self.contract) + len(self.hash_differs))
+                + len(self.contract) + len(self.hash_differs)
+                + len(self.renderer_inconsistent))
 
     def summary(self) -> str:
         if self.ok:
@@ -107,6 +113,11 @@ class ReadBackReport:
             parts.append(f"{len(self.mismatched):,} field mismatches")
         if self.hash_differs:
             parts.append(f"{len(self.hash_differs):,} payload hash differences")
+        if self.renderer_inconsistent:
+            parts.append(
+                f"{len(self.renderer_inconsistent):,} VALIDATOR-INTERNAL "
+                f"inconsistencies (hash differs, every field equal — this is "
+                f"an instrument defect, not a persistence defect)")
         if self.contract:
             parts.append(f"{len(self.contract):,} contract violations")
         return "read-back FAILED: " + "; ".join(parts)
@@ -148,6 +159,13 @@ class ReadBackReport:
                       getattr(v, "metric", "?"), v)
         for code in self.hash_differs[:DETAIL_LIMIT]:
             log.error("  PAYLOAD     %s — normalised payloads differ", code)
+        if self.renderer_inconsistent:
+            log.error("  VALIDATOR   %s rows hash differently while every "
+                      "field compares equal. Fix the renderer, not the "
+                      "writer: %s%s",
+                      len(self.renderer_inconsistent),
+                      ", ".join(self.renderer_inconsistent[:10]),
+                      " ..." if len(self.renderer_inconsistent) > 10 else "")
         if self.failure_count > DETAIL_LIMIT:
             log.error("  ... %s further failures not listed",
                       self.failure_count - DETAIL_LIMIT)
@@ -244,8 +262,24 @@ def row_payload(assessments: Mapping[str, object],
         if a is None:
             out[metric] = {"__absent__": True}
             continue
+        # storage_value() first, then quantise.
+        #
+        # The intent side must be rendered from what the WRITER sends, not
+        # from the raw assessment. BOOLEAN_METRICS arrive from pandas as
+        # floats -- gross_margin_expanding is 1.0, not True -- and PostgreSQL
+        # returns a real boolean. 1.0 == True in Python, so the field-by-field
+        # check below called them equal, while json.dumps rendered 1.0 against
+        # true and the hash called them different.
+        #
+        # discovery-14: 892 rows, zero field mismatches, 892 hash differences.
+        # A validator disagreeing with itself, reported as a persistence
+        # failure. storage_value is the writer's own coercion, so using it
+        # here means the intent payload is the payload that was written.
+        from compute.engine.universe_writer import storage_value
+
         out[metric] = {
-            "v": quantise(a.value, scales.get(column_of(metric))),
+            "v": quantise(storage_value(metric, a.value),
+                          scales.get(column_of(metric))),
             "s": a.state.value,
             "c": a.cause.value if getattr(a, "cause", None) is not None else None,
         }
@@ -317,7 +351,21 @@ def verify_population(cur, by_code: Mapping[str, Mapping[str, object]],
                     (code, metric, want[metric], got[metric]))
 
         if payload_hash(want) != payload_hash(got):
-            report.hash_differs.append(code)
+            # A hash difference with no field difference is the validator
+            # disagreeing with itself, and it must never again be reported as
+            # a persistence failure.
+            #
+            # The field check compares with Python ==; the hash compares
+            # serialised JSON. Those are not the same relation: 1.0 == True is
+            # true in Python and false in JSON. discovery-14 produced 892 of
+            # these and they read as 892 broken rows.
+            #
+            # Separating them applies the triage rule in the instrument
+            # instead of leaving it to whoever reads the log at midnight.
+            if any(c == code for c, _, _, _ in report.mismatched):
+                report.hash_differs.append(code)
+            else:
+                report.renderer_inconsistent.append(code)
 
         # The contract, against what is actually stored.
         restored_values = {m: a.value for m, a in restored.items()}

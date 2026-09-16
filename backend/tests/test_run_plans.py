@@ -336,7 +336,7 @@ def test_the_resolver_validates_against_each_runs_own_plan():
     query going back to one static list and every daily run vanishing from the
     API while its logs say it published.
     """
-    sql = _code("app/api/v1/routes/screener.py")
+    sql = _code("compute/engine/run_resolution.py")
     assert "JOIN plan_requirements pr ON pr.plan_name = r.plan_name" in sql, (
         "the resolver no longer joins runs to their own plan's requirements")
     assert "LEFT JOIN plan_requirements" not in sql, (
@@ -347,6 +347,30 @@ def test_the_resolver_validates_against_each_runs_own_plan():
         "the resolver still references the static tuple that hid daily runs")
     assert "plan_requirements()" in sql, (
         "the requirements are not derived from the plan declarations")
+
+
+def test_the_route_and_the_harness_share_one_definition_of_servable():
+    """A second copy is the failure it would be used to detect: an assertion
+    bundle with its own idea of "servable" can report that the resolver
+    refuses a failed run while the resolver, reading a different query, serves
+    it."""
+    route = _code("app/api/v1/routes/screener.py")
+    assert "VALIDATED_RUNS_SQL_TEXT = VALIDATED_RUNS_SQL" in route, (
+        "the route defines its own copy of the resolution query")
+    # The route keeps ATTEMPTED_RUNS_SQL_TEXT, a diagnostic that LEFT JOINs
+    # finalizations to count attempts. That is a different question and stays.
+    # What must not come back is a second RESOLUTION query, whose signature is
+    # the plan_requirements CTE.
+    assert "plan_requirements AS (" not in route, (
+        "the route carries its own copy of the resolution query")
+    assert "from compute.engine.run_resolution import VALIDATED_RUNS_SQL" in route
+
+    # And the synchronous form is derived from the same text, not retyped.
+    shared = _code("compute/engine/run_resolution.py")
+    assert "_PSYCOPG_SUBS" in shared and "def validated_runs_sql_psycopg" in shared
+    assert shared.count("compute_run_finalizations f ON f.run_id") == 1, (
+        "the psycopg2 variant is a second copy of the statement rather than a "
+        "substitution of the first")
 
 
 def test_publication_resolves_the_plan_from_the_run_not_the_flag():

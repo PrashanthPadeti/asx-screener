@@ -45,6 +45,7 @@ from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 # The writer and the reader must agree on what "published" means, so the
 # required stage set is imported rather than restated here.
 from compute.engine.run_plans import plan_requirements
+from compute.engine.run_resolution import VALIDATED_RUNS_SQL
 from compute.engine.screen_predicates import CriterionType
 from compute.engine.screen_sql import (
     CompileError, RunScope, ValidatedRun, plan_screen,
@@ -68,28 +69,11 @@ from compute.engine.screen_sql import (
 # than a count, because counting success rows would accept two successes for
 # one stage and none for the other. Absence of a stage row is not permission:
 # a stage that never ran has no failed row either.
-VALIDATED_RUNS_SQL_TEXT = """
-    WITH plan_requirements AS (
-        SELECT key AS plan_name,
-               ARRAY(SELECT jsonb_array_elements_text(value)) AS required
-          FROM jsonb_each(CAST(:plan_requirements AS jsonb))
-    )
-    SELECT r.id, r.factor_model_version, r.unhealthy_sources, r.detail
-      FROM screener.compute_runs r
-      JOIN screener.compute_run_finalizations f ON f.run_id = r.id
-      JOIN plan_requirements pr ON pr.plan_name = r.plan_name
-     WHERE r.factor_model_version = ANY(:supported)
-       AND f.persistence_violations = 0
-       AND NOT EXISTS (
-           SELECT 1 FROM unnest(pr.required) AS req(name)
-            WHERE NOT EXISTS (
-                SELECT 1 FROM screener.compute_run_stages s
-                 WHERE s.run_id     = r.id
-                   AND s.stage_name = req.name
-                   AND s.status     = 'success'))
-     ORDER BY r.run_at DESC
-     LIMIT :limit
-"""
+# The one definition of what may be served, imported rather than restated.
+# A second copy here would be exactly the failure it exists to detect: the
+# rehearsal's assertion bundle asking a different question of the same
+# database and reporting agreement.
+VALIDATED_RUNS_SQL_TEXT = VALIDATED_RUNS_SQL
 
 # Asked only when the query above returns nothing, to tell an operator which
 # of several very different situations they are in. "No validated snapshot"

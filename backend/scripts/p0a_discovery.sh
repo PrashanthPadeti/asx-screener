@@ -503,7 +503,58 @@ do_role() {
 
 # ── preflight (the acceptance boundary) + sentinel ────────────────────────────
 
+#: The production sentinel, across EVERY authority a stage holds.
+#:
+#: It used to mean PostgreSQL alone, and discovery-15 passed it while flushing
+#: production Redis: the database sentinel was spotless and the rehearsal had
+#: still reached out of its box. The boundary is the execution context, so the
+#: evidence has to say what was actually checked -- otherwise "sentinel
+#: unchanged" drifts back to meaning "the database was unchanged", which is the
+#: exact claim d15 satisfied while being wrong.
 capture_sentinel() {
+    echo "--- postgres"
+    capture_sentinel_postgres
+    echo "--- redis"
+    capture_sentinel_redis
+    echo "--- email"
+    capture_sentinel_email
+}
+
+#: Production Redis, by key census rather than by trusting REDIS_URL. Counts
+#: and a digest of the screener keyspace: a flush shows as a count change, and
+#: a rewrite that preserves the count shows in the digest.
+capture_sentinel_redis() {
+    local url="${REDIS_URL:-redis://localhost:6379/0}"
+    if ! command -v redis-cli >/dev/null 2>&1; then
+        echo "redis_census|UNAVAILABLE (no redis-cli — cannot prove Redis untouched)"
+        return 0
+    fi
+    local keys
+    keys=$(redis-cli -u "$url" --scan --pattern 'asx:screener:*' 2>/dev/null | sort)
+    echo "redis_endpoint|$(echo "$url" | sed 's#//.*@#//***@#')"
+    echo "redis_screener_keys|$(printf '%s' "$keys" | grep -c . || true)"
+    echo "redis_screener_digest|$(printf '%s' "$keys" | md5sum | cut -d' ' -f1)"
+    echo "redis_dbsize|$(redis-cli -u "$url" DBSIZE 2>/dev/null | tr -d '\r')"
+}
+
+#: No outbound rehearsal email. alert.py suppresses on P0A_EXPECTED_DB, and
+#: this records the suppression's own precondition alongside the mail-log
+#: position, so "no email was sent" is evidence rather than an assumption.
+capture_sentinel_email() {
+    echo "email_suppression_armed|${P0A_EXPECTED_DB:+yes}"
+    local maillog=/var/log/mail.log
+    if [ -r "$maillog" ]; then
+        echo "mail_log_bytes|$(stat -c %s "$maillog" 2>/dev/null || echo '-')"
+    else
+        echo "mail_log_bytes|unreadable"
+    fi
+    # Resend is an HTTPS API, so there is no local spool to measure. What can
+    # be stated is that the suppression path is the one compiled in.
+    echo "alert_suppression_var|$(grep -c 'P0A_EXPECTED_DB' \
+        "$BACKEND/scripts/utils/alert.py" 2>/dev/null || echo 0)"
+}
+
+capture_sentinel_postgres() {
     $PSQL_PROD -F '|' -c "
         SELECT 'universe_rows',        count(*)::text FROM screener.universe
         UNION ALL SELECT 'universe_active',     count(*)::text FROM screener.universe WHERE status='active'
@@ -725,6 +776,38 @@ do_run() {
     fi
     echo
     echo "canonical run published"
+}
+
+# ── adversarial ───────────────────────────────────────────────────────────────
+#
+# The assertion bundle, against the real scratch database, anchored to run ids
+# the operator names. Never "the latest run": an unrelated run existing would
+# make the report prove correct behaviour about the wrong lifecycle.
+#
+#   RUN_B=43 RUN_C=44 DRIVER_EXIT=1 p0a_discovery.sh adversarial C
+do_adversarial() {
+    local case_name="${1:-}"
+    case "$case_name" in
+        B|C|D) ;;
+        *) echo "usage: p0a_discovery.sh adversarial {B|C|D}" >&2; return 2 ;;
+    esac
+
+    local url_sync
+    url_sync=$(scratch_url "$DATABASE_URL_SYNC") || return 2
+
+    local argv=(--case "$case_name")
+    [ -n "${RUN_A:-}" ] && argv+=(--run-a "$RUN_A")
+    [ -n "${RUN_B:-}" ] && argv+=(--run-b "$RUN_B")
+    [ -n "${RUN_C:-}" ] && argv+=(--run-c "$RUN_C")
+    [ -n "${RUN_D:-}" ] && argv+=(--run-d "$RUN_D")
+    [ -n "${DRIVER_EXIT:-}" ] && argv+=(--driver-exit "$DRIVER_EXIT")
+    [ -n "${DRIVER_LOG:-}" ] && argv+=(--driver-log "$DRIVER_LOG")
+
+    # Read-only, and pointed at scratch. P0A_EXPECTED_DB is set so that any
+    # writer reached by accident refuses rather than writes.
+    DATABASE_URL_SYNC="$url_sync" P0A_EXPECTED_DB="$SCRATCH" \
+        P0A_REDIS_MODE=disabled \
+        "$PYBIN" scripts/p0a_adversarial_assertions.py "${argv[@]}"
 }
 
 # ── evidence ──────────────────────────────────────────────────────────────────

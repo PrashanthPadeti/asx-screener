@@ -80,30 +80,69 @@ The canonical tail runs **weekly**. That mismatch is the defect.
 
 ---
 
+## Side-effect authority
+
+Every authority a stage holds beyond its PostgreSQL connection, classified.
+**Surveyed, not assumed** — `smtplib|resend|requests.post|httpx|webhook|boto3|
+stripe|redis` across every orchestrated stage.
+
+| Authority | Where | Reached by | Rehearsal disposition |
+|---|---|---|---|
+| **PostgreSQL** | every compute stage | `DATABASE_URL_SYNC` | **redirected** — scratch database, and each child proves its own `current_database()` before its first statement |
+| **Redis** | `build_screener_universe._flush_screener_cache` (the only one) | `os.getenv("REDIS_URL", "redis://localhost:6379/0")` | **redirected** — logical db 15; the default is what flushed production in d15 |
+| **Filesystem (raw zone)** | `download_eod_prices`, `download_short_positions` | `RAW_DATA_DIR` | **redirected**, or skipped — a rehearsal reuses the existing raw zone read-only |
+| **Email (Resend)** | `scripts/utils/alert.py`, called by **both orchestrators** on any step failure | `RESEND_API_KEY` + `ADMIN_EMAILS` | **explicitly disabled** in the child on `P0A_EXPECTED_DB` |
+| **External API (read)** | EODHD, ASIC downloads | `EODHD_API_KEY` | **not exercised** — read-only, but consumes the metered budget `budget_audit.py` governs |
+| Webhooks / object storage / payment | — | — | **none exist** in any orchestrated stage |
+
+The email path deserves its own note. It fires on the **failure** path, which
+is the path a rehearsal is most likely to reach, and it would tell the real
+admins that the **production** pipeline failed and to SSH in and re-run it —
+when what failed was a rehearsal against a scratch database. The likelier the
+side effect, the less acceptable it is to leave it to an environment
+convention, so it is refused in `alert.py` on the same signal the database and
+Redis gates use, and both directions are asserted in
+`tests/test_runtime_envelope.py`: suppressed under confinement, and still
+reaching the send path in production, so the suppression cannot quietly become
+a permanent disablement.
+
+**No stage is left unresolved-blocking.** Every authority above is redirected,
+disabled, or shown not to exist.
+
+---
+
 ## Stage manifest
 
 `GOV?` = writes one or more of the 72 governed storage columns.
 `POST-FIN?` = can run after a finalisation and mutate governed storage.
+`AUTHORITY` = non-PostgreSQL side effects, per the table above.
 
 ### Daily pipeline — `scripts/eodhd/v2/jobs/daily_pipeline.py`
 
-| # | Entrypoint | Writes | Reads | GOV? | POST-FIN? |
+Every step is additionally reached by the orchestrator's **email** authority:
+a non-zero exit from any of them calls `send_failure_alert`.
+
+| # | Entrypoint | Writes | GOV? | POST-FIN? | AUTHORITY |
 |---|---|---|---|---|---|
-| 1 | `download_eod_prices.py` | *(raw zone, filesystem)* | `market.companies` | no | no |
-| 2 | `asic/download_short_positions.py` | *(raw zone)* | — | no | no |
-| 3 | `load_to_staging_prices.py` | `staging_au.eod_prices` | — | no | no |
-| 4 | `asic/load_to_staging_short.py` | `staging_au.short_positions` | — | no | no |
-| 5 | `transforms/transform_prices.py` | `market.daily_prices` | `staging_au.eod_prices`, `staging_au.company_profile` | no | no |
-| 6 | `asic/transforms/transform_short.py` | `market.short_positions` | staging | no | no |
-| 7 | `compute/engine/daily_compute.py` | `market.computed_metrics` | prices, dividends, financials, companies | **feeds** | no |
-| 8 | `compute/engine/technical_compute.py` | `market.daily_metrics` | prices, companies, shares_stats | **feeds** | no |
-| 9 | `compute/engine/halfyearly_compute.py` | `market.halfyearly_metrics` | `market.quarterly_metrics` | **feeds** | no |
-| 10 | `compute/engine/period_metrics_compute.py` | `market.period_metrics` | `market.daily_prices` | **feeds** | no |
-| 11–12 | index / fund prices | index + fund tables | — | no | no |
-| **13** | **`build_screener_universe.py`** | **`screener.universe`** | financials, cm, ym, daily_metrics, valuation_snapshot, dividends, announcements, staging | **YES** | **YES — the defect** |
-| 14 | `compute/engine/heatmap_compute.py` | `market.heatmap_cache`, `heatmap_labels` | `screener.universe`, prices | no | no |
-| 15 | market snapshots | snapshot tables | universe | no | no |
+| 1 | `download_eod_prices.py` | *(raw zone, filesystem)* | no | no | filesystem, EODHD read |
+| 2 | `asic/download_short_positions.py` | *(raw zone)* | no | no | filesystem, ASIC read |
+| 3 | `load_to_staging_prices.py` | `staging_au.eod_prices` | no | no | filesystem read |
+| 4 | `asic/load_to_staging_short.py` | `staging_au.short_positions` | no | no | filesystem read |
+| 5 | `transforms/transform_prices.py` | `market.daily_prices` | no | no | postgres only |
+| 6 | `asic/transforms/transform_short.py` | `market.short_positions` | no | no | postgres only |
+| 7 | `compute/engine/daily_compute.py` | `market.computed_metrics` | **feeds** | no | postgres only |
+| 8 | `compute/engine/technical_compute.py` | `market.daily_metrics` | **feeds** | no | postgres only |
+| 9 | `compute/engine/halfyearly_compute.py` | `market.halfyearly_metrics` | **feeds** | no | postgres only |
+| 10 | `compute/engine/period_metrics_compute.py` | `market.period_metrics` | **feeds** | no | postgres only |
+| 11–12 | index / fund prices | index + fund tables | no | no | EODHD read |
+| **13** | **`build_screener_universe.py`** | **`screener.universe`** | **YES** | **YES — the defect** | **postgres + REDIS** |
+| 14 | `compute/engine/heatmap_compute.py` | `market.heatmap_cache`, `heatmap_labels` | no | no | postgres only |
+| 15 | market snapshots | snapshot tables | no | no | postgres only |
 | — | **canonical tail** | — | — | — | **ABSENT** |
+
+Step 13 is the only stage in either pipeline holding an authority outside
+PostgreSQL and its own filesystem — and it is also the stage at the centre of
+the temporal integrity defect.
 
 ### Weekly pipeline — `scripts/eodhd/v2/jobs/weekly_pipeline.py`
 
@@ -118,7 +157,7 @@ The canonical tail runs **weekly**. That mismatch is the defect.
 | 5 | `halfyearly_compute.py` | `market.halfyearly_metrics` | **feeds** | |
 | 6 | `weekly_compute.py` | `market.weekly_metrics` | no | |
 | 7 | `monthly_compute.py` | `market.monthly_metrics` | no | 1st Monday only |
-| 8 | `build_screener_universe.py` | `screener.universe` | **YES** | |
+| 8 | `build_screener_universe.py` | `screener.universe` | **YES** | **holds the Redis authority** |
 | **9a** | **`composite_score.py`** | **`screener.universe` (canonical)** | **YES — canonical** | the only finalisation today |
 | 9b | `pros_cons.py` | `screener.universe` (`pros`, `cons`) | **no — 0/72** | safe post-finalisation |
 | 9c | `sector_benchmarks.py` | `market.sector_benchmarks` | no | reads universe |
@@ -142,17 +181,20 @@ which is the *only* reason they may run after a finalisation. Asserted by
 
 Not yet established; required before the rehearsal is designed.
 
-1. **Target isolation per stage.** Every write-producing stage must prove the
-   database it actually reached immediately before its first write. The
-   orchestrators spawn subprocesses (`subprocess.run`), so a single inherited
-   `DATABASE_URL_SYNC` proves nothing about what each child resolved — some
-   call `load_dotenv()` again, some build async URLs, some connect
-   independently.
-2. **Non-PostgreSQL side effects.** Known so far: Redis cache invalidation in
-   `build_screener_universe` (*"Cache invalidated: 2 asx:screener:* keys
-   flushed"* — it flushed **production** Redis during a scratch run),
-   filesystem raw-zone writes, and the email paths in the alert/digest
-   workers. Each must be redirected, disabled, or shown irrelevant.
+1. ~~**Target isolation per stage.**~~ **CLOSED** — `compute/engine/
+   runtime_envelope.py`. Each of the eight canonical-path writers proves its
+   own `current_database()` through the connection it is about to write
+   through, as the first executable statement after connecting. Asked of the
+   live connection, never of the URL the caller meant to use: the
+   orchestrators spawn stages with `subprocess.run` and several re-read
+   `.env`, so a redirect proven in the parent proves nothing about the child.
+   Outside a discovery run the gate only logs. Nine guards in
+   `tests/test_runtime_envelope.py`, each mutation-tested until it failed.
+2. ~~**Non-PostgreSQL side effects.**~~ **CLOSED** — see
+   [Side-effect authority](#side-effect-authority). Nothing unresolved
+   remains: Redis and the filesystem redirected, email disabled under
+   confinement, external APIs read-only, and no webhook, object-store or
+   payment authority exists in any orchestrated stage.
 3. **APScheduler set.** 19 jobs; only `asx_indices` and `short_positions`
    touch `screener.universe`. The remainder (alerts, digests, portfolio,
    announcements, capital raises, cleanup, predictions) are **not** part of

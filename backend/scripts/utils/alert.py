@@ -63,6 +63,24 @@ def send_failure_alert(
         target_date: ISO date string the pipeline was processing
         exit_code:   The subprocess exit code that triggered the failure
     """
+    # A discovery run must not send mail. The alert would go to the real
+    # admins, from the production sender, reporting that the PRODUCTION
+    # pipeline failed and telling the reader to SSH in and re-run it — while
+    # what actually failed was a rehearsal against a scratch database.
+    #
+    # This is the failure path, so it is the one a rehearsal is most likely to
+    # reach: the likelier the side effect, the less acceptable it is to leave
+    # it to an environment convention. Refused in the child, on the same
+    # signal the database and Redis gates use.
+    expected_db = os.getenv("P0A_EXPECTED_DB", "")
+    if expected_db:
+        log.warning(
+            "send_failure_alert: SUPPRESSED — this process is confined to '%s'. "
+            "%s pipeline, %s, exit %s. Read the failure from the run log and "
+            "screener.compute_run_stages, not from your inbox.",
+            expected_db, pipeline, step, exit_code)
+        return
+
     api_key    = os.getenv("RESEND_API_KEY", "")
     from_addr  = os.getenv("EMAIL_FROM", "noreply@asxscreener.com.au")
     admin_raw  = os.getenv("ADMIN_EMAILS", "asxscreener@gmail.com")

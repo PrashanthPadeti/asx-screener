@@ -151,6 +151,53 @@ def test_isolated_or_disabled_redis_is_permitted():
             assert env.discovery
 
 
+# ── Outbound side effects ────────────────────────────────────────────────────
+
+def _alert_log(**env):
+    """Call send_failure_alert and return what it logged."""
+    import logging
+    from scripts.utils import alert
+
+    records = []
+
+    class Capture(logging.Handler):
+        def emit(self, r):
+            records.append(r.getMessage() if not r.args else r.msg % r.args)
+
+    h = Capture()
+    alert.log.addHandler(h)
+    try:
+        with _with_env(**env):
+            alert.send_failure_alert(pipeline="daily", step="Step 7",
+                                     target_date="2026-09-16", exit_code=1)
+    finally:
+        alert.log.removeHandler(h)
+    return " ".join(records)
+
+
+def test_a_discovery_run_does_not_email_the_admins():
+    """The alert fires on the failure path — the one a rehearsal reaches most
+    often — and would report a PRODUCTION failure that did not happen."""
+    out = _alert_log(**{EXPECTED_DB_VAR: "asx_screener_scratch",
+                        "RESEND_API_KEY": "re_live_key_shaped_value",
+                        "ADMIN_EMAILS": "admin@example.com"})
+    assert "SUPPRESSED" in out, (
+        "a scratch-confined run was willing to email the real admins from the "
+        f"production sender; it logged: {out!r}")
+    assert "asx_screener_scratch" in out
+
+
+def test_production_alerting_still_reaches_the_send_path():
+    """Suppression must not become a silent permanent disablement.
+
+    With no key configured the function reports exactly that, which proves it
+    ran past the discovery guard rather than stopping at it.
+    """
+    out = _alert_log(**{"RESEND_API_KEY": "", "ADMIN_EMAILS": "a@example.com"})
+    assert "SUPPRESSED" not in out
+    assert "RESEND_API_KEY not set" in out
+
+
 # ── The gate is actually present ─────────────────────────────────────────────
 
 def test_every_canonical_path_writer_proves_its_envelope():

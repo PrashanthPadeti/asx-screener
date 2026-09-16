@@ -177,6 +177,73 @@ which is the *only* reason they may run after a finalisation. Asserted by
 
 ---
 
+## Producer population proofs
+
+Every producer proves its population at **its own semantic grain**. Three of
+the four are really questions about time, and a proof collapsed to company
+codes cannot ask them: the consumer takes the latest row with no recency
+bound, so a code present at the wrong date is served exactly like a code
+present at the right one.
+
+| Producer | Grain | Expected set, derived from | Actual set, observed from |
+|---|---|---|---|
+| `technical_compute` | `asx_code + date` | `daily_prices ⋈ companies_current`, each code's own latest trading day, ≥ 20 days of history | `RETURNING asx_code, date` |
+| `halfyearly_compute` | `asx_code + fiscal_year` | `quarterly_metrics`, years with a quarter and a revenue-bearing company | `RETURNING asx_code, fiscal_year` |
+| `period_metrics_compute` | `asx_code + computed_date` | `DISTINCT asx_code FROM daily_prices` × today | `RETURNING asx_code, computed_date` |
+| `transform_prices` | `asx_code + row_count + date_set_digest` | `staging_au.eod_prices`, same window | the target **after** the write, same window |
+| *(already proven)* `yearly_compute`, `daily_compute`, `universe_build` | `asx_code` | source domain | written set |
+
+Rules they all follow:
+
+- **Set equality is the proof; counts are diagnostics.** Equal counts over
+  different members fails. Zero exceptions with an incomplete population fails.
+- **Expected is never the producer's own selection list.** A run compared
+  against its own selection agrees by construction.
+- **Actual is what PostgreSQL persisted**, via `RETURNING` on an unconditional
+  upsert — not what the process submitted, and not counted until the
+  transaction that carried it committed.
+- **Both directions.** `expected − actual` is a missed source; `actual −
+  expected` means the producer wrote something its own domain does not account
+  for, so one of the two is wrong and the run cannot say which.
+- **Missing source is not a failed producer; missed eligible source is.**
+- **Scoped runs record nothing** — their expected population is not the source
+  domain, and a stage row claiming otherwise would be a false claim the
+  resolver would act on.
+- **Failure is executable**, `sys.exit(main())`, not a log line.
+
+### Why `transform_prices` is not proved by containment
+
+`market.daily_prices` is historical. "Does the target contain every expected
+code" is satisfied by rows loaded months ago, so a run that transformed nothing
+would pass it for every company — the exact failure the proof exists to catch.
+It is therefore proved as set equality against staging **over the same window
+on both sides**, per code, by a digest of that code's complete date set. The
+digest, not min/max/count: a day swapped out of the middle leaves the count and
+both endpoints unchanged.
+
+### Three defects found by construction, before any run
+
+1. `technical_compute` selected `market.companies.status = 'active'`; its
+   consumer joins `market.companies_current`, which is `is_current = TRUE` —
+   SCD2 row currency, **not** listing status. A producer narrower than its own
+   consumer, which is precisely the defect that left 2,954 `yearly_metrics`
+   rows with a live source untouched.
+2. `transform_prices` took its code list from `staging_au.company_profile`
+   while the rows come from `staging_au.eod_prices`. A code in the feed but not
+   the profile was never transformed — and a full run **truncates first**, so
+   its entire price history was destroyed and not rebuilt, while the counters
+   reported a clean run.
+3. That `TRUNCATE` had **no precondition**. Against empty staging it succeeded,
+   the reload wrote nothing, and every downstream producer then computed
+   correctly over no data. It now refuses.
+
+The selections are fixed rather than left for the proof to report nightly.
+None of this has been observed against production data yet: these changes are
+on `p0a-correctness`, and production runs `main`. **The rehearsal is the first
+evidence, and it must be green before any merge.**
+
+---
+
 ## Open audit items
 
 Not yet established; required before the rehearsal is designed.
@@ -200,9 +267,11 @@ Not yet established; required before the rehearsal is designed.
    announcements, capital raises, cleanup, predictions) are **not** part of
    the canonical path and must not be pulled into the rehearsal merely
    because cron invokes them.
-4. **Expected-population proof per producer.** `yearly_compute`,
-   `daily_compute` and `universe_build` prove theirs. `technical_compute`,
-   `halfyearly_compute`, `period_metrics_compute` and the transforms do not.
+4. ~~**Expected-population proof per producer.**~~ **CLOSED** — see
+   [Producer population proofs](#producer-population-proofs). Each proves its
+   own population at its own grain. None has been added to `REQUIRED_STAGES`:
+   which are formal prerequisites of a canonical run follows from the
+   dependency graph, not from having been audited.
 
 ---
 

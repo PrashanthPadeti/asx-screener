@@ -201,6 +201,95 @@ def test_samples_are_bounded_and_say_so_when_truncated():
     assert payload["missing_truncated"] is True
 
 
+# ── Full replacement is old-complete or new-complete, never partial ──────────
+
+TRANSFORM_PRICES = (Path(__file__).resolve().parents[1]
+                    / "scripts/eodhd/v2/transforms/transform_prices.py")
+
+
+def _code_lines():
+    """Source with comments and blanks removed, so no guard can match its own
+    explanation -- a mistake this codebase has made four times."""
+    out = []
+    for line in TRANSFORM_PRICES.read_text(encoding="utf-8").splitlines():
+        body = line.split("#")[0].rstrip()
+        if body.strip():
+            out.append(body)
+    return out
+
+
+def test_the_truncate_is_not_committed_on_its_own():
+    """The original defect.
+
+    TRUNCATE; COMMIT; then rebuild 6.7M rows left market.daily_prices empty
+    and DURABLY so for the length of the rebuild. Anything that went wrong in
+    that window destroyed the price history with nothing to roll back to, and
+    almost every producer downstream reads this table.
+    """
+    lines = _code_lines()
+    trunc = next(i for i, l in enumerate(lines)
+                 if "TRUNCATE TABLE market.daily_prices" in l)
+    following = " ".join(lines[trunc + 1:trunc + 4])
+    assert "conn.commit()" not in following, (
+        "the TRUNCATE is committed before the reload replaces what it removed")
+
+
+def test_no_commit_is_reachable_mid_replacement():
+    """Every commit between the TRUNCATE and the guards must be unreachable on
+    a full run, or the table can be left in a committed partial state."""
+    lines = _code_lines()
+    trunc = next(i for i, l in enumerate(lines)
+                 if "TRUNCATE TABLE market.daily_prices" in l)
+    # Up to the proof, not merely up to the shrink guard: a commit placed
+    # between the guards and the proof would still publish a replacement the
+    # proof had not yet approved.
+    proof = next(i for i, l in enumerate(lines) if "ok = prove_population(" in l)
+
+    for i in range(trunc, proof):
+        if "conn.commit()" not in lines[i]:
+            continue
+        # Walk back to the condition governing this commit.
+        indent = len(lines[i]) - len(lines[i].lstrip())
+        context = " ".join(
+            l for l in lines[max(0, i - 4):i]
+            if len(l) - len(l.lstrip()) < indent and l.strip().startswith(("if", "elif")))
+        assert "not is_full_run" in context, (
+            f"line {i}: {lines[i].strip()!r} can commit part of a replacement")
+
+
+def test_a_failing_code_aborts_the_full_run_rather_than_skipping_it():
+    """Skip-and-continue is how a partial replacement gets committed: the
+    rollback restores the TRUNCATE too, so the remaining codes would rebuild
+    into a table that was never emptied."""
+    lines = _code_lines()
+    start = next(i for i, l in enumerate(lines) if l.strip() == "except Exception as e:")
+    block = " ".join(lines[start:start + 14])
+    assert "is_full_run" in block and "return 1" in block, (
+        "a per-code failure during a full run does not abort the run")
+
+
+def test_every_refusal_restores_the_previous_state():
+    """Empty rebuild, sharp shrink, and a failed population proof must each
+    roll back — a refusal that leaves the truncate committed is not a refusal.
+    """
+    src = " ".join(_code_lines())
+    for refusal in ("the rebuild produced no rows",
+                    "would shrink",
+                    "does not match"):
+        idx = src.index(refusal)
+        # The rollback precedes the message it explains.
+        assert "conn.rollback()" in src[max(0, idx - 400):idx], (
+            f"the {refusal!r} refusal does not roll back")
+
+
+def test_the_proof_gates_the_commit_rather_than_describing_it():
+    """A proof that runs after the commit can only report the damage."""
+    lines = _code_lines()
+    proof = next(i for i, l in enumerate(lines) if "ok = prove_population(" in l)
+    final = max(i for i, l in enumerate(lines) if "conn.commit()" in l)
+    assert proof < final, "the population proof runs after the final commit"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

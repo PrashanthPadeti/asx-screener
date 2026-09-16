@@ -40,6 +40,13 @@ BATCH_COMMIT = 100
 # ASX close = 16:00 AEST = UTC+10 → 06:00 UTC
 CLOSE_TIME = "16:00:00+10"
 
+#: A full rebuild that lands below this fraction of the table it replaces is
+#: refused. Same threshold as market.dividends, for the same reason: a source
+#: that has stopped answering can still technically produce rows, and a
+#: legitimate contraction of more than half has never happened to a price
+#: history that only ever grows. Delisted codes keep their history.
+SHRINK_FLOOR = 0.50
+
 
 INSERT_SQL = """
     INSERT INTO market.daily_prices
@@ -135,8 +142,16 @@ def main():
     parser.add_argument("--to-date",   help="YYYY-MM-DD inclusive")
     parser.add_argument("--run-id",    type=int, default=None,
                         help="Record stage evidence against this compute run")
+    parser.add_argument("--allow-shrink", action="store_true",
+                        help="Permit a full rebuild that would leave "
+                             "market.daily_prices below %d%% of its current "
+                             "rows or codes. Intended contraction only."
+                             % int(SHRINK_FLOOR * 100))
     args = parser.parse_args()
 
+    # --allow-shrink narrows nothing, so it must not be mistaken for a filter.
+    # Reading it as one would silently turn a full rebuild into a partial run
+    # and skip the very guards it was passed to override.
     is_full_run = not args.codes and not args.from_date and not args.to_date
 
     conn = psycopg2.connect(DB_URL)
@@ -147,24 +162,50 @@ def main():
     _prove_envelope("transform_prices", conn)
     cur  = conn.cursor()
 
+    prior_rows = prior_codes = 0
     if is_full_run:
-        # The destructive step needs a precondition. A full run truncates the
-        # entire price history and rebuilds it from staging; if staging is
-        # empty -- a failed load upstream, a wrong database -- the truncate
-        # succeeds, the reload writes nothing, and every downstream producer
-        # then computes correctly over no data.
+        # The destructive step needs a precondition. A full run replaces the
+        # entire price history from staging; if staging is empty -- a failed
+        # load upstream, a wrong database -- the reload writes nothing, and
+        # every downstream producer then computes correctly over no data.
         cur.execute("SELECT COUNT(*) FROM staging_au.eod_prices")
         staged = cur.fetchone()[0]
         if staged == 0:
             log.error("REFUSING full run: staging_au.eod_prices is empty. "
-                      "Truncating market.daily_prices against an empty source "
+                      "Replacing market.daily_prices from an empty source "
                       "would destroy the price history and report success.")
             return 1
-        log.info("Full run — truncating market.daily_prices (staging holds "
-                 "%s rows) …", f"{staged:,}")
+
+        # What is about to be replaced, measured before it is destroyed.
+        cur.execute("SELECT count(*), count(DISTINCT asx_code) "
+                    "FROM market.daily_prices")
+        prior_rows, prior_codes = cur.fetchone()
+
+        # NOT committed. TRUNCATE is transactional in PostgreSQL, so it belongs
+        # in the same transaction as the inserts that replace what it removed.
+        #
+        # Committing it on its own -- which is what this did -- opened a window
+        # in which market.daily_prices was empty and DURABLY so, for the entire
+        # length of a 6.7M-row rebuild. A crash, a bad row, a killed session or
+        # a failing code inside that window left the price history destroyed
+        # with nothing to roll back to, and almost every producer downstream
+        # reads this table.
+        #
+        # A population proof can report that a rebuild was incomplete. It
+        # cannot undo a committed partial replacement. So the proof below now
+        # runs BEFORE the commit and the commit is conditional on it: the table
+        # goes from one complete state to another complete state, or it does
+        # not move.
+        #
+        # The cost is an ACCESS EXCLUSIVE lock held for the length of the
+        # rebuild, so readers block rather than see an empty table. That is a
+        # strictly better failure: blocking is recoverable and being wrong is
+        # not. Full runs are manual -- the daily pipeline always passes
+        # --from-date -- so this is not a nightly cost.
+        log.info("Full run — replacing market.daily_prices in one transaction "
+                 "(staging holds %s rows; current table %s rows / %s codes) …",
+                 f"{staged:,}", f"{prior_rows:,}", f"{prior_codes:,}")
         cur.execute("TRUNCATE TABLE market.daily_prices")
-        conn.commit()
-        log.info("Truncated.")
 
     # Get list of codes to process.
     #
@@ -197,20 +238,98 @@ def main():
             done += 1
         except Exception as e:
             conn.rollback()
+            if is_full_run:
+                # Skip-and-continue is how a partial replacement gets
+                # committed. The rollback above has already restored the whole
+                # table to its previous complete state, including the TRUNCATE;
+                # carrying on would rebuild the remaining codes into a table
+                # that was never emptied and commit the mixture.
+                log.error("ABORTING full run at %s: %s", code, e)
+                log.error("market.daily_prices is unchanged — the transaction "
+                          "that would have replaced it has been rolled back, "
+                          "TRUNCATE included.")
+                cur.close()
+                conn.close()
+                return 1
             failed += 1
             log.warning(f"  {code}: {e}")
             continue
 
-        if i % BATCH_COMMIT == 0:
+        # A full run is one transaction from TRUNCATE to COMMIT, so it has no
+        # intermediate commit points by construction. Partial runs are additive
+        # and idempotent, so batching is safe there.
+        if not is_full_run and i % BATCH_COMMIT == 0:
             conn.commit()
             log.info(f"  [{i:4d}/{total_codes}]  ok={done}  err={failed}  rows={total_rows:,}")
+        elif is_full_run and i % BATCH_COMMIT == 0:
+            log.info(f"  [{i:4d}/{total_codes}]  ok={done}  rows={total_rows:,} (uncommitted)")
 
-    conn.commit()
-    log.info(f"DONE — {done} codes  |  {total_rows:,} rows upserted  |  {failed} errors")
+    log.info(f"Transformed {done} codes  |  {total_rows:,} rows  |  {failed} errors")
+
+    # ── The commit precondition ──────────────────────────────────────────────
+    # For a full run everything so far is still uncommitted, so these checks
+    # decide whether the replacement happens at all rather than describing one
+    # that already did.
+    if is_full_run:
+        cur.execute("SELECT count(*), count(DISTINCT asx_code) "
+                    "FROM market.daily_prices")
+        new_rows, new_codes = cur.fetchone()
+
+        if new_rows == 0:
+            conn.rollback()
+            log.error("REFUSING to commit: the rebuild produced no rows. "
+                      "market.daily_prices is unchanged (%s rows).",
+                      f"{prior_rows:,}")
+            cur.close(); conn.close()
+            return 1
+
+        # The shrink guard, on the same reasoning as market.dividends: a source
+        # that has stopped answering can still technically produce rows, and it
+        # must not be allowed to overwrite a good dataset just because it did.
+        shrunk = (prior_rows and new_rows < prior_rows * SHRINK_FLOOR) or \
+                 (prior_codes and new_codes < prior_codes * SHRINK_FLOOR)
+        if shrunk and not args.allow_shrink:
+            conn.rollback()
+            log.error("REFUSING to commit: rebuild would shrink "
+                      "market.daily_prices from %s rows / %s codes to "
+                      "%s rows / %s codes. market.daily_prices is unchanged. "
+                      "Check the raw zone and the staging load; pass "
+                      "--allow-shrink if the contraction is genuine.",
+                      f"{prior_rows:,}", f"{prior_codes:,}",
+                      f"{new_rows:,}", f"{new_codes:,}")
+            cur.close(); conn.close()
+            return 1
+        if shrunk:
+            log.warning("Rebuild shrinks the table and --allow-shrink was "
+                        "given: %s → %s rows.",
+                        f"{prior_rows:,}", f"{new_rows:,}")
 
     ok = prove_population(cur, args, {"codes_failed": failed,
                                       "full_run": is_full_run})
+
+    if is_full_run and not ok:
+        # The whole point of holding the transaction open. The proof is a
+        # precondition of the replacement, not a report on one that already
+        # happened -- a proof that can only tell you afterwards that the
+        # rebuild was incomplete cannot undo it.
+        #
+        # The stage row prove_population just wrote rolls back with everything
+        # else, so a refused full run leaves no failed stage row. That is the
+        # correct trade here and not a silent one: the refusal is on the exit
+        # code and in the log above, and require_stages asks for the POSITIVE
+        # record, so an absent row blocks publication exactly as a failed one
+        # would. Recording the failure durably would need a second connection,
+        # which is a change to make deliberately, not as a side effect of this
+        # one.
+        conn.rollback()
+        log.error("REFUSING to commit: the rebuilt population does not match "
+                  "staging. market.daily_prices is unchanged (%s rows).",
+                  f"{prior_rows:,}")
+        cur.close(); conn.close()
+        return 1
+
     conn.commit()
+    log.info("Committed.")
     cur.close()
     conn.close()
     return 0 if ok else 1

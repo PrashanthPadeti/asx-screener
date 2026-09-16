@@ -191,6 +191,66 @@ def check_yearly_reuse(cur) -> ReuseDecision:
         run_id, current.differences(proven))
 
 
+class PublicationRefused(RuntimeError):
+    """The run may not finalise. It exists, so this is execution evidence."""
+
+    def __init__(self, message: str, failure_class: str):
+        super().__init__(message)
+        self.failure_class = failure_class
+
+
+def verify_yearly_currency_at_publication(cur, plan: RunPlan, run_id: int):
+    """Re-check, immediately before the canonical commit.
+
+    Checking at plan-open time is necessary and not sufficient. The producers
+    run for minutes, and the window is real:
+
+        fingerprint matches -> create run -> producers run for several minutes
+        -> a fundamentals correction lands -> canonical publish certifies a
+           source state that no longer exists
+
+    Publication cannot certify a source state that ceased to exist during the
+    run, so the fingerprint that the yearly output represents must still equal
+    the current one at the moment of commit.
+
+    The check applies to BOTH plans, for the same reason in two shapes: a daily
+    run reuses an earlier yearly output, a full run computes its own -- and in
+    either case the governed values about to be attributed were derived from
+    fundamentals that may have moved since.
+    """
+    from compute.engine import source_fingerprint as sfp
+
+    if "yearly_compute" in plan.reuses:
+        source_run, represented = sfp.proven_by_latest_yearly(cur)
+        failure_class = "reused_source_changed_during_run"
+        what = f"the yearly output reused from run {source_run}"
+    else:
+        source_run, represented = run_id, sfp.proven_by_run(cur, run_id)
+        failure_class = "fundamentals_changed_after_yearly_compute"
+        what = "this run's own yearly_compute output"
+
+    if represented is None:
+        raise PublicationRefused(
+            f"{plan.name} run {run_id}: no yearly source fingerprint is "
+            f"available to re-check at publication. Absence is not permission "
+            f"-- publishing would attribute governed values to fundamentals "
+            f"nobody has shown to be current.",
+            failure_class)
+
+    current = sfp.compute(cur)
+    if current.aggregate == represented.aggregate:
+        return current
+
+    raise PublicationRefused(
+        f"{plan.name} run {run_id}: the fundamentals moved during the run, so "
+        f"{what} no longer represents them. "
+        + "; ".join(current.differences(represented))
+        + ". Not finalising: publication would certify a source state that "
+          "ceased to exist while this run was computing. The governed rows "
+          "stay provisional and un-attributed, so the product fails closed.",
+        failure_class)
+
+
 def open_plan(cur, plan: RunPlan, log) -> None:
     """Evaluate a plan's preconditions. Raises rather than creating a run.
 

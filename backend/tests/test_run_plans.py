@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from compute.engine import source_fingerprint as sfp  # noqa: E402
 from compute.engine.run_plans import (  # noqa: E402
     DAILY_CANONICAL, FULL_FUNDAMENTALS_CANONICAL, PLANS,
-    PlanPreconditionFailed, RunPlan, check_yearly_reuse, open_plan,
+    PlanPreconditionFailed, PublicationRefused, RunPlan, check_yearly_reuse,
+    open_plan, verify_yearly_currency_at_publication,
 )
 
 
@@ -231,6 +232,98 @@ def test_opening_the_daily_plan_logs_what_it_inherits():
     out = log.text()
     assert "reuses" in out and "yearly_compute" in out
     assert "reuse PERMITTED" in out
+
+
+# ── The publication-time recheck: the TOCTOU window ──────────────────────────
+
+class PubCur(FakeCur):
+    """Adds the per-run stage lookup the full plan uses."""
+
+    def __init__(self, tables, proven=None, proven_run=41, this_run=None):
+        super().__init__(tables, proven, proven_run)
+        self.this_run = this_run
+
+    def execute(self, sql, params=None):
+        if "WHERE run_id = %s AND stage_name = 'yearly_compute'" in sql:
+            self._answer = (self.this_run,) if self.this_run else None
+            return
+        super().execute(sql, params)
+
+
+def test_a_source_change_during_a_daily_run_refuses_publication():
+    """The window the plan-open check cannot close.
+
+        fingerprint matches -> create run -> producers run for minutes
+        -> a fundamentals correction lands -> publish certifies a source
+           state that no longer exists
+    """
+    proven = _proven_from(_state())                      # admitted at open
+    moved = _state(**{"financials.annual_pnl": "CORRECTED_MID_RUN"})
+
+    try:
+        verify_yearly_currency_at_publication(
+            PubCur(moved, proven=proven), DAILY_CANONICAL, 99)
+    except PublicationRefused as e:
+        assert e.failure_class == "reused_source_changed_during_run"
+        assert "fails closed" in str(e)
+        assert "annual_pnl" in str(e)
+    else:
+        raise AssertionError(
+            "a daily run published governed values attributed to fundamentals "
+            "that changed while it was computing")
+
+
+def test_a_source_change_after_yearly_compute_refuses_the_full_plan_too():
+    """The full plan computes its own yearly output and is not exempt: the
+    correction can land after yearly_compute finished and before the tail."""
+    this_run = _proven_from(_state())
+    moved = _state(**{"financials.annual_balance_sheet": "CORRECTED_MID_RUN"})
+
+    try:
+        verify_yearly_currency_at_publication(
+            PubCur(moved, this_run=this_run), FULL_FUNDAMENTALS_CANONICAL, 99)
+    except PublicationRefused as e:
+        assert e.failure_class == "fundamentals_changed_after_yearly_compute"
+    else:
+        raise AssertionError("a full run published against moved fundamentals")
+
+
+def test_the_full_plan_compares_against_its_own_run_not_the_newest():
+    """A newer yearly_compute belonging to a different run says nothing about
+    what THIS run computed."""
+    tables = _state()
+    cur = PubCur(tables, proven=_proven_from(tables), this_run=None)
+    try:
+        verify_yearly_currency_at_publication(
+            cur, FULL_FUNDAMENTALS_CANONICAL, 99)
+    except PublicationRefused as e:
+        assert "no yearly source fingerprint" in str(e), (
+            "the full plan fell back to another run's fingerprint")
+    else:
+        raise AssertionError(
+            "publication proceeded with no fingerprint from this run")
+
+
+def test_an_unchanged_source_publishes():
+    tables = _state()
+    fp = verify_yearly_currency_at_publication(
+        PubCur(tables, proven=_proven_from(tables)), DAILY_CANONICAL, 99)
+    assert fp.aggregate
+
+
+def test_a_new_daily_price_does_not_refuse_publication():
+    """The whole point of scoping the price projection.
+
+    Today's bar is outside every fiscal-year window the computation reads, so
+    it must not invalidate a reuse that is genuinely still valid — otherwise
+    DAILY_CANONICAL could never publish at all.
+    """
+    tables = _state()
+    # Same projection, same digest: a new row beyond the scope changes neither.
+    fp = verify_yearly_currency_at_publication(
+        PubCur(tables, proven=_proven_from(tables)), DAILY_CANONICAL, 99)
+    assert fp.aggregate == sfp.aggregate_digest(
+        sfp.FINGERPRINT_SCHEMA_VERSION, tables)
 
 
 # ── The fingerprint the plan compares against ────────────────────────────────

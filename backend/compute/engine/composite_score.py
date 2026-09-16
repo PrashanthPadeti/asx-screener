@@ -606,7 +606,8 @@ def multibagger_band(score: Optional[float]) -> Optional[str]:
             return label
     return MB_BANDS[-1][1]
 
-def run(conn, dry_run: bool = False, run_id: Optional[int] = None) -> int:
+def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
+        plan_name: str = "FULL_FUNDAMENTALS_CANONICAL") -> int:
     """Load universe, compute scores, upsert. Returns number of rows updated."""
     log.info("Loading screener.universe for scoring…")
 
@@ -848,15 +849,40 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None) -> int:
         factor_model_version=LATEST_MODEL_VERSION,
         run_id=run_id)
 
+    # The last precondition, checked here and not earlier.
+    #
+    # The plan verified the yearly source fingerprint before it opened this
+    # run. That was necessary and not sufficient: the producers since then took
+    # minutes, and a fundamentals correction landing inside that window would
+    # leave this commit certifying a source state that no longer exists.
+    #
+    # Refusing here is fail-closed, not destructive. The universe build already
+    # cleared metric_states and compute_run_id, so the governed rows are
+    # provisional and un-attributed; without this commit they stay that way and
+    # the projector withholds them.
+    from compute.engine.run_plans import (
+        PLANS, PublicationRefused, verify_yearly_currency_at_publication)
+
+    plan = PLANS[plan_name]
+    fingerprint = verify_yearly_currency_at_publication(conn.cursor(), plan,
+                                                        run_id)
+    log.info("  ✓ yearly source fingerprint still current at publication: %s",
+             fingerprint.aggregate[:16])
+
     by_code = canonical_assessments(df, masked, factor_states,
                                     masked.source_failed)
     written = commit_canonical(
         conn, ComputeRun(run_id, "composite_score", LATEST_MODEL_VERSION,
                          source_health),
         by_code,
-        required_stages=REQUIRED_STAGES,
+        # Per-plan, not the one static tuple. A daily run must not be required
+        # to have run yearly_compute: reusing that output is the intended
+        # behaviour, and the fingerprint above is what makes it legitimate.
+        required_stages=plan.required,
         details={"universe_rows": len(df),
-                 "dividend_feed_healthy": feed_health.healthy})
+                 "dividend_feed_healthy": feed_health.healthy,
+                 "plan": plan.name,
+                 "yearly_source_fingerprint": fingerprint.aggregate})
 
     log.info("  ✓ canonical commit: %s rows published under run %s",
              f"{written:,}", run_id)
@@ -968,6 +994,12 @@ def main():
     parser = argparse.ArgumentParser(description="Compute composite factor scores")
     parser.add_argument("--dry-run", action="store_true",
                         help="Compute scores without writing to DB")
+    parser.add_argument("--plan", default="FULL_FUNDAMENTALS_CANONICAL",
+                        choices=("DAILY_CANONICAL", "FULL_FUNDAMENTALS_CANONICAL"),
+                        help="Which run plan this publication belongs to. It "
+                             "decides which stage evidence is required, and "
+                             "which yearly output the publication-time "
+                             "fingerprint re-check compares against.")
     parser.add_argument("--run-id", type=int,
                         help="The compute run to publish under. Without it "
                              "the scores are written but stay PROVISIONAL: no "
@@ -981,13 +1013,42 @@ def main():
     # a discovery run this only logs, so the nightly pipeline is unaffected.
     from compute.engine.runtime_envelope import prove as _prove_envelope
     _prove_envelope("composite_score", conn)
+    from compute.engine.run_plans import PublicationRefused
+
     try:
-        n = run(conn, dry_run=args.dry_run, run_id=args.run_id)
-    finally:
+        n = run(conn, dry_run=args.dry_run, run_id=args.run_id,
+                plan_name=args.plan)
+    except PublicationRefused as refused:
+        # Fail closed, and say so durably.
+        #
+        # The run exists, so this is execution evidence rather than a plan
+        # precondition. Nothing is finalised, and the universe build already
+        # cleared metric_states and compute_run_id — so the governed rows stay
+        # provisional and the projector withholds them. The product is stale,
+        # not wrong.
+        conn.rollback()
         conn.close()
+        log.error("PUBLICATION REFUSED: %s", refused)
+
+        from compute.engine.run_stages import (
+            StageResult, record_failed_stage_after_rollback)
+        record_failed_stage_after_rollback(
+            DB_URL, args.run_id,
+            StageResult("composite_score", frozenset(), frozenset(),
+                        {"plan": args.plan}, grain="asx_code"),
+            log,
+            failure_class=refused.failure_class,
+            failure_message=str(refused))
+        return 1
+    finally:
+        if not conn.closed:
+            conn.close()
 
     log.info(f"Composite score engine complete — {n} stocks processed.")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # A refused publication must be executable. Called bare, the return value
+    # is discarded and the orchestrator reads a fail-closed run as a success.
+    sys.exit(main())

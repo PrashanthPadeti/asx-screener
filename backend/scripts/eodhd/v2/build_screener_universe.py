@@ -1833,7 +1833,32 @@ ON CONFLICT (asx_code) DO UPDATE SET
     cash_conversion_cycle      = EXCLUDED.cash_conversion_cycle,
     roe_improving              = EXCLUDED.roe_improving,
     roce_improving             = EXCLUDED.roce_improving,
-    universe_built_at       = NOW()
+    universe_built_at       = NOW(),
+
+    -- ── The canonical claim is revoked in the same statement ──────────────
+    -- These values are provisional: recomputed, but assessed by nobody. The
+    -- previous run's sidecar and attribution described the values that were
+    -- here a moment ago, and leaving them attached would make this row claim
+    -- an assessment that was never performed on what it now holds.
+    --
+    -- That was the temporal integrity defect. composite_score ran weekly
+    -- while this build ran daily, so on six days out of seven today's
+    -- governed values sat under last week's run identity -- and a row in that
+    -- state is worse than an unassessed one, because the projector trusts it
+    -- and serves it.
+    --
+    -- Atomic with the governed mutation, not a second statement: any gap
+    -- between writing the values and revoking the claim is a window in which
+    -- exactly that mixture is readable.
+    --
+    -- The numbers themselves are deliberately NOT cleared. They are real
+    -- provisional data and the next canonical commit needs them; what is
+    -- withdrawn is their authority. app/core/row_projection.py turns a NULL
+    -- compute_run_id into OUTSIDE_SNAPSHOT and nulls every governed value
+    -- with a stated cause, so an un-attributed row fails closed at the API
+    -- rather than being served as current.
+    metric_states           = NULL,
+    compute_run_id          = NULL
 RETURNING asx_code
 """
 
@@ -1909,7 +1934,15 @@ def main():
     # is the evaluated population rather than the changed one.
     written_codes = {r[0] for r in cur.fetchall()}
     n = len(written_codes)
-    conn.commit()
+    # NOT committed here. Everything from the upsert to the proof below is one
+    # transaction, for the same reason transform_prices holds its replacement
+    # open: a partially invalidated population must never become durable.
+    #
+    # If the proof shows expected {A,B,C} against actual {A,B}, committing
+    # would leave A and B provisional and un-attributed while C kept the
+    # previous run's values, states and run id -- a population split across two
+    # contracts, which is a worse state than either the old one or the new one.
+    # Recording a failed stage afterwards cannot undo that.
 
     # The upsert can only add or update — it never removes.  Clear out any
     # excluded securities already present from a previous build.
@@ -1923,37 +1956,13 @@ def main():
     if cur.rowcount:
         log.info(f"Removed {cur.rowcount} non-equity securities "
                  f"({', '.join(EXCLUDED_TYPES)}) from screener.universe")
-    conn.commit()
-
-    # ── Terminal stage evidence ──────────────────────────────────────────────
-    # yearly_compute proving perfect coverage is not enough on its own. If the
-    # build silently misses rows, the canonical writer faithfully re-emits
-    # stale provisional values — the same defect wearing a completeness
-    # certificate. Every full producer whose output the canonical writer reads
-    # has to prove its own population.
-    if args.run_id is not None:
-        from compute.engine.run_stages import StageResult, record_stage
-
-        result = StageResult(
-            "universe_build",
-            frozenset(expected_codes), frozenset(written_codes),
-            {"scoped_to_codes": bool(args.codes),
-             "excluded_types": list(EXCLUDED_TYPES)})
-        ok = record_stage(cur, args.run_id, result)
-        conn.commit()
-        log.info("stage universe_build: %s — %s", result.status, result.summary())
-        if not ok:
-            # Loud, and non-fatal here by design: the evidence is already
-            # committed, and composite_score will refuse to publish without a
-            # success row. Exiting non-zero as well so an orchestrator does
-            # not proceed believing the build succeeded.
-            log.error("universe_build did not cover its source population. "
-                      "No canonical run can be published from this build.")
-            cur.close(); conn.close()
-            sys.exit(1)
 
     # Post-processing: revenue_above_sector_median
-    # True when a stock's revenue_growth_3y_cagr exceeds its sector's median
+    # True when a stock's revenue_growth_3y_cagr exceeds its sector's median.
+    #
+    # Inside the transaction, because it writes a governed column. Committed
+    # separately it would be a governed mutation outside the rebuild's atomic
+    # boundary — the very shape the invalidation above exists to prevent.
     log.info("Computing revenue_above_sector_median…")
     cur.execute("""
         UPDATE screener.universe u
@@ -1971,15 +1980,68 @@ def main():
         WHERE u.sector = sector_medians.sector
           AND u.revenue_growth_3y_cagr IS NOT NULL
     """)
-    conn.commit()
 
+    # ── Terminal stage evidence ──────────────────────────────────────────────
+    # yearly_compute proving perfect coverage is not enough on its own. If the
+    # build silently misses rows, the canonical writer faithfully re-emits
+    # stale provisional values — the same defect wearing a completeness
+    # certificate. Every full producer whose output the canonical writer reads
+    # has to prove its own population.
+    from compute.engine.run_stages import (
+        StageResult, record_failed_stage_after_rollback, report_population)
+
+    result = StageResult(
+        "universe_build",
+        frozenset(expected_codes), frozenset(written_codes),
+        {"scoped_to_codes": bool(args.codes),
+         "excluded_types": list(EXCLUDED_TYPES)})
+    ok = report_population(cur, args.run_id, result, log)
+
+    if not ok:
+        # Roll back to the previous complete canonical state. Every row keeps
+        # the values, states and attribution of the last run that covered the
+        # whole population — old and coherent, rather than new and mixed.
+        #
+        # Failure BEFORE a complete provisional rebuild preserves the previous
+        # canonical state. Failure AFTER one leaves the new data explicitly
+        # un-attributed. Both are safe; they are not the same, and this is the
+        # first of them.
+        conn.rollback()
+        log.error("universe_build did not cover its source population. "
+                  "screener.universe is unchanged and still carries the "
+                  "previous canonical run's values and attribution.")
+        cur.close()
+        conn.close()
+        record_failed_stage_after_rollback(
+            DB_URL, args.run_id, result, log,
+            failure_class="population_not_covered",
+            failure_message="the provisional rebuild did not cover "
+                            "market.companies_current")
+        # No cache flush: nothing changed, so there is nothing stale to clear,
+        # and flushing would evict a cache that still matches the database.
+        return 1
+
+    conn.commit()
     cur.close()
     conn.close()
-    log.info(f"DONE — {n:,} rows upserted into screener.universe")
+    log.info(f"DONE — {n:,} rows rebuilt as PROVISIONAL in screener.universe "
+             f"(metric_states and compute_run_id cleared; governed values are "
+             f"unservable until the canonical tail re-attributes them)")
 
-    # Flush Redis screener cache so next request gets fresh data
+    # Flush Redis screener cache so next request gets fresh data.
+    #
+    # The rows it will serve are now provisional and un-attributed, so the
+    # projector withholds every governed value until the canonical tail
+    # re-attributes them. Flushing is still right: a cache holding the previous
+    # canonical values would keep serving them as current while the database
+    # no longer says they are.
     _flush_screener_cache()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # sys.exit(main()), not a bare call. An uncovered population must be
+    # executable: called bare the return value is discarded, the process exits
+    # 0, and the orchestrator proceeds to the canonical tail believing the
+    # build succeeded.
+    sys.exit(main())

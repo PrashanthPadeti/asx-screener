@@ -286,6 +286,22 @@ def compute(cur) -> SourceFingerprint:
 STAGE_DETAIL_KEY = "yearly_source_fingerprint"
 
 
+def proven_by_run(cur, run_id: int) -> Optional[SourceFingerprint]:
+    """The fingerprint yearly_compute proved under THIS run.
+
+    For a plan that computes its own yearly output, the relevant claim is the
+    one this run made -- not the newest one in the table, which could belong to
+    a different run entirely.
+    """
+    cur.execute(f"""
+        SELECT details -> '{STAGE_DETAIL_KEY}'
+          FROM screener.compute_run_stages
+         WHERE run_id = %s AND stage_name = 'yearly_compute'
+           AND status = 'success';""", (run_id,))
+    row = cur.fetchone()
+    return SourceFingerprint.from_json(row[0]) if row else None
+
+
 def proven_by_latest_yearly(cur) -> tuple[Optional[int], Optional[SourceFingerprint]]:
     """The fingerprint the most recent SUCCESSFUL yearly_compute proved.
 

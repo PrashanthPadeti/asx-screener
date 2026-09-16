@@ -100,17 +100,23 @@ def test_non_canonical_writers_touch_no_governed_column():
         f"attribution survives on the row.")
 
 
-def test_the_universe_builder_does_not_write_the_canonical_columns():
-    """Stated so the reason is recorded, not because it is desirable.
+def test_the_universe_builder_revokes_canonical_state_and_never_claims_it():
+    """The builder may DESTROY a canonical claim. It may never MAKE one.
 
-    build_screener_universe leaving metric_states and compute_run_id alone is
-    exactly what lets them survive its rebuild. That is the defect, and the
-    fix is a canonical tail after every governed rebuild — not making the
-    builder write a sidecar it cannot compute.
+    This guard used to assert that build_screener_universe left metric_states
+    and compute_run_id alone entirely. That was the defect, not the contract:
+    leaving them alone is exactly what let the previous run's attribution
+    survive a rebuild of the values it described, so today's governed numbers
+    sat under last week's run identity.
 
-    If this ever fails, the builder has started writing canonical state
-    outside the canonical writer, which is a different and equally serious
-    problem.
+    The fix is not to let the builder write a sidecar it cannot compute — it
+    has assessed nothing. It is to clear the claim in the same statement that
+    writes the provisional values, so the row is visibly unassessed until the
+    canonical tail attributes it.
+
+    So the property is directional: these columns may only ever be set to
+    NULL here. If this fails because the builder assigned something else, it
+    has started writing canonical state outside the canonical writer.
     """
     src = (BACKEND / "scripts" / "eodhd" / "v2"
            / "build_screener_universe.py").read_text(encoding="utf-8")
@@ -118,10 +124,56 @@ def test_the_universe_builder_does_not_write_the_canonical_columns():
                      if not ln.strip().startswith("--"))
 
     for canonical in ("metric_states", "compute_run_id"):
-        assert canonical not in code, (
-            f"build_screener_universe now references {canonical}; canonical "
-            f"state must be written only by the canonical writer, under a "
-            f"run that finalises")
+        assignments = re.findall(rf"{canonical}\s*=\s*([^\s,]+)", code)
+        assert assignments, (
+            f"build_screener_universe no longer assigns {canonical}. The "
+            f"provisional rebuild must revoke the previous canonical claim "
+            f"atomically, or today's values survive under yesterday's "
+            f"attribution.")
+        bad = [a for a in assignments if a.upper() != "NULL"]
+        assert not bad, (
+            f"build_screener_universe assigns {canonical} = {bad}; it may "
+            f"revoke a canonical claim but never make one — it has assessed "
+            f"nothing.")
+
+
+def test_the_provisional_rebuild_is_not_committed_before_it_is_proved():
+    """A partially invalidated population must never become durable.
+
+    If the proof shows expected {A,B,C} against actual {A,B}, committing first
+    leaves A and B provisional and un-attributed while C keeps the previous
+    run's values, states and run id — a population split across two contracts,
+    which is worse than either the old one or the new one. Recording a failed
+    stage afterwards cannot undo it.
+    """
+    src = (BACKEND / "scripts" / "eodhd" / "v2"
+           / "build_screener_universe.py").read_text(encoding="utf-8")
+    lines = [ln.split("#")[0].rstrip() for ln in src.splitlines()]
+    lines = [ln for ln in lines if ln.strip()]
+
+    upsert = next(i for i, ln in enumerate(lines) if "cur.execute(sql, params)" in ln)
+    proof = next(i for i, ln in enumerate(lines) if "report_population(" in ln
+                 and "import" not in ln)
+    assert upsert < proof, "the population proof runs before the write it proves"
+
+    committed = [ln.strip() for ln in lines[upsert:proof] if "conn.commit()" in ln]
+    assert not committed, (
+        "the provisional rebuild is committed before the proof approves it, so "
+        "an incomplete population becomes durable and half the universe is "
+        "left under the previous run's attribution")
+
+
+def test_the_revocation_is_in_the_same_statement_as_the_governed_write():
+    """Any gap between writing the values and revoking the claim is a window
+    in which today's numbers are readable under yesterday's run id."""
+    src = (BACKEND / "scripts" / "eodhd" / "v2"
+           / "build_screener_universe.py").read_text(encoding="utf-8")
+    upsert = src[src.index("ON CONFLICT (asx_code) DO UPDATE SET"):
+                 src.index("RETURNING asx_code")]
+    for canonical in ("metric_states", "compute_run_id"):
+        assert re.search(rf"^\s*{canonical}\s*=\s*NULL", upsert, re.M), (
+            f"{canonical} is not cleared inside the governed UPSERT; a "
+            f"separate statement leaves the mixed state readable in between")
 
 
 def test_each_orchestrator_resolves_exactly_one_compute_tree():

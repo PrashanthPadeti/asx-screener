@@ -49,9 +49,35 @@ EXPECTED_DB_VAR = "P0A_EXPECTED_DB"
 #: does not use, or to the literal "disabled".
 DISCOVERY_REDIS_VAR = "P0A_REDIS_MODE"
 
+#: Must read exactly "enabled". Not a truthiness test: "0", "false" and "no"
+#: are all truthy strings, and a variable whose mere presence arms fault
+#: injection is a variable that arms it by accident.
+DISCOVERY_MODE_VAR = "P0A_DISCOVERY_MODE"
+#: The production database name, declared by the harness. The child cannot
+#: work it out for itself -- its own DATABASE_URL points at scratch, which is
+#: the whole point -- so "scratch is not production" has to be told to it, and
+#: an absent declaration is a refusal rather than a pass.
+PRODUCTION_DB_VAR = "P0A_PRODUCTION_DB"
+#: Which fault to inject, from FAULT_POINTS. Set by p0a_discovery.sh only.
+FAULT_VAR = "P0A_DISCOVERY_FAULT"
+
+#: Every fault the rehearsal may request. A fixed allowlist, so a typo is a
+#: refusal rather than a silently absent fault that makes the adversarial case
+#: pass by not happening.
+FAULT_POINTS = frozenset({
+    #: Between a committed provisional universe rebuild and the canonical
+    #: tail. The exact boundary where the temporal guarantee is vulnerable:
+    #: the old canonical claim has been revoked and the new one not yet made.
+    "after_provisional_rebuild",
+})
+
 
 class EnvelopeRefused(RuntimeError):
     """The process reached something it was not permitted to reach."""
+
+
+class InjectedFault(RuntimeError):
+    """A rehearsal fault fired. Not a defect -- the rehearsal asked for it."""
 
 
 @dataclass
@@ -134,6 +160,12 @@ def enforce(env: Envelope) -> None:
     for line in env.lines():
         log.info("%s", line)
 
+    # Before the discovery short-circuit, deliberately. A production run with a
+    # fault variable still set in its environment is the case that must refuse,
+    # and returning early here would let it through as an ordinary production
+    # run carrying a loaded gun.
+    refuse_faults_outside_discovery(env)
+
     if not env.discovery:
         return
 
@@ -168,3 +200,113 @@ def prove(stage: str, conn=None, *, cursor=None,
     env = observe(stage, conn, cursor=cursor, filesystem_roots=filesystem_roots)
     enforce(env)
     return env
+
+
+# ── Rehearsal fault injection ────────────────────────────────────────────────
+#
+# Adversarial case 2 needs a failure at one exact boundary: after a complete
+# provisional universe rebuild has revoked the old canonical claim, and before
+# the canonical tail makes a new one. A manual kill at roughly the right moment
+# is too weak -- hard to reproduce at the same boundary, impossible to
+# mutation-test, and eventually somebody skips it because it was tested once.
+#
+# It is deliberately NOT a driver flag. `--fail-after-rebuild` would read as a
+# supported production operation, sit in shell history, and be one paste away
+# from the wrong terminal. An environment variable that only p0a_discovery.sh
+# sets, behind the live runtime envelope, says what this actually is: a way to
+# prove failure behaviour inside an isolated rehearsal.
+
+
+def _fault_conditions(env: Envelope) -> list[str]:
+    """Every reason this process may NOT inject a fault. Empty means it may.
+
+    Stated as unmet conditions rather than a boolean, so a refusal can say
+    which one failed. All are required together: each on its own is satisfiable
+    by an environment that is not actually isolated.
+    """
+    unmet = []
+    production = os.getenv(PRODUCTION_DB_VAR, "").strip()
+
+    if os.getenv(DISCOVERY_MODE_VAR, "").strip().lower() != "enabled":
+        unmet.append(f"{DISCOVERY_MODE_VAR} is not 'enabled'")
+    if not env.expected_db:
+        unmet.append(f"{EXPECTED_DB_VAR} is unset")
+    elif env.database != env.expected_db:
+        # The live connection, not the environment. An inherited variable is
+        # intent; this is the same distinction the whole module exists for.
+        unmet.append(f"this process reached '{env.database}', not "
+                     f"'{env.expected_db}'")
+    if not production:
+        unmet.append(f"{PRODUCTION_DB_VAR} is undeclared, so 'not production' "
+                     f"cannot be established")
+    elif production == env.expected_db or production == env.database:
+        unmet.append(f"the target database IS production ('{production}')")
+    if os.getenv(DISCOVERY_REDIS_VAR, "").strip().lower() not in \
+            ("isolated", "disabled"):
+        unmet.append(f"{DISCOVERY_REDIS_VAR} is neither isolated nor disabled")
+    # Production email suppression is NOT a separate condition here, because
+    # it would be a duplicate: alert.py suppresses on EXPECTED_DB_VAR, which
+    # the expected_db condition above already requires. A branch that cannot
+    # fail independently of another one is not a safeguard, it is a second
+    # copy of one -- and it reads as coverage that does not exist.
+    #
+    # The real risk is alert.py's condition CHANGING, which no runtime check
+    # here could see. test_runtime_envelope.py asserts that coupling directly.
+    return unmet
+
+
+def refuse_faults_outside_discovery(env: Envelope) -> None:
+    """A fault variable present without full isolation stops the process.
+
+    Called from enforce(), so every writer carrying the gate inherits it and
+    refuses BEFORE doing any work. The dangerous case is not a fault that fails
+    to fire -- it is a fault variable lingering in an environment that resolves
+    to production, where the safe-looking outcome is that nothing happens and
+    the unsafe one is that something does.
+    """
+    requested = os.getenv(FAULT_VAR, "").strip()
+    if not requested:
+        return
+
+    unmet = _fault_conditions(env)
+    if unmet:
+        raise EnvelopeRefused(
+            f"{env.stage}: {FAULT_VAR}='{requested}' is set, but this process "
+            f"is not in an isolated rehearsal: {'; '.join(unmet)}. Refusing "
+            f"before any work. Fault injection exists to prove failure "
+            f"behaviour against a scratch database and must never be reachable "
+            f"from an environment that resolves to production.")
+
+    if requested not in FAULT_POINTS:
+        raise EnvelopeRefused(
+            f"{env.stage}: {FAULT_VAR}='{requested}' is not a known fault "
+            f"point. Known: {', '.join(sorted(FAULT_POINTS))}. An unrecognised "
+            f"name is refused rather than ignored -- a typo that silently "
+            f"injects nothing makes the adversarial case pass by not "
+            f"happening.")
+
+
+def discovery_fault(point: str, env: Envelope, log=None) -> None:
+    """Fire the requested fault at this point, if this is it.
+
+    A no-op everywhere else, including every production run: the variable is
+    unset, and if it were set, enforce() would already have refused.
+    """
+    assert point in FAULT_POINTS, (
+        f"{point!r} is not a declared fault point; add it to FAULT_POINTS so "
+        f"the allowlist and the call sites cannot drift apart")
+
+    if os.getenv(FAULT_VAR, "").strip() != point:
+        return
+
+    unmet = _fault_conditions(env)
+    if unmet:                                    # pragma: no cover - enforce()
+        raise EnvelopeRefused(                   # already refused this process
+            f"{env.stage}: refusing to inject '{point}': {'; '.join(unmet)}")
+
+    message = (f"INJECTED FAULT '{point}' in {env.stage} against "
+               f"'{env.database}'. This is the rehearsal proving what happens "
+               f"when the canonical tail does not complete.")
+    if log is not None:
+        log.error("%s", message)
+    raise InjectedFault(message)

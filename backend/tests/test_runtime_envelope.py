@@ -198,6 +198,192 @@ def test_production_alerting_still_reaches_the_send_path():
     assert "RESEND_API_KEY not set" in out
 
 
+# ── Fault injection: reachable only from a real rehearsal ────────────────────
+
+FAULT = "after_provisional_rebuild"
+
+
+def _isolated(**extra):
+    """The full set of conditions a fault needs. Individually removable."""
+    env = {EXPECTED_DB_VAR: "asx_screener_scratch",
+           "P0A_PRODUCTION_DB": "asx_screener",
+           "P0A_DISCOVERY_MODE": "enabled",
+           DISCOVERY_REDIS_VAR: "isolated",
+           "REDIS_URL": "redis://localhost:6379/15",
+           "P0A_DISCOVERY_FAULT": FAULT}
+    env.update(extra)
+    return {k: v for k, v in env.items() if v is not None}
+
+
+def test_the_fault_fires_only_in_a_fully_isolated_rehearsal():
+    from compute.engine.runtime_envelope import InjectedFault, discovery_fault
+    with _with_env(**_isolated()):
+        env = prove("universe_build", cursor=Cur("asx_screener_scratch"))
+        try:
+            discovery_fault(FAULT, env)
+        except InjectedFault as e:
+            assert "asx_screener_scratch" in str(e)
+        else:
+            raise AssertionError("the requested fault did not fire")
+
+
+def test_a_fault_variable_against_production_refuses_before_any_work():
+    """The dangerous case is not a fault that fails to fire.
+
+    It is a fault variable left in an environment that resolves to production,
+    where the safe-looking outcome is that nothing happens and the unsafe one
+    is that something does. Every writer carrying the envelope gate refuses.
+    """
+    with _with_env(**{"P0A_DISCOVERY_FAULT": FAULT}):
+        try:
+            prove("universe_build", cursor=Cur("asx_screener"))
+        except EnvelopeRefused as e:
+            assert "before any work" in str(e)
+        else:
+            raise AssertionError(
+                "a production run carrying a fault variable was permitted")
+
+
+def test_every_isolation_condition_is_individually_required():
+    """Each condition on its own is satisfiable by an environment that is not
+    actually isolated, so removing any one must refuse.
+
+    Exercised against refuse_faults_outside_discovery rather than prove().
+    enforce() carries its own database and Redis checks which fire first, so
+    going through prove() would let two of these pass for the wrong reason —
+    the guard would be testing the outer checks twice and reporting coverage
+    it does not have.
+    """
+    from compute.engine.runtime_envelope import (
+        Envelope, refuse_faults_outside_discovery,
+    )
+
+    def envelope():
+        return Envelope(stage="universe_build",
+                        database="asx_screener_scratch",
+                        expected_db="asx_screener_scratch",
+                        discovery=True,
+                        redis_endpoint="localhost:6379",
+                        redis_logical_db="15")
+
+    removals = {
+        "discovery mode off": {"P0A_DISCOVERY_MODE": None},
+        "discovery mode merely truthy": {"P0A_DISCOVERY_MODE": "0"},
+        "no expected db": {EXPECTED_DB_VAR: None},
+        "production undeclared": {"P0A_PRODUCTION_DB": None},
+        "target IS production": {"P0A_PRODUCTION_DB": "asx_screener_scratch"},
+        "redis undeclared": {DISCOVERY_REDIS_VAR: None},
+        "redis neither isolated nor disabled": {DISCOVERY_REDIS_VAR: "maybe"},
+    }
+    for label, removal in removals.items():
+        env_vars = _isolated()
+        for k, v in removal.items():
+            env_vars.pop(k, None) if v is None else env_vars.update({k: v})
+
+        e = envelope()
+        if removal.get(EXPECTED_DB_VAR, "") is None:
+            e.expected_db = None          # the envelope observes it too
+
+        with _with_env(**env_vars):
+            try:
+                refuse_faults_outside_discovery(e)
+            except EnvelopeRefused:
+                continue
+            raise AssertionError(
+                f"a fault was armed with {label}: the conditions are not all "
+                f"required, so 'isolated' can be claimed without being true")
+
+
+def test_a_fault_is_refused_when_the_process_landed_somewhere_unexpected():
+    """A third database, neither the expected one nor production.
+
+    Every other condition here is satisfiable by an environment that merely
+    says the right things; only comparing the LIVE connection catches a child
+    that resolved its own URL and landed somewhere else entirely. The
+    production check does not cover this case, which is exactly why it needs
+    its own.
+    """
+    from compute.engine.runtime_envelope import (
+        Envelope, refuse_faults_outside_discovery,
+    )
+
+    # Asserted against refuse_faults_outside_discovery directly, not through
+    # prove(). enforce() has its own database check that fires first, so
+    # calling prove() here would pass for the wrong reason and this guard
+    # would be inert — it would be testing the outer check twice.
+    env = Envelope(stage="universe_build",
+                   database="asx_screener_someone_elses",
+                   expected_db="asx_screener_scratch",
+                   discovery=True,
+                   redis_endpoint="localhost:6379", redis_logical_db="15")
+    with _with_env(**_isolated()):
+        try:
+            refuse_faults_outside_discovery(env)
+        except EnvelopeRefused as e:
+            assert "asx_screener_someone_elses" in str(e)
+        else:
+            raise AssertionError(
+                "a fault was armed in a process that reached an unexpected "
+                "database")
+
+
+def test_email_suppression_rides_on_the_variable_the_fault_gate_requires():
+    """The coupling, asserted where it can actually bite.
+
+    A fault may only fire when P0A_EXPECTED_DB is set, and alert.py suppresses
+    mail on that same variable — so "production email is disabled" comes free
+    with the fault conditions. Duplicating it as another runtime branch would
+    be a second copy of one check rather than a second safeguard; what no
+    runtime check can see is alert.py's condition being changed, so that is
+    what this asserts.
+    """
+    alert_src = (BACKEND / "scripts/utils/alert.py").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in alert_src.splitlines()
+                     if not ln.strip().startswith("#"))
+    assert f'os.getenv("{EXPECTED_DB_VAR}"' in code, (
+        f"alert.py no longer suppresses on {EXPECTED_DB_VAR}, so a rehearsal "
+        f"fault can now fire while production email is live")
+    assert "SUPPRESSED" in code
+
+
+def test_an_unknown_fault_name_is_refused_rather_than_ignored():
+    """A typo that silently injects nothing makes the adversarial case pass by
+    not happening."""
+    with _with_env(**_isolated(P0A_DISCOVERY_FAULT="after_provisonal_rebuild")):
+        try:
+            prove("universe_build", cursor=Cur("asx_screener_scratch"))
+        except EnvelopeRefused as e:
+            assert "not a known fault point" in str(e)
+        else:
+            raise AssertionError("a misspelled fault name was ignored")
+
+
+def test_a_fault_point_not_requested_is_a_no_op():
+    from compute.engine.runtime_envelope import discovery_fault
+    with _with_env(**_isolated(P0A_DISCOVERY_FAULT=None)):
+        env = prove("universe_build", cursor=Cur("asx_screener_scratch"))
+        discovery_fault(FAULT, env)          # must not raise
+
+
+def test_a_call_site_cannot_invent_a_fault_point():
+    """The allowlist and the call sites must not drift apart."""
+    from compute.engine.runtime_envelope import discovery_fault
+    with _with_env(**_isolated()):
+        env = prove("universe_build", cursor=Cur("asx_screener_scratch"))
+        try:
+            discovery_fault("some_undeclared_point", env)
+        except AssertionError as e:
+            assert "not a declared fault point" in str(e)
+        else:
+            raise AssertionError("an undeclared fault point was accepted")
+
+
+def test_production_is_still_unaffected_when_no_fault_is_requested():
+    with _with_env():
+        env = prove("daily_compute", cursor=Cur("asx_screener"))
+        assert not env.discovery
+
+
 # ── The gate is actually present ─────────────────────────────────────────────
 
 def test_every_canonical_path_writer_proves_its_envelope():

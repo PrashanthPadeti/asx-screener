@@ -60,7 +60,13 @@ from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.metric_states import (  # noqa: E402
     LATEST_MODEL_VERSION, SourceHealth,
 )
-from compute.engine.run_stages import REQUIRED_STAGES, stages_passed  # noqa: E402
+from compute.engine.run_stages import stages_passed  # noqa: E402
+from compute.engine.run_plans import (  # noqa: E402
+    PLANS, PlanPreconditionFailed, open_plan,
+)
+from compute.engine.runtime_envelope import (  # noqa: E402
+    InjectedFault, discovery_fault, prove as prove_envelope,
+)
 from compute.engine.universe_writer import (  # noqa: E402
     create_run, persisted_governed, verify_storage,
 )
@@ -170,7 +176,37 @@ def verify_schema(cur) -> None:
 #: than silently redefining what "correct" means.
 EXPECTED_MODEL = "FACTOR_MODEL_V2"
 EXPECTED_GOVERNED = 72
-EXPECTED_STAGES = ("yearly_compute", "daily_compute", "universe_build")
+#: The static REQUIRED_STAGES tuple is no longer what publication uses -- each
+#: plan carries its own required set -- so asserting equality against it would
+#: be a tripwire on something the driver has stopped consulting.
+#:
+#: What replaces it are the structural properties a canonical plan must have,
+#: checked against the plan actually being executed. Not a second copy of the
+#: stage list: a duplicated list drifts, and the drift then reads as a defect
+#: in whichever copy was not edited.
+def verify_plan(plan) -> None:
+    wrong = []
+    if not plan.stages or plan.stages[-1] != "composite_score":
+        wrong.append(f"{plan.name} does not end in canonical publication")
+    if "universe_build" not in plan.required:
+        wrong.append(f"{plan.name} would publish without requiring the "
+                     f"universe build that produced the governed values")
+    if "composite_score" in plan.required:
+        wrong.append(f"{plan.name} requires evidence from the stage that "
+                     f"writes the finalisation, which cannot exist yet")
+    for stage in plan.reuses:
+        if stage in plan.required:
+            wrong.append(f"{plan.name} reuses {stage} and also requires its "
+                         f"evidence under this run")
+    if wrong:
+        raise PreconditionFailed(
+            "the run plan is not a valid canonical plan: " + "; ".join(wrong))
+
+    log.info("plan                       : %s", plan.name)
+    log.info("plan stages                : %s", ", ".join(plan.stages))
+    log.info("plan required evidence     : %s", ", ".join(plan.required))
+    log.info("plan reuses                : %s",
+             ", ".join(plan.reuses) or "nothing")
 
 
 def verify_activation() -> dict:
@@ -184,12 +220,10 @@ def verify_activation() -> dict:
     """
     mapping = persisted_governed(LATEST_MODEL_VERSION)
     facts = {"model": LATEST_MODEL_VERSION,
-             "governed": len(mapping),
-             "stages": tuple(REQUIRED_STAGES)}
+             "governed": len(mapping)}
 
     log.info("model version              : %s", facts["model"])
     log.info("persisted governed metrics : %s", facts["governed"])
-    log.info("required stages            : %s", ", ".join(facts["stages"]))
 
     wrong = []
     if facts["model"] != EXPECTED_MODEL:
@@ -197,9 +231,6 @@ def verify_activation() -> dict:
     if facts["governed"] != EXPECTED_GOVERNED:
         wrong.append(f"{facts['governed']} governed metrics, expected "
                      f"{EXPECTED_GOVERNED}")
-    if facts["stages"] != EXPECTED_STAGES:
-        wrong.append(f"required stages are {facts['stages']}, expected "
-                     f"{EXPECTED_STAGES}")
     if wrong:
         raise PreconditionFailed(
             "the activated contract is not the one this driver expects: "
@@ -283,13 +314,28 @@ def main() -> int:
     parser.add_argument("--allow-production", action="store_true",
                         help="Permit running against the database named by "
                              "DATABASE_URL when it is not a scratch one.")
+    parser.add_argument("--plan", default="FULL_FUNDAMENTALS_CANONICAL",
+                        choices=tuple(PLANS),
+                        help="Which run plan to execute. The plan decides "
+                             "which stages run, which stage evidence its "
+                             "publication requires, and what it may reuse.")
     args = parser.parse_args()
+
+    plan = PLANS[args.plan]
 
     conn = psycopg2.connect(get_database_url_sync())
     cur = conn.cursor()
 
-    cur.execute("SELECT current_database()")
-    database = cur.fetchone()[0]
+    # The driver proves its own envelope like every write-producing child, and
+    # keeps it: the fault seam below needs the OBSERVED envelope, not a fresh
+    # reading of the environment that could disagree with it.
+    #
+    # This also refuses immediately if a fault variable is present while the
+    # envelope resolves production — before any precondition runs, and long
+    # before a run exists.
+    envelope = prove_envelope("canonical_driver", conn)
+
+    database = envelope.database
     log.info("target database: %s", database)
 
     if "scratch" not in database and not args.allow_production:
@@ -301,13 +347,19 @@ def main() -> int:
     log.info("── preconditions")
     try:
         verify_activation()
+        verify_plan(plan)
         verify_schema(cur)
+        # Plan preconditions, including the yearly reuse contract. Evaluated
+        # here so a stale reused prerequisite prevents the run from opening at
+        # all, rather than leaving an abandoned run id behind for a condition
+        # that was knowable without computing anything.
+        open_plan(cur, plan, log)
         health = assess_source_health(cur)
         log.info("  source health: %s",
                  "healthy" if health.healthy
                  else f"UNHEALTHY {health.unhealthy_sources} {health.detail}")
         require_publishable(health)
-    except PreconditionFailed as exc:
+    except (PreconditionFailed, PlanPreconditionFailed) as exc:
         log.error("PRECONDITION FAILED — no run was created.")
         log.error("%s", exc)
         return 2
@@ -339,12 +391,26 @@ def main() -> int:
                    "--run-id", str(run.run_id)])
         require_stage(conn, run.run_id, "universe_build")
 
+        # ── The vulnerable boundary ──────────────────────────────────────────
+        # The provisional rebuild has committed. The old canonical claim is
+        # revoked — metric_states and compute_run_id are NULL across the
+        # population — and the new one has not been made. The governed surface
+        # is fail-closed right now, and it stays that way unless the tail below
+        # completes.
+        #
+        # A no-op in every run except a rehearsal that explicitly asked for
+        # this fault from inside a proven-isolated envelope. If the fault
+        # variable were set anywhere else, the envelope gate would already have
+        # refused this process before it wrote anything.
+        discovery_fault("after_provisional_rebuild", envelope, log)
+
         # composite_score performs the canonical commit: it re-emits every
         # governed value with the sidecar and the attribution, validates, and
         # finalises — all in one transaction.
         run_stage("composite_score (canonical commit)",
                   [PYBIN, "compute/engine/composite_score.py",
-                   "--run-id", str(run.run_id)])
+                   "--run-id", str(run.run_id),
+                   "--plan", plan.name])
 
         cur.execute("""
             SELECT rows_written, persistence_violations
@@ -359,8 +425,23 @@ def main() -> int:
         log.info("─" * 60)
         log.info("PUBLISHED: run %s, %s rows, %s violations",
                  run.run_id, f"{final[0]:,}", final[1])
-        log.info("Required stages: %s", ", ".join(REQUIRED_STAGES))
+        log.info("Plan: %s | required evidence: %s",
+                 plan.name, ", ".join(plan.required))
         return 0
+
+    except InjectedFault as fault:
+        # Deliberate, and the point of the run. Logged apart from a real
+        # failure so the rehearsal transcript cannot be misread later as an
+        # unexplained outage at this boundary.
+        log.error("─" * 60)
+        log.error("RUN %s STOPPED BY INJECTED FAULT: %s", run.run_id, fault)
+        log.error("Expected state now: the provisional rebuild is committed, "
+                  "every governed row is un-attributed (compute_run_id IS "
+                  "NULL, metric_states IS NULL), run %s has universe_build "
+                  "SUCCESS and no finalisation, and the governed surface "
+                  "fails closed. Recovery is a NEW run, not a repair of this "
+                  "one.", run.run_id)
+        return 1
 
     except Exception as exc:                          # noqa: BLE001
         log.error("─" * 60)

@@ -118,6 +118,15 @@ PY
 #: redirect covers every read and write, including the ones not yet found.
 P0A_REDIS_DB=${P0A_REDIS_DB:-15}
 
+#: Which run plan this cycle executes. Cycle A of the rehearsal is the full
+#: fundamentals plan; Cycle B is the daily plan, which reuses Cycle A's yearly
+#: output and must prove the source fingerprint is still current to do so.
+PLAN=${PLAN:-FULL_FUNDAMENTALS_CANONICAL}
+case "$PLAN" in
+    DAILY_CANONICAL|FULL_FUNDAMENTALS_CANONICAL) ;;
+    *) echo "REFUSING: unknown PLAN '$PLAN'." >&2; exit 2 ;;
+esac
+
 redis_scratch_url() {
     "$PYBIN" - "${REDIS_URL:-redis://localhost:6379/0}" "$P0A_REDIS_DB" <<'PY'
 import sys, urllib.parse as u
@@ -630,6 +639,12 @@ do_run() {
     fi
 
     echo "redis redirected to:     $url_redis"
+    echo "plan:                    $PLAN"
+    if [ -n "${P0A_DISCOVERY_FAULT:-}" ]; then
+        echo "INJECTED FAULT:          $P0A_DISCOVERY_FAULT"
+        echo "  This run is expected to FAIL. It is proving what the system"
+        echo "  does when the canonical tail does not complete."
+    fi
     echo
 
     # Exported, not per-command: the driver spawns each stage as a subprocess
@@ -640,10 +655,23 @@ do_run() {
     # runtime_envelope.py). The driver re-checks the database identity before
     # every stage as well; a child that connects independently is only caught
     # by the child.
+    # P0A_DISCOVERY_FAULT is passed through from the caller, never defaulted.
+    # It injects a failure at one exact boundary so the adversarial cases are
+    # repeatable instead of resting on a manual kill at roughly the right
+    # moment. It is an environment variable and not a driver flag deliberately:
+    # `--fail-after-rebuild` would read as a supported production operation and
+    # sit in shell history one paste away from the wrong terminal.
+    #
+    # P0A_DISCOVERY_MODE and P0A_PRODUCTION_DB are what let the child verify
+    # isolation for itself. The child cannot work out production's name alone
+    # -- its own DATABASE_URL points at scratch -- so it is told, and an
+    # undeclared production name makes the fault refuse rather than pass.
     DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" \
         REDIS_URL="$url_redis" \
         P0A_EXPECTED_DB="$SCRATCH" P0A_REDIS_MODE=isolated \
-        "$PYBIN" scripts/p0a_canonical_run.py --execute
+        P0A_DISCOVERY_MODE=enabled P0A_PRODUCTION_DB="$PROD" \
+        ${P0A_DISCOVERY_FAULT:+P0A_DISCOVERY_FAULT="$P0A_DISCOVERY_FAULT"} \
+        "$PYBIN" scripts/p0a_canonical_run.py --execute --plan "$PLAN"
     local rc=$?
 
     if [ $rc -ne 0 ]; then

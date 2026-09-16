@@ -8,15 +8,22 @@ finalisation. That is deliberate: an alternate publication path is exactly the
 kind of thing that grows back later, and the resolver cannot tell one lifecycle
 from another once the rows exist.
 
-    verify target database
+    prove the runtime envelope
     verify schema capability
+    verify the plan is a valid canonical plan
     evaluate source health
     require publishable source health
-    create_run(the health that was evaluated)
-    yearly_compute(run_id)      -> require stage success
-    daily_compute(run_id)       -> require stage success
-    universe_build(run_id)      -> require stage success
-    composite_score(run_id)     -> canonical commit, validate, finalise
+    plan preconditions, including the yearly reuse contract
+    create_run(plan)                  -> plan identity is immutable metadata
+    for each producer in plan.stages[:-1]:
+        dispatch a FIXED known command with production-shaped arguments
+        require its terminal SUCCESS evidence when the plan requires it
+    discovery_fault("after_provisional_rebuild")   -> rehearsal only
+    composite_score(run_id, plan)     -> publication-time fingerprint recheck,
+                                         canonical commit, read-back, finalise
+
+The stage list comes from the plan; the commands come from a fixed mapping in
+this module. A plan names stages, never executables -- see STAGE_COMMANDS.
 
 Three outcomes, with clean semantics:
 
@@ -48,7 +55,7 @@ import argparse
 import logging
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -284,11 +291,82 @@ def require_publishable(health: SourceHealth) -> None:
 
 # ── Stages ───────────────────────────────────────────────────────────────────
 
+# ── The stage dispatcher ─────────────────────────────────────────────────────
+#
+# A fixed Python mapping from stage name to argv builder. Deliberately boring:
+# no executable names taken from the plan, no command strings, no shell
+# adapter, shell=False throughout. A plan is a list of names this module
+# already knows how to run, and an unknown name is an error before the run
+# starts rather than a subprocess failure halfway through one.
+#
+# The arguments are PRODUCTION-SHAPED, not merely production code. The point of
+# the rehearsal is whether the nightly sequence composes, so each stage is
+# invoked the way its real cadence invokes it. transform_prices is the one that
+# matters: the daily pipeline passes --from-date, and exercising its
+# full-replacement mode here would answer a different question. That mode's
+# atomicity work stands on its own; it is not what this run is testing.
+
+
+def _daily_window() -> str:
+    """The same incremental boundary the nightly pipeline uses."""
+    return (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+
+
+#: stage name -> argv builder. Each takes the run id and returns a full argv.
+STAGE_COMMANDS = {
+    "transform_prices": lambda rid: [
+        PYBIN, "scripts/eodhd/v2/transforms/transform_prices.py",
+        "--from-date", _daily_window(), "--run-id", str(rid)],
+    "yearly_compute": lambda rid: [
+        PYBIN, "compute/engine/yearly_compute.py", "--run-id", str(rid)],
+    "daily_compute": lambda rid: [
+        PYBIN, "compute/engine/daily_compute.py", "--run-id", str(rid)],
+    "technical_compute": lambda rid: [
+        PYBIN, "compute/engine/technical_compute.py", "--run-id", str(rid)],
+    "halfyearly_compute": lambda rid: [
+        PYBIN, "compute/engine/halfyearly_compute.py", "--run-id", str(rid)],
+    "period_metrics_compute": lambda rid: [
+        PYBIN, "compute/engine/period_metrics_compute.py", "--run-id", str(rid)],
+    "universe_build": lambda rid: [
+        PYBIN, "scripts/eodhd/v2/build_screener_universe.py",
+        "--run-id", str(rid)],
+}
+
+
+def dispatch(stage: str, run_id: int) -> list[str]:
+    """argv for one known stage. An unknown name is a defect, not a failure."""
+    if stage not in STAGE_COMMANDS:
+        raise PreconditionFailed(
+            f"no command is defined for stage '{stage}'. The plan names a "
+            f"stage this driver does not know how to run; add it to "
+            f"STAGE_COMMANDS deliberately rather than letting the plan supply "
+            f"an executable.")
+    return STAGE_COMMANDS[stage](run_id)
+
+
 def run_stage(label: str, argv: list[str]) -> None:
     log.info("── %s", label)
-    result = subprocess.run(argv, cwd=str(BACKEND))
+    # shell=False (the default) and an argv list, never a string: nothing here
+    # should be able to become a shell command.
+    result = subprocess.run(argv, cwd=str(BACKEND), shell=False)
     if result.returncode != 0:
         raise RuntimeError(f"{label} exited {result.returncode}")
+
+
+def run_producer(conn, plan, stage: str, run_id: int) -> None:
+    """Execute one producer and require its terminal SUCCESS evidence.
+
+    Two separate conditions, because a zero exit is not completion proof --
+    that is the whole reason the stage evidence exists. A producer can exit 0
+    having written a subset of its population, and the evidence is what says
+    whether it covered the population it owed.
+
+    Only stages the plan REQUIRES are checked for evidence. A plan may run a
+    stage whose success is not a condition of publishing.
+    """
+    run_stage(f"{stage} (plan {plan.name})", dispatch(stage, run_id))
+    if stage in plan.required:
+        require_stage(conn, run_id, stage)
 
 
 def require_stage(conn, run_id: int, stage: str) -> None:
@@ -376,22 +454,13 @@ def main() -> int:
              run.run_id, LATEST_MODEL_VERSION, plan.name)
 
     try:
-        run_stage("yearly_compute",
-                  [PYBIN, "compute/engine/yearly_compute.py",
-                   "--run-id", str(run.run_id)])
-        require_stage(conn, run.run_id, "yearly_compute")
-
-        # Both feed universe_build, so both precede it. Their order relative
-        # to each other does not matter: neither reads the other's output.
-        run_stage("daily_compute",
-                  [PYBIN, "compute/engine/daily_compute.py",
-                   "--run-id", str(run.run_id)])
-        require_stage(conn, run.run_id, "daily_compute")
-
-        run_stage("universe_build",
-                  [PYBIN, "scripts/eodhd/v2/build_screener_universe.py",
-                   "--run-id", str(run.run_id)])
-        require_stage(conn, run.run_id, "universe_build")
+        # The plan's producers, in the plan's order, which comes from the
+        # dependency graph rather than from any schedule. The last stage is
+        # always the canonical tail and is run separately below, after the
+        # fault seam: everything before it is a producer, and the boundary
+        # between them is exactly where the temporal guarantee is vulnerable.
+        for stage in plan.stages[:-1]:
+            run_producer(conn, plan, stage, run.run_id)
 
         # ── The vulnerable boundary ──────────────────────────────────────────
         # The provisional rebuild has committed. The old canonical claim is

@@ -100,6 +100,35 @@ print(u.urlunparse(parsed._replace(path="/" + sys.argv[2])))
 PY
 }
 
+#: The second isolation dimension.
+#:
+#: discovery-15 was clean by every database measure — scratch throughout,
+#: production sentinel unchanged — and it flushed PRODUCTION Redis:
+#:
+#:     Cache invalidated: 2 asx:screener:* keys flushed
+#:
+#: because `_flush_screener_cache` reads REDIS_URL straight from the
+#: environment and this harness never set it, so it fell back to
+#: redis://localhost:6379/0. Harmless that once; it cost a recompute. But it
+#: proves the rehearsal boundary is the execution context, not the database.
+#:
+#: A logical database is redirected rather than the one `delete` call being
+#: special-cased: both Redis paths (settings.REDIS_URL in app/core/cache.py,
+#: os.getenv in build_screener_universe) read this one variable, so one
+#: redirect covers every read and write, including the ones not yet found.
+P0A_REDIS_DB=${P0A_REDIS_DB:-15}
+
+redis_scratch_url() {
+    "$PYBIN" - "${REDIS_URL:-redis://localhost:6379/0}" "$P0A_REDIS_DB" <<'PY'
+import sys, urllib.parse as u
+parsed = u.urlparse(sys.argv[1])
+prod_db = (parsed.path or "/0").lstrip("/") or "0"
+if prod_db == sys.argv[2]:
+    sys.exit("REFUSING: scratch Redis db %s is the one production uses" % prod_db)
+print(u.urlunparse(parsed._replace(path="/" + sys.argv[2])))
+PY
+}
+
 #: Ask the connection which database it reached, through the same resolver the
 #: stages use. Printed before every stage, because the whole history of P0-A
 #: says a runtime observation beats an assumption about inheritance.
@@ -588,9 +617,10 @@ do_run() {
     # The driver owns ordering, stage requirements, the health precondition
     # and finalisation. Everything here does is point it at scratch and prove
     # it went there.
-    local url_sync url_async reached
+    local url_sync url_async url_redis reached
     url_sync=$(scratch_url "$DATABASE_URL_SYNC") || return 2
     url_async=$(scratch_url "$DATABASE_URL") || return 2
+    url_redis=$(redis_scratch_url) || { echo "$url_redis" >&2; return 2; }
 
     reached=$(observed_db "$url_sync")
     echo "driver will run against: $reached"
@@ -599,10 +629,21 @@ do_run() {
         return 2
     fi
 
+    echo "redis redirected to:     $url_redis"
+    echo
+
     # Exported, not per-command: the driver spawns each stage as a subprocess
-    # and they inherit this environment. The driver re-checks the database
-    # identity before every stage regardless.
-    DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async"         "$PYBIN" scripts/p0a_canonical_run.py --execute
+    # and they inherit this environment. Inheritance is intent, though, not
+    # fact — so P0A_EXPECTED_DB travels with it and every write-producing child
+    # refuses to proceed unless its OWN live connection reports the scratch
+    # database and its Redis is redirected or off (compute/engine/
+    # runtime_envelope.py). The driver re-checks the database identity before
+    # every stage as well; a child that connects independently is only caught
+    # by the child.
+    DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" \
+        REDIS_URL="$url_redis" \
+        P0A_EXPECTED_DB="$SCRATCH" P0A_REDIS_MODE=isolated \
+        "$PYBIN" scripts/p0a_canonical_run.py --execute
     local rc=$?
 
     if [ $rc -ne 0 ]; then

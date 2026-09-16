@@ -620,6 +620,11 @@ def main():
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
+    # Prove where this process ACTUALLY connected, before any mutation.
+    # An inherited environment is intent; a live connection is fact. Outside
+    # a discovery run this only logs, so the nightly pipeline is unaffected.
+    from compute.engine.runtime_envelope import prove as _prove_envelope
+    _prove_envelope("technical_compute", conn)
     cur  = conn.cursor()
 
     codes = fetch_codes(cur, args.codes, args.limit)

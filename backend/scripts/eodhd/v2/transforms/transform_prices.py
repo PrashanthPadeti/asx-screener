@@ -104,6 +104,11 @@ def main():
     is_full_run = not args.codes and not args.from_date and not args.to_date
 
     conn = psycopg2.connect(DB_URL)
+    # Prove where this process ACTUALLY connected, before any mutation.
+    # An inherited environment is intent; a live connection is fact. Outside
+    # a discovery run this only logs, so the nightly pipeline is unaffected.
+    from compute.engine.runtime_envelope import prove as _prove_envelope
+    _prove_envelope("transform_prices", conn)
     cur  = conn.cursor()
 
     if is_full_run:

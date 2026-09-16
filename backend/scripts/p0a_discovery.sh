@@ -354,6 +354,17 @@ CRITICAL = [
     "market.short_positions", "market.analyst_ratings",
     "staging_au.shares_stats", "staging_au.company_profile",
     "screener.universe", "market.sector_benchmarks",
+    # The lifecycle tables. Absent from this list until now, which is why a
+    # scratch database with an empty screener.compute_runs read as acceptable
+    # and took a manual query to notice. They happened to be faithful --
+    # production holds no runs at all -- but "the clone dropped the tables the
+    # whole lifecycle depends on" and "production has never published" are very
+    # different situations, and the verify step could not tell them apart.
+    #
+    # They are also now the most load-bearing tables in the design: plan_name
+    # decides what publication requires and what the resolver validates.
+    "screener.compute_runs", "screener.compute_run_stages",
+    "screener.compute_run_finalizations",
 ]
 
 def q(db, sql):

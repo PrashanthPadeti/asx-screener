@@ -69,6 +69,46 @@ log = logging.getLogger(__name__)
 COMPUTE_VERSION = "1.0.0"
 BATCH_COMMIT    = 50
 
+#: Below this many trading days the indicators cannot be formed at all, so the
+#: company is outside the producer's domain rather than missed by it. Named
+#: once and used by both the loop's skip and the expected population: a domain
+#: rule that exists twice will eventually be two different rules, and the proof
+#: would then be measuring against a boundary the producer no longer uses.
+MIN_HISTORY_DAYS = 20
+
+#: The trading day, as the producer itself defines it. fetch_ohlcv groups
+#: market.daily_prices by this expression, so the expected population must
+#: derive its dates from the same one -- an expected set built on UTC days
+#: would disagree with the written set by a day for every evening bar and
+#: report a defect that does not exist.
+TRADING_DAY = "DATE(time AT TIME ZONE 'Australia/Sydney')"
+
+#: The producer's source domain, stated once and used for both the work and
+#: the proof.
+#:
+#: Note what is NOT here: market.companies.status = 'active'. That filter was
+#: the selection this producer used, and it is strictly narrower than its
+#: consumer. build_screener_universe joins market.companies_current -- which is
+#: is_current = TRUE, SCD2 row currency, NOT listing status -- and then takes
+#: the latest market.daily_metrics row per code with ORDER BY date DESC LIMIT
+#: 1, with no bound on how old that row may be. So a delisted company with
+#: price history was read by the consumer and never rewritten by the producer,
+#: and the stale indicators it returned were indistinguishable from current
+#: ones.
+#:
+#: This is the identical defect that left 2,954 yearly_metrics rows with a live
+#: source untouched: a producer narrower than its own consumer. The two
+#: disagreed, and the consumer's identity is the one the product actually
+#: serves, so the producer is the side that was wrong.
+SOURCE_DOMAIN_SQL = f"""
+    SELECT p.asx_code, MAX({TRADING_DAY}) AS latest_day
+      FROM market.daily_prices p
+      JOIN market.companies_current c ON c.asx_code = p.asx_code
+     GROUP BY p.asx_code
+    HAVING COUNT(DISTINCT {TRADING_DAY}) >= {MIN_HISTORY_DAYS}
+     ORDER BY p.asx_code
+"""
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -106,18 +146,24 @@ def _s(series: pd.Series, idx: int):
 
 # ── Data Fetchers ─────────────────────────────────────────────────────────────
 
+def fetch_source_domain(cur) -> dict:
+    """{asx_code: latest trading day} — the population this producer owes.
+
+    Derived from the source tables, independently of the loop's selection.
+    Comparing a run against its own selection is circular: it agrees by
+    construction and proves nothing.
+    """
+    cur.execute(SOURCE_DOMAIN_SQL)
+    return {r[0]: r[1] for r in cur.fetchall()}
+
+
 def fetch_codes(cur, codes=None, limit=None) -> list:
     if codes:
         return [c.upper() for c in codes]
-    sql = """
-        SELECT DISTINCT p.asx_code
-        FROM market.daily_prices p
-        JOIN market.companies c ON c.asx_code = p.asx_code
-        WHERE c.status = 'active'
-        ORDER BY p.asx_code
-    """
+    sql = SOURCE_DOMAIN_SQL
     if limit:
-        sql += f" LIMIT {limit}"
+        sql = sql.replace("ORDER BY p.asx_code",
+                          f"ORDER BY p.asx_code LIMIT {limit}")
     cur.execute(sql)
     return [r[0] for r in cur.fetchall()]
 
@@ -599,11 +645,62 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None) ->
     return rows
 
 
-def upsert_rows(cur, rows: list) -> int:
+def upsert_rows(cur, rows: list) -> list:
+    """Upsert, and return the (asx_code, date) keys PostgreSQL accepted.
+
+    RETURNING rather than the input tuples, because the input is what the
+    producer intended to write and the question the proof asks is what was
+    actually persisted. The ON CONFLICT action is an unconditional DO UPDATE,
+    so every submitted row returns whether it inserted or updated -- a
+    DO NOTHING, or a WHERE-guarded update, would silently drop keys from this
+    set and the difference would read as a missed write.
+    """
     if not rows:
-        return 0
-    execute_values(cur, INSERT_SQL, rows, page_size=500)
-    return len(rows)
+        return []
+    return execute_values(cur, INSERT_SQL + " RETURNING asx_code, date",
+                          rows, page_size=500, fetch=True)
+
+
+# ── Population proof ──────────────────────────────────────────────────────────
+
+def prove_population(cur, args, expected: dict, written: set,
+                     details: dict) -> bool:
+    """Did this run write an indicator row for every company that owed one?
+
+    The grain is (asx_code, date), which is the target's own identity and the
+    only grain at which the question can be asked honestly. Collapsed to codes
+    the proof would pass while every row it wrote was a year old: the consumer
+    takes ORDER BY date DESC LIMIT 1 with no recency bound, so a code present
+    at the wrong date is served exactly like a code present at the right one.
+
+    Each company's expected date is its OWN latest trading day, not a single
+    market-wide date. A stock that last traded in March owes a row for March;
+    demanding today's date of it would report a defect where there is only an
+    absence of trading.
+    """
+    from compute.engine.run_stages import StageResult, report_population
+
+    scoped = ""
+    if args.codes or args.limit:
+        scoped = "a scoped run's expected population is not the source domain"
+    elif args.full or args.days:
+        # A different question, not an unprovable one: the expected population
+        # of a history rewrite is every eligible (code, day), which this run
+        # deliberately did not derive. Claiming the latest-date proof here
+        # would assert coverage of a population that was never measured.
+        scoped = (f"mode is {'full history' if args.full else str(args.days) + 'd'}, "
+                  f"whose expected population is every eligible trading day, "
+                  f"not the latest one")
+
+    result = StageResult(
+        "technical_compute",
+        frozenset(expected.items()),
+        frozenset(written),
+        details,
+        grain="asx_code+date")
+
+    return report_population(cur, getattr(args, "run_id", None), result, log,
+                             scoped_reason=scoped)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -617,6 +714,8 @@ def main():
                              "(default: latest date only)")
     parser.add_argument("--full",   action="store_true",
                         help="Write all computed rows (full history — slow)")
+    parser.add_argument("--run-id", type=int, default=None,
+                        help="Record stage evidence against this compute run")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
@@ -629,6 +728,21 @@ def main():
 
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
+
+    # Derived before the loop and independently of it.
+    expected = fetch_source_domain(cur)
+
+    # `written` holds only keys that survived a COMMIT. `pending` holds keys
+    # accepted since the last one.
+    #
+    # The loop rolls back on any per-company exception, and a rollback here
+    # discards the whole batch -- up to BATCH_COMMIT-1 other companies that
+    # succeeded. Counting a key as written at the moment RETURNING produced it
+    # would claim rows the database does not have, and the proof would certify
+    # a population that was thrown away. A write is written when it is durable,
+    # not when it is accepted.
+    written: set = set()
+    pending: set = set()
 
     # Determine the 'since' date for filtering output rows
     since: Optional[date] = None
@@ -647,7 +761,7 @@ def main():
     for idx, asx_code in enumerate(codes, 1):
         try:
             df = fetch_ohlcv(cur, asx_code)
-            if df.empty or len(df) < 20:
+            if df.empty or len(df) < MIN_HISTORY_DAYS:
                 skipped += 1
                 continue
 
@@ -666,12 +780,15 @@ def main():
                 skipped += 1
                 continue
 
-            n = upsert_rows(cur, rows)
-            total_rows += n
+            accepted = upsert_rows(cur, rows)
+            pending.update((code, day) for code, day in accepted)
+            total_rows += len(accepted)
             processed  += 1
 
             if idx % BATCH_COMMIT == 0:
                 conn.commit()
+                written |= pending
+                pending.clear()
                 log.info(f"  [{idx:4d}/{total}] {processed} done | "
                          f"{skipped} skipped | {errors} errors | "
                          f"{total_rows:,} rows so far")
@@ -680,15 +797,32 @@ def main():
             errors += 1
             log.warning(f"  {asx_code}: {e}", exc_info=(errors <= 3))
             conn.rollback()
+            # The whole batch went with it, including companies that succeeded.
+            # They are not missing source rows; they are missed writes, and the
+            # proof must see them as such.
+            total_rows -= len(pending)
+            pending.clear()
 
     conn.commit()
-    cur.close()
-    conn.close()
+    written |= pending
+    pending.clear()
 
     log.info("─" * 60)
     log.info(f"Done! {processed} stocks | {skipped} skipped | "
              f"{errors} errors | {total_rows:,} rows upserted")
 
+    # ── Terminal stage evidence ──────────────────────────────────────────────
+    ok = prove_population(cur, args, expected, written,
+                          {"skipped_short_history": skipped, "errors": errors})
+    conn.commit()
+    cur.close()
+    conn.close()
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
-    main()
+    # sys.exit(main()), not a bare main(): the proof's whole purpose is that an
+    # uncovered population is executable. Called bare, the return value is
+    # discarded and the process exits 0 — the orchestrator sees success and the
+    # failure survives only as a log line nobody has to read.
+    sys.exit(main())

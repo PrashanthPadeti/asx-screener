@@ -118,7 +118,23 @@ UPSERT_SQL = """
 """
 
 
-def run(codes: list[str] | None = None):
+#: The producer's source domain.
+#:
+#: Every code with any price history owes a row for today: COMPUTE_SQL's only
+#: eligibility rule is HAVING COUNT(*) >= 1, with no date bound and no company
+#: join. Unlike technical_compute this producer is not narrower than its
+#: consumer, so the domain is simply what the price table holds.
+#:
+#: Stated as its own query against market.daily_prices rather than reusing
+#: COMPUTE_SQL's projection. Deriving the expected set from the same statement
+#: that produced the rows would make the comparison circular -- it would agree
+#: however wrong the statement was.
+SOURCE_DOMAIN_SQL = """
+    SELECT DISTINCT asx_code FROM market.daily_prices ORDER BY asx_code
+"""
+
+
+def run(codes: list[str] | None = None, run_id: int | None = None) -> bool:
     conn = psycopg2.connect(DB_URL)
     # Prove where this process ACTUALLY connected, before any mutation.
     # An inherited environment is intent; a live connection is fact. Outside
@@ -138,17 +154,29 @@ def run(codes: list[str] | None = None):
 
     sql = COMPUTE_SQL.format(where_clause=where_clause)
 
+    # Derived before the write, from the source table, independently of the
+    # statement that computes the values.
+    today = datetime.now(timezone.utc).date()
+    cur.execute(SOURCE_DOMAIN_SQL)
+    expected = {(r[0], today) for r in cur.fetchall()}
+
     log.info("Computing period metrics%s…", f" for {codes}" if codes else " for all stocks")
     cur.execute(sql, params)
     rows = cur.fetchall()
     log.info("Fetched %d stocks from daily_prices", len(rows))
 
     if not rows:
-        log.warning("No rows returned — nothing to upsert")
+        # Not a quiet exit. An empty result while the source domain is
+        # populated is the most severe form of the failure this proof exists to
+        # catch -- every company missed at once -- and returning here without
+        # evidence used to make it indistinguishable from a clean run.
+        log.error("No rows returned — nothing to upsert")
+        ok = _prove(cur, run_id, expected, set(), codes,
+                    {"compute_returned_rows": 0})
+        conn.commit()
         conn.close()
-        return
+        return ok
 
-    today = datetime.now(timezone.utc).date()
     records = [
         (
             r[0],    # asx_code
@@ -164,19 +192,55 @@ def run(codes: list[str] | None = None):
         for r in rows
     ]
 
-    execute_values(cur, UPSERT_SQL, records, page_size=500)
+    # RETURNING, so the actual set is what PostgreSQL persisted rather than
+    # what this process submitted. The conflict action is an unconditional
+    # DO UPDATE, so every record comes back.
+    accepted = execute_values(
+        cur, UPSERT_SQL + " RETURNING asx_code, computed_date",
+        records, page_size=500, fetch=True)
     conn.commit()
-    log.info("Upserted %d rows into market.period_metrics for %s", len(records), today)
+    written = {(code, day) for code, day in accepted}
+    log.info("Upserted %d rows into market.period_metrics for %s", len(written), today)
+
+    ok = _prove(cur, run_id, expected, written, codes,
+                {"compute_returned_rows": len(rows)})
+    conn.commit()
     cur.close()
     conn.close()
+    return ok
+
+
+def _prove(cur, run_id, expected: set, written: set, codes, details: dict) -> bool:
+    """Set equality at (asx_code, computed_date).
+
+    The date belongs in the key. Collapsed to codes, the proof would pass on a
+    run that wrote nothing today, because market.period_metrics still holds
+    yesterday's row for every company -- a query asking only whether the target
+    "contains" each expected code is satisfied entirely by history.
+    """
+    from compute.engine.run_stages import StageResult, report_population
+
+    result = StageResult(
+        "period_metrics_compute",
+        frozenset(expected), frozenset(written), details,
+        grain="asx_code+computed_date")
+    return report_population(
+        cur, run_id, result, log,
+        scoped_reason=("a scoped run's expected population is not the source "
+                       "domain" if codes else ""))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Compute period H/L/AvgVol metrics")
     parser.add_argument("--codes", nargs="+", metavar="CODE", help="Limit to specific ASX codes")
+    parser.add_argument("--run-id", type=int, default=None,
+                        help="Record stage evidence against this compute run")
     args = parser.parse_args()
 
     start = datetime.now()
-    run(codes=[c.upper() for c in args.codes] if args.codes else None)
+    ok = run(codes=[c.upper() for c in args.codes] if args.codes else None,
+             run_id=args.run_id)
     elapsed = (datetime.now() - start).total_seconds()
     log.info("Done in %.1fs", elapsed)
+    # An uncovered population must be executable, not merely logged.
+    sys.exit(0 if ok else 1)

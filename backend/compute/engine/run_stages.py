@@ -73,7 +73,33 @@ class StageIncomplete(RuntimeError):
     """A stage did not cover its source population, so nothing may publish."""
 
 
-def set_hash(keys: Iterable[str]) -> str:
+#: Separates the parts of a composite key. A unit separator, because it cannot
+#: occur in an ASX code, an ISO date or a period label, so rendering is
+#: unambiguous and two different keys can never collide into one string.
+KEY_SEP = "\x1f"
+
+
+def render_key(key) -> str:
+    """One canonical string for a key at any grain.
+
+    Producers do not share a grain and must not be made to pretend they do.
+    technical_compute's population is (code, date); halfyearly_compute's is
+    (code, period_end_date); daily_compute's is a bare code. Collapsing them
+    all to codes would make three different questions look like one, and the
+    two that are really about dates would be answered by a proof that never
+    examined a date -- passing while the row for today was missing.
+
+    Dates are rendered with isoformat(), so a date and a datetime for the same
+    instant never hash as different members.
+    """
+    if isinstance(key, (tuple, list)):
+        return KEY_SEP.join(render_key(part) for part in key)
+    if hasattr(key, "isoformat"):
+        return key.isoformat()
+    return str(key)
+
+
+def set_hash(keys: Iterable) -> str:
     """A deterministic fingerprint of a key set.
 
     Sorted and newline-joined before hashing, so two runs that covered the same
@@ -81,8 +107,11 @@ def set_hash(keys: Iterable[str]) -> str:
     hashes is the positive form of the invariant -- not "missing_count is
     zero", which is the same claim stated in a way that cannot be re-checked
     later.
+
+    Sorting happens on the rendered strings, so a set of tuples orders the same
+    way on every run and on every platform.
     """
-    joined = "\n".join(sorted(keys))
+    joined = "\n".join(sorted(render_key(k) for k in keys))
     return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
@@ -91,9 +120,16 @@ class StageResult:
     """What a producer proved about its own coverage."""
 
     stage_name: str
-    expected: frozenset[str]
-    written: frozenset[str]
+    expected: frozenset
+    written: frozenset
     details: Mapping[str, object] = None
+    #: The semantic identity the two sets are populations OF, named on the
+    #: record. Without it a reader of compute_run_stages cannot tell whether
+    #: "2,103 expected" means 2,103 companies or 2,103 company-days, and two
+    #: stages whose counts look comparable may not be measuring the same thing
+    #: at all. Recorded, not inferred, because a grain that has to be guessed
+    #: from a count is not evidence.
+    grain: str = "asx_code"
 
     @property
     def missing(self) -> frozenset[str]:
@@ -118,23 +154,29 @@ class StageResult:
     def summary(self) -> str:
         if self.ok:
             return (f"{self.stage_name}: covered {len(self.expected):,} of "
-                    f"{len(self.expected):,} expected")
+                    f"{len(self.expected):,} expected, by {self.grain}")
         parts = []
         if self.missing:
             parts.append(f"{len(self.missing):,} expected but not written")
         if self.extra:
             parts.append(f"{len(self.extra):,} written but not expected")
-        return f"{self.stage_name}: {'; '.join(parts)}"
+        return f"{self.stage_name}: {'; '.join(parts)} (by {self.grain})"
 
     def payload(self) -> dict:
-        """The details column: bounded samples, plus anything the stage added."""
+        """The details column: bounded samples, plus anything the stage added.
+
+        The counts alone cannot distinguish "wrote the right number of the
+        wrong members" from a clean run -- two sets of equal size can be
+        disjoint -- so the samples and the set hashes are what make a passing
+        record re-checkable.
+        """
         out: dict[str, object] = dict(self.details or {})
-        if self.missing:
-            out["missing_sample"] = sorted(self.missing)[:SAMPLE_LIMIT]
-            out["missing_truncated"] = len(self.missing) > SAMPLE_LIMIT
-        if self.extra:
-            out["extra_sample"] = sorted(self.extra)[:SAMPLE_LIMIT]
-            out["extra_truncated"] = len(self.extra) > SAMPLE_LIMIT
+        out["grain"] = self.grain
+        for name, keys in (("missing", self.missing), ("extra", self.extra)):
+            if keys:
+                out[f"{name}_sample"] = sorted(
+                    render_key(k) for k in keys)[:SAMPLE_LIMIT]
+                out[f"{name}_truncated"] = len(keys) > SAMPLE_LIMIT
         return out
 
 
@@ -157,6 +199,62 @@ def record_stage(cur, run_id: int, result: StageResult) -> bool:
          len(result.missing), len(result.extra),
          set_hash(result.expected), set_hash(result.written),
          json.dumps(result.payload(), sort_keys=True, default=str)))
+    return result.ok
+
+
+def report_population(cur, run_id: Optional[int], result: Optional[StageResult],
+                      log, *, scoped_reason: str = "") -> bool:
+    """Print the proof, record it when there is a run to record it against,
+    and answer whether the producer covered its domain.
+
+    The caller turns a False into a non-zero exit. That separation is
+    deliberate: the proof is printed on every run, including ones with no run
+    id, so a developer running the producer by hand sees the same evidence the
+    lifecycle would; but the failure has to be executable, because a log line
+    is something a person may read and an exit code is something the
+    orchestrator cannot ignore.
+
+    A scoped run records nothing. Its expected population is not the source
+    domain, and a stage row claiming otherwise would be a false claim -- worse
+    than no claim, because the resolver would act on it.
+    """
+    if scoped_reason:
+        log.info("population proof skipped: %s", scoped_reason)
+        return True
+
+    if result is None:
+        # Only a scoped run may arrive without a result. Reaching here with
+        # nothing to report would otherwise return success for a producer that
+        # proved nothing -- the exact shape of an inert check.
+        raise ValueError(
+            "report_population called with no result and no scoped_reason: a "
+            "producer cannot pass by having nothing to say")
+
+    log.info("─" * 60)
+    log.info("population proof — %s (grain: %s)", result.stage_name, result.grain)
+    log.info("  expected  %8d   %s", len(result.expected), set_hash(result.expected))
+    log.info("  written   %8d   %s", len(result.written), set_hash(result.written))
+    log.info("  missing   %8d   (expected, not written)", len(result.missing))
+    log.info("  extra     %8d   (written, not expected)", len(result.extra))
+
+    if result.ok:
+        # Stated as set equality, not as two zero counts. Equal counts over
+        # different members is a failure, and a proof that reports only counts
+        # cannot tell the two apart.
+        log.info("  RESULT    sets are equal")
+    else:
+        log.error("  RESULT    POPULATION NOT COVERED")
+        for name, keys in (("missing", result.missing), ("extra", result.extra)):
+            if keys:
+                sample = sorted(render_key(k) for k in keys)[:SAMPLE_LIMIT]
+                log.error("  %s sample: %s%s", name, ", ".join(sample),
+                          " …" if len(keys) > SAMPLE_LIMIT else "")
+    log.info("─" * 60)
+
+    if run_id is not None:
+        record_stage(cur, run_id, result)
+        log.info("stage %s: %s — %s",
+                 result.stage_name, result.status, result.summary())
     return result.ok
 
 

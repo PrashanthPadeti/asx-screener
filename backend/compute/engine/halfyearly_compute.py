@@ -129,19 +129,60 @@ def _v(val):
 
 # ── Data Fetching ─────────────────────────────────────────────────────────────
 
+#: The producer's source domain, at (asx_code, fiscal_year).
+#:
+#: Why not (asx_code, period_end_date), which is the target's primary key: that
+#: date is DERIVED by _agg_halves, from how many quarters the company filed and
+#: which of them fall in each half. An expected set containing it would have to
+#: reimplement that rule in SQL, and the proof would then be comparing the
+#: producer against a second copy of its own logic. Two copies agree until they
+#: drift, and the day they drift the proof reports the drift as a data defect.
+#: A proof must be derived from the source, not from a restatement of the
+#: transformation.
+#:
+#: (asx_code, fiscal_year) is the finest grain the source can state on its own,
+#: and it is the grain at which the missed-source question actually lives: did
+#: a fiscal year that had usable quarterly data end up with no half-year row.
+#: Which halves a year yields is a property of the filing pattern; whether the
+#: year produced anything at all is a property of this producer.
+#:
+#: The three conditions are the producer's own eligibility rules, read off the
+#: code: fetch_quarterly requires fiscal_year and quarter, and the company must
+#: have revenue somewhere or nothing meaningful can be computed for it.
+SOURCE_DOMAIN_SQL = """
+    SELECT DISTINCT q.asx_code, q.fiscal_year
+      FROM market.quarterly_metrics q
+     WHERE q.fiscal_year IS NOT NULL
+       AND q.quarter     IS NOT NULL
+       AND EXISTS (SELECT 1 FROM market.quarterly_metrics r
+                    WHERE r.asx_code = q.asx_code
+                      AND r.revenue IS NOT NULL)
+     ORDER BY q.asx_code, q.fiscal_year
+"""
+
+
+def fetch_source_domain(cur, min_year=None) -> set:
+    """{(asx_code, fiscal_year)} — the population this producer owes.
+
+    Derived from market.quarterly_metrics directly, never from the loop's
+    selection: a run compared against its own selection agrees by construction.
+    """
+    cur.execute(SOURCE_DOMAIN_SQL)
+    domain = {(r[0], r[1]) for r in cur.fetchall()}
+    if min_year:
+        # The flag narrows what is written, so it must narrow what is owed by
+        # exactly the same predicate, or every older year reads as missed.
+        domain = {k for k in domain if k[1] >= min_year}
+    return domain
+
+
 def fetch_codes(cur, codes=None, limit=None) -> list[str]:
     if codes:
         return [c.upper() for c in codes]
-    sql = """
-        SELECT DISTINCT asx_code
-        FROM market.quarterly_metrics
-        WHERE revenue IS NOT NULL
-        ORDER BY asx_code
-    """
-    if limit:
-        sql += f" LIMIT {limit}"
-    cur.execute(sql)
-    return [r[0] for r in cur.fetchall()]
+    cur.execute(SOURCE_DOMAIN_SQL)
+    # dict preserves the query's order while de-duplicating the years.
+    ordered = list(dict.fromkeys(r[0] for r in cur.fetchall()))
+    return ordered[:limit] if limit else ordered
 
 
 def fetch_quarterly(cur, asx_code: str) -> pd.DataFrame:
@@ -355,11 +396,17 @@ UPSERT_SQL = f"""
 """
 
 
-def upsert_rows(cur, rows: list[tuple]) -> int:
+def upsert_rows(cur, rows: list[tuple]) -> list:
+    """Upsert, returning the (asx_code, fiscal_year) keys PostgreSQL accepted.
+
+    RETURNING, not the input rows: the input is intent and the question is what
+    persisted. The conflict action is an unconditional DO UPDATE, so every
+    submitted row comes back whether it inserted or updated.
+    """
     if not rows:
-        return 0
-    execute_values(cur, UPSERT_SQL, rows, page_size=500)
-    return len(rows)
+        return []
+    return execute_values(cur, UPSERT_SQL + " RETURNING asx_code, fiscal_year",
+                          rows, page_size=500, fetch=True)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
@@ -369,6 +416,8 @@ def main():
     parser.add_argument("--codes",    nargs="+", help="Specific ASX codes")
     parser.add_argument("--limit",    type=int,  help="Max stocks to process")
     parser.add_argument("--min-year", type=int,  help="Only upsert rows for fiscal_year >= N")
+    parser.add_argument("--run-id",   type=int, default=None,
+                        help="Record stage evidence against this compute run")
     args = parser.parse_args()
 
     conn = psycopg2.connect(DB_URL)
@@ -381,6 +430,15 @@ def main():
 
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
+
+    # Derived before the loop, independently of it. `written` counts only what
+    # survived a COMMIT: the loop rolls back the whole batch on any per-company
+    # exception, so keys accepted since the last commit are not yet durable and
+    # claiming them would certify rows the database threw away.
+    expected = fetch_source_domain(cur, args.min_year)
+    written: set = set()
+    pending: set = set()
+
     log.info(f"Half-yearly compute — {total} stocks"
              + (f" | min-year {args.min_year}" if args.min_year else " (all years)"))
     log.info("─" * 60)
@@ -411,12 +469,15 @@ def main():
                 skipped += 1
                 continue
 
-            upsert_rows(cur, rows)
-            total_rows += len(rows)
+            accepted = upsert_rows(cur, rows)
+            pending.update((code, fy) for code, fy in accepted)
+            total_rows += len(accepted)
             processed  += 1
 
             if i % BATCH_COMMIT == 0:
                 conn.commit()
+                written |= pending
+                pending.clear()
                 log.info(f"  [{i:4d}/{total}] {processed} done | "
                          f"{skipped} skipped | {errors} errors | "
                          f"{total_rows:,} rows so far")
@@ -425,15 +486,39 @@ def main():
             errors += 1
             log.warning(f"  {asx_code}: {e}", exc_info=(errors <= 3))
             conn.rollback()
+            # The batch went with it, including companies that succeeded.
+            total_rows -= len(pending)
+            pending.clear()
 
     conn.commit()
-    cur.close()
-    conn.close()
+    written |= pending
+    pending.clear()
 
     log.info("─" * 60)
     log.info(f"Done! {processed} stocks | {skipped} skipped | "
              f"{errors} errors | {total_rows:,} rows upserted")
 
+    # ── Terminal stage evidence ──────────────────────────────────────────────
+    from compute.engine.run_stages import StageResult, report_population
+
+    result = StageResult(
+        "halfyearly_compute",
+        frozenset(expected), frozenset(written),
+        {"skipped_no_quarterly": skipped, "errors": errors,
+         "min_year": args.min_year},
+        grain="asx_code+fiscal_year")
+
+    ok = report_population(
+        cur, args.run_id, result, log,
+        scoped_reason=("a scoped run's expected population is not the source "
+                       "domain" if (args.codes or args.limit) else ""))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
-    main()
+    # sys.exit, not a bare call: an uncovered population must be executable,
+    # not merely logged.
+    sys.exit(main())

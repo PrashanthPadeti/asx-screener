@@ -46,14 +46,40 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-BASE_DIR  = Path(__file__).resolve().parents[4]   # /opt/asx-screener
+#: The MAINTAINED backend tree, and only that one.
+#:
+#: parents[4] of backend/scripts/eodhd/v2/jobs/ is `backend`, not
+#: /opt/asx-screener as the comment here claimed for a long time. Nothing
+#: depended on the comment being right until the compute path below did.
+BASE_DIR  = Path(__file__).resolve().parents[4]   # <repo>/backend
 SCRIPTS   = BASE_DIR / "scripts" / "eodhd" / "v2"
 ASIC      = BASE_DIR / "scripts" / "asic"
 # Prefer backend/compute/engine (canonical source); fall back to root-level compute/engine
 # if the server uses a symlink or flat deployment without the backend/ prefix.
-_compute_canonical = BASE_DIR / "backend" / "compute" / "engine"
-_compute_fallback  = BASE_DIR / "compute" / "engine"
-COMPUTE   = _compute_canonical if _compute_canonical.exists() else _compute_fallback
+#: One engine tree. No fallback.
+#:
+#: This resolved two candidates and took whichever existed:
+#:
+#:     _compute_canonical = BASE_DIR / "backend" / "compute" / "engine"
+#:     _compute_fallback  = BASE_DIR / "compute" / "engine"
+#:
+#: BASE_DIR is `backend`, so the "canonical" candidate was
+#: backend/backend/compute/engine and could never exist, and the "fallback"
+#: was backend/compute/engine — the maintained tree. It worked, by accident,
+#: with the two names meaning the opposite of what they said.
+#:
+#: The trap was that correcting BASE_DIR to the repo root — the obvious
+#: reading of the old comment — would have flipped the fallback to
+#: <repo>/compute/engine: the stale April copies the deployment contract
+#: records as a live hazard, correct code in git and something else
+#: executing. A pipeline that silently selects a second engine tree is worse
+#: than one that cannot start.
+COMPUTE   = BASE_DIR / "compute" / "engine"
+if not COMPUTE.is_dir():
+    raise SystemExit(
+        f"FATAL: compute engine tree not found at {COMPUTE}. There is no "
+        f"fallback and there must not be one: a second tree is how April's "
+        f"code ends up running against today's database. Fix the deployment.")
 PYTHON    = sys.executable
 TODAY     = date.today().isoformat()
 YESTERDAY = (date.today() - timedelta(days=1)).isoformat()

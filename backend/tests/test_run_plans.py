@@ -1,0 +1,278 @@
+"""
+Cadence is not correctness
+==========================
+A daily run must not fail because yearly_compute did not run that day —
+reusing the weekly output is the intended behaviour. What it must not do is
+assume that output is still current.
+
+The adversarial case this suite exists for:
+
+    advance the annual source fingerprint without rerunning yearly_compute
+    -> DAILY_CANONICAL must REFUSE, and must refuse before creating a run
+
+That proves the reuse contract rather than its happy path.
+
+Run under pytest, or standalone:
+    cd /opt/asx-screener/backend && ../asx-venv/bin/python tests/test_run_plans.py
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from compute.engine import source_fingerprint as sfp  # noqa: E402
+from compute.engine.run_plans import (  # noqa: E402
+    DAILY_CANONICAL, FULL_FUNDAMENTALS_CANONICAL, PLANS,
+    PlanPreconditionFailed, RunPlan, check_yearly_reuse, open_plan,
+)
+
+
+class Log:
+    def __init__(self):
+        self.lines = []
+
+    def _add(self, msg, *a):
+        self.lines.append(msg % a if a else msg)
+
+    info = error = warning = _add
+
+    def text(self):
+        return "\n".join(self.lines)
+
+
+class FakeCur:
+    """Answers the fingerprint queries and the stage lookup.
+
+    `tables` is the CURRENT source state; `proven` is what the recorded
+    yearly_compute evidence claims.
+    """
+
+    def __init__(self, tables, proven=None, proven_run=41):
+        self.tables = tables
+        self.proven = proven
+        self.proven_run = proven_run
+        self._answer = None
+        self._digest_for = None
+
+    def execute(self, sql, params=None):
+        if "information_schema.columns" in sql:
+            self._answer = "numeric-set"
+            self._rows = []
+        elif "compute_run_stages" in sql:
+            self._answer = ((self.proven_run, self.proven)
+                            if self.proven is not None else None)
+        else:
+            # A table digest, identified by the marker the query carries. The
+            # two scoped projections contain a correlated subquery over
+            # financials.annual_pnl, so matching on "FROM <table>" picks
+            # whichever name appears first and silently answers for the wrong
+            # table — which is exactly what it did before the marker existed.
+            for name in self.tables:
+                if f"/* fingerprint:{name} */" in sql:
+                    self._answer = (self.tables[name]["n"],
+                                    self.tables[name]["digest"])
+                    return
+            raise AssertionError(f"unrecognised digest query: {sql[:120]}")
+
+    def fetchone(self):
+        return self._answer
+
+    def fetchall(self):
+        return []
+
+
+def _state(**overrides):
+    """A current-source state: every fingerprinted table, digest 'base'."""
+    tables = {t: {"n": 10, "digest": overrides.get(t, "base")}
+              for t in sfp.PROJECTIONS}
+    return tables
+
+
+def _proven_from(tables):
+    return sfp.SourceFingerprint(
+        sfp.FINGERPRINT_SCHEMA_VERSION, tables,
+        sfp.aggregate_digest(sfp.FINGERPRINT_SCHEMA_VERSION, tables)).to_json()
+
+
+# ── Plan shape ───────────────────────────────────────────────────────────────
+
+def test_the_daily_plan_does_not_require_yearly_compute():
+    """Requiring it would force a daily run to recompute the weekly output
+    purely to satisfy its own bookkeeping."""
+    assert "yearly_compute" not in DAILY_CANONICAL.required
+    assert "yearly_compute" not in DAILY_CANONICAL.stages
+    assert "yearly_compute" in DAILY_CANONICAL.reuses
+
+
+def test_the_full_plan_computes_yearly_and_inherits_nothing():
+    assert "yearly_compute" in FULL_FUNDAMENTALS_CANONICAL.required
+    assert FULL_FUNDAMENTALS_CANONICAL.reuses == ()
+
+
+def test_the_canonical_tail_is_in_both_plans():
+    """Four of the five direct input families to the governed columns change
+    daily. A canonical tail that runs only weekly leaves a finalised contract
+    valid for hours — the temporal defect P0-A-2 found."""
+    for plan in PLANS.values():
+        assert "composite_score" in plan.stages, (
+            f"{plan.name} rebuilds governed values without canonicalising them")
+        assert plan.stages[-1] == "composite_score", (
+            f"{plan.name} does not END in canonical publication")
+
+
+def test_universe_build_precedes_the_canonical_tail_in_every_plan():
+    for plan in PLANS.values():
+        assert plan.stages.index("universe_build") < \
+               plan.stages.index("composite_score")
+
+
+def test_a_plan_cannot_require_a_stage_it_never_runs():
+    """A prerequisite the plan cannot satisfy is a plan that can never
+    publish."""
+    try:
+        RunPlan(name="BROKEN", stages=("a",), required=("a", "b"))
+    except AssertionError as e:
+        assert "never runs" in str(e)
+    else:
+        raise AssertionError("a plan requiring an unrun stage was accepted")
+
+
+def test_a_plan_cannot_both_run_and_reuse_a_stage():
+    try:
+        RunPlan(name="BROKEN", stages=("yearly_compute",), required=(),
+                reuses=("yearly_compute",))
+    except AssertionError as e:
+        assert "runs and reuses" in str(e)
+    else:
+        raise AssertionError("a plan that both computes and inherits was accepted")
+
+
+# ── The reuse contract ───────────────────────────────────────────────────────
+
+def test_reuse_is_permitted_when_the_fingerprint_is_unchanged():
+    tables = _state()
+    cur = FakeCur(tables, proven=_proven_from(tables))
+    decision = check_yearly_reuse(cur)
+    assert decision.permitted
+    assert decision.proven_by_run == 41
+
+
+def test_a_changed_fundamentals_source_refuses_reuse():
+    """The adversarial case: advance the annual source without rerunning
+    yearly_compute."""
+    proven = _proven_from(_state())
+    cur = FakeCur(_state(**{"financials.annual_pnl": "CORRECTED"}), proven=proven)
+
+    decision = check_yearly_reuse(cur)
+    assert not decision.permitted
+    assert "no longer represents current fundamentals" in decision.reason
+    assert any("annual_pnl" in d for d in decision.differences), (
+        "the refusal does not say which source moved, leaving the operator to "
+        "guess between a fundamentals correction and a price backfill")
+
+
+def test_a_balance_sheet_correction_alone_refuses_reuse():
+    """A fingerprint of annual_pnl alone would have certified stale output."""
+    proven = _proven_from(_state())
+    cur = FakeCur(_state(**{"financials.annual_balance_sheet": "CORRECTED"}),
+                  proven=proven)
+    assert not check_yearly_reuse(cur).permitted
+
+
+def test_a_historical_price_backfill_refuses_reuse():
+    """yearly_metrics carries price-derived returns and risk metrics bounded at
+    each fiscal year end; correcting those prices changes the output."""
+    proven = _proven_from(_state())
+    cur = FakeCur(_state(**{"market.daily_prices": "BACKFILLED"}), proven=proven)
+    assert not check_yearly_reuse(cur).permitted
+
+
+def test_no_recorded_fingerprint_means_no_reuse():
+    """Absence is not permission — the same rule that governs publication,
+    applied to the thing publication would be built on."""
+    cur = FakeCur(_state(), proven=None)
+    decision = check_yearly_reuse(cur)
+    assert not decision.permitted
+    assert "Absence is not permission" in decision.reason
+
+
+# ── The precondition happens before a run exists ─────────────────────────────
+
+def test_a_stale_yearly_source_refuses_to_open_the_daily_plan():
+    cur = FakeCur(_state(**{"financials.annual_cashflow": "CORRECTED"}),
+                  proven=_proven_from(_state()))
+    log = Log()
+    try:
+        open_plan(cur, DAILY_CANONICAL, log)
+    except PlanPreconditionFailed as e:
+        assert "No run was created" in str(e), (
+            "a precondition failure must not leave an abandoned run id that "
+            "later reads as a failed computation")
+        assert FULL_FUNDAMENTALS_CANONICAL.name in str(e), (
+            "the refusal does not say what to run instead")
+    else:
+        raise AssertionError("a stale yearly source opened a daily run")
+
+
+def test_the_full_plan_needs_no_reuse_proof_to_open():
+    """It computes yearly output for itself, so there is nothing to inherit —
+    and it must open even when no fingerprint has ever been recorded, or the
+    system could never recover from that state."""
+    cur = FakeCur(_state(), proven=None)
+    open_plan(cur, FULL_FUNDAMENTALS_CANONICAL, Log())
+
+
+def test_opening_the_daily_plan_logs_what_it_inherits():
+    tables = _state()
+    log = Log()
+    open_plan(FakeCur(tables, proven=_proven_from(tables)), DAILY_CANONICAL, log)
+    out = log.text()
+    assert "reuses" in out and "yearly_compute" in out
+    assert "reuse PERMITTED" in out
+
+
+# ── The fingerprint the plan compares against ────────────────────────────────
+
+def test_the_recorded_fingerprint_survives_a_json_round_trip():
+    """It is persisted in a JSONB details column and read back by a later
+    process; a value that does not survive that is not a contract."""
+    tables = _state()
+    blob = json.loads(json.dumps(_proven_from(tables)))
+    restored = sfp.SourceFingerprint.from_json(blob)
+    assert restored.aggregate == sfp.aggregate_digest(
+        sfp.FINGERPRINT_SCHEMA_VERSION, tables)
+
+
+def test_a_projection_change_refuses_reuse_and_says_which_it_was():
+    """A fingerprint recorded under an older projection says nothing about
+    whether the sources moved. Refusing with "the fundamentals moved" would
+    send someone looking for a source correction that never happened."""
+    tables = _state()
+    older = sfp.FINGERPRINT_SCHEMA_VERSION + 1        # recorded under another
+    proven = sfp.SourceFingerprint(
+        older, tables, sfp.aggregate_digest(older, tables)).to_json()
+
+    decision = check_yearly_reuse(FakeCur(tables, proven=proven))
+    assert not decision.permitted
+    assert "projection changed" in decision.reason
+    assert "fundamentals" not in decision.reason
+
+
+if __name__ == "__main__":
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    failures = []
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"  PASS  {name}")
+        except AssertionError as e:
+            failures.append(name)
+            print(f"  FAIL  {name}  - {e}")
+        except Exception as e:
+            failures.append(name)
+            print(f"  ERROR {name}  - {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
+    sys.exit(1 if failures else 0)

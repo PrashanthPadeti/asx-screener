@@ -1,0 +1,217 @@
+"""
+Two plans, named explicitly
+===========================
+Not a dependency scheduler. Two run shapes, each stating which stages it runs
+and which stage evidence its canonical publication requires.
+
+    FULL_FUNDAMENTALS_CANONICAL   fundamentals refresh; yearly_compute runs
+    DAILY_CANONICAL               daily producers; yearly output is REUSED
+
+The distinction that matters is not cadence, it is what the run computes for
+itself versus what it inherits. A daily run must not fail because
+yearly_compute did not run that day -- reusing the weekly output is the
+intended behaviour. What it must not do is *assume* that output is still
+current.
+
+Cadence and correctness are separate
+------------------------------------
+A single growing REQUIRED_STAGES tuple would conflate them: every stage any
+plan runs would become mandatory for every plan, so the daily run would have
+to re-run yearly_compute purely to satisfy its own bookkeeping. Prerequisites
+are therefore per-plan.
+
+The reuse contract
+------------------
+`DAILY_CANONICAL` may reuse market.yearly_metrics only when the current
+fingerprint of yearly_compute's entire input set equals the one a successful
+yearly_compute proved. Not "a successful yearly_compute happened less than
+seven days ago" -- that permits a fundamentals correction to land on Tuesday
+while daily canonical runs keep publishing Monday's yearly output, which is
+precisely the stale-input problem P0-A exists to end.
+
+A fingerprint mismatch is NOT a failed daily computation. Nothing has computed
+anything yet. It is a plan precondition failure -- the yearly output no longer
+represents current fundamentals -- and it is evaluated BEFORE a run is created,
+so the lifecycle stays:
+
+    plan/source precondition failure   -> no run
+    execution failure after creation   -> run + immutable FAILED evidence
+    successful execution               -> immutable SUCCESS evidence
+    valid complete run                 -> finalisation
+
+Creating a run and only then discovering that its deliberately reused
+prerequisite was stale would leave an abandoned run id behind for a condition
+that was knowable in advance.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Optional
+
+
+class PlanPreconditionFailed(RuntimeError):
+    """The plan may not open a run. No run id has been created."""
+
+
+@dataclass(frozen=True)
+class RunPlan:
+    name: str
+
+    #: Stages this plan executes, in dependency order. The order comes from the
+    #: dependency graph in docs/p0a_orchestration_manifest.md, not from the
+    #: schedule a cron entry happens to use.
+    stages: tuple[str, ...]
+
+    #: Stage evidence that must exist, and be successful, under THIS run before
+    #: its canonical publication may finalise. A subset of `stages`: a stage
+    #: can be worth running without its success being a condition of publishing
+    #: governed values.
+    required: tuple[str, ...]
+
+    #: Producers whose output this plan inherits rather than computes. Each
+    #: needs a currentness proof, because inheriting an output is a claim about
+    #: it.
+    reuses: tuple[str, ...] = ()
+
+    description: str = ""
+
+    def __post_init__(self):
+        unknown = set(self.required) - set(self.stages)
+        assert not unknown, (
+            f"{self.name} requires {sorted(unknown)}, which it never runs. A "
+            f"prerequisite the plan cannot satisfy is a plan that can never "
+            f"publish.")
+        overlap = set(self.reuses) & set(self.stages)
+        assert not overlap, (
+            f"{self.name} both runs and reuses {sorted(overlap)}. One of those "
+            f"is wrong, and which one decides whether a currentness proof is "
+            f"needed.")
+
+
+#: The daily producers, in dependency order.
+#:
+#: transform_prices feeds every price-derived producer, so it comes first;
+#: daily/technical/halfyearly/period all feed the universe build; the universe
+#: build feeds the canonical writer. composite_score is the canonical tail --
+#: the commit, read-back and finalisation -- and under the new orchestration it
+#: runs DAILY, not weekly. Four of the five direct input families to the
+#: governed columns change daily, so a weekly canonical tail leaves a finalised
+#: contract valid for hours rather than a week.
+_DAILY_PRODUCERS = (
+    "transform_prices",
+    "daily_compute",
+    "technical_compute",
+    "halfyearly_compute",
+    "period_metrics_compute",
+    "universe_build",
+)
+
+DAILY_CANONICAL = RunPlan(
+    name="DAILY_CANONICAL",
+    stages=_DAILY_PRODUCERS + ("composite_score",),
+    # yearly_compute is deliberately absent. Its output is inherited, and the
+    # fingerprint below is what makes that legitimate.
+    required=_DAILY_PRODUCERS,
+    reuses=("yearly_compute",),
+    description="Daily governed rebuild ending in canonical publication, "
+                "reusing proven-current yearly output.")
+
+FULL_FUNDAMENTALS_CANONICAL = RunPlan(
+    name="FULL_FUNDAMENTALS_CANONICAL",
+    stages=("transform_prices", "yearly_compute", "daily_compute",
+            "technical_compute", "halfyearly_compute",
+            "period_metrics_compute", "universe_build", "composite_score"),
+    required=("transform_prices", "yearly_compute", "daily_compute",
+              "technical_compute", "halfyearly_compute",
+              "period_metrics_compute", "universe_build"),
+    reuses=(),
+    description="Fundamentals refresh: computes yearly output for itself, so "
+                "it inherits nothing and needs no reuse proof.")
+
+PLANS = {p.name: p for p in (DAILY_CANONICAL, FULL_FUNDAMENTALS_CANONICAL)}
+
+
+@dataclass
+class ReuseDecision:
+    """Whether inherited output may be used, and on what evidence."""
+
+    permitted: bool
+    reason: str
+    proven_by_run: Optional[int] = None
+    differences: list = field(default_factory=list)
+
+    def lines(self) -> list:
+        head = ("reuse PERMITTED" if self.permitted else "reuse REFUSED")
+        out = [f"{head}: {self.reason}"]
+        if self.proven_by_run is not None:
+            out.append(f"  proven by run {self.proven_by_run}")
+        out.extend(f"  {d}" for d in self.differences)
+        return out
+
+
+def check_yearly_reuse(cur) -> ReuseDecision:
+    """May a daily run inherit market.yearly_metrics as it stands?
+
+    Read-only, and called before any run exists.
+    """
+    from compute.engine import source_fingerprint as sfp
+
+    run_id, proven = sfp.proven_by_latest_yearly(cur)
+    if proven is None:
+        return ReuseDecision(
+            False,
+            "no successful yearly_compute has recorded a source fingerprint. "
+            "Absence is not permission: a run that never proved its inputs "
+            "cannot license reuse of its output.")
+
+    current = sfp.compute(cur)
+
+    # Checked before the aggregate, for the diagnosis rather than the verdict.
+    # The version is already inside the aggregate, so a projection change
+    # refuses reuse either way -- but it would refuse saying "the fundamentals
+    # moved", sending someone to look for a source correction that never
+    # happened.
+    if current.schema_version != proven.schema_version:
+        return ReuseDecision(
+            False,
+            f"fingerprint projection changed (schema "
+            f"{proven.schema_version} → {current.schema_version}); the "
+            f"recorded fingerprint is not comparable and says nothing about "
+            f"whether the sources moved",
+            run_id, current.differences(proven))
+
+    if current.aggregate == proven.aggregate:
+        return ReuseDecision(
+            True, "yearly source fingerprint is unchanged", run_id)
+
+    return ReuseDecision(
+        False,
+        "yearly output no longer represents current fundamentals",
+        run_id, current.differences(proven))
+
+
+def open_plan(cur, plan: RunPlan, log) -> None:
+    """Evaluate a plan's preconditions. Raises rather than creating a run.
+
+    Called before create_run, deliberately. A precondition failure must leave
+    no trace in the run table: the condition was knowable without computing
+    anything, and an abandoned run id would later read as a failed computation.
+    """
+    log.info("plan %s — %s", plan.name, plan.description)
+    log.info("  stages   : %s", ", ".join(plan.stages))
+    log.info("  required : %s", ", ".join(plan.required))
+    log.info("  reuses   : %s", ", ".join(plan.reuses) or "nothing")
+
+    if "yearly_compute" not in plan.reuses:
+        return
+
+    decision = check_yearly_reuse(cur)
+    for line in decision.lines():
+        (log.info if decision.permitted else log.error)("  %s", line)
+
+    if not decision.permitted:
+        raise PlanPreconditionFailed(
+            f"{plan.name} cannot open: {decision.reason}. "
+            f"Run {FULL_FUNDAMENTALS_CANONICAL.name} instead, which computes "
+            f"yearly output for itself. No run was created.")

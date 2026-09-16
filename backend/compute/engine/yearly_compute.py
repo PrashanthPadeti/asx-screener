@@ -1245,6 +1245,16 @@ def main():
     expected_rows = {f"{code}:{year}" for code, year in cur.fetchall()}
     written_rows: set[str] = set()
 
+    # What this run's output will represent, measured before it computes
+    # anything. A later DAILY_CANONICAL cycle reuses market.yearly_metrics
+    # only if the sources still fingerprint to this exact value -- so the
+    # fingerprint has to describe the inputs the computation actually read,
+    # which means capturing it before the reading starts.
+    from compute.engine import source_fingerprint as sfp
+    fingerprint_before = sfp.compute(cur)
+    log.info("yearly source fingerprint (before): %s",
+             fingerprint_before.aggregate[:16])
+
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
     log.info(f"Yearly compute — {total} stocks"
@@ -1379,6 +1389,23 @@ def main():
     # A scoped run proves nothing about the corpus and records nothing: its
     # expected population is not the source population, and a stage row saying
     # otherwise would be false.
+    # Did the inputs move underneath the computation?
+    #
+    # This run took minutes, and a fundamentals loader or a price backfill
+    # finishing inside that window would leave the output a mixture of two
+    # source states. Recording the BEFORE fingerprint for such a run would
+    # certify output that never corresponded to any single version of the
+    # sources -- and a later daily cycle would reuse it on the strength of
+    # that certificate.
+    fingerprint_after = sfp.compute(cur)
+    sources_moved = fingerprint_after.aggregate != fingerprint_before.aggregate
+    if sources_moved:
+        log.error("SOURCES CHANGED DURING THE COMPUTATION: %s",
+                  "; ".join(fingerprint_after.differences(fingerprint_before))
+                  or "aggregate differs")
+        log.error("This output represents no single source state, so no "
+                  "fingerprint describes it and no later run may reuse it.")
+
     stage_ok = True
     if args.run_id is not None and not scoped:
         from compute.engine.run_stages import StageResult, record_stage
@@ -1388,7 +1415,16 @@ def main():
             frozenset(expected_rows), frozenset(written_rows),
             {"rows_upserted": total_rows, "errors": errors,
              "pruned_orphans": len(orphans) if not args.keep_orphans
-                               and not scoped else None})
+                               and not scoped else None,
+             # Persisted with the evidence, so the claim and the thing it is a
+             # claim ABOUT are one immutable record. Only recorded when the
+             # sources held still: a fingerprint attached to output assembled
+             # from two source states would be a false certificate, and the
+             # reuse contract is built entirely on this value.
+             **({sfp.STAGE_DETAIL_KEY: fingerprint_before.to_json()}
+                if not sources_moved else
+                {"source_fingerprint_withheld": "sources changed mid-run"})},
+            failure_class="sources_changed_mid_run" if sources_moved else None)
         stage_ok = record_stage(cur, args.run_id, result)
         conn.commit()
         log.info("stage yearly_compute: %s — %s", result.status, result.summary())

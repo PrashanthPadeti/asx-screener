@@ -76,6 +76,13 @@ class RunPlan:
 
     description: str = ""
 
+    #: Whether a NEW run may be opened under this plan. LEGACY_CANONICAL exists
+    #: only to describe runs published before plans did, so that the resolver
+    #: can validate them against the contract they actually met. Choosing it
+    #: for new work would publish under a weaker contract than either real
+    #: plan.
+    executable: bool = True
+
     def __post_init__(self):
         unknown = set(self.required) - set(self.stages)
         assert not unknown, (
@@ -129,7 +136,43 @@ FULL_FUNDAMENTALS_CANONICAL = RunPlan(
     description="Fundamentals refresh: computes yearly output for itself, so "
                 "it inherits nothing and needs no reuse proof.")
 
-PLANS = {p.name: p for p in (DAILY_CANONICAL, FULL_FUNDAMENTALS_CANONICAL)}
+#: What runs published before plans existed actually proved.
+#:
+#: Historical only. Its required set is the old static REQUIRED_STAGES tuple,
+#: which is what those runs were validated against when they published. The two
+#: live plans now require four more producer stages, and holding old runs to a
+#: contract that did not exist when they ran would unpublish every one of them
+#: on deploy -- taking the governed surface dark -- with no evidence that any
+#: of them was wrong.
+#:
+#: Recording what they proved is the honest claim. Refusing to let anything new
+#: use it is what stops that honesty becoming a loophole.
+LEGACY_CANONICAL = RunPlan(
+    name="LEGACY_CANONICAL",
+    stages=("yearly_compute", "daily_compute", "universe_build",
+            "composite_score"),
+    required=("yearly_compute", "daily_compute", "universe_build"),
+    reuses=(),
+    description="Runs published before run plans existed, under the historical "
+                "three-stage contract. Not executable.",
+    executable=False)
+
+PLANS = {p.name: p for p in (DAILY_CANONICAL, FULL_FUNDAMENTALS_CANONICAL,
+                             LEGACY_CANONICAL)}
+
+#: What a new run may be opened under. `PLANS` is the wider set, because the
+#: resolver must be able to look up the plan of a run that already exists.
+EXECUTABLE_PLANS = {n: p for n, p in PLANS.items() if p.executable}
+
+
+def plan_requirements() -> dict:
+    """{plan_name: [required stages]} — for the resolver's per-run validation.
+
+    Derived from the plan declarations, never written out a second time. A
+    duplicated requirement list is a list that drifts, and the drift shows up
+    as runs that publish and are then quietly unservable.
+    """
+    return {name: list(plan.required) for name, plan in PLANS.items()}
 
 
 @dataclass

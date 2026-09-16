@@ -216,16 +216,38 @@ class ComputeRun:
 
 
 def create_run(cur, engine: str, source_health: SourceHealth,
-               model_version: str = LATEST_MODEL_VERSION) -> ComputeRun:
-    """Open a run and return its identity. Call before computing anything."""
+               model_version: str = LATEST_MODEL_VERSION,
+               *, plan_name: str) -> ComputeRun:
+    """Open a run and return its identity. Call before computing anything.
+
+    ``plan_name`` is required and has no default. It is immutable run metadata:
+    it decides which stage evidence this run's publication requires AND which
+    the resolver later validates it against, so a run that does not state its
+    plan is a run whose publication contract nobody can name.
+
+    Keyword-only and mandatory deliberately. A default would be a guess, and
+    guessing FULL_FUNDAMENTALS_CANONICAL for a daily run would demand evidence
+    from a stage that plan never runs -- publishing successfully and then being
+    unservable, which is the exact defect this column exists to close.
+    """
     governed_for(model_version)          # refuse an uninterpretable contract
+
+    from compute.engine.run_plans import EXECUTABLE_PLANS
+    if plan_name not in EXECUTABLE_PLANS:
+        raise WriteRefused(
+            f"'{plan_name}' is not an executable run plan. Known: "
+            f"{', '.join(sorted(EXECUTABLE_PLANS))}. LEGACY_CANONICAL exists "
+            f"only to describe runs published before plans did; opening a new "
+            f"run under it would publish against a weaker contract than "
+            f"either live plan requires.")
 
     cur.execute("""
         INSERT INTO screener.compute_runs
-            (run_at, engine, factor_model_version, unhealthy_sources, detail)
-        VALUES (%s, %s, %s, %s, %s::jsonb)
+            (run_at, engine, factor_model_version, plan_name,
+             unhealthy_sources, detail)
+        VALUES (%s, %s, %s, %s, %s, %s::jsonb)
         RETURNING id
-    """, (datetime.now(timezone.utc), engine, model_version,
+    """, (datetime.now(timezone.utc), engine, model_version, plan_name,
           list(source_health.unhealthy_sources),
           json.dumps(dict(source_health.detail or {}))))
 

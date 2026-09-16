@@ -369,9 +369,11 @@ def main() -> int:
         return 0
 
     # ── From here a run exists, and survives failure as evidence. ────────────
-    run = create_run(cur, "canonical_driver", health, LATEST_MODEL_VERSION)
+    run = create_run(cur, "canonical_driver", health, LATEST_MODEL_VERSION,
+                     plan_name=plan.name)
     conn.commit()
-    log.info("run %s created under %s", run.run_id, LATEST_MODEL_VERSION)
+    log.info("run %s created under %s / plan %s",
+             run.run_id, LATEST_MODEL_VERSION, plan.name)
 
     try:
         run_stage("yearly_compute",

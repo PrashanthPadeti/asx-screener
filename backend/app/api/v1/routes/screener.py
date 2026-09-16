@@ -44,7 +44,7 @@ from app.core.screener_fields import UnknownField, build_registry
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 # The writer and the reader must agree on what "published" means, so the
 # required stage set is imported rather than restated here.
-from compute.engine.run_stages import REQUIRED_STAGES
+from compute.engine.run_plans import plan_requirements
 from compute.engine.screen_predicates import CriterionType
 from compute.engine.screen_sql import (
     CompileError, RunScope, ValidatedRun, plan_screen,
@@ -69,13 +69,19 @@ from compute.engine.screen_sql import (
 # one stage and none for the other. Absence of a stage row is not permission:
 # a stage that never ran has no failed row either.
 VALIDATED_RUNS_SQL_TEXT = """
+    WITH plan_requirements AS (
+        SELECT key AS plan_name,
+               ARRAY(SELECT jsonb_array_elements_text(value)) AS required
+          FROM jsonb_each(CAST(:plan_requirements AS jsonb))
+    )
     SELECT r.id, r.factor_model_version, r.unhealthy_sources, r.detail
       FROM screener.compute_runs r
       JOIN screener.compute_run_finalizations f ON f.run_id = r.id
+      JOIN plan_requirements pr ON pr.plan_name = r.plan_name
      WHERE r.factor_model_version = ANY(:supported)
        AND f.persistence_violations = 0
        AND NOT EXISTS (
-           SELECT 1 FROM unnest(CAST(:required_stages AS text[])) AS req(name)
+           SELECT 1 FROM unnest(pr.required) AS req(name)
             WHERE NOT EXISTS (
                 SELECT 1 FROM screener.compute_run_stages s
                  WHERE s.run_id     = r.id
@@ -903,9 +909,24 @@ async def _validated_scope(db) -> tuple[Optional[RunScope], str]:
     503 needs to know which.
     """
     try:
+        # Each run is validated against the requirements of the plan it was
+        # OPENED under, read from its own immutable plan_name -- never against
+        # one static tuple.
+        #
+        # The static tuple included yearly_compute, which DAILY_CANONICAL
+        # deliberately never runs. Every daily run would have published
+        # correctly and then been invisible here, and the product would have
+        # gone on serving an older snapshot while every log line said the run
+        # succeeded.
+        #
+        # The JOIN is inner, so a run whose plan_name this build does not know
+        # is not served. That is the right default: an unrecognised plan is a
+        # publication contract this build cannot evaluate, and serving it would
+        # mean trusting evidence against requirements nobody can name.
         rows = await db.execute(text(VALIDATED_RUNS_SQL_TEXT),
                                 {"supported": list(GOVERNED_METRICS.keys()),
-                                 "required_stages": list(REQUIRED_STAGES),
+                                 "plan_requirements": json.dumps(
+                                     plan_requirements()),
                                  "limit": 8})
         fetched = rows.fetchall()
     except SQLAlchemyError as exc:

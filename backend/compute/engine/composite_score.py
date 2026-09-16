@@ -863,7 +863,33 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     from compute.engine.run_plans import (
         PLANS, PublicationRefused, verify_yearly_currency_at_publication)
 
-    plan = PLANS[plan_name]
+    # The plan is read from the RUN, not taken from the flag.
+    #
+    # The flag says what this invocation believes it is publishing; the run row
+    # says what the run was opened under, immutably, and that is the identity
+    # the resolver will later validate this run against. If they disagree, the
+    # run would publish against one contract and be judged against another --
+    # so the disagreement is the error, and neither side gets to win silently.
+    cur_plan = conn.cursor()
+    cur_plan.execute("SELECT plan_name FROM screener.compute_runs WHERE id = %s",
+                     (run_id,))
+    row = cur_plan.fetchone()
+    cur_plan.close()
+    if row is None:
+        raise PublicationRefused(
+            f"run {run_id} does not exist; nothing can be published under it.",
+            "run_missing")
+    recorded = row[0]
+    if recorded != plan_name:
+        raise PublicationRefused(
+            f"run {run_id} was opened under '{recorded}' but this publication "
+            f"was invoked with --plan {plan_name}. The run's recorded plan is "
+            f"immutable and is what the resolver will validate against, so "
+            f"publishing here would satisfy one contract and be judged by "
+            f"another.",
+            "plan_mismatch")
+
+    plan = PLANS[recorded]
     fingerprint = verify_yearly_currency_at_publication(conn.cursor(), plan,
                                                         run_id)
     log.info("  ✓ yearly source fingerprint still current at publication: %s",

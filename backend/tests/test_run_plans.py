@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from compute.engine import source_fingerprint as sfp  # noqa: E402
 from compute.engine.run_plans import (  # noqa: E402
-    DAILY_CANONICAL, FULL_FUNDAMENTALS_CANONICAL, PLANS,
+    DAILY_CANONICAL, EXECUTABLE_PLANS, FULL_FUNDAMENTALS_CANONICAL,
+    LEGACY_CANONICAL, PLANS, plan_requirements,
     PlanPreconditionFailed, PublicationRefused, RunPlan, check_yearly_reuse,
     open_plan, verify_yearly_currency_at_publication,
 )
@@ -232,6 +233,171 @@ def test_opening_the_daily_plan_logs_what_it_inherits():
     out = log.text()
     assert "reuses" in out and "yearly_compute" in out
     assert "reuse PERMITTED" in out
+
+
+# ── Plan identity is recorded once and resolved everywhere ───────────────────
+
+def test_the_resolver_would_have_hidden_every_daily_run():
+    """The defect the recorded plan closes.
+
+    The resolver validated every finalised run against one static tuple that
+    included yearly_compute — a stage DAILY_CANONICAL never runs. A daily run
+    would have published correctly and then been invisible to the API, and the
+    product would have gone on serving an older snapshot while every log line
+    said the run succeeded.
+    """
+    historical = set(LEGACY_CANONICAL.required)
+    assert "yearly_compute" in historical, "the premise of this test"
+    assert not historical <= set(DAILY_CANONICAL.required), (
+        "a DAILY_CANONICAL run cannot satisfy the historical static tuple, "
+        "which is exactly why requirements must come from the run's own plan")
+
+
+def test_every_plan_a_run_can_carry_is_resolvable():
+    """The resolver joins on plan_name. A plan it cannot look up is a run it
+    cannot serve, so the lookup must cover everything create_run can write —
+    and LEGACY_CANONICAL, which the migration backfills."""
+    reqs = plan_requirements()
+    assert set(reqs) == set(PLANS)
+    for name in ("DAILY_CANONICAL", "FULL_FUNDAMENTALS_CANONICAL",
+                 "LEGACY_CANONICAL"):
+        assert reqs[name], f"{name} resolves to no requirements"
+
+
+def test_the_requirements_the_resolver_uses_are_the_plans_own():
+    """Derived, never a second copy. A duplicated list drifts, and the drift
+    shows up as runs that publish and are then quietly unservable."""
+    for name, required in plan_requirements().items():
+        assert tuple(required) == PLANS[name].required
+
+
+def test_legacy_runs_stay_servable_but_nothing_new_may_use_that_plan():
+    """Holding old runs to a contract that did not exist when they published
+    would unpublish all of them on deploy, taking the governed surface dark,
+    with no evidence any was wrong. Letting new work use it would publish
+    against a weaker contract than either live plan."""
+    assert not LEGACY_CANONICAL.executable
+    assert "LEGACY_CANONICAL" in plan_requirements()
+    assert "LEGACY_CANONICAL" not in EXECUTABLE_PLANS
+    assert set(EXECUTABLE_PLANS) == {"DAILY_CANONICAL",
+                                     "FULL_FUNDAMENTALS_CANONICAL"}
+
+
+def test_the_legacy_plan_records_the_contract_those_runs_actually_met():
+    assert LEGACY_CANONICAL.required == ("yearly_compute", "daily_compute",
+                                         "universe_build")
+
+
+def test_a_new_run_cannot_be_opened_under_a_non_executable_plan():
+    from compute.engine.universe_writer import WriteRefused, create_run
+
+    class Cur:
+        def execute(self, *a, **k):
+            raise AssertionError("a row was inserted for a refused plan")
+
+    for bad in ("LEGACY_CANONICAL", "NOT_A_PLAN"):
+        try:
+            create_run(Cur(), "driver", _health(), plan_name=bad)
+        except WriteRefused as e:
+            assert "executable run plan" in str(e)
+        else:
+            raise AssertionError(f"a run was opened under {bad}")
+
+
+def test_create_run_will_not_guess_a_plan():
+    """A default would be a guess, and guessing the full plan for a daily run
+    demands evidence from a stage that plan never runs."""
+    import inspect
+    from compute.engine.universe_writer import create_run
+    sig = inspect.signature(create_run)
+    param = sig.parameters["plan_name"]
+    assert param.default is inspect.Parameter.empty, (
+        "create_run has a default plan; a run that does not state its plan is "
+        "a run whose publication contract nobody can name")
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
+
+
+BACKEND = Path(__file__).resolve().parents[1]
+
+
+def _code(rel):
+    """Source with comments stripped, so a guard cannot match its own
+    explanation — a mistake this codebase has made four times."""
+    src = (BACKEND / rel).read_text(encoding="utf-8")
+    return "\n".join(ln for ln in src.splitlines()
+                     if not ln.strip().startswith(("#", "--")))
+
+
+def test_the_resolver_validates_against_each_runs_own_plan():
+    """Asserted textually because the failure mode is a silent fallback.
+
+    The SQL is PostgreSQL-specific (jsonb_each, unnest) so it cannot be
+    exercised here, and the dangerous shape is not a wrong answer — it is the
+    query going back to one static list and every daily run vanishing from the
+    API while its logs say it published.
+    """
+    sql = _code("app/api/v1/routes/screener.py")
+    assert "JOIN plan_requirements pr ON pr.plan_name = r.plan_name" in sql, (
+        "the resolver no longer joins runs to their own plan's requirements")
+    assert "LEFT JOIN plan_requirements" not in sql, (
+        "the join is outer, so a run with an unknown plan_name validates "
+        "against no requirements at all and is served unconditionally")
+    assert "unnest(pr.required)" in sql
+    assert "REQUIRED_STAGES" not in sql, (
+        "the resolver still references the static tuple that hid daily runs")
+    assert "plan_requirements()" in sql, (
+        "the requirements are not derived from the plan declarations")
+
+
+def test_publication_resolves_the_plan_from_the_run_not_the_flag():
+    """The flag says what this invocation believes; the run row says what the
+    run was opened under, and that is what the resolver will judge it by."""
+    code = _code("compute/engine/composite_score.py")
+    assert "SELECT plan_name FROM screener.compute_runs" in code, (
+        "composite_score never reads the run's recorded plan, so a mistyped "
+        "--plan would publish against a contract the resolver will not use")
+    assert "recorded != plan_name" in code, (
+        "the recorded plan and the flag are not compared; they can disagree "
+        "and the run publishes under one contract while being judged by "
+        "another")
+    assert "PLANS[recorded]" in code, (
+        "the required stages come from the flag rather than the record")
+
+
+def test_the_run_row_carries_the_plan():
+    code = _code("compute/engine/universe_writer.py")
+    assert "plan_name" in code and "INSERT INTO screener.compute_runs" in code
+    insert = code[code.index("INSERT INTO screener.compute_runs"):]
+    assert "plan_name" in insert[:400], (
+        "create_run does not persist plan_name, so the run's publication "
+        "contract is unrecorded and unresolvable later")
+
+
+def test_the_migration_makes_plan_identity_immutable_and_mandatory():
+    sql = (BACKEND / "migrations/add_plan_name_to_compute_runs.sql"
+           ).read_text(encoding="utf-8")
+    assert "ALTER COLUMN plan_name SET NOT NULL" in sql, (
+        "a run could be written with no plan, and the resolver's inner join "
+        "would then silently drop it")
+    assert "ALTER COLUMN plan_name DROP DEFAULT" in sql, (
+        "the backfill default survives, so a future INSERT that forgets the "
+        "plan silently becomes LEGACY_CANONICAL — the weakest contract")
+    assert "NEW.plan_name            IS DISTINCT FROM OLD.plan_name" in sql, (
+        "plan_name is not in the immutability trigger, so a run's publication "
+        "contract could be lowered after the fact to match whatever evidence "
+        "it happened to produce")
+    assert "DEFAULT 'LEGACY_CANONICAL'" in sql
+    assert "DISABLE TRIGGER" not in sql, (
+        "a migration that disables the immutability trigger has stopped "
+        "believing in it")
+
+
+def _health():
+    from compute.engine.metric_states import SourceHealth
+    from datetime import datetime, timezone
+    return SourceHealth(run_at=datetime.now(timezone.utc),
+                        unhealthy_sources=(), detail={},
+                        factor_model_version="FACTOR_MODEL_V2", run_id=None)
 
 
 # ── The publication-time recheck: the TOCTOU window ──────────────────────────

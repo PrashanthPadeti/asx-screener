@@ -234,6 +234,45 @@ do_clone() {
           connection string names this database. Not authoritative, not backed
           up, safe to drop.';" || return 2
 
+    # ── The clone attests for itself ─────────────────────────────────────────
+    # Every other isolation condition is a claim the ENVIRONMENT makes about
+    # the database. Declarations can contradict one another, and the dangerous
+    # combination is a consistent set of lies -- P0A_EXPECTED_DB naming
+    # production, the live connection agreeing because it really did reach
+    # production, and P0A_PRODUCTION_DB naming something else. Nothing in the
+    # environment catches that, because everything in the environment is what
+    # is wrong.
+    #
+    # This marker is written INSIDE the clone, by the step that made it,
+    # recording the database name it was created under. Production has no such
+    # table and no environment variable can give it one. current_database() is
+    # taken from the connection itself rather than from $SCRATCH, so the row
+    # cannot record a name the connection did not actually reach.
+    sudo -u postgres psql -X -q -d "$SCRATCH" -v ON_ERROR_STOP=1 <<SQL || return 2
+        CREATE TABLE IF NOT EXISTS screener.p0a_scratch_marker (
+            database   TEXT        PRIMARY KEY,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            cloned_from TEXT       NOT NULL
+        );
+        INSERT INTO screener.p0a_scratch_marker (database, cloned_from)
+        VALUES (current_database(), '$PROD')
+        ON CONFLICT (database) DO NOTHING;
+        COMMENT ON TABLE screener.p0a_scratch_marker IS
+            'This database attests that it is a P0-A rehearsal clone. '
+            'compute/engine/runtime_envelope.py requires a row here naming '
+            'the database actually connected to before any fault may be '
+            'injected. Never create this table on a production database.';
+SQL
+
+    local attested
+    attested=$(sudo -u postgres psql -X -tA -d "$SCRATCH" -c \
+        "SELECT database FROM screener.p0a_scratch_marker LIMIT 1;")
+    if [ "$attested" != "$SCRATCH" ]; then
+        echo "FATAL: scratch marker says '$attested', expected '$SCRATCH'." >&2
+        return 2
+    fi
+    echo "scratch marker: $attested (cloned from $PROD)"
+
     echo "clone complete — acceptance is decided by 'verify', not by this step"
 }
 

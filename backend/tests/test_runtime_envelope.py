@@ -57,17 +57,36 @@ CANONICAL_PATH_WRITERS = {
 
 
 class Cur:
-    """A cursor that answers with the database it was told to be."""
+    """A cursor that answers with the database it was told to be.
 
-    def __init__(self, db):
+    `marker` is what the database attests about ITSELF — the name in its
+    scratch marker. None models a database carrying no marker at all, which is
+    what production looks like.
+    """
+
+    def __init__(self, db, marker="same"):
         self.db = db
+        #: "same" is the ordinary rehearsal case: a clone whose marker names
+        #: the database it is. Spelled as a sentinel so a test can distinguish
+        #: "no marker" (None) from "a marker naming somewhere else".
+        self.marker = db if marker == "same" else marker
+        self._answer = None
 
-    def execute(self, q):
-        assert "current_database()" in q, (
-            "the envelope must ask the live connection, never read the URL")
+    def execute(self, q, params=None):
+        if "current_database()" in q:
+            self._answer = (self.db,)
+        elif "to_regclass" in q:
+            self._answer = ("screener.p0a_scratch_marker"
+                            if self.marker is not None else None,)
+        elif "p0a_scratch_marker" in q:
+            self._answer = (self.marker,)
+        else:
+            raise AssertionError(
+                f"the envelope asked something unexpected: {q[:80]!r}. It must "
+                f"ask the live connection, never read the URL.")
 
     def fetchone(self):
-        return (self.db,)
+        return self._answer
 
     def close(self):
         pass
@@ -344,6 +363,74 @@ def test_email_suppression_rides_on_the_variable_the_fault_gate_requires():
         f"alert.py no longer suppresses on {EXPECTED_DB_VAR}, so a rehearsal "
         f"fault can now fire while production email is live")
     assert "SUPPRESSED" in code
+
+
+def test_production_cannot_be_declared_into_being_a_discovery_target():
+    """The consistent set of lies.
+
+    P0A_EXPECTED_DB names production; the live connection agrees, because it
+    really did reach production; and P0A_PRODUCTION_DB names something else
+    entirely, so the "is this production?" comparison passes. Every
+    environment declaration is self-consistent and all of them are wrong —
+    nothing in the environment can catch it, because the environment is what
+    is wrong.
+
+    A hardcoded production-name denylist would be the obvious guard and is
+    weaker than it looks here: this repository is public and the real database
+    name lives only in the server's .env, so a guessed constant would be an
+    inert guard the day it is wrong, and silently inert.
+
+    So the database attests for itself. Production carries no scratch marker
+    and no environment variable can give it one.
+    """
+    with _with_env(**_isolated(**{EXPECTED_DB_VAR: "asx_screener",
+                                  "P0A_PRODUCTION_DB": "something_else"})):
+        try:
+            prove("universe_build", cursor=Cur("asx_screener", marker=None))
+        except EnvelopeRefused as e:
+            assert "attest" in str(e), (
+                f"refused for the wrong reason: {e}")
+        else:
+            raise AssertionError(
+                "production was accepted as a discovery target because every "
+                "declaration about it agreed")
+
+
+def test_a_clone_restored_somewhere_else_is_refused():
+    """The marker records where the clone was MADE. Restored under another
+    name it still names its birthplace, and the mismatch is the evidence."""
+    with _with_env(**_isolated()):
+        try:
+            prove("universe_build",
+                  cursor=Cur("asx_screener_scratch", marker="asx_screener"))
+        except EnvelopeRefused as e:
+            assert "restored somewhere other than where it was made" in str(e)
+        else:
+            raise AssertionError("a relocated clone was accepted")
+
+
+def test_the_marker_is_only_probed_when_a_fault_is_requested():
+    """Production must not pay a query per stage to answer a question only the
+    fault gate asks."""
+    class Counting(Cur):
+        def __init__(self, db):
+            super().__init__(db)
+            self.queries = []
+
+        def execute(self, q, params=None):
+            self.queries.append(q)
+            super().execute(q, params)
+
+    with _with_env():                       # production: no fault requested
+        cur = Counting("asx_screener")
+        prove("daily_compute", cursor=cur)
+        assert not any("p0a_scratch_marker" in q for q in cur.queries), (
+            "the marker is probed on ordinary production runs")
+
+    with _with_env(**_isolated()):
+        cur = Counting("asx_screener_scratch")
+        prove("daily_compute", cursor=cur)
+        assert any("to_regclass" in q for q in cur.queries)
 
 
 def test_an_unknown_fault_name_is_refused_rather_than_ignored():

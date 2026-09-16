@@ -61,6 +61,29 @@ PRODUCTION_DB_VAR = "P0A_PRODUCTION_DB"
 #: Which fault to inject, from FAULT_POINTS. Set by p0a_discovery.sh only.
 FAULT_VAR = "P0A_DISCOVERY_FAULT"
 
+#: The database's own attestation that it is a rehearsal clone.
+#:
+#: Every other condition is a claim made BY the environment ABOUT the database.
+#: Declarations can contradict each other, and the dangerous combination is a
+#: consistent set of lies: P0A_EXPECTED_DB naming production, the live
+#: connection agreeing because it really did reach production, and
+#: P0A_PRODUCTION_DB naming something else entirely. Nothing in the
+#: environment catches that, because everything in the environment is what is
+#: wrong.
+#:
+#: A name denylist would be the obvious fix and is weaker than it looks: this
+#: repository is public and production's database name lives only in the
+#: server's .env, so a hardcoded guess would be an inert guard the day it is
+#: wrong -- and silently inert, which is the worst kind.
+#:
+#: So the database attests for itself. p0a_discovery.sh writes this table into
+#: the scratch clone, recording the name it was created under; the check
+#: requires the marker to name the database the connection actually reached.
+#: Production has no such table, cannot be given one by any environment
+#: variable, and a clone restored somewhere else carries a marker naming the
+#: database it came from rather than the one it now is.
+SCRATCH_MARKER = "screener.p0a_scratch_marker"
+
 #: Every fault the rehearsal may request. A fixed allowlist, so a typo is a
 #: refusal rather than a silently absent fault that makes the adversarial case
 #: pass by not happening.
@@ -91,6 +114,10 @@ class Envelope:
     discovery: bool = False
     expected_db: Optional[str] = None
     filesystem_roots: list[str] = field(default_factory=list)
+    #: What the connected database says about ITSELF: the database name
+    #: recorded in its scratch marker, or None if it carries no marker.
+    #: Observed, never declared -- see SCRATCH_MARKER.
+    scratch_marker: Optional[str] = None
 
     def lines(self) -> list[str]:
         mode = "DISCOVERY" if self.discovery else "production"
@@ -139,6 +166,21 @@ def observe(stage: str, conn=None, *, cursor=None,
     if cursor is not None:
         cursor.execute("SELECT current_database()")
         env.database = cursor.fetchone()[0]
+
+        # Probed only when a fault is requested. The marker exists for the
+        # fault gate, and asking for it on every production run would add a
+        # query to every stage to answer a question nothing else asks.
+        if os.getenv(FAULT_VAR, "").strip():
+            # to_regclass first: selecting from a missing table raises, and in
+            # PostgreSQL that aborts the caller's transaction -- so a probe for
+            # something that is legitimately absent would break the very run it
+            # was inspecting.
+            cursor.execute("SELECT to_regclass(%s)", (SCRATCH_MARKER,))
+            if cursor.fetchone()[0] is not None:
+                cursor.execute(f"SELECT database FROM {SCRATCH_MARKER} LIMIT 1")
+                row = cursor.fetchone()
+                env.scratch_marker = row[0] if row else None
+
         if owned:
             cursor.close()
 
@@ -244,6 +286,17 @@ def _fault_conditions(env: Envelope) -> list[str]:
     if os.getenv(DISCOVERY_REDIS_VAR, "").strip().lower() not in \
             ("isolated", "disabled"):
         unmet.append(f"{DISCOVERY_REDIS_VAR} is neither isolated nor disabled")
+
+    # The database's own word, which no environment variable can forge. Last
+    # because it is the one that still holds when every declaration above is
+    # consistent and all of them are wrong.
+    if env.scratch_marker is None:
+        unmet.append(f"'{env.database}' carries no {SCRATCH_MARKER}, so it "
+                     f"does not attest to being a rehearsal clone")
+    elif env.scratch_marker != env.database:
+        unmet.append(f"'{env.database}' carries a scratch marker naming "
+                     f"'{env.scratch_marker}' -- this is a clone restored "
+                     f"somewhere other than where it was made")
     # Production email suppression is NOT a separate condition here, because
     # it would be a duplicate: alert.py suppresses on EXPECTED_DB_VAR, which
     # the expected_db condition above already requires. A branch that cannot

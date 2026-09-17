@@ -18,7 +18,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+BACKEND = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND))
 
 from compute.engine.run_stages import (  # noqa: E402
     StageResult, render_key, report_population, set_hash,
@@ -378,10 +379,95 @@ def test_the_failed_payload_says_the_data_was_rolled_back():
     assert not failed.ok
 
 
+# ── Producer and consumer share one population definition ────────────────────
+
+def test_the_excluded_instrument_types_are_defined_once():
+    """Cycle A held technical_compute to covering SUNPG, a capital note that
+    build_screener_universe deletes — a producer wider than its consumer.
+
+    Two copies of the list would drift, and the drift shows up as a producer
+    failing its proof over rows the product never serves.
+    """
+    from compute.engine.serving_population import (
+        EXCLUDED_COMPANY_TYPES, excluded_types_predicate,
+    )
+    assert EXCLUDED_COMPANY_TYPES == ("notes", "preferred_stock")
+
+    for rel in ("scripts/eodhd/v2/build_screener_universe.py",
+                "compute/engine/technical_compute.py"):
+        code = "\n".join(
+            ln for ln in (BACKEND / rel).read_text(encoding="utf-8").splitlines()
+            if not ln.strip().startswith(("#", "--")))
+        assert "serving_population import" in code, (
+            f"{rel} does not take the exclusion list from the shared module")
+        assert '("notes", "preferred_stock")' not in code, (
+            f"{rel} carries its own copy of the excluded types")
+
+    # Importing the shared rule is not applying it. technical_compute's domain
+    # SQL must actually carry the predicate, or the producer is held to
+    # covering instruments the universe deletes — which is the defect.
+    domain = (BACKEND / "compute/engine/technical_compute.py"
+              ).read_text(encoding="utf-8")
+    domain_sql = domain[domain.index("SOURCE_DOMAIN_SQL = f"):
+                        domain.index('"""', domain.index("SELECT p.asx_code"))]
+    assert "excluded_types_predicate(" in domain_sql, (
+        "technical_compute imports the exclusion rule and does not apply it "
+        "to its expected population")
+
+    assert "'notes', 'preferred_stock'" in excluded_types_predicate("c")
+
+
+def test_a_served_company_is_never_skipped_at_its_latest_date():
+    """Skipping is how a three-month-old indicator poses as current.
+
+    build_screener_universe takes ORDER BY date DESC LIMIT 1 with no recency
+    bound. Cycle A found four codes — CINPA, EMUCA, MAUCA, MFGO — typed
+    common_stock, all in the universe, whose prices never move, so RSI is a
+    0/0 division and every indicator is NaN. Skipping them left June's numbers
+    being served as today's.
+
+    A row with NULL indicators says "this cannot be computed". No row at all
+    says nothing, and the consumer fills that silence with the past.
+    """
+    import ast
+    src = (BACKEND / "compute/engine/technical_compute.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+
+    build_rows = next(n for n in ast.walk(tree)
+                      if isinstance(n, ast.FunctionDef) and n.name == "build_rows")
+    assert any(a.arg == "keep_uncomputable" for a in build_rows.args.args), (
+        "build_rows cannot keep a row whose indicators are all NaN")
+
+    # The warm-up filter must be conditional, not unconditional.
+    body = ast.get_source_segment(src, build_rows)
+    assert 'if not keep_uncomputable:' in body, (
+        "the warm-up filter still drops uncomputable rows unconditionally, so "
+        "the latest date can go unwritten")
+
+    main = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "main")
+    main_src = ast.get_source_segment(src, main)
+    assert "keep_uncomputable=True" in main_src, (
+        "the latest-date-only path does not keep uncomputable rows")
+    # And only there: a history rewrite would otherwise write millions of
+    # empty warm-up rows.
+    assert main_src.count("keep_uncomputable=True") == 1
+
+
+def test_the_uncomputable_count_reaches_the_stage_evidence():
+    """Otherwise rows with no indicators are indistinguishable from rows with
+    good ones, and the proof passes while the screener shows blanks nobody
+    accounted for."""
+    src = (BACKEND / "compute/engine/technical_compute.py").read_text(encoding="utf-8")
+    assert "rows_without_indicators" in src
+    assert "INDEX_RSI_14 = INSERT_COLS.index" in src, (
+        "the rsi_14 position is hardcoded; inserting a column above it would "
+        "silently miscount")
+
+
 # ── Full replacement is old-complete or new-complete, never partial ──────────
 
-TRANSFORM_PRICES = (Path(__file__).resolve().parents[1]
-                    / "scripts/eodhd/v2/transforms/transform_prices.py")
+TRANSFORM_PRICES = BACKEND / "scripts/eodhd/v2/transforms/transform_prices.py"
 
 
 def _code_lines():

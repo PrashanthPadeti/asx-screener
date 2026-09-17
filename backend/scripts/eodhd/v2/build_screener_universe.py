@@ -1903,7 +1903,12 @@ def main():
     # do not belong in a stock screener.  They also distort the composite score:
     # having no momentum or growth data, they are averaged over their remaining
     # (income/quality) factors only, which floats them to the top of the ranking.
-    EXCLUDED_TYPES = ("notes", "preferred_stock")
+    # From the shared definition, not a second copy. technical_compute's
+    # expected population needs the identical rule, and two lists drift: Cycle
+    # A held that producer to covering SUNPG, a capital note this build
+    # deletes.
+    from compute.engine.serving_population import EXCLUDED_COMPANY_TYPES
+    EXCLUDED_TYPES = EXCLUDED_COMPANY_TYPES
     base_filter = ("WHERE COALESCE(c.company_type, '') NOT IN "
                    f"({', '.join(['%s'] * len(EXCLUDED_TYPES))})")
     base_params = list(EXCLUDED_TYPES)

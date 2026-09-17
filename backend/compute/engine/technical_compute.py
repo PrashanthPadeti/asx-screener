@@ -45,6 +45,9 @@ from pathlib import Path
 # The database credential lives in the environment, never in source.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
+from compute.engine.serving_population import (  # noqa: E402
+    excluded_types_predicate,
+)
 
 
 # Cast NUMERIC → Python float automatically
@@ -100,10 +103,17 @@ TRADING_DAY = "DATE(time AT TIME ZONE 'Australia/Sydney')"
 #: source untouched: a producer narrower than its own consumer. The two
 #: disagreed, and the consumer's identity is the one the product actually
 #: serves, so the producer is the side that was wrong.
+#:
+#: The instrument types the universe deletes are excluded here too, from the
+#: shared definition rather than a second copy. Cycle A held this producer to
+#: covering SUNPG, a capital note the universe removes -- a producer wider than
+#: its consumer, which is the mirror of the defect that removed the status
+#: filter above.
 SOURCE_DOMAIN_SQL = f"""
     SELECT p.asx_code, MAX({TRADING_DAY}) AS latest_day
       FROM market.daily_prices p
       JOIN market.companies_current c ON c.asx_code = p.asx_code
+     WHERE {excluded_types_predicate('c')}
      GROUP BY p.asx_code
     HAVING COUNT(DISTINCT {TRADING_DAY}) >= {MIN_HISTORY_DAYS}
      ORDER BY p.asx_code
@@ -570,6 +580,11 @@ INSERT_COLS = [
     "compute_version", "computed_at",
 ]
 
+#: Derived from the column list, never hardcoded. A literal index would be a
+#: silent off-by-one the day a column is inserted above rsi_14, and the only
+#: symptom would be a miscounted diagnostic.
+INDEX_RSI_14 = INSERT_COLS.index("rsi_14")
+
 INSERT_SQL = f"""
     INSERT INTO market.daily_metrics ({", ".join(INSERT_COLS)})
     VALUES %s
@@ -578,15 +593,38 @@ INSERT_SQL = f"""
 """
 
 
-def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None) -> list:
-    """Convert the indicator DataFrame to a list of tuples for execute_values."""
+def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
+               keep_uncomputable: bool = False) -> list:
+    """Convert the indicator DataFrame to a list of tuples for execute_values.
+
+    ``keep_uncomputable`` keeps rows whose indicators are all NaN. It is set for
+    the latest-date-only write and NOT for a history rewrite, because the two
+    are different questions.
+
+    In a history rewrite the NaN rows are warm-up: the first thirteen days of a
+    series, where RSI genuinely does not exist yet, and writing millions of
+    empty rows would say nothing.
+
+    At the latest date it is the opposite. build_screener_universe takes
+    ORDER BY date DESC LIMIT 1 with no recency bound, so a company skipped
+    today keeps serving whatever indicators were last written for it. Cycle A
+    found four such codes -- CINPA, EMUCA, MAUCA, MFGO -- all typed
+    common_stock, all in the universe, two of them last traded three months
+    ago. Their prices never move, so RSI is a 0/0 division and every indicator
+    is NaN, and skipping them left the screener presenting June's numbers as
+    today's.
+
+    A row with NULL indicators says "this cannot be computed". No row at all
+    says nothing, and the consumer fills that silence with the past.
+    """
     now = datetime.now(tz=timezone.utc)
 
     if since:
         df = df[df["date"].dt.date >= since]
 
-    # Need at least one indicator to be non-null (skip warm-up rows)
-    df = df[df["rsi_14"].notna()]
+    if not keep_uncomputable:
+        # Warm-up rows: RSI does not exist for the first thirteen days.
+        df = df[df["rsi_14"].notna()]
 
     rows = []
     for _, row in df.iterrows():
@@ -757,6 +795,11 @@ def main():
     log.info("─" * 60)
 
     processed = skipped = errors = total_rows = 0
+    # Rows written with no computable indicators: real companies
+    # whose price never moves, so RSI is 0/0. Counted so the
+    # stage evidence shows them rather than hiding them among
+    # the successes.
+    uncomputable = 0
 
     for idx, asx_code in enumerate(codes, 1):
         try:
@@ -769,10 +812,15 @@ def main():
             df     = compute_indicators(df, shares)
 
             if not args.full and not args.days:
-                # Latest date only
+                # Latest date only. keep_uncomputable, so a company whose
+                # indicators cannot be formed still gets a row at its latest
+                # date rather than leaving the consumer to serve an older one.
                 last_date = df["date"].max().date()
                 since_latest = last_date - timedelta(days=0)
-                rows = build_rows(asx_code, df, since=since_latest)
+                rows = build_rows(asx_code, df, since=since_latest,
+                                  keep_uncomputable=True)
+                if rows and rows[0][INDEX_RSI_14] is None:
+                    uncomputable += 1
             else:
                 rows = build_rows(asx_code, df, since=since)
 
@@ -813,7 +861,8 @@ def main():
 
     # ── Terminal stage evidence ──────────────────────────────────────────────
     ok = prove_population(cur, args, expected, written,
-                          {"skipped_short_history": skipped, "errors": errors})
+                          {"skipped_short_history": skipped, "errors": errors,
+                           "rows_without_indicators": uncomputable})
     conn.commit()
     cur.close()
     conn.close()

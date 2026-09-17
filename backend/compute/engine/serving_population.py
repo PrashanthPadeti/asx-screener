@@ -46,3 +46,30 @@ def serving_predicate(alias: str = "") -> str:
 #: The same thing as a description, for evidence and logs. Kept beside the
 #: predicate so a change to one is visibly a change to the other.
 SERVING_POPULATION = "active companies with a price"
+
+
+#: Instrument types the screener does not carry.
+#:
+#: Hybrids, capital notes and preference shares are not ordinary equities. They
+#: also distort the composite score: having no momentum or growth data, they
+#: are averaged over their remaining factors only, which floats them to the top
+#: of the ranking.
+#:
+#: Lives here, with the rest of the population definition, because
+#: build_screener_universe and technical_compute must agree on it. They did
+#: not: technical_compute's expected population included SUNPG, a note the
+#: universe deletes, so the producer was held to covering a row the product
+#: never serves.
+EXCLUDED_COMPANY_TYPES = ("notes", "preferred_stock")
+
+
+def excluded_types_predicate(alias: str = "") -> str:
+    """`COALESCE(company_type,'') NOT IN (...)`, qualified by `alias`.
+
+    Spelled out rather than parameterised: this lands in the middle of queries
+    that already carry their own parameters, and threading two more through
+    every call site is how the two copies of the list appear.
+    """
+    prefix = f"{alias}." if alias else ""
+    types = ", ".join(f"'{t}'" for t in EXCLUDED_COMPANY_TYPES)
+    return f"COALESCE({prefix}company_type, '') NOT IN ({types})"

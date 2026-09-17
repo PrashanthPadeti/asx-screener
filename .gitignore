@@ -7,6 +7,22 @@
 .env.local
 .env.production
 .env.*.local
+
+# Any .env, anywhere, under any suffix.
+#
+# The patterns above are anchored to the repo root and match exact names, so
+# backend/.env.bak and backend/.env.bak.20260914 were both untracked AND
+# unignored. Six of them hold live production credentials on the server, whose
+# /opt/asx-screener is itself a git checkout — one `git add -A` there would
+# have published them, and this repository is public.
+#
+# `*` rather than a list: the next backup will be named something nobody
+# predicted, and a pattern that has to be extended is a pattern that will be
+# out of date at the moment it matters.
+.env*
+!.env.example
+!.env.sample
+!.env.template
 *.pem
 *.key
 secrets/

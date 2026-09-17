@@ -176,6 +176,50 @@ def test_producers_run_before_the_fault_seam_and_the_tail_after():
         "the fault seam is not between the producers and the canonical tail")
 
 
+# ── The clone must contain what the plan reads ───────────────────────────────
+
+def test_every_table_the_plan_stages_touch_is_proven_by_verify():
+    """Derived from the stages' own SQL, not from memory.
+
+    The clone excluded staging_au.eod_prices under the comment "read by no
+    pipeline stage — derived from the code, not assumed". That was true when
+    the discovery run executed four stages. The plans now run eight, and
+    transform_prices reads it: Cycle A died 1.4 seconds in with UndefinedTable.
+
+    An exclusion derived from one reading of the code stops being true when
+    the stage set changes. This guard re-derives it every time, so the next
+    stage added to a plan either brings its tables into the verified set or
+    fails here — before a freeze window is spent on it.
+    """
+    harness = (BACKEND / "scripts" / "p0a_discovery.sh").read_text(encoding="utf-8")
+    critical = set(re.findall(
+        r'"((?:financials|market|staging_au|screener)\.\w+)"', harness))
+    excluded = set(re.findall(r"-T\s+((?:financials|market|staging_au|screener)\.\w+)",
+                              harness))
+
+    missing, cloned_out = {}, {}
+    for stage in driver.STAGE_COMMANDS:
+        script = BACKEND / driver.dispatch(stage, 0)[1]
+        src = "\n".join(ln for ln in script.read_text(encoding="utf-8").splitlines()
+                        if not ln.strip().startswith(("#", "--")))
+        for table in set(re.findall(
+                r"(?:FROM|JOIN|INTO|UPDATE)\s+"
+                r"((?:financials|market|staging_au|screener)\.\w+)", src)):
+            if table in excluded:
+                cloned_out.setdefault(table, []).append(stage)
+            elif table not in critical:
+                missing.setdefault(table, []).append(stage)
+
+    assert not cloned_out, (
+        f"these tables are excluded from the clone but read by plan stages: "
+        f"{cloned_out}. The run will fail on UndefinedTable after the freeze "
+        f"window has already been opened.")
+    assert not missing, (
+        f"these tables are touched by plan stages but not counted by verify: "
+        f"{missing}. A clone that lost one would be ACCEPTED, and the failure "
+        f"would surface inside the run instead of before it.")
+
+
 # ── The attestation marker is clone infrastructure ───────────────────────────
 
 def test_no_lifecycle_code_creates_or_repairs_the_scratch_marker():

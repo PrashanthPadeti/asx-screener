@@ -65,9 +65,23 @@ SENTINEL="$WORKDIR/production_sentinel.txt"
 #: failed preflight -- so its existence cannot stand for acceptance.
 PREFLIGHT_OK="$WORKDIR/preflight.ok"
 
-#: Read by no pipeline stage — derived from the code, not assumed. Between
-#: them 1.7GB of the 7.4GB database.
-EXCLUDE=(-T staging_au.eod_prices -T market.price_predictions)
+#: Excluded from the clone.
+#:
+#: This list previously held staging_au.eod_prices too, under the comment
+#: "read by no pipeline stage — derived from the code, not assumed". That was
+#: true when the discovery run executed four stages. The plans now run eight,
+#: and transform_prices reads staging_au.eod_prices as its source: the run
+#: failed 1.4 seconds in with UndefinedTable.
+#:
+#: The lesson is not "add one table". It is that an exclusion derived from one
+#: reading of the code stops being true when the stage set changes, so what
+#: the clone must contain has to be derived from what the PLANS run. Every
+#: table the plan stages read is now in CRITICAL below, where verify proves it
+#: arrived — this failure belonged there, before the run, not inside it.
+#:
+#: market.price_predictions stays out: no plan stage reads it, and
+#: run_predictions.sh is not part of any canonical path.
+EXCLUDE=(-T market.price_predictions)
 
 #: The hypertables in the pipeline's dependency set. Row counts alone cannot
 #: tell a faithful restore from one with the right number of rows and the
@@ -354,6 +368,19 @@ CRITICAL = [
     "market.short_positions", "market.analyst_ratings",
     "staging_au.shares_stats", "staging_au.company_profile",
     "screener.universe", "market.sector_benchmarks",
+    # transform_prices' source. Excluded from the clone until it cost a run:
+    # the stage set grew and the exclusion list did not.
+    "staging_au.eod_prices",
+    # halfyearly_compute's source. Never in this list, so a clone that lost it
+    # would have been ACCEPTED and the failure would have surfaced four stages
+    # into the run instead of here.
+    "market.quarterly_metrics",
+    # The remainder of what the plan stages touch, found by reading their SQL
+    # rather than by remembering. universe_build reads the first two;
+    # period_metrics_compute writes the third, and a target that did not
+    # arrive is as fatal as a source that did not.
+    "market.asx_announcements", "market.monthly_metrics",
+    "market.period_metrics",
     # The lifecycle tables. Absent from this list until now, which is why a
     # scratch database with an empty screener.compute_runs read as acceptable
     # and took a manual query to notice. They happened to be faithful --

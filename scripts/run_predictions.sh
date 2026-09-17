@@ -65,20 +65,34 @@ if [ -z "$TOKEN" ]; then
 fi
 
 # ── Step 2: trigger predictions ──────────────────────────────────────────────
-RESULT=$(curl -s --max-time 600 -X POST \
+# The HTTP status decides the verdict, not the shape of the body.
+#
+# My first version failed on any response containing "detail", which made
+# 409 "Today's predictions already ran" an ERROR. That is an idempotency
+# reply, not a failure: the work is done and re-running would change nothing.
+# A predicate that reports success as failure trains whoever reads the log to
+# ignore it, which is worse than having no check.
+RESPONSE=$(curl -s --max-time 600 -w '\n%{http_code}' -X POST \
     "$API/api/v1/predictions/trigger?top_n=1000" \
     -H "Authorization: Bearer $TOKEN")
+STATUS=${RESPONSE##*$'\n'}
+BODY=${RESPONSE%$'\n'*}
 
-log "Result: $RESULT"
+log "HTTP $STATUS: $BODY"
 
-# A non-zero exit when the trigger did not report success, so a failure is
-# visible to cron and to anything watching exit codes rather than only being
-# narrated into a log file nobody reads.
-case "$RESULT" in
-    *'"detail"'*|"")
-        log "ERROR: prediction trigger did not succeed"
+case "$STATUS" in
+    2??)
+        log "--- run_predictions done (triggered) ---"
+        exit 0
+        ;;
+    409)
+        # Already ran today. Nothing to do, and nothing wrong.
+        log "--- run_predictions done (already ran today; no action) ---"
+        exit 0
+        ;;
+    *)
+        log "ERROR: prediction trigger failed with HTTP ${STATUS:-no response}"
         exit 1
         ;;
 esac
 
-log "--- run_predictions done ---"

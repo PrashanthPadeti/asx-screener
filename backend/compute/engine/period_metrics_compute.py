@@ -141,7 +141,17 @@ def run(codes: list[str] | None = None, run_id: int | None = None) -> bool:
     # a discovery run this only logs, so the nightly pipeline is unaffected.
     from compute.engine.runtime_envelope import prove as _prove_envelope
     _prove_envelope("period_metrics_compute", conn)
-    conn.autocommit = False
+    # `conn.autocommit = False` used to sit here and is gone rather than moved.
+    #
+    # It was always redundant -- psycopg2 connections are transactional by
+    # default -- and once the envelope gate runs SELECT current_database()
+    # immediately above, a transaction is open and psycopg2 refuses to change
+    # the session mode: "set_session cannot be used inside a transaction".
+    #
+    # Moving it above the gate would have worked and would have been the wrong
+    # fix: the gate must be the first thing after connect, so that no statement
+    # can reach a database this process has not yet proved it is allowed to
+    # touch. Deleting a line that asserts the default costs nothing.
     cur = conn.cursor()
 
     params = {f"d_{k}": v for k, v in WINDOWS.items()}

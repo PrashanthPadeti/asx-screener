@@ -29,6 +29,7 @@ Run under pytest, or standalone:
 """
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -487,6 +488,33 @@ def test_every_canonical_path_writer_proves_its_envelope():
     assert not missing, (
         f"these stages write without proving where they connected: {missing}. "
         f"An inherited environment is intent; a live connection is fact.")
+
+
+def test_no_session_setting_is_deferred_until_after_the_gate():
+    """The other half of "the gate goes first".
+
+    The gate issues SELECT current_database(), which opens a transaction — and
+    psycopg2 refuses to change the session mode once one is open:
+    "set_session cannot be used inside a transaction". period_metrics_compute
+    set conn.autocommit after the gate and died there, 56 minutes into Cycle A.
+
+    The resolution is never to move such a line ABOVE the gate. Nothing may
+    reach the database before the process has proved which database it is.
+    A session setting that has to precede the first statement therefore cannot
+    coexist with the gate, and in practice each one so far has been asserting
+    a psycopg2 default and could simply go.
+    """
+    offenders = []
+    for rel in CANONICAL_PATH_WRITERS:
+        for i, line in enumerate(
+                (BACKEND / rel).read_text(encoding="utf-8").splitlines(), 1):
+            body = line.split("#")[0]
+            if re.search(r"\.(autocommit\s*=|set_session\(|set_isolation_level\()",
+                         body):
+                offenders.append(f"{rel}:{i}: {body.strip()}")
+    assert not offenders, (
+        f"these change the connection's session mode, which psycopg2 refuses "
+        f"once the envelope gate has opened a transaction: {offenders}")
 
 
 def test_the_gate_is_the_first_statement_after_connecting():

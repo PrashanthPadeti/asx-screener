@@ -204,7 +204,14 @@ do_clone() {
 
     # Redirect as root rather than -f: pg_dump runs as postgres and cannot
     # write into a root-owned directory. That failure has been hit before.
-    echo "dumping $PROD (excluding eod_prices, price_predictions)…"
+    # Derived from EXCLUDE, never restated. This line said "excluding
+    # eod_prices, price_predictions" for a whole clone AFTER eod_prices was
+    # put back in — a message that was true when it was written, which is the
+    # same defect class as the exclusion list it describes. A log line that
+    # can disagree with what the command does is worse than no log line.
+    local excluded
+    excluded=$(printf '%s ' "${EXCLUDE[@]}" | sed 's/-T //g' | xargs)
+    echo "dumping $PROD (excluding ${excluded:-nothing})…"
     sudo -u postgres pg_dump -d "$PROD" -Fc "${EXCLUDE[@]}" > "$dump" || return 2
     chmod 644 "$dump"
     ls -lh "$dump"

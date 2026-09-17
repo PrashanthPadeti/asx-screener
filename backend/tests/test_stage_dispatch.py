@@ -178,6 +178,25 @@ def test_producers_run_before_the_fault_seam_and_the_tail_after():
 
 # ── The clone must contain what the plan reads ───────────────────────────────
 
+def test_the_clone_never_names_a_table_it_does_not_exclude():
+    """The log line must be derived from EXCLUDE, not restated beside it.
+
+    It read "excluding eod_prices, price_predictions" for an entire clone
+    AFTER eod_prices had been put back — a message that was true when written,
+    the same defect class as the exclusion list it describes. A log line that
+    can disagree with what the command does is worse than no log line, because
+    it is read as evidence.
+    """
+    harness = (BACKEND / "scripts" / "p0a_discovery.sh").read_text(encoding="utf-8")
+    line = next(ln for ln in harness.splitlines()
+                if 'echo "dumping' in ln)
+    for table in ("eod_prices", "price_predictions", "daily_prices"):
+        assert table not in line, (
+            f"the clone's log line names {table!r} literally; it must render "
+            f"whatever EXCLUDE actually holds")
+    assert "$" in line, "the message is not derived from a variable"
+
+
 def test_every_table_the_plan_stages_touch_is_proven_by_verify():
     """Derived from the stages' own SQL, not from memory.
 

@@ -72,10 +72,18 @@ class Cur:
         #: "no marker" (None) from "a marker naming somewhere else".
         self.marker = db if marker == "same" else marker
         self._answer = None
+        #: Every statement the envelope issued, so a test can assert the
+        #: marker probe was rolled back rather than left aborting.
+        self.statements = []
 
     def execute(self, q, params=None):
+        self.statements.append(q)
         if "current_database()" in q:
             self._answer = (self.db,)
+        elif "SAVEPOINT" in q:
+            # The marker probe runs inside a savepoint so a permission error
+            # cannot abort the producer's transaction.
+            self._answer = None
         elif "to_regclass" in q:
             self._answer = ("screener.p0a_scratch_marker"
                             if self.marker is not None else None,)
@@ -395,6 +403,36 @@ def test_production_cannot_be_declared_into_being_a_discovery_target():
             raise AssertionError(
                 "production was accepted as a discovery target because every "
                 "declaration about it agreed")
+
+
+def test_a_marker_that_cannot_be_read_is_treated_as_absent():
+    """The clone creates the marker as postgres; producers read it as the app
+    role. Without the clone's GRANT that raises InsufficientPrivilege, and an
+    unhandled error there aborts the producer's whole transaction — it dies
+    mid-stage rather than being permitted or refused.
+
+    Unreadable must therefore fail closed, not crash.
+    """
+    class Denied(Cur):
+        def execute(self, q, params=None):
+            if "p0a_scratch_marker" in q and "to_regclass" not in q \
+                    and "SAVEPOINT" not in q:
+                raise RuntimeError("InsufficientPrivilege: permission denied")
+            super().execute(q, params)
+
+    with _with_env(**_isolated()):
+        cur = Denied("asx_screener_scratch")
+        try:
+            prove("universe_build", cursor=cur)
+        except EnvelopeRefused as e:
+            assert "attest" in str(e), f"refused for the wrong reason: {e}"
+        else:
+            raise AssertionError(
+                "a fault was armed against a marker the process could not read")
+
+    # And the probe must be rolled back, not left aborting the transaction.
+    assert any("ROLLBACK TO SAVEPOINT" in q for q in cur.statements), (
+        "the failed probe was not rolled back to its savepoint")
 
 
 def test_a_clone_restored_somewhere_else_is_refused():

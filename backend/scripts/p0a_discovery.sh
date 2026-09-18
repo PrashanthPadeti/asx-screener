@@ -875,9 +875,11 @@ case "${1:-all}" in
     run)       do_run ;;
     sentinel)  do_sentinel ;;
     evidence)  do_evidence ;;
+    adversarial) do_adversarial "${2:-}" ;;
     all)       do_clone && do_verify && do_preflight && do_run \
                         && do_sentinel && do_evidence ;;
     *) echo "usage: $0 {clone|verify|role|preflight|run|sentinel|evidence|all}" >&2
+       echo "       $0 adversarial {B|C|D}   (RUN_B/RUN_C/RUN_D env)" >&2
        exit 2 ;;
 esac
 rc=$?

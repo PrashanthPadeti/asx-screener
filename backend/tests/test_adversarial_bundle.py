@@ -226,6 +226,42 @@ def test_the_projection_check_goes_through_the_real_projector():
     assert "row_projection" in src
 
 
+def test_every_harness_subcommand_is_reachable():
+    """A do_* function with no dispatch case is dead code.
+
+    do_adversarial() existed for a full day with no `adversarial)` branch, so
+    running it printed the usage text. I had "verified" the dispatch with
+    `bash -n`, which only parses, and with a usage test that failed earlier on
+    a missing PYBIN — a check that passed for the wrong reason, which is the
+    failure mode this whole suite exists to catch.
+    """
+    sh = (BACKEND / "scripts" / "p0a_discovery.sh").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in sh.splitlines()
+                     if not ln.strip().startswith("#"))
+
+    defined = set(re.findall(r"^do_(\w+)\(\)", code, re.M))
+    assert defined, "no do_* functions found; this guard is inert"
+
+    # The terminator must be the one that closes THIS case block. The script
+    # has earlier `case` statements (PLAN validation, the adversarial argument
+    # check), so searching for the first "\nesac" lands before the dispatch and
+    # slices an empty region — which then reports every function as
+    # unreachable. A guard that is wrong in the loud direction is still wrong.
+    start = code.index('case "${1')
+    dispatch = code[start:code.index("\nesac", start)]
+    # Its own case LABEL, not merely a mention. `all)` calls do_sentinel among
+    # others, so searching for the function name finds it there and a
+    # subcommand that lost its own label still looks reachable — invocable
+    # only as part of `all`, never on its own.
+    unreachable = sorted(
+        name for name in defined
+        if not re.search(rf"^\s*(?:[\w|]+\|)?{name}\)", dispatch, re.M))
+
+    assert not unreachable, (
+        f"these harness functions have no dispatch label and cannot be "
+        f"invoked on their own: {unreachable}")
+
+
 # ── The sentinel means the whole execution context ───────────────────────────
 
 def test_the_sentinel_covers_every_authority():

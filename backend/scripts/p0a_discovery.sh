@@ -283,6 +283,15 @@ do_clone() {
             'compute/engine/runtime_envelope.py requires a row here naming '
             'the database actually connected to before any fault may be '
             'injected. Never create this table on a production database.';
+        -- The application role must be able to READ it.
+        --
+        -- It is created by postgres and therefore owned by postgres, while
+        -- the envelope gate reads it as the producer -- which connects as the
+        -- app role. Without this grant the marker probe raises
+        -- InsufficientPrivilege inside the producer's own transaction, so a
+        -- fault-injection run dies mid-stage rather than being permitted or
+        -- refused. SELECT only: nothing in the lifecycle may write this table.
+        GRANT SELECT ON screener.p0a_scratch_marker TO $owner;
 SQL
 
     local attested

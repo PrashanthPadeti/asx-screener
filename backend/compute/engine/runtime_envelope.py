@@ -177,9 +177,28 @@ def observe(stage: str, conn=None, *, cursor=None,
             # was inspecting.
             cursor.execute("SELECT to_regclass(%s)", (SCRATCH_MARKER,))
             if cursor.fetchone()[0] is not None:
-                cursor.execute(f"SELECT database FROM {SCRATCH_MARKER} LIMIT 1")
-                row = cursor.fetchone()
-                env.scratch_marker = row[0] if row else None
+                # A savepoint, because the marker is owned by postgres and the
+                # producer reads it as the app role. Without the clone's GRANT
+                # this raises InsufficientPrivilege, and an unhandled error
+                # here aborts the caller's whole transaction -- the producer
+                # dies mid-stage instead of being permitted or refused.
+                #
+                # Unreadable is treated as absent, which makes the fault gate
+                # refuse. Fail closed: a marker this process cannot read is not
+                # an attestation it can rely on.
+                cursor.execute("SAVEPOINT p0a_marker_probe")
+                try:
+                    cursor.execute(
+                        f"SELECT database FROM {SCRATCH_MARKER} LIMIT 1")
+                    row = cursor.fetchone()
+                    env.scratch_marker = row[0] if row else None
+                    cursor.execute("RELEASE SAVEPOINT p0a_marker_probe")
+                except Exception as exc:               # noqa: BLE001
+                    cursor.execute("ROLLBACK TO SAVEPOINT p0a_marker_probe")
+                    log.warning("%s: %s exists but could not be read (%s); "
+                                "treating as no attestation.",
+                                stage, SCRATCH_MARKER,
+                                type(exc).__name__)
 
         if owned:
             cursor.close()

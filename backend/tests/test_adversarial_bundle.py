@@ -226,6 +226,45 @@ def test_the_projection_check_goes_through_the_real_projector():
     assert "row_projection" in src
 
 
+def test_conditional_env_vars_reach_the_driver_through_env():
+    """Bash recognises assignments before a command only when they are LITERAL.
+
+    `${VAR:+NAME=value}` produces such a word by expansion, and bash then
+    treats it as the command NAME. Cycle C died with rc=127 — "command not
+    found" — having injected nothing and never started the driver. A fault run
+    that fails to fault is the worst shape of failure here, because a careless
+    reading sees FAIL and assumes the fault worked.
+    """
+    sh = (BACKEND / "scripts" / "p0a_discovery.sh").read_text(encoding="utf-8")
+    code = "\n".join(ln for ln in sh.splitlines()
+                     if not ln.strip().startswith("#"))
+
+    # Only expansions that PRODUCE an assignment. `${VAR:+yes}` inside an echo
+    # is an ordinary string and harmless; `${VAR:+NAME=value}` before a
+    # command is the hazard.
+    for block in re.findall(r"[^\n]*\$\{[A-Z0-9_]+:\+[A-Z0-9_]+=[^\n]*", code):
+        # A conditional assignment word must be an argument to `env`, never a
+        # bare prefix. Walk back to the start of the command.
+        start = code.rindex("\n", 0, code.index(block))
+        command = code[max(0, start - 400):code.index(block)]
+        assert re.search(r"(^|\s|&&\s*)env\s", command.rsplit("\n\n", 1)[-1]), (
+            f"this conditional assignment is not passed through env, so bash "
+            f"will treat it as a command name: {block.strip()!r}")
+
+
+def test_a_missing_driver_log_is_a_failed_assertion_not_a_crash():
+    """Case C reads the driver log to classify the stop as an InjectedFault.
+
+    Pointed at a path that does not exist it raised FileNotFoundError and took
+    the whole bundle down, so a mistyped --driver-log looked like a broken
+    instrument rather than an unmet assertion.
+    """
+    src = ast.get_source_segment(BUNDLE.read_text(encoding="utf-8"),
+                                 _function("case_c"))
+    assert "exists()" in src or "try:" in src, (
+        "case C reads the driver log without guarding for its absence")
+
+
 def test_every_harness_subcommand_is_reachable():
     """A do_* function with no dispatch case is dead code.
 

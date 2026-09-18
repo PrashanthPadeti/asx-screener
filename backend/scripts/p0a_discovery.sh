@@ -810,7 +810,21 @@ do_run() {
     # isolation for itself. The child cannot work out production's name alone
     # -- its own DATABASE_URL points at scratch -- so it is told, and an
     # undeclared production name makes the fault refuse rather than pass.
-    DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" \
+    # Via `env`, not bare assignments.
+    #
+    # Bash recognises assignments before a command only when they are LITERAL
+    # at parse time. `${VAR:+NAME=value}` produces such a word by expansion,
+    # and bash then treats it as the command NAME:
+    #
+    #     line 813: P0A_DISCOVERY_FAULT=after_provisional_rebuild:
+    #               command not found
+    #
+    # Cycle C died that way with rc=127, having injected nothing and never
+    # started the driver -- a fault run that fails to fault, which is the
+    # worst shape of failure for an adversarial exercise because a careless
+    # reading sees "FAIL" and assumes the fault worked. With `env` the same
+    # words are ordinary arguments and are handled correctly.
+    env DATABASE_URL_SYNC="$url_sync" DATABASE_URL="$url_async" \
         REDIS_URL="$url_redis" \
         P0A_EXPECTED_DB="$SCRATCH" P0A_REDIS_MODE=isolated \
         P0A_DISCOVERY_MODE=enabled P0A_PRODUCTION_DB="$PROD" \

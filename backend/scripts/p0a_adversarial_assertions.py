@@ -115,12 +115,26 @@ def case_c(cur, args, report: Report) -> None:
     # 1. The driver stopped, and stopped for the reason we injected.
     report.check("1  driver exited non-zero", args.driver_exit != 0,
                  f"exit {args.driver_exit}")
-    classified = False
+    # A missing log is an unmet assertion, not a crash. Pointed at a path that
+    # does not exist this raised FileNotFoundError and took the whole bundle
+    # down, so a mistyped --driver-log read as a broken instrument rather than
+    # as evidence that could not be found.
+    classified, detail = False, args.driver_log or "no --driver-log given"
     if args.driver_log:
-        text = Path(args.driver_log).read_text(encoding="utf-8", errors="ignore")
-        classified = "INJECTED FAULT" in text and "after_provisional_rebuild" in text
-    report.check("1b classified as InjectedFault", classified,
-                 args.driver_log or "no --driver-log given")
+        log_path = Path(args.driver_log)
+        if not log_path.exists():
+            detail = f"{args.driver_log} does not exist"
+        else:
+            text = log_path.read_text(encoding="utf-8", errors="ignore")
+            classified = ("INJECTED FAULT" in text
+                          and "after_provisional_rebuild" in text)
+            if not classified:
+                # rc=127 produced a FAIL with no fault injected at all. The
+                # distinction matters: a run that stopped for some other
+                # reason proves nothing about the boundary being tested.
+                detail = ("no INJECTED FAULT line — the run failed for some "
+                          "other reason and proves nothing about this boundary")
+    report.check("1b classified as InjectedFault", classified, detail)
 
     # 2. The failure is about the lifecycle we think it is.
     cur.execute("SELECT plan_name FROM screener.compute_runs WHERE id = %s;",

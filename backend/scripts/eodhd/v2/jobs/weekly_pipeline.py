@@ -76,6 +76,38 @@ def run(label: str, cmd: list[str]) -> None:
     log.info(f"✓  {label} done")
 
 
+def run_optional(label: str, cmd: list[str]) -> None:
+    """Run a step whose failure must not stop the pipeline.
+
+    ASIC short positions are supplementary market data. They write none of the
+    72 governed columns, and daily_pipeline already treats the same transform
+    as non-fatal -- so the project had already decided they are ancillary. The
+    weekly pipeline had not: steps 0a-0c ran through run(), which exits, and a
+    flaky ASIC CSV therefore blocked the entire fundamentals refresh behind it.
+
+    Four of the eight Sundays to 20 Sep 2026 died at Step 0b with "No rows
+    loaded -- check CSV format". Only one of those eight completed. The value,
+    quality and growth factors are computed from yearly_metrics, which sits
+    downstream of this gate, so a short-interest CSV nobody was watching had
+    been holding the screener's fundamentals at 30 August.
+
+    The alert still fires; only the exit is removed.
+    """
+    log.info(f"▶  {label}")
+    result = subprocess.run(cmd, cwd=BASE_DIR)
+    if result.returncode != 0:
+        log.warning(f"⚠  {label} failed (exit {result.returncode}) — continuing; "
+                    f"this step is supplementary and does not gate fundamentals")
+        send_failure_alert(
+            pipeline="weekly",
+            step=f"{label} (optional — pipeline continued)",
+            target_date=_from_date,
+            exit_code=result.returncode,
+        )
+        return
+    log.info(f"✓  {label} done")
+
+
 def is_first_monday_of_month(today: date) -> bool:
     """True if today is the first Monday of its calendar month."""
     return today.weekday() == 0 and today.day <= 7
@@ -120,13 +152,13 @@ def main():
     # ── Step 0: ASIC short interest — download → staging → transform ──────────
     # Downloads the most recent ASIC aggregate short position CSV (free, public).
     # Published with ~2–3 business-day lag; idempotent if already cached.
-    run("Step 0a: ASIC download short positions", [
+    run_optional("Step 0a: ASIC download short positions", [
         PYTHON, str(ASIC / "download_short_positions.py"),
     ])
-    run("Step 0b: ASIC load → staging_au.short_positions", [
+    run_optional("Step 0b: ASIC load → staging_au.short_positions", [
         PYTHON, str(ASIC / "load_to_staging_short.py"),
     ])
-    run("Step 0c: ASIC transform → market.short_positions (+ back-fill short_interest)", [
+    run_optional("Step 0c: ASIC transform → market.short_positions (+ back-fill short_interest)", [
         PYTHON, str(ASIC / "transforms" / "transform_short.py"),
     ])
 

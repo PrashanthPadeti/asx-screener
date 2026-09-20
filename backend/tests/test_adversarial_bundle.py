@@ -47,10 +47,36 @@ def _calls(fn: ast.FunctionDef, attr: str) -> list:
 
 
 def _sql_literals(fn: ast.FunctionDef) -> list:
-    """Every string constant in the function that looks like SQL."""
-    return [n.value for n in ast.walk(fn)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str)
-            and re.search(r"\bSELECT\b|\bUPDATE\b", n.value)]
+    """Every SQL string in the function, f-strings included and intact.
+
+    An f-string is a JoinedStr whose literal chunks are separate Constants, so
+    reading Constants alone splits `WHERE {serving_predicate('u')}` away from
+    the SELECT it belongs to — and a guard checking that the two appear
+    together then fails on correct code. Taking the source segment keeps the
+    interpolation visible as written.
+    """
+    source = BUNDLE.read_text(encoding="utf-8")
+
+    # An f-string's literal chunks are Constants *inside* the JoinedStr, so
+    # walking yields both the whole f-string and its fragments. Returning both
+    # makes "every SQL string must contain X" fail on the fragment that was
+    # split away from X — which is exactly how the first version of this
+    # helper reported correct code as broken.
+    inner = {id(c) for n in ast.walk(fn) if isinstance(n, ast.JoinedStr)
+             for c in ast.walk(n) if isinstance(c, ast.Constant)}
+
+    out = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.JoinedStr):
+            text = ast.get_source_segment(source, node) or ""
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+              and id(node) not in inner):
+            text = node.value
+        else:
+            continue
+        if re.search(r"\bSELECT\b|\bUPDATE\b", text):
+            out.append(text)
+    return out
 
 
 # ── Anchoring ────────────────────────────────────────────────────────────────
@@ -154,6 +180,39 @@ def test_case_c_covers_every_required_assertion():
                                  _function("case_c"))
     for helper in ("_projection_withheld", "_marker_consistent", "_run_immutable"):
         assert helper in src, f"case C never calls {helper}"
+
+
+def test_case_d_measures_the_serving_population_not_the_universe():
+    """universe_build owns 2,528 rows; the canonical writer attributes the
+    2,116 the API can return. Asserting attribution over the universe reported
+    412 phantom failures.
+
+    compute/engine/serving_population.py exists because this exact mistake was
+    made before, by the evidence bundle, against these same two numbers — and
+    case D made it again. Importing the predicate is the point of the module.
+    """
+    fn = _function("case_d")
+    src = ast.get_source_segment(BUNDLE.read_text(encoding="utf-8"), fn)
+    assert "serving_population import" in src
+
+    # The attribution query ITSELF must be scoped. Checking only that
+    # serving_predicate appears somewhere in the function passes while the
+    # query that matters selects over everything — the first draft of this
+    # guard did exactly that.
+    attribution = [s for s in _sql_literals(fn) if "IS DISTINCT FROM" in s]
+    assert attribution, "case D no longer checks attribution at all"
+    for sql in attribution:
+        assert "serving_predicate" in sql, (
+            "the attribution query is not scoped to the serving population, "
+            "so rows the canonical writer never attributes count as failures")
+
+    # Both directions must be REPORTED, not merely queried. Deleting the
+    # report.check while leaving the SQL passed the first draft.
+    names = " | ".join(_assertion_names("case_d"))
+    assert "serving population attributed to run_d" in names
+    assert "outside the serving population carry no run" in names, (
+        "nothing reports whether rows outside the serving population carry "
+        "attribution, so over-attribution would pass unnoticed")
 
 
 def test_case_d_does_not_assert_arithmetic_adjacency():

@@ -375,14 +375,43 @@ def case_d(cur, args, report: Report) -> None:
     report.check("D7 resolver selects run_d", run_d in servable, f"{servable}")
     report.check("D8 resolver still excludes run_c", run_c not in servable)
 
-    population = anchored_population(cur, run_d, report)
-    cur.execute("""
-        SELECT count(*) FROM screener.universe
-         WHERE asx_code = ANY(%s) AND compute_run_id IS DISTINCT FROM %s;""",
-        (list(population), run_d))
-    stragglers = cur.fetchone()[0]
-    report.check("D9 whole population attributed to run_d", stragglers == 0,
-                 f"{stragglers:,} rows not carrying run_d")
+    anchored_population(cur, run_d, report)
+
+    # The SERVING population, not the universe population.
+    #
+    # universe_build rebuilds every row it owns -- 2,528 -- while the canonical
+    # writer attributes only what the API can return: active companies with a
+    # price, 2,116. The other 412 are correctly outside the contract and carry
+    # no attribution, so asserting over the universe reported 412 phantom
+    # failures.
+    #
+    # compute/engine/serving_population.py exists because this exact mistake
+    # was made before, by the evidence bundle, against these same two numbers.
+    # Its docstring says so. Importing the predicate rather than restating it
+    # is the whole point of that module.
+    from compute.engine.serving_population import (
+        SERVING_POPULATION, serving_predicate,
+    )
+
+    cur.execute(f"""
+        SELECT count(*) FILTER (WHERE u.compute_run_id IS DISTINCT FROM %s),
+               count(*)
+          FROM screener.universe u
+         WHERE {serving_predicate('u')};""", (run_d,))
+    stragglers, serving = cur.fetchone()
+    report.check("D9 serving population attributed to run_d", stragglers == 0,
+                 f"{stragglers:,} of {serving:,} {SERVING_POPULATION} "
+                 f"not carrying run_d")
+
+    # And the converse, so "attributed" cannot be satisfied by attributing
+    # everything: rows outside the serving population must carry no run at all.
+    cur.execute(f"""
+        SELECT count(*) FROM screener.universe u
+         WHERE NOT ({serving_predicate('u')})
+           AND u.compute_run_id IS NOT NULL;""")
+    outside = cur.fetchone()[0]
+    report.check("D10 rows outside the serving population carry no run",
+                 outside == 0, f"{outside:,} attributed but not servable")
 
     _run_immutable(cur, run_c, report)
 

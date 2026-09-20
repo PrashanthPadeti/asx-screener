@@ -37,7 +37,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 logging.basicConfig(
@@ -102,7 +102,15 @@ def main():
     today      = date.today()
     # Default from-date: last Monday (start of the just-completed week)
     days_since_monday = today.weekday()   # Monday=0
-    last_monday = today.replace(day=today.day - days_since_monday) if days_since_monday > 0 else today
+    # timedelta, not replace(day=...).
+    #
+    # replace() cannot cross a month boundary, so `day=today.day - N` raises
+    # ValueError whenever last Monday fell in the previous month. This crashed
+    # the weekly pipeline on 11 of 2026's 52 Sundays -- roughly one a month --
+    # and worked perfectly the other three, which is why it went unnoticed
+    # from at least June. The 6 Sep 2026 run died here (day=6, weekday=6,
+    # replace(day=0)) and market.yearly_metrics has read 30 Aug ever since.
+    last_monday = today - timedelta(days=days_since_monday)
     from_date   = args.from_date or last_monday.isoformat()
 
     global _from_date

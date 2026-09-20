@@ -101,6 +101,49 @@ def test_the_old_expression_really_did_fail_and_this_is_not_hindsight():
         assert (c - timedelta(days=c.weekday())).weekday() == 0
 
 
+def test_supplementary_steps_do_not_gate_the_fundamentals_refresh():
+    """ASIC short positions must not be able to stop the weekly pipeline.
+
+    They write none of the 72 governed columns, and daily_pipeline already
+    treats the same transform as non-fatal. The weekly pipeline ran steps
+    0a–0c through run(), which exits — so four of the eight Sundays to
+    20 Sep 2026 died at Step 0b on "No rows loaded — check CSV format",
+    holding the screener's fundamentals at 30 August behind a short-interest
+    CSV nobody was watching.
+    """
+    code = _source()
+    assert "def run_optional(" in code, (
+        "the weekly pipeline has no non-fatal runner, so every step is a gate")
+
+    for step in ("Step 0a", "Step 0b", "Step 0c"):
+        call = re.search(rf'(run_optional|run)\("{step}', code)
+        assert call, f"{step} is gone; this guard is now inert"
+        assert call.group(1) == "run_optional", (
+            f"{step} is supplementary but still aborts the pipeline, blocking "
+            f"the fundamentals refresh downstream of it")
+
+
+def test_the_steps_that_do_gate_still_gate():
+    """Non-fatal must not spread. The producers that feed governed values
+    still have to stop the pipeline when they fail."""
+    code = _source()
+    for step in ("Step 4", "Step 8", "Step 9a"):
+        call = re.search(rf'(run_optional|run)\("{step}', code)
+        if not call:
+            continue
+        assert call.group(1) == "run", (
+            f"{step} feeds governed values and must not be optional")
+
+
+def test_a_failed_optional_step_still_alerts():
+    """Removing the exit must not remove the visibility."""
+    code = _source()
+    body = code[code.index("def run_optional("):code.index("def is_first_monday")]
+    assert "send_failure_alert" in body, (
+        "an optional step now fails silently")
+    assert "sys.exit" not in body, "run_optional still exits"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

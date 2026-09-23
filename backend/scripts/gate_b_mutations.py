@@ -35,20 +35,37 @@ from pathlib import Path
 
 GATE = Path(__file__).resolve().parent / "gate_b.py"
 
-#: (name, what it breaks, exact source fragment, replacement)
+#: (name, what the mutation asserts instead, exact source fragment, replacement)
+#:
+#: Each mutation INVERTS an expectation so that it contradicts reality, and the
+#: assertion must then fire against the live database.
+#:
+#: The first draft did the opposite — it made each assertion vacuously true
+#: (`x in y` became `x not in y or True`) — and four of the five "survived",
+#: correctly. Disabling an assertion cannot make a healthy gate fail; it just
+#: removes a check from a run that was going to pass anyway. That design
+#: proved nothing, and had the gate been entirely inert it would have produced
+#: the same output.
+#:
+#: The distinction matters because the usual form of mutation testing — break
+#: the SYSTEM, see whether the test notices — is unavailable here: the gate is
+#: read-only by construction, so there is no way to corrupt the publication it
+#: judges. Inverting the expectation is the reachable equivalent. It proves
+#: the assertion is evaluated against real data and reaches a real verdict,
+#: which is the property that was actually in doubt.
 MUTATIONS = [
     ("resolver expectation",
-     "accepts a resolver that does NOT serve the anchored run",
+     "asserts the resolver does NOT serve the anchored run",
      "    check(run_id in servable,",
-     "    check(run_id not in servable or True,"),
+     "    check(run_id not in servable,"),
 
     ("finalisation requirement",
-     "accepts a run whose plan-required stages are not SUCCESS",
+     "asserts the plan-required stages are anything BUT success",
      '    missing = [s for s in plan.required if stages.get(s) != "success"]',
-     "    missing = []"),
+     '    missing = [s for s in plan.required if stages.get(s) == "success"]'),
 
     ("run anchoring",
-     "measures the newest finalised run instead of the anchored one",
+     "attributes every row to a run that is not the anchored one",
      "        SELECT asx_code, compute_run_id FROM screener.universe\n"
      "         WHERE asx_code = ANY(%s);\"\"\", (codes,))\n"
      "    return dict(cur.fetchall())",
@@ -57,15 +74,15 @@ MUTATIONS = [
      "    return dict(cur.fetchall())"),
 
     ("ordering exclusion",
-     "accepts a ranking that admits rows storage says cannot participate",
+     "asserts the ranking admits a DIFFERENT count from the applicable one",
      "    check(ranked == applicable,",
-     "    check(ranked == applicable or True,"),
+     "    check(ranked != applicable,"),
 
     ("governed projection",
-     "tolerates an attributed row whose governed value is blank and unexplained",
-     "                    blank += 1\n"
-     "                    breaches.append(f\"{code}: {metric} is null with no \"\n"
-     "                                    f\"sidecar entry\")",
+     "treats every served governed value as an unexplained blank",
+     "                if value is None:\n"
+     "                    blank += 1",
+     "                if value is not None:\n"
      "                    blank += 1"),
 ]
 

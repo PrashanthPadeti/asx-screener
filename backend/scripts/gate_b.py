@@ -71,7 +71,7 @@ import psycopg2  # noqa: E402
 
 from app.api.v1.routes.screener import _EXPORT_COLS  # noqa: E402
 from app.core.db import get_database_url_sync  # noqa: E402
-from app.core.deps import get_current_user  # noqa: E402
+from app.core.deps import get_current_user, get_optional_user  # noqa: E402
 from app.core.row_projection import NOT_ASSESSED, NO_CONTRACT, OUTSIDE_SNAPSHOT  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas.screener import ScreenerRow  # noqa: E402
@@ -103,8 +103,19 @@ if settings.REDIS_URL != os.environ["GATE_B_REDIS_URL"]:
         f"an earlier run left behind.")
 
 # Paid, because the CSV export is gated behind one and a 401 would skip the
-# surface rather than prove it. Same reasoning as Gate A.
-app.dependency_overrides[get_current_user] = lambda: {"plan": "pro", "id": 1}
+# surface rather than prove it.
+#
+# BOTH dependencies, which Gate A does not do. /screener resolves its user
+# through get_optional_user and only /screener/export uses get_current_user,
+# so overriding the latter alone left every screen request unauthenticated:
+# is_free was true, the screen was capped at FREE_STOCK_LIMIT, and total and
+# ranked_total measured the cap rather than the population. The suppression
+# assertions still held — they are about the 50 rows actually returned — but
+# any defect affecting a company outside the first 500 was invisible, and the
+# gate said nothing about it either way.
+_GATE_USER = {"plan": "pro", "id": 1}
+app.dependency_overrides[get_current_user] = lambda: _GATE_USER
+app.dependency_overrides[get_optional_user] = lambda: _GATE_USER
 
 GOVERNED = GOVERNED_METRICS[LATEST_MODEL_VERSION]
 
@@ -352,6 +363,11 @@ def api_projection(client, cur, run_id: int) -> None:
     check(run_id in (body.get("run_ids") or []),
           f"the API's own resolved snapshot includes run {run_id}",
           f"it resolved {body.get('snapshot')} over runs {body.get('run_ids')}")
+    check(body.get("free_limit") is None and not body.get("is_capped"),
+          "the gate's screen is not truncated by the free-tier cap",
+          f"free_limit={body.get('free_limit')} is_capped={body.get('is_capped')}; "
+          f"a defect affecting any company outside the first "
+          f"{body.get('free_limit')} would be invisible to this gate")
     print(f"        snapshot={body.get('snapshot')} "
           f"run_ids={body.get('run_ids')} rows={len(rows)} "
           f"total={body.get('total')} capped={body.get('is_capped')}")

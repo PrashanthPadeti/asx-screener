@@ -37,10 +37,35 @@ import argparse
 import csv
 import io
 import json
+import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# ── Before app.main is imported, because Settings reads the environment once ──
+#
+# The first green run of this gate started nineteen APScheduler jobs and wrote
+# a screener response into the serving Redis. Both are side effects of
+# importing and starting the real application, and both falsify the claim in
+# this module's own docstring. Neither was hypothetical: step 7 of the
+# production sequence runs this gate against production DURING a freeze, and
+# starting the schedulers there is precisely the thing the freeze exists to
+# prevent.
+#
+# The cache is the worse of the two. A cached body was projected under the
+# snapshot current when it was stored, so a second run of the gate could
+# assert against a response the gate did not cause — green because of what
+# the first run left behind. Pointing Redis at an unreachable port makes
+# caching a no-op: cache_get returns None and cache_set returns False, both
+# swallowing the error, so every response the gate judges is freshly computed.
+#
+# Set here, not in the invocation, for the reason target isolation exists:
+# a guarantee that depends on the operator remembering a flag is not a
+# guarantee.
+os.environ["SCHEDULERS_ENABLED"] = "false"
+os.environ.setdefault("GATE_B_REDIS_URL", "redis://127.0.0.1:1/0")
+os.environ["REDIS_URL"] = os.environ["GATE_B_REDIS_URL"]
 
 import psycopg2  # noqa: E402
 
@@ -57,8 +82,25 @@ from compute.engine.run_plans import PLANS, plan_requirements  # noqa: E402
 from compute.engine.run_resolution import validated_run_ids  # noqa: E402
 from compute.engine.serving_population import serving_predicate  # noqa: E402
 from compute.engine.universe_writer import persisted_governed  # noqa: E402
+from app.core.config import settings  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
+
+# Proved, not assumed. Settings reads the environment at import time, so an
+# assignment made one import too late is silently ignored — and the gate would
+# go on printing a docstring that says it writes nothing while starting the
+# scheduler on a frozen production host.
+if settings.SCHEDULERS_ENABLED:
+    raise SystemExit(
+        "GATE B REFUSES TO RUN: SCHEDULERS_ENABLED is still true after the "
+        "environment was set, so importing the app would start background "
+        "jobs. A release gate must not schedule work on the system it judges.")
+if settings.REDIS_URL != os.environ["GATE_B_REDIS_URL"]:
+    raise SystemExit(
+        f"GATE B REFUSES TO RUN: REDIS_URL resolved to {settings.REDIS_URL}, "
+        f"not the isolated {os.environ['GATE_B_REDIS_URL']}. The gate would "
+        f"read and write the serving cache, and could assert against a body "
+        f"an earlier run left behind.")
 
 # Paid, because the CSV export is gated behind one and a 401 would skip the
 # surface rather than prove it. Same reasoning as Gate A.
@@ -453,32 +495,55 @@ def export_containment(client, cur, run_id: int) -> None:
           "it carries only a header")
     index = {name: i for i, name in enumerate(_EXPORT_COLS)}
 
-    populated = blank = 0
+    # Both directions. The first draft checked only that a suppressed metric
+    # was not populated in the export, and reported 56 blank governed cells
+    # without examining one of them. A blank cell whose metric IS applicable
+    # and IS stored is the same silent blank in the other direction: the
+    # export dropped a value the API serves, and a one-sided check would
+    # certify it.
+    selected = ", ".join(f"u.{c}" for c in CSV_GOV)
+    populated = suppressed_blank = 0
+    leaked, dropped = [], []
     for line in rows[1:11]:
         code = line[0]
-        cur.execute("""
-            SELECT metric_states FROM screener.universe
-             WHERE asx_code = %s AND compute_run_id = %s;""", (code, run_id))
+        cur.execute(f"""
+            SELECT u.metric_states, {selected} FROM screener.universe u
+             WHERE u.asx_code = %s AND u.compute_run_id = %s;""",
+            (code, run_id))
         found = cur.fetchone()
         if not found:
             continue
         states = found[0] or {}
         if isinstance(states, str):
             states = json.loads(states)
+        stored = dict(zip(CSV_GOV, found[1:]))
+
         for column in CSV_GOV:
             if index[column] >= len(line):
                 continue
             cell = line[index[column]].strip()
             metric = COL2CANON[column]
-            if metric in states and cell:
-                breaches.append(f"csv {code}: {column} suppressed in the API "
-                                f"but populated in the export ({cell!r})")
-            populated += bool(cell)
-            blank += not cell
+            if metric in states:
+                if cell:
+                    leaked.append(f"{code}.{column}={cell!r}")
+                else:
+                    suppressed_blank += 1
+            elif stored[column] is not None and not cell:
+                dropped.append(f"{code}.{column} (stored "
+                               f"{stored[column]}, exported blank)")
+            else:
+                populated += bool(cell)
+
+    check(not leaked, "no metric suppressed by the contract is populated in "
+          "the export", f"these were: {leaked[:3]}")
+    check(not dropped, "no applicable stored value is dropped from the export",
+          f"these were: {dropped[:3]}")
     check(populated > 0, "the export carries governed values",
           "it carries none, so containment cannot be distinguished from an "
           "empty file")
-    print(f"        csv governed cells: populated={populated} blank={blank}")
+    print(f"        csv governed cells: {populated} served, "
+          f"{suppressed_blank} blank because suppressed, "
+          f"{len(leaked)} leaked, {len(dropped)} dropped")
 
 
 def unknown_contract_fails_closed(cur, run_id: int) -> None:

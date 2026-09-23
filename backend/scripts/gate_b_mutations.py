@@ -26,6 +26,7 @@ result here.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -69,12 +70,28 @@ MUTATIONS = [
 ]
 
 
+BACKEND = GATE.parent.parent
+
+
 def run(path: Path, run_id: int | None) -> tuple[int, str]:
+    """Run a copy of the gate with backend importable.
+
+    PYTHONPATH is the whole point. The mutated copy lives in a temp directory,
+    and a script's sys.path[0] is its OWN directory, not the working one — so
+    `sys.path.insert(0, parents[1])` inside the gate resolves to /tmp and
+    `import app.main` fails. Every mutated run would then exit non-zero on
+    ImportError, and this harness would report all five mutations as caught
+    without a single assertion having been evaluated: the inert-guard failure
+    mode wearing a different hat, and this time it would have certified the
+    gate rather than a product defect.
+    """
     argv = [sys.executable, str(path)]
     if run_id is not None:
         argv += ["--run-id", str(run_id)]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(BACKEND) + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(argv, capture_output=True, text=True,
-                          cwd=str(GATE.parent.parent))
+                          cwd=str(BACKEND), env=env)
     return proc.returncode, proc.stdout + proc.stderr
 
 
@@ -111,12 +128,25 @@ def main() -> int:
             shutil.copystat(GATE, target)
 
             code, output = run(target, args.run_id)
-            survived = code == 0
-            if survived:
+
+            # Non-zero is not enough. A mutated copy that cannot import, or
+            # dies on an UndefinedColumn, also exits non-zero — and would be
+            # scored as "the assertion caught it" when no assertion ran at
+            # all. The gate prints this line only after evaluating every
+            # assertion and finding at least one breach, so it is the only
+            # evidence that the mutation was detected rather than merely fatal.
+            detected = code != 0 and "GATE B FAILED" in output
+            crashed = code != 0 and not detected
+            if not detected:
                 failures.append(name)
-            print(f"  {'FAIL' if survived else 'PASS'}  {name}: "
-                  f"{'SURVIVED' if survived else 'caught'} — {effect}")
-            if survived:
+            verdict = ("caught" if detected
+                       else "CRASHED, assertion never evaluated" if crashed
+                       else "SURVIVED")
+            print(f"  {'PASS' if detected else 'FAIL'}  {name}: "
+                  f"{verdict} — {effect}")
+            if crashed:
+                print("        " + (output.strip().splitlines() or ["(no output)"])[-1])
+            elif not detected:
                 print("        the gate exited 0 with this assertion "
                       "disabled, so it was never proving it")
 

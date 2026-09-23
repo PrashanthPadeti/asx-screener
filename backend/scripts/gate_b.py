@@ -353,7 +353,8 @@ def api_projection(client, cur, run_id: int) -> None:
           f"the API's own resolved snapshot includes run {run_id}",
           f"it resolved {body.get('snapshot')} over runs {body.get('run_ids')}")
     print(f"        snapshot={body.get('snapshot')} "
-          f"run_ids={body.get('run_ids')} rows={len(rows)}")
+          f"run_ids={body.get('run_ids')} rows={len(rows)} "
+          f"total={body.get('total')} capped={body.get('is_capped')}")
 
     attributed = attribution_of(cur, [r["asx_code"] for r in rows])
     served = blank = outside = in_scope_rows = 0
@@ -471,13 +472,28 @@ def three_valued_filter(client, metric: str, column: str) -> None:
           f"suppression coerced to an extreme",
           f"the served order was {ordered[:5]}")
 
-    exclusion = req.json().get("excluded_from_ordering")
-    ranked_total = req.json().get("ranked_total")
+    body = req.json()
+    exclusion = body.get("excluded_from_ordering")
+    ranked_total = body.get("ranked_total")
     check(ranked_total is not None,
           f"ordering by governed {column} reports the ranked subset separately "
           f"from screen membership",
           "ranked_total is absent, so the client cannot tell the two apart")
-    print(f"        ranked_total={ranked_total} excluded={exclusion}")
+
+    # ranked_total is min(ranked_raw, total), and `total` is capped at 500 for
+    # a free user. So a gate running as free-tier would assert over a
+    # truncated screen and report a ranked_total that measures the cap rather
+    # than the contract — the assertions would all pass, about 500 rows,
+    # silently. The override says "pro"; this is where that is proved.
+    check(body.get("free_limit") is None and not body.get("is_capped"),
+          "the gate's requests are not subject to the free-tier cap",
+          f"free_limit={body.get('free_limit')} is_capped={body.get('is_capped')}; "
+          f"every count below measures the cap, not the population")
+    check(ranked_total <= body.get("total", 0),
+          "the ranked subset is no larger than screen membership",
+          f"ranked_total={ranked_total} exceeds total={body.get('total')}")
+    print(f"        total={body.get('total')} ranked_total={ranked_total} "
+          f"excluded={exclusion} capped={body.get('is_capped')}")
 
 
 def export_containment(client, cur, run_id: int) -> None:

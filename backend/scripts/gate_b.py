@@ -443,6 +443,63 @@ def busiest_governed_metric(cur, run_id: int) -> tuple[str, str]:
     return best
 
 
+def ordering_excludes_the_unproven(client, cur, metric: str, column: str,
+                                   servable: list) -> None:
+    """The ORDERED BY subset is the applicable one, and the API says so.
+
+    Separate from the REQUIRED filter above, because the filter conceals this.
+    Filtering on `column > 0` removes every inapplicable row before the
+    ordering ever sees one, so the screen reports ranked_total == total and
+    excluded_from_ordering is None — the exclusion path never runs, and a
+    version that silently coerced NULLs to an extreme would pass exactly the
+    same way. The unfiltered screen is where the two counts can diverge.
+
+    The expectation is derived from storage rather than read back from the
+    response, so this is a population proof rather than an internal
+    consistency check: the API's excluded count must equal the number of
+    served rows that genuinely cannot participate in this ranking.
+    """
+    cur.execute(f"""
+        SELECT count(*) FROM screener.universe u
+         WHERE {serving_predicate('u')}
+           AND u.compute_run_id = ANY(%s)
+           AND u.{column} IS NOT NULL
+           AND NOT (u.metric_states ? %s);""", (servable, metric))
+    applicable = cur.fetchone()[0]
+
+    response = client.post("/api/v1/screener",
+                           json={"filters": [], "sort_by": column,
+                                 "sort_dir": "desc", "page_size": 25})
+    check(response.status_code == 200,
+          f"an unfiltered screen ordered by governed {column} answers 200",
+          f"it returned {response.status_code}")
+    if response.status_code != 200:
+        return
+    body = response.json()
+    total, ranked = body.get("total"), body.get("ranked_total")
+    exclusion = body.get("excluded_from_ordering") or {}
+
+    check(ranked == applicable,
+          f"the {column} ranking admits exactly the {applicable:,} rows that "
+          f"can participate in it",
+          f"the API ranked {ranked}, storage says {applicable} are applicable")
+    check(total > ranked,
+          f"screen membership exceeds the {column} ranking, so the exclusion "
+          f"path is actually exercised here",
+          f"total={total} equals ranked_total={ranked}; every served row is "
+          f"applicable for this metric, so this assertion proves nothing and "
+          f"a coercion defect would look identical")
+    if total > ranked:
+        check(exclusion.get("count") == total - ranked,
+              f"the response reports how many rows the {column} ranking "
+              f"excluded, rather than dropping them silently",
+              f"excluded_from_ordering={exclusion or None}, but "
+              f"total - ranked_total = {total - ranked}")
+    print(f"        unfiltered: total={total} ranked_total={ranked} "
+          f"excluded={exclusion.get('count')} (storage says "
+          f"{total - applicable} cannot participate)")
+
+
 def three_valued_filter(client, metric: str, column: str) -> None:
     """Unproven does not become false, and is not coerced into an order.
 
@@ -672,6 +729,8 @@ def main() -> int:
         print("three-valued filter and ranking")
         metric, column = busiest_governed_metric(cur, run_id)
         three_valued_filter(client, metric, column)
+        ordering_excludes_the_unproven(client, cur, metric, column,
+                                       validated_run_ids(cur))
         print("export containment")
         export_containment(client, cur, run_id)
 

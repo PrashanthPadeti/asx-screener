@@ -55,6 +55,11 @@ MUTATIONS = [
      "         WHERE asx_code = ANY(%s);\"\"\", (codes,))\n"
      "    return dict(cur.fetchall())"),
 
+    ("ordering exclusion",
+     "accepts a ranking that admits rows storage says cannot participate",
+     "    check(ranked == applicable,",
+     "    check(ranked == applicable or True,"),
+
     ("governed projection",
      "tolerates an attributed row whose governed value is blank and unexplained",
      "                    blank += 1\n"

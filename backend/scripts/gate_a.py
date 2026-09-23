@@ -36,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api.v1.routes.screener import _EXPORT_COLS  # noqa: E402
-from app.core.deps import get_current_user  # noqa: E402
+from app.core.deps import get_current_user, get_optional_user  # noqa: E402
 from app.core.row_projection import NO_CONTRACT  # noqa: E402
 from app.main import app  # noqa: E402
 from app.schemas.screener import ScreenerRow  # noqa: E402
@@ -48,7 +48,17 @@ from compute.engine.universe_writer import column_for  # noqa: E402
 
 # A paid user, because the CSV export is gated behind one and an unauthenticated
 # 401 would skip the surface rather than prove it.
-app.dependency_overrides[get_current_user] = lambda: {"plan": "pro", "id": 1}
+#
+# BOTH dependencies. /screener and /screener/batch resolve their user through
+# get_optional_user; only /screener/export uses get_current_user. Overriding
+# the latter alone left every screen request unauthenticated, so is_free was
+# true and the screen was silently capped at FREE_STOCK_LIMIT. This gate's
+# assertions are fail-closed ones about the rows it receives, so they stayed
+# VALID — but they covered the first 500 companies rather than the population,
+# and read as though they covered everything. Found while building Gate B.
+_GATE_USER = {"plan": "pro", "id": 1}
+app.dependency_overrides[get_current_user] = lambda: _GATE_USER
+app.dependency_overrides[get_optional_user] = lambda: _GATE_USER
 
 GOVERNED = GOVERNED_METRICS[LATEST_MODEL_VERSION]
 

@@ -73,6 +73,11 @@ MUTATIONS = [
      "         WHERE asx_code = ANY(%s);\"\"\", (codes,))\n"
      "    return dict(cur.fetchall())"),
 
+    ("batch surface",
+     "asserts the batch response contains a different number of rows",
+     "    check(len(rows) == len(codes),",
+     "    check(len(rows) != len(codes),"),
+
     ("ordering exclusion",
      "asserts the ranking admits a DIFFERENT count from the applicable one",
      "    check(ranked == applicable,",

@@ -218,7 +218,12 @@ def storage_contract(cur, run_id: int) -> None:
     """
     contradictions = 0
     sampled = 0
-    for metric, column in COL2CANON.items():
+    # COL2CANON is column -> metric. Destructured the other way round, this
+    # loop passed the metric name as a column: `u.dividend_payout_ratio`,
+    # whose column is `payout_ratio`. The two names coincide for most governed
+    # metrics, so the aliased ones were the only ones that could expose it --
+    # and they did, on the first real run.
+    for column, metric in COL2CANON.items():
         cur.execute(f"""
             SELECT count(*) FROM screener.universe u
              WHERE u.compute_run_id = %s
@@ -528,6 +533,24 @@ def main() -> int:
             "cannot be trusted to have validated it.")
     except psycopg2.errors.ReadOnlySqlTransaction:
         pass
+
+    # Every column the gate is about to name, checked once, before any
+    # assertion. The alternative is what actually happened twice: the gate
+    # crashes on UndefinedColumn part-way through, having printed PASS for the
+    # assertions it reached and nothing at all for the ones it did not — a
+    # partial result that looks like a report.
+    cur.execute("""
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'screener' AND table_name = 'universe';""")
+    present = {r[0] for r in cur.fetchall()}
+    absent = sorted(set(COL2CANON) - present)
+    if absent:
+        raise SystemExit(
+            f"GATE B CANNOT RUN: {LATEST_MODEL_VERSION} governs metrics whose "
+            f"storage columns are absent from screener.universe: {absent}. "
+            f"Either the database is behind the model version, or the gate is "
+            f"naming columns wrongly; both must be settled before any "
+            f"assertion about persistence means anything.")
 
     run_id, model, plan_name = resolve_anchor(cur, args.run_id)
     print(f"\nGATE B — database {database}, run {run_id}, model {model}, "

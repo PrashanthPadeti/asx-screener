@@ -56,7 +56,7 @@ from compute.engine.metric_states import (  # noqa: E402
 from compute.engine.run_plans import PLANS, plan_requirements  # noqa: E402
 from compute.engine.run_resolution import validated_run_ids  # noqa: E402
 from compute.engine.serving_population import serving_predicate  # noqa: E402
-from compute.engine.universe_writer import column_for  # noqa: E402
+from compute.engine.universe_writer import persisted_governed  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -65,9 +65,22 @@ from fastapi.testclient import TestClient  # noqa: E402
 app.dependency_overrides[get_current_user] = lambda: {"plan": "pro", "id": 1}
 
 GOVERNED = GOVERNED_METRICS[LATEST_MODEL_VERSION]
-COL2CANON = {column_for(m): m for m in GOVERNED}
+
+#: column -> canonical metric, for the metrics this model version actually
+#: STORES. Not `column_for(m) for m in GOVERNED`: that is what Gate A uses, and
+#: it is safe there only because Gate A never touches a storage column — it
+#: intersects with ScreenerRow and the export header, and NOT_PERSISTED metrics
+#: fall out on their own. Gate B queries screener.universe directly, so the
+#: same expression reached for u.dividend_payout_ratio, a governed metric with
+#: no column at all, and the gate died on UndefinedColumn mid-assertion.
+COL2CANON = {c: m for m, c in persisted_governed(LATEST_MODEL_VERSION).items()}
 API_GOV = {c: m for c, m in COL2CANON.items() if c in ScreenerRow.model_fields}
 CSV_GOV = sorted(set(COL2CANON) & set(_EXPORT_COLS))
+
+#: Governed but not stored, so no storage assertion can cover them. Named here
+#: and reported in the evidence: a gate that quietly narrows its own scope is
+#: how a green result stops meaning what its reader thinks it means.
+UNSTORED = sorted(GOVERNED - set(persisted_governed(LATEST_MODEL_VERSION)))
 
 #: The reasons the projector synthesises when it withholds for a CONTRACT-level
 #: cause rather than an assessed one. A row ATTRIBUTED TO THE PUBLISHED RUN must
@@ -82,10 +95,20 @@ CONTRACT_LEVEL_REASONS = {NO_CONTRACT, OUTSIDE_SNAPSHOT, NOT_ASSESSED}
 breaches: list[str] = []
 
 
-def check(ok: bool, message: str) -> None:
+def check(ok: bool, claim: str, detail: str = "") -> None:
+    """`claim` is what must be TRUE; `detail` says what was found instead.
+
+    The first draft passed one string, phrased as the failure. It printed
+    "PASS  the resolver does not serve run 5; it serves [5, 4, 2, 1]" — a
+    correct result rendered as its own contradiction. A release gate's output
+    is read months later by someone deciding whether a publication was sound,
+    and evidence that has to be mentally inverted to be understood will
+    eventually be read the wrong way round.
+    """
     if not ok:
-        breaches.append(message)
-    print(f"  {'PASS' if ok else 'FAIL'}  {message}")
+        breaches.append(f"{claim}{f' — {detail}' if detail else ''}")
+    print(f"  {'PASS' if ok else 'FAIL'}  {claim}"
+          + (f"\n        {detail}" if detail and not ok else ""))
 
 
 # ── The anchor ───────────────────────────────────────────────────────────────
@@ -114,13 +137,14 @@ def resolve_anchor(cur, requested: int | None) -> tuple[int, str, str]:
 def lifecycle(cur, run_id: int, model: str, plan_name: str) -> None:
     """Finalisation, plan-specific required stages, and a clean read-back."""
     check(model == LATEST_MODEL_VERSION,
-          f"run {run_id} model is {model}, this build serves "
-          f"{LATEST_MODEL_VERSION}")
+          f"run {run_id} was computed under the model this build serves",
+          f"run model is {model}, this build serves {LATEST_MODEL_VERSION}")
 
     plan = PLANS.get(plan_name)
     check(plan is not None,
-          f"run {run_id} plan {plan_name!r} is unknown to this build; the "
-          f"resolver could not evaluate its requirements")
+          f"run {run_id}'s plan {plan_name!r} is known to this build",
+          "the resolver cannot evaluate the requirements of a plan it has "
+          "never heard of")
     if plan is None:
         return
 
@@ -130,7 +154,8 @@ def lifecycle(cur, run_id: int, model: str, plan_name: str) -> None:
     stages = dict(cur.fetchall())
     missing = [s for s in plan.required if stages.get(s) != "success"]
     check(not missing,
-          f"run {run_id} ({plan_name}) required stages not SUCCESS: {missing}")
+          f"every stage {plan_name} requires succeeded for run {run_id}",
+          f"not SUCCESS: {missing}")
 
     # The recorded violation count is not evidence: finalise() refuses to
     # insert a row with a non-zero one, so reading it back can only ever say
@@ -153,8 +178,9 @@ def lifecycle(cur, run_id: int, model: str, plan_name: str) -> None:
         (run_id,))
     attributed_now = cur.fetchone()[0]
     check(attributed_now > 0,
-          f"run {run_id} finalised over {rows_written:,} rows and now holds "
-          f"none; it has been wholly superseded and is not what is being served")
+          f"run {run_id} still holds attributed rows",
+          f"it finalised over {rows_written:,} rows and now holds none, so it "
+          f"has been wholly superseded and is not what is being served")
     print(f"        run {run_id} | {model} | {plan_name} | "
           f"{rows_written:,} rows written, {attributed_now:,} still attributed "
           f"| {violations} recorded violations | "
@@ -165,7 +191,8 @@ def resolver_selects(cur, run_id: int) -> None:
     """The exact run, and nothing unfinalised — however new."""
     servable = validated_run_ids(cur)
     check(run_id in servable,
-          f"the resolver does not serve run {run_id}; it serves {servable}")
+          f"the resolver serves run {run_id}",
+          f"it serves {servable}")
 
     cur.execute("""
         SELECT r.id FROM screener.compute_runs r
@@ -174,8 +201,8 @@ def resolver_selects(cur, run_id: int) -> None:
     unfinalised = [r[0] for r in cur.fetchall()]
     leaked = sorted(set(unfinalised) & set(servable))
     check(not leaked,
-          f"unfinalised runs are servable: {leaked}. A failed run must never "
-          f"be selected, however recent.")
+          "no unfinalised run is servable, however recent",
+          f"these are both unfinalised and servable: {leaked}")
     newer = [r for r in unfinalised if r > run_id]
     print(f"        servable={servable} unfinalised={unfinalised} "
           f"newer-unfinalised={newer or 'none'}")
@@ -204,8 +231,9 @@ def storage_contract(cur, run_id: int) -> None:
             breaches.append(f"{metric}: {n} rows carry BOTH a suppression "
                             f"entry and a stored value")
     check(contradictions == 0,
-          f"{contradictions} value/state contradictions across {sampled} "
-          f"governed columns in storage")
+          f"a suppressed metric is persisted NULL across all {sampled} stored "
+          f"governed columns, not merely hidden at projection",
+          f"{contradictions} rows carry both a suppression entry and a value")
 
     cur.execute(f"""
         SELECT count(*) FROM screener.universe u
@@ -213,8 +241,9 @@ def storage_contract(cur, run_id: int) -> None:
            AND u.compute_run_id = %s;""", (run_id,))
     unassessed = cur.fetchone()[0]
     check(unassessed == 0,
-          f"{unassessed} rows attributed to run {run_id} carry NO sidecar; "
-          f"values and states must be written together")
+          f"every served row attributed to run {run_id} carries a sidecar",
+          f"{unassessed} carry none; values and states must be written "
+          f"together or the value cannot be interpreted")
 
     # The canonical read-back, live and over the whole servable set rather
     # than one run: every company the product serves must be attributed to
@@ -233,10 +262,13 @@ def storage_contract(cur, run_id: int) -> None:
          WHERE {serving_predicate('u')};""")
     serving = cur.fetchone()[0]
     check(unattributed == 0,
-          f"{unattributed:,} of {serving:,} served companies are attributed to "
-          f"no validated run ({servable}); their governed fields are withheld "
-          f"from every client")
+          f"all {serving:,} served companies are attributed to a validated run",
+          f"{unattributed:,} are attributed to none of {servable}, so their "
+          f"governed fields are withheld from every client")
     print(f"        serving population {serving:,}, unattributed {unattributed:,}")
+    if UNSTORED:
+        print(f"        NOT covered by any storage assertion (governed but "
+              f"not persisted): {', '.join(UNSTORED)}")
 
 
 def attribution_of(cur, codes: list[str]) -> dict:
@@ -258,19 +290,21 @@ def api_projection(client, cur, run_id: int) -> None:
     response = client.post("/api/v1/screener",
                            json={"filters": [], "sort_by": "market_cap",
                                  "page_size": 50})
-    check(response.status_code == 200,
-          f"screen returned {response.status_code}, want 200")
+    check(response.status_code == 200, "the screen endpoint answers 200",
+          f"it returned {response.status_code}")
     if response.status_code != 200:
         return
     body = response.json()
     rows = body.get("data", [])
-    check(bool(rows), "screen returned no rows; the gate would prove nothing")
+    check(bool(rows), "the screen returns rows to judge",
+          "it returned none, so every projection assertion below would pass "
+          "vacuously")
     check(body.get("snapshot") is not None,
-          "response carries no snapshot identifier after publication")
+          "the response carries a snapshot identifier",
+          "it carries none, which means no validated contract was resolvable")
     check(run_id in (body.get("run_ids") or []),
-          f"the API resolved snapshot {body.get('snapshot')} over runs "
-          f"{body.get('run_ids')}, which does not include the published run "
-          f"{run_id}")
+          f"the API's own resolved snapshot includes run {run_id}",
+          f"it resolved {body.get('snapshot')} over runs {body.get('run_ids')}")
     print(f"        snapshot={body.get('snapshot')} "
           f"run_ids={body.get('run_ids')} rows={len(rows)}")
 
@@ -308,12 +342,13 @@ def api_projection(client, cur, run_id: int) -> None:
                 else:
                     outside += 1
 
-    check(served > 0,
-          "no governed value was served on any row; publication achieved "
-          "nothing a client can see")
+    check(served > 0, "governed values are actually served to clients",
+          "not one governed value appeared on any row, so the publication "
+          "achieved nothing a client can see")
     check(in_scope_rows > 0,
-          f"none of the sampled rows is attributed to run {run_id}; the "
-          f"projection assertions measured nothing about this publication")
+          f"the sampled rows include some attributed to run {run_id}",
+          "none are, so the projection assertions measured nothing about "
+          "this publication")
     print(f"        rows-in-scope={in_scope_rows}/{len(rows)} served={served} "
           f"unexplained-blanks={blank} out-of-scope-suppressions={outside}")
 
@@ -356,11 +391,14 @@ def three_valued_filter(client, metric: str, column: str) -> None:
                                          "value": 0}],
                             "sort_by": column, "sort_dir": "desc",
                             "page_size": 25})
-    check(req.status_code == 200, f"governed filter {req.status_code}, want 200")
+    check(req.status_code == 200,
+          f"a screen filtered on governed {column} answers 200",
+          f"it returned {req.status_code}")
     if req.status_code != 200:
         return
     rows = req.json().get("data", [])
-    check(bool(rows), f"filtering on {column} returned nothing to judge")
+    check(bool(rows), f"filtering on {column} returns rows to judge",
+          "it returned none, so the REQUIRED assertion below is vacuous")
 
     bad = []
     for row in rows:
@@ -372,7 +410,9 @@ def three_valued_filter(client, metric: str, column: str) -> None:
         elif row.get(column) <= 0:
             bad.append(f"{row['asx_code']}={row.get(column)} fails the predicate")
     check(not bad,
-          f"REQUIRED filter admitted rows it must exclude: {bad[:3]}")
+          f"every row matching the {column} filter is applicable AND satisfies "
+          f"the predicate",
+          f"these were admitted and must not have been: {bad[:3]}")
     print(f"        required-filter rows={len(rows)} violations={len(bad)}")
 
     # Sorting must rank the applicable subset, never coerce a suppression to
@@ -380,13 +420,16 @@ def three_valued_filter(client, metric: str, column: str) -> None:
     # at one end of a ranking users read as a league table.
     ordered = [r.get(column) for r in rows if r.get(column) is not None]
     check(ordered == sorted(ordered, reverse=True),
-          f"a descending ranking on {column} is not descending: {ordered[:5]}")
+          f"the descending ranking on {column} is monotonic, with no "
+          f"suppression coerced to an extreme",
+          f"the served order was {ordered[:5]}")
 
     exclusion = req.json().get("excluded_from_ordering")
     ranked_total = req.json().get("ranked_total")
     check(ranked_total is not None,
-          f"ordering by governed {column} reported no ranked_total, so the "
-          f"client cannot tell screen membership from the ranked subset")
+          f"ordering by governed {column} reports the ranked subset separately "
+          f"from screen membership",
+          "ranked_total is absent, so the client cannot tell the two apart")
     print(f"        ranked_total={ranked_total} excluded={exclusion}")
 
 
@@ -395,13 +438,14 @@ def export_containment(client, cur, run_id: int) -> None:
     export = client.post("/api/v1/screener/export",
                          json={"filters": [], "sort_by": "market_cap",
                                "page_size": 25})
-    check(export.status_code == 200,
-          f"csv export {export.status_code}, want 200")
+    check(export.status_code == 200, "the CSV export answers 200",
+          f"it returned {export.status_code}")
     if export.status_code != 200:
         return
 
     rows = list(csv.reader(io.StringIO(export.text)))
-    check(len(rows) > 1, "csv has no data rows")
+    check(len(rows) > 1, "the CSV carries data rows",
+          "it carries only a header")
     index = {name: i for i, name in enumerate(_EXPORT_COLS)}
 
     populated = blank = 0
@@ -426,9 +470,9 @@ def export_containment(client, cur, run_id: int) -> None:
                                 f"but populated in the export ({cell!r})")
             populated += bool(cell)
             blank += not cell
-    check(populated > 0,
-          "the export carries no governed values at all; containment cannot "
-          "be distinguished from an empty file")
+    check(populated > 0, "the export carries governed values",
+          "it carries none, so containment cannot be distinguished from an "
+          "empty file")
     print(f"        csv governed cells: populated={populated} blank={blank}")
 
 
@@ -441,7 +485,8 @@ def unknown_contract_fails_closed(cur, run_id: int) -> None:
                  "plan_requirements": json.dumps(plan_requirements()),
                  "limit": 8})
     check(not cur.fetchall(),
-          "a run was served under an unsupported factor model")
+          "an unsupported factor model serves nothing",
+          "a run was served under model 'NO_SUCH_MODEL'")
 
     cur.execute(validated_runs_sql_psycopg(),
                 {"supported": list(GOVERNED_METRICS.keys()),
@@ -449,8 +494,9 @@ def unknown_contract_fails_closed(cur, run_id: int) -> None:
                  "limit": 8})
     served = [r[0] for r in cur.fetchall()]
     check(run_id not in served,
-          f"run {run_id} was served while its plan was unknown to the "
-          f"resolver; an unrecognised contract must fail closed")
+          "a plan unknown to the resolver serves nothing",
+          f"run {run_id} was served while its plan was absent from the "
+          f"requirements map; an unrecognised contract must fail closed")
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

@@ -417,6 +417,58 @@ def api_projection(client, cur, run_id: int) -> None:
           f"unexplained-blanks={blank} out-of-scope-suppressions={outside}")
 
 
+def batch_surface(client, cur, run_id: int) -> None:
+    """The watchlist surface, which has its own SELECT list.
+
+    Worth a separate assertion because it has its own failure mode. Inside a
+    validated contract the projector RAISES MissingProjectedColumn on a
+    governed field the query did not fetch, rather than serving a blank — so
+    a column missing from this endpoint's SELECT is a 500 on the watchlist
+    from the moment of the first publication, not a degraded value. Gate A
+    could not see it: pre-contract there is no sidecar, and the projector
+    withholds instead of raising. batch_screener and query_screener were both
+    missing earnings_growth_3y_cagr.
+    """
+    cur.execute("""
+        SELECT asx_code FROM screener.universe
+         WHERE compute_run_id = %s ORDER BY market_cap DESC NULLS LAST
+         LIMIT 10;""", (run_id,))
+    codes = [r[0] for r in cur.fetchall()]
+    check(bool(codes), f"run {run_id} has rows to request by code",
+          "none, so the batch surface cannot be exercised")
+    if not codes:
+        return
+
+    response = client.post("/api/v1/screener/batch", json={"codes": codes})
+    check(response.status_code == 200,
+          "the batch surface answers 200 under a validated contract",
+          f"it returned {response.status_code}; a governed column missing "
+          f"from its SELECT raises rather than degrading, so this is the "
+          f"watchlist failing outright: {response.text[:200]}")
+    if response.status_code != 200:
+        return
+
+    rows = response.json()
+    check(len(rows) == len(codes),
+          f"the batch surface returns all {len(codes)} requested codes",
+          f"it returned {len(rows)}")
+
+    served = 0
+    for row in rows:
+        states = row.get("metric_states") or {}
+        for column, metric in API_GOV.items():
+            if metric in states:
+                if row.get(column) is not None:
+                    breaches.append(f"batch {row['asx_code']}: {metric} "
+                                    f"suppressed but carries a value")
+            elif row.get(column) is not None:
+                served += 1
+    check(served > 0, "the batch surface serves governed values",
+          "every governed field was absent, so containment here is "
+          "indistinguishable from an empty response")
+    print(f"        batch: {len(rows)} rows, {served} governed values served")
+
+
 def busiest_governed_metric(cur, run_id: int) -> tuple[str, str]:
     """The governed metric with the most applicable rows under this run.
 
@@ -726,6 +778,8 @@ def main() -> int:
     with TestClient(app) as client:
         print("api projection")
         api_projection(client, cur, run_id)
+        print("batch surface")
+        batch_surface(client, cur, run_id)
         print("three-valued filter and ranking")
         metric, column = busiest_governed_metric(cur, run_id)
         three_valued_filter(client, metric, column)

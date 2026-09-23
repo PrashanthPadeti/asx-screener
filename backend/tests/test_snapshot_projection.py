@@ -329,6 +329,13 @@ def test_every_select_fetches_every_governed_field_it_promises():
     source = ROUTE.read_text(encoding="utf-8")
     tree = ast.parse(source)
 
+    # Every surface, every field, before reporting. Asserting inside the loop
+    # stops at the first miss: batch_screener was missing
+    # earnings_growth_3y_cagr, the assertion fired there, and query_screener --
+    # which was missing the SAME column -- went unmentioned. The fix would
+    # then have looked complete and the next run would have found the second
+    # one, which is how a two-line defect becomes two release cycles.
+    gaps = []
     for name in ("build_screener_sql", "batch_screener", "query_screener"):
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -337,9 +344,14 @@ def test_every_select_fetches_every_governed_field_it_promises():
 
         for metric, column in PROMISED.items():
             found = len(re.findall(rf"u\.{column}\b", body))
-            assert found == 1, (
-                f"{name}: {column} ({metric}) selected {found} times, want 1 "
-                f"— promised by ScreenerRow, so it must be fetched")
+            if found != 1:
+                gaps.append(f"{name}: {column} ({metric}) selected {found} "
+                            f"times, want 1")
+    assert not gaps, (
+        "these governed fields are promised by ScreenerRow and not fetched "
+        "exactly once; inside a validated contract the projector raises "
+        "MissingProjectedColumn rather than serving a blank:\n  "
+        + "\n  ".join(gaps))
 
 
 def test_the_export_fetches_every_governed_field_it_serialises():

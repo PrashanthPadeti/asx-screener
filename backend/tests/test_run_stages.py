@@ -265,13 +265,20 @@ def test_zero_errors_is_not_a_coverage_claim():
 # them would still pass every test that exercised a fully-correct run.
 
 def _resolver_sql() -> str:
-    from pathlib import Path as _P
-    src = (_P(__file__).resolve().parents[1]
-           / "app" / "api" / "v1" / "routes" / "screener.py").read_text(encoding="utf-8")
-    import re as _re
-    m = _re.search(r"VALIDATED_RUNS_SQL_TEXT = \"\"\"(.*?)\"\"\"", src, _re.S)
-    assert m, "could not locate VALIDATED_RUNS_SQL_TEXT"
-    return " ".join(m.group(1).split())
+    """The resolver's statement, from the module that defines it.
+
+    This used to regex a triple-quoted literal out of the route file. The
+    statement then moved into compute.engine.run_resolution so that the route
+    and the psycopg2 harnesses could share ONE definition, and the regex
+    stopped matching — so three tests failed on "could not locate", which is
+    at least loud. The quieter risk was the other direction: had the literal
+    survived in the route as a stale copy, these tests would have gone on
+    passing while asserting things about SQL nobody executed.
+
+    Read the definition, not a transcription of it.
+    """
+    from compute.engine.run_resolution import VALIDATED_RUNS_SQL
+    return " ".join(VALIDATED_RUNS_SQL.split())
 
 
 def test_stage_successes_without_finalisation_are_not_publication():
@@ -304,6 +311,14 @@ def test_the_resolver_requires_the_same_stages_the_writer_proves():
     """Two copies of the required set would eventually disagree about what
     published means, and the disagreement would be silent in both directions.
 
+    The property survived a redesign; its expression did not. The resolver no
+    longer holds one global required set — requirements are per plan, because
+    DAILY_CANONICAL does not run yearly_compute and validating it against a
+    set containing that stage made a correct publication permanently
+    invisible. So the identity to assert is no longer
+    `route.REQUIRED_STAGES is REQUIRED_STAGES`; it is that the requirements
+    the resolver evaluates come from the plan declarations themselves.
+
     Needs fastapi, so it reports SKIPPED where the API stack is not installed
     rather than passing. A skipped test that prints PASS is the failure mode
     this whole effort keeps running into."""
@@ -312,7 +327,24 @@ def test_the_resolver_requires_the_same_stages_the_writer_proves():
     except ModuleNotFoundError as e:
         raise Skipped(f"needs the API stack: {e}")
 
-    assert route.REQUIRED_STAGES is REQUIRED_STAGES
+    from compute.engine.run_plans import PLANS, plan_requirements
+    from compute.engine.run_resolution import VALIDATED_RUNS_SQL
+
+    assert route.plan_requirements is plan_requirements, (
+        "the route builds its own requirements map, so it can disagree with "
+        "the plans the driver enforces")
+    assert route.VALIDATED_RUNS_SQL_TEXT is VALIDATED_RUNS_SQL, (
+        "the route runs a transcription of the resolver's statement rather "
+        "than the statement itself")
+
+    # And the declarations are still the single source: every plan's required
+    # stages must be a subset of the stages it actually runs, or a run could
+    # never satisfy its own contract.
+    for name, plan in PLANS.items():
+        assert set(plan.required) <= set(plan.stages), (
+            f"{name} requires stages it never runs: "
+            f"{sorted(set(plan.required) - set(plan.stages))}")
+    assert set(plan_requirements()) == set(PLANS)
 
 
 def test_rows_written_is_no_longer_accepted_as_publication():

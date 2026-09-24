@@ -32,9 +32,22 @@ classifications that are allowed to exist outside the driver:
                       ANY dependency table. Writing an input after publication
                       moves the sources out from under a contract that has
                       already been finalised against them.
+    POST_PUBLICATION_WRITER
+                      the narrow exception: a suffix step that writes a shared
+                      canonical table, permitted only inside the lease, only
+                      after finalisation, and only on NON-GOVERNED columns —
+                      which is checked, not claimed. Every one states why.
     CANONICAL_DRIVER  owns the derived mutation sequence, admission through
                       finalisation. Not declared: a step whose script IS a
                       plan stage is one of these by definition.
+
+Ownership stays at TABLE level deliberately. Making it column-level would put
+correctness on two independent writers keeping perfectly disjoint SET lists
+forever, and this codebase has enough evidence that such assumptions decay.
+The invariant is: while a canonical execution owns screener.universe, no
+unrelated writer mutates it concurrently. POST_PUBLICATION_WRITER does not
+weaken that — it sequences the writer inside the lease instead of exempting
+it.
 
 Pure stdlib by design. It reads source; it imports nothing that needs a
 database driver, so it runs in any environment and cannot be quietly skipped
@@ -115,6 +128,45 @@ def _executable_source(path: Path) -> str:
     # strings, and a commented-out UPDATE inside one is not a write.
     return "\n".join(line for line in src.splitlines()
                      if not line.strip().startswith(("#", "--")))
+
+
+_SET_LIST = re.compile(
+    rf"\bUPDATE\s+({_TABLE})\s+SET\s+(.*?)(?=\bFROM\b|\bWHERE\b|\bRETURNING\b|;|\"\"\")",
+    re.IGNORECASE | re.DOTALL)
+_INSERT_LIST = re.compile(
+    rf"\bINSERT\s+INTO\s+({_TABLE})\s*\(([^)]*)\)", re.IGNORECASE | re.DOTALL)
+_ASSIGNED = re.compile(r"(\w+)\s*=")
+
+
+def columns_written(path: Path, table: str) -> set[str]:
+    """Which columns of `table` a script assigns.
+
+    Used for one thing: holding a POST_PUBLICATION_WRITER to its claim that it
+    touches no governed column. The claim is cheap to make and expensive to be
+    wrong about, so it is checked rather than believed.
+
+    Deliberately narrow — `UPDATE ... SET` and `INSERT INTO ... (cols)`, the
+    two shapes these writers use. It is not a SQL parser, and a writer whose
+    shape it cannot read reports NO columns, which is why
+    `test_the_column_extractor_finds_pros_and_cons` exists: an extractor that
+    silently finds nothing would clear every writer it cannot understand.
+    """
+    source = _executable_source(path)
+    found: set[str] = set()
+    for matched_table, body in _SET_LIST.findall(source):
+        if matched_table.lower() == table.lower():
+            found |= set(_ASSIGNED.findall(body))
+    for matched_table, body in _INSERT_LIST.findall(source):
+        if matched_table.lower() == table.lower():
+            found |= {c.strip() for c in body.split(",") if c.strip().isidentifier()}
+    return found
+
+
+def governed_columns() -> set[str]:
+    """The storage columns the current model governs, from the writer itself."""
+    from compute.engine.metric_states import LATEST_MODEL_VERSION
+    from compute.engine.universe_writer import persisted_governed
+    return set(persisted_governed(LATEST_MODEL_VERSION).values())
 
 
 def tables_touched(path: Path) -> dict[str, set[str]]:
@@ -261,7 +313,33 @@ def all_steps() -> list[Step]:
 
 PRE_INGESTION = "PRE_INGESTION"
 POST_PUBLICATION = "POST_PUBLICATION"
+POST_PUBLICATION_WRITER = "POST_PUBLICATION_WRITER"
 CANONICAL_DRIVER = "CANONICAL_DRIVER"
+
+#: A suffix step that writes a canonical table, permitted only under the
+#: canonical execution lease and only on non-governed columns.
+#:
+#: Table ownership stays the invariant — "while a canonical execution owns
+#: screener.universe, no unrelated writer mutates it concurrently" — precisely
+#: because the column-level alternative would make correctness depend on two
+#: independent writers keeping perfectly disjoint SET lists forever. This
+#: classification does not weaken that. It says: this writer is sequenced
+#: inside the lease, and its non-governed claim is checked rather than
+#: asserted.
+#:
+#: Every entry states why. The reason is not documentation — a writer with no
+#: stated reason is a violation.
+SUFFIX_WRITE_REASONS: dict[str, str] = {
+    "compute/engine/pros_cons.py":
+        "Writes shared canonical table screener.universe; non-governed "
+        "columns (pros, cons). Decided 24 Sep 2026: it determines none of the "
+        "72 governed values, so its success must NOT gate canonical "
+        "finalisation — a failure leaves the published run authoritative and "
+        "reports suffix-specific degradation. But it mutates the table the "
+        "driver owns, so it runs after finalisation and inside the lease. "
+        "Mechanically established before deciding: no plan stage reads pros "
+        "or cons, so it has no reason to execute before publication.",
+}
 
 #: Steps that touch a dependency table and are NOT plan stages must be declared
 #: here. A step whose script is a plan stage needs no entry — it is
@@ -293,8 +371,9 @@ CLASSIFICATIONS: dict[str, str] = {
     "compute/engine/heatmap_compute.py": POST_PUBLICATION,
     "compute/engine/sector_benchmarks.py": POST_PUBLICATION,
 
-    # Writes screener.universe outside a canonical run. See ACCEPTED below.
-    "compute/engine/pros_cons.py": POST_PUBLICATION,
+    # Writes screener.universe, non-governed columns only, inside the
+    # lease and after finalisation. See SUFFIX_WRITE_REASONS.
+    "compute/engine/pros_cons.py": POST_PUBLICATION_WRITER,
 }
 
 #: Known, accepted boundary violations — debts, not dispensations.
@@ -304,18 +383,7 @@ CLASSIFICATIONS: dict[str, str] = {
 #: violation acceptable, and a stale entry — one whose step no longer violates
 #: — fails just as loudly as an undeclared one, because an allowlist nobody
 #: prunes is an allowlist nobody reads.
-ACCEPTED: dict[str, str] = {
-    "compute/engine/pros_cons.py":
-        "Writes screener.universe (a canonical output) outside any canonical "
-        "run, from weekly_pipeline step 9b. Its columns are not among the 72 "
-        "governed metrics, so it cannot corrupt a governed value — but it "
-        "mutates a table the driver owns, unsequenced and unleased, which is "
-        "the hazard the lease exists for. Resolving it needs a design "
-        "decision that is NOT settled by this module: either the boundary "
-        "becomes column-level rather than table-level, or pros_cons becomes "
-        "part of the plan. Raised 24 Sep 2026 by the first run of this "
-        "classifier.",
-}
+ACCEPTED: dict[str, str] = {}
 
 
 def classification(step: Step) -> str | None:
@@ -390,7 +458,24 @@ def _all_violations() -> list[str]:
                 found.append(
                     f"{POST_PUBLICATION}  {step.key} writes canonical "
                     f"dependency tables {sorted(written)}; a post-publication "
-                    f"step may read them but never mutate them")
+                    f"step may read them but never mutate them. If the write "
+                    f"is intended, classify it {POST_PUBLICATION_WRITER} and "
+                    f"state why — it will then run inside the lease and its "
+                    f"non-governed claim will be checked.")
+        elif kind == POST_PUBLICATION_WRITER:
+            if step.key not in SUFFIX_WRITE_REASONS:
+                found.append(
+                    f"{POST_PUBLICATION_WRITER}  {step.key} writes a shared "
+                    f"canonical table with no stated reason")
+            governed = governed_columns()
+            for table in sorted(written):
+                overlap = columns_written(step.script, table) & governed
+                if overlap:
+                    found.append(
+                        f"{POST_PUBLICATION_WRITER}  {step.key} writes "
+                        f"GOVERNED columns {sorted(overlap)} of {table}. A "
+                        f"suffix writer may share the table; it may not touch "
+                        f"a value the canonical run is accountable for.")
     return found
 
 

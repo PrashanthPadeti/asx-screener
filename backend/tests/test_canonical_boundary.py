@@ -195,6 +195,76 @@ def test_every_accepted_entry_states_why():
             f"allowlist without reasons becomes permanent")
 
 
+# ── The suffix writer, and its non-governed claim ────────────────────────────
+
+def test_the_column_extractor_finds_pros_and_cons():
+    """Non-inert check. columns_written reports nothing for a SQL shape it
+    cannot read, so an extractor that silently found nothing would clear every
+    writer it does not understand — including the one it exists to police."""
+    found = cb.columns_written(
+        cb.BACKEND / "compute/engine/pros_cons.py", "screener.universe")
+    assert found == {"pros", "cons"}, found
+
+
+def test_governed_columns_is_populated():
+    governed = cb.governed_columns()
+    assert len(governed) >= 60, f"only {len(governed)} governed columns"
+
+
+def test_no_canonical_stage_reads_what_the_suffix_writer_writes():
+    """The one thing that would overturn the decision to put pros_cons after
+    publication: if a plan stage consumed its columns, it would have to run
+    before. Established mechanically rather than by reading."""
+    import re as _re
+    written = cb.columns_written(
+        cb.BACKEND / "compute/engine/pros_cons.py", "screener.universe")
+    assert written, "fixture is empty; the assertion below would be vacuous"
+    for stage, path in cb.plan_scripts().items():
+        source = cb._executable_source(path)
+        for column in written:
+            assert not _re.search(rf"\b{column}\b", source), (
+                f"{stage} references '{column}', which a POST_PUBLICATION "
+                f"writer produces — it cannot run after publication")
+
+
+def test_every_suffix_writer_states_why():
+    for step in cb.all_steps():
+        if cb.classification(step) == cb.POST_PUBLICATION_WRITER:
+            reason = cb.SUFFIX_WRITE_REASONS.get(step.key, "")
+            assert len(reason) > 120, (
+                f"{step.key} writes a shared canonical table without a "
+                f"stated reason")
+
+
+def test_a_suffix_writer_touching_a_governed_column_is_detected():
+    """The mutation for the non-governed claim. Pretend one of pros_cons's
+    columns is governed and require the boundary to object."""
+    real = cb.governed_columns
+    cb.governed_columns = lambda: real() | {"pros"}
+    try:
+        found = cb.violations()
+        assert any("GOVERNED columns" in v and "pros_cons" in v for v in found), (
+            f"a suffix writer touching a governed column was not reported: {found}")
+    finally:
+        cb.governed_columns = real
+
+
+def test_a_suffix_writer_without_a_reason_is_detected():
+    saved = cb.SUFFIX_WRITE_REASONS.pop("compute/engine/pros_cons.py")
+    try:
+        found = cb.violations()
+        assert any("no stated reason" in v for v in found), found
+    finally:
+        cb.SUFFIX_WRITE_REASONS["compute/engine/pros_cons.py"] = saved
+
+
+def test_the_exemption_list_is_empty_now_that_the_decision_is_made():
+    """ACCEPTED is for undecided cases. Leaving a resolved one there would
+    make the exceptional state permanent, which is the opposite of deciding."""
+    assert cb.ACCEPTED == {}, (
+        f"these are exempted rather than classified: {sorted(cb.ACCEPTED)}")
+
+
 # ── The guard fails when the boundary is broken ──────────────────────────────
 
 def test_removing_a_classification_is_detected():

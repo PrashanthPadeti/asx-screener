@@ -263,7 +263,8 @@ def report(crontab: str | None = None) -> str:
     lines = ["desired (setup_cron.sh):"]
     for entry in sorted(desired(), key=lambda s: s.target):
         hits = touches_canonical(entry.target)
-        lines.append(f"  {entry.cadence:14} {entry.target:52} "
+        lines.append(f"  {'ON ' if entry.enabled else 'OFF'} "
+                     f"{entry.cadence:14} {entry.target:52} "
                      f"{'canonical' if hits else '-'}")
     if crontab is not None:
         lines.append("\nobserved (crontab -l):")

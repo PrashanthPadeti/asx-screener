@@ -60,9 +60,40 @@ mkdir -p "$LOG_DIR"
 
 # ── Build the new cron lines ──────────────────────────────────────────────────
 # Times are UTC — the server clock is UTC, so 12:00 here is 22:00 AEST.
-DAILY_CMD="30 8 * * 1-5  cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
+# ── DISABLED, deliberately ───────────────────────────────────────────────────
+# daily_pipeline and weekly_pipeline both call build_screener_universe, which
+# invalidates the canonical contract atomically (metric_states = NULL,
+# compute_run_id = NULL) — correct and by design — and NEITHER ends in a
+# canonical run. Left enabled they revoke a valid published snapshot
+# unattended, and the governed surface fails closed until a human repairs
+# authority. The decision was to move the human choice BEFORE that destructive
+# boundary rather than after it.
+#
+# They are declared here in their disabled form on purpose. This file is
+# DESIRED state; if it declared them enabled while runtime had them off,
+# rerunning it would not reproduce the running system, and the reconciliation
+# in compute/engine/launch_authority.py would be comparing against a fiction.
+#
+# Re-enable only when the prefix → admission/lease → canonical driver →
+# finalisation → suffix orchestration is deployed and proven. See
+# docs/canonical_orchestration.md.
+DISABLED_REASON="# DISABLED 2026-09-23 p0a bridge — legacy path revokes canonical attribution unattended:"
+DAILY_CMD="${DISABLED_REASON} 30 8 * * 1-5  cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
+WEEKLY_COMPUTE_CMD="${DISABLED_REASON} 0 21 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
+
 WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_refresh.py >> ${LOG_DIR}/weekly_refresh.log 2>&1"
-WEEKLY_COMPUTE_CMD="0 21 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
+
+# ── Previously undeclared ────────────────────────────────────────────────────
+# These three were installed in the crontab and absent from this file, so
+# production ran work that code review could not see. Two of them touch
+# canonical tables and both fire INSIDE the daily pipeline's own window —
+# 08:45 and 09:00 against a pipeline starting at 08:30 — which is a shared
+# input race, not merely untidy scheduling. Declared here so the drift is
+# visible; their placement relative to the canonical lease is a separate
+# decision the wrapper refactor settles.
+ANNOUNCEMENTS_CMD="45 8 * * 1-5   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/asx/download_announcements.py >> ${LOG_DIR}/download_announcements.log 2>&1"
+YFINANCE_BACKFILL_CMD="0 9 * * 1-5   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/eodhd/v2/backfill_yfinance_prices.py --days 3 >> ${LOG_DIR}/yfinance_backfill.log 2>&1"
+PREDICTIONS_CMD="0 21 * * 1-5 ASX_ENV_FILE=${PROJECT_DIR}/backend/.env.predictions ${PROJECT_DIR}/scripts/run_predictions.sh"
 # AlphaFive: 22:00 UTC Sunday = Monday 8am AEST, after the weekly pipeline.
 ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR}/backend && ${ENV_PREFIX} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
 
@@ -103,6 +134,30 @@ if ! grep -qF "top5_strategy" "$TMPFILE"; then
     CHANGED=1
 else
     echo "  - AlphaFive picks already in crontab — skipped"
+fi
+
+if ! grep -qF "download_announcements.py" "$TMPFILE"; then
+    echo "$ANNOUNCEMENTS_CMD" >> "$TMPFILE"
+    echo "  ✓ Added: ASX announcements download (weekdays 18:45 AEST)"
+    CHANGED=1
+else
+    echo "  - Announcements download already in crontab — skipped"
+fi
+
+if ! grep -qF "backfill_yfinance_prices.py" "$TMPFILE"; then
+    echo "$YFINANCE_BACKFILL_CMD" >> "$TMPFILE"
+    echo "  ✓ Added: yfinance price backfill (weekdays 19:00 AEST)"
+    CHANGED=1
+else
+    echo "  - yfinance backfill already in crontab — skipped"
+fi
+
+if ! grep -qF "run_predictions.sh" "$TMPFILE"; then
+    echo "$PREDICTIONS_CMD" >> "$TMPFILE"
+    echo "  ✓ Added: nightly predictions (weekdays 07:00 AEST)"
+    CHANGED=1
+else
+    echo "  - Predictions run already in crontab — skipped"
 fi
 
 if [ "$CHANGED" = "1" ]; then

@@ -130,8 +130,14 @@ def _executable_source(path: Path) -> str:
                      if not line.strip().startswith(("#", "--")))
 
 
+# The optional alias is not cosmetic. `UPDATE screener.universe u SET ...` is
+# the shape short_positions uses, and a pattern demanding SET immediately after
+# the table reported NO columns for it — silently clearing an aliased writer of
+# exactly the check that exists to police it. Found when the scheduler trace
+# said that job writes screener.universe while this said it writes nothing.
 _SET_LIST = re.compile(
-    rf"\bUPDATE\s+({_TABLE})\s+SET\s+(.*?)(?=\bFROM\b|\bWHERE\b|\bRETURNING\b|;|\"\"\")",
+    rf"\bUPDATE\s+({_TABLE})(?:\s+(?!SET\b)(?:AS\s+)?\w+)?\s+SET\s+"
+    rf"(.*?)(?=\bFROM\b|\bWHERE\b|\bRETURNING\b|;|\"\"\")",
     re.IGNORECASE | re.DOTALL)
 _INSERT_LIST = re.compile(
     rf"\bINSERT\s+INTO\s+({_TABLE})\s*\(([^)]*)\)", re.IGNORECASE | re.DOTALL)

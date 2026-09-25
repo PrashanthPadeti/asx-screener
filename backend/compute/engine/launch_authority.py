@@ -40,6 +40,7 @@ reclassified.
 
 from __future__ import annotations
 
+import ast
 import re
 import subprocess
 import sys
@@ -257,6 +258,187 @@ def independent_launches(crontab: str | None = None) -> list[str]:
 def _classification_key(target: str) -> str:
     """Repo-relative -> the backend-relative key CLASSIFICATIONS uses."""
     return target[len("backend/"):] if target.startswith("backend/") else target
+
+
+# ── The second launch authority: APScheduler, in-process ─────────────────────
+#
+# Same intent-versus-runtime model as cron. `app/main.py`'s add_job calls are
+# DESIRED state; the jobs the running scheduler holds are OBSERVED state. The
+# distinction is not academic here: registration is conditional — everything
+# is skipped when SCHEDULERS_ENABLED is off, and anomaly_alerts is skipped
+# unless ANOMALY_ALERTS_ENABLED — so static enumeration genuinely cannot tell
+# you what is registered.
+#
+# These jobs are Python callables, not scripts, so "what does it touch?" means
+# following the call graph rather than reading one file. It is followed to a
+# bounded depth and anything that cannot be followed is reported UNRESOLVED,
+# never assumed harmless. A job whose reach we cannot establish is the same
+# category as a metric we failed to obtain: the honest answer is "unknown",
+# and unknown blocks.
+
+MAIN = cb.BACKEND / "app" / "main.py"
+_TRACE_DEPTH = 4
+
+
+@dataclass(frozen=True)
+class SchedulerJob:
+    job_id: str
+    callable_name: str
+    module: str
+    conditional: bool
+
+
+def _module_path(dotted: str) -> Path | None:
+    candidate = cb.BACKEND / (dotted.replace(".", "/") + ".py")
+    return candidate if candidate.exists() else None
+
+
+def scheduler_registrations() -> list[SchedulerJob]:
+    """Every add_job in app/main.py, with the module its callable comes from."""
+    source = MAIN.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    imports: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                imports[alias.asname or alias.name] = node.module
+
+    # Which add_job calls sit inside an `if`, i.e. are conditionally
+    # registered. Tracked because it is the reason runtime observation is
+    # required rather than optional.
+    guarded: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Call):
+                    guarded.add(id(inner))
+
+    found: list[SchedulerJob] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "attr", "") == "add_job"
+                and node.args):
+            continue
+        name = getattr(node.args[0], "id", "")
+        job_id = next((k.value.value for k in node.keywords
+                       if k.arg == "id" and isinstance(k.value, ast.Constant)), "")
+        found.append(SchedulerJob(job_id=job_id or name, callable_name=name,
+                                  module=imports.get(name, ""),
+                                  conditional=id(node) in guarded))
+    return found
+
+
+def _definition(path: Path, name: str):
+    """The definition a name binds to: function, class, or assignment.
+
+    Not just functions. AsyncSessionLocal is a sessionmaker instance,
+    track_scheduler_job and measure_async are classes — and a
+    context-manager class runs code on entry and exit, so it can touch tables
+    as readily as any function. Reporting these three as unresolvable was
+    noise that buried signal; allowlisting them as harmless would have been
+    the assumption this tracer exists to refuse. They are resolved and
+    scanned like anything else.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    for node in ast.walk(tree):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                and node.name == name):
+            return tree, node
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if getattr(target, "id", None) == name:
+                    return tree, node
+    return tree, None
+
+
+def trace_tables(module: str, name: str) -> tuple[dict[str, set[str]], list[str]]:
+    """Tables a callable reaches, and what could not be followed.
+
+    Returns (tables, unresolved). A non-empty `unresolved` means the table set
+    is a LOWER BOUND — the answer is "at least these, and we cannot see past
+    those calls" — which is why callers must treat it as blocking rather than
+    as a clean result.
+    """
+    tables: dict[str, set[str]] = {}
+    unresolved: list[str] = []
+    seen: set[tuple[str, str]] = set()
+
+    def walk(mod: str, fn_name: str, depth: int) -> None:
+        if depth > _TRACE_DEPTH or (mod, fn_name) in seen:
+            return
+        seen.add((mod, fn_name))
+
+        path = _module_path(mod)
+        if path is None:
+            unresolved.append(f"{mod}.{fn_name} (module not found)")
+            return
+        tree, node = _definition(path, fn_name)
+        if node is None:
+            unresolved.append(f"{mod}.{fn_name} (no definition found)")
+            return
+
+        segment = ast.get_source_segment(
+            path.read_text(encoding="utf-8", errors="ignore"), node) or ""
+        for verb, table in cb._PATTERN.findall(segment):
+            key = " ".join(verb.split()).lower()
+            tables.setdefault(table.lower(), set()).add(cb._DIRECTION[key])
+
+        local = {n.name for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        # (module, REAL name). `from x import run as run_mining` binds the
+        # alias locally while the function is still called `run`; looking it
+        # up by the alias finds nothing, and the tracer reported three compute
+        # entry points as unresolvable when they were merely renamed. The
+        # UNRESOLVED discipline is what exposed that — a tracer that assumed
+        # "not found means nothing there" would have understated three jobs.
+        imported: dict[str, tuple[str, str]] = {}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ImportFrom) and n.module:
+                for alias in n.names:
+                    imported[alias.asname or alias.name] = (n.module, alias.name)
+
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            called = getattr(call.func, "id", None)
+            if called is None or called in {"len", "str", "int", "list", "dict",
+                                            "set", "print", "range", "sorted"}:
+                continue
+            if called in local:
+                walk(mod, called, depth + 1)
+            elif called in imported:
+                target_module, target_name = imported[called]
+                if target_module.startswith(("app.", "compute.", "scripts.")):
+                    walk(target_module, target_name, depth + 1)
+
+    walk(module, name, 0)
+    return tables, unresolved
+
+
+def scheduler_findings() -> list[str]:
+    """Canonical intersections and unresolved reach, per registered job."""
+    deps = cb.dependency_tables()
+    found: list[str] = []
+    for job in scheduler_registrations():
+        if not job.module:
+            found.append(f"UNRESOLVED  scheduler job '{job.job_id}': callable "
+                         f"{job.callable_name} has no resolvable import")
+            continue
+        tables, unresolved = trace_tables(job.module, job.callable_name)
+        hits = {t: d for t, d in tables.items() if t in deps}
+        if hits:
+            written = {t for t, d in hits.items() if "w" in d}
+            found.append(
+                f"CANONICAL  scheduler job '{job.job_id}' "
+                f"({'writes ' + str(sorted(written)) if written else 'reads ' + str(sorted(hits))})"
+                f" in-process, outside any canonical execution lease")
+        if unresolved:
+            found.append(
+                f"UNRESOLVED  scheduler job '{job.job_id}' reach could not be "
+                f"fully traced ({len(unresolved)} call(s), e.g. "
+                f"{unresolved[0]}); its table set is a lower bound")
+    return found
 
 
 def report(crontab: str | None = None) -> str:

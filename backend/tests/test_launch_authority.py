@@ -118,6 +118,75 @@ def test_an_unclassified_cron_target_is_reported():
         cb.CLASSIFICATIONS[victim] = saved
 
 
+# ── The second authority: APScheduler ────────────────────────────────────────
+
+def test_every_add_job_is_enumerated():
+    jobs = la.scheduler_registrations()
+    assert len(jobs) >= 18, f"only {len(jobs)} registrations found"
+    assert all(j.job_id for j in jobs), [j for j in jobs if not j.job_id]
+
+
+def test_conditional_registration_is_recognised():
+    """Registration is guarded — anomaly_alerts only registers when
+    ANOMALY_ALERTS_ENABLED is on. If this stops being detected, the argument
+    for observing runtime rather than trusting static enumeration goes with
+    it."""
+    assert any(j.conditional for j in la.scheduler_registrations())
+
+
+def test_no_scheduler_job_is_unresolved():
+    """The acceptance rule: '0 canonical intersections' must never rest on a
+    list of function names. Every registered callable is traced to its actual
+    read/write set, and anything untraceable is blocking rather than
+    harmless."""
+    unresolved = [f for f in la.scheduler_findings() if f.startswith("UNRESOLVED")]
+    assert not unresolved, "\n".join(unresolved)
+
+
+def test_the_tracer_follows_an_aliased_import():
+    """`from compute.engine.mining_metrics import run as run_mining` binds the
+    alias while the function is still `run`. Looking it up by the alias found
+    nothing, and three compute entry points reported as untraceable when they
+    were merely renamed."""
+    tables, unresolved = la.trace_tables(
+        "app.workers.mining_reit_worker", "sync_mining_reit_metrics")
+    assert not unresolved, unresolved
+    assert tables, "the trace reached no tables at all"
+
+
+def test_the_tracer_resolves_a_class_definition():
+    """track_scheduler_job and measure_async are classes, and a context
+    manager runs code on entry and exit — it can touch tables as readily as a
+    function. Treating them as unresolvable was noise; treating them as
+    harmless would have been the assumption this refuses."""
+    tables, unresolved = la.trace_tables(
+        "app.workers.short_positions_worker", "run_short_positions")
+    assert not unresolved, unresolved
+    assert "screener.universe" in tables, sorted(tables)
+
+
+def test_scheduler_canonical_intersections_are_reported():
+    """Non-inert. If this goes quiet, either the tracer broke or the finding
+    was resolved — and the second would be a deliberate change."""
+    canonical = [f for f in la.scheduler_findings() if f.startswith("CANONICAL")]
+    assert len(canonical) >= 10, canonical
+
+
+def test_the_universe_writers_touch_no_governed_column():
+    """Three jobs write screener.universe outside any canonical run. That is
+    an open sequencing question — but if any of them ever writes a GOVERNED
+    column it stops being a sequencing question and becomes a correctness
+    one, and that must fail immediately."""
+    governed = cb.governed_columns()
+    for module in ("compute/engine/short_positions.py",
+                   "compute/engine/asx_indices.py",
+                   "compute/engine/pros_cons.py"):
+        written = cb.columns_written(cb.BACKEND / module, "screener.universe")
+        assert written, f"{module}: extractor found no columns — it cannot clear it"
+        overlap = written & governed
+        assert not overlap, f"{module} writes governed columns {sorted(overlap)}"
+
+
 # ── Reconciliation: server only ──────────────────────────────────────────────
 
 def test_desired_and_observed_agree_on_canonical_entries():

@@ -207,6 +207,44 @@ def test_the_column_extractor_finds_pros_and_cons():
     assert found == {"pros", "cons"}, found
 
 
+def test_an_aliased_update_is_seen():
+    """`UPDATE screener.universe u SET ...` is the shape short_positions uses.
+
+    A pattern demanding SET immediately after the table reported no columns
+    for it, which silently cleared an aliased writer of the governed-column
+    check. Found because the scheduler trace said that job writes
+    screener.universe while the column extractor said it writes nothing — two
+    derivations disagreeing is how this surfaced at all.
+    """
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                     encoding="utf-8") as handle:
+        handle.write('q = """\n'
+                     '    UPDATE screener.universe u\n'
+                     '    SET short_pct = sp.a, short_interest_chg_1w = sp.b\n'
+                     '    FROM market.short_positions sp\n'
+                     '"""\n')
+        path = Path(handle.name)
+    try:
+        found = cb.columns_written(path, "screener.universe")
+        assert found == {"short_pct", "short_interest_chg_1w"}, found
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_the_alias_is_not_mistaken_for_a_column():
+    """The alias must not swallow SET, or the first assignment is lost."""
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False,
+                                     encoding="utf-8") as handle:
+        handle.write('q = "UPDATE screener.universe SET pros = 1 WHERE x"\n')
+        path = Path(handle.name)
+    try:
+        assert cb.columns_written(path, "screener.universe") == {"pros"}
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def test_governed_columns_is_populated():
     governed = cb.governed_columns()
     assert len(governed) >= 60, f"only {len(governed)} governed columns"

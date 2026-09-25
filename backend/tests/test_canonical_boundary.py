@@ -184,7 +184,8 @@ def test_accepted_entries_are_real_violations():
     """An exemption for something that does not violate is a comment nobody
     will ever delete."""
     violating = {cb._key_of(v) for v in cb.violations(include_accepted=True)}
-    stale = sorted(set(cb.ACCEPTED) - violating)
+    visible = set(cb.all_units())
+    stale = sorted((set(cb.ACCEPTED) & visible) - violating)
     assert not stale, f"ACCEPTED lists non-violations: {stale}"
 
 
@@ -258,11 +259,18 @@ def test_a_suffix_writer_without_a_reason_is_detected():
         cb.SUFFIX_WRITE_REASONS["compute/engine/pros_cons.py"] = saved
 
 
-def test_the_exemption_list_is_empty_now_that_the_decision_is_made():
-    """ACCEPTED is for undecided cases. Leaving a resolved one there would
-    make the exceptional state permanent, which is the opposite of deciding."""
-    assert cb.ACCEPTED == {}, (
-        f"these are exempted rather than classified: {sorted(cb.ACCEPTED)}")
+def test_a_decided_case_is_not_left_as_an_exemption():
+    """ACCEPTED is for UNDECIDED cases. Leaving a resolved one there makes the
+    exceptional state permanent, which is the opposite of deciding.
+
+    This asserted `ACCEPTED == {}` while pros_cons was the only entry, which
+    was really a test that one decision had been taken, written as though it
+    were a rule about the list. A legitimate new entry then failed it."""
+    decided = {"compute/engine/pros_cons.py"}
+    left = decided & set(cb.ACCEPTED)
+    assert not left, (
+        f"these were decided and should be classified, not exempted: "
+        f"{sorted(left)}")
 
 
 # ── The guard fails when the boundary is broken ──────────────────────────────
@@ -295,11 +303,29 @@ def test_a_pre_ingestion_step_writing_a_canonical_output_is_detected():
 
 
 def test_a_stale_exemption_is_detected():
-    cb.ACCEPTED["compute/engine/nothing_here.py"] = "x" * 130
+    """The fixture must be a unit this environment can SEE and that does not
+    violate. An invisible key is not stale — it is unjudgeable — and the first
+    draft of this test used one, so it was asserting the wrong thing."""
+    victim = "scripts/eodhd/v2/load_to_staging_prices.py"
+    assert victim in cb.all_units(), "fixture is not visible here"
+    cb.ACCEPTED[victim] = "x" * 130
     try:
-        assert any("STALE EXEMPTION" in v for v in cb.violations()), cb.violations()
+        assert any("STALE EXEMPTION" in v and victim in v
+                   for v in cb.violations()), cb.violations()
     finally:
-        cb.ACCEPTED.pop("compute/engine/nothing_here.py")
+        cb.ACCEPTED.pop(victim)
+
+
+def test_an_invisible_exemption_is_not_called_stale():
+    """backfill_yfinance_prices lives in the runtime crontab and not in the
+    checked-in generator, so off-server it is invisible. Reporting it as a
+    resolved violation would delete the record of an open question."""
+    cb.ACCEPTED["scripts/does/not/exist_here.py"] = "y" * 130
+    try:
+        assert not any("STALE EXEMPTION" in v and "exist_here" in v
+                       for v in cb.violations()), cb.violations()
+    finally:
+        cb.ACCEPTED.pop("scripts/does/not/exist_here.py")
 
 
 def test_all_three_pipelines_yield_steps():

@@ -305,6 +305,77 @@ def pipeline_steps(pipeline: str) -> list[Step]:
 PIPELINES = ("daily_pipeline.py", "weekly_pipeline.py", "monthly_pipeline.py")
 
 
+# ── Units cron launches directly ─────────────────────────────────────────────
+#
+# A pipeline is not the only launch authority. cron runs scripts of its own,
+# and a boundary that saw only pipeline steps was an authority over the
+# pipelines and silent about everything else — including a script that writes
+# a canonical output on its own schedule.
+#
+# Only the TARGETS are derived here, from the checked-in generator. Whether
+# desired and observed state agree, and whether a launch sits outside the
+# lease, belong to `launch_authority` — this module answers one question, and
+# it is "what may this unit touch?".
+
+GENERATOR = JOBS / "setup_cron.sh"
+
+_CADENCE = r"(?:[-\d*/,]+\s+){4}[-\d*/,]+"
+_CRON_ASSIGN = re.compile(r'^(\w+_CMD)="(.*)"\s*$', re.MULTILINE)
+_SHELL_VAR = re.compile(r'^(\w+)="(.*)"\s*$', re.MULTILINE)
+
+
+def cron_target(command: str) -> str:
+    """The script a cron command runs, repo-relative ('' if none)."""
+    module = re.search(r"-m\s+([\w.]+)", command)
+    if module:
+        return "backend/" + module.group(1).replace(".", "/") + ".py"
+    script = re.search(r"([\w./-]+\.(?:py|sh))",
+                       command.replace("/opt/asx-screener/", ""))
+    return script.group(1).lstrip("./") if script else ""
+
+
+def cron_units() -> dict[str, Path]:
+    """{classification key: script} for everything the generator schedules.
+
+    Pipelines are excluded: they are wrappers, and their steps are already
+    units in their own right.
+    """
+    text = GENERATOR.read_text(encoding="utf-8")
+    variables = dict(_SHELL_VAR.findall(text))
+    wrappers = {f"scripts/eodhd/v2/jobs/{p}" for p in PIPELINES}
+    units: dict[str, Path] = {}
+    for name, value in _CRON_ASSIGN.findall(text):
+        for _ in range(4):
+            value = re.sub(r"\$\{(\w+)\}",
+                           lambda m: variables.get(m.group(1), m.group(0)),
+                           value)
+        target = cron_target(value)
+        if not target:
+            continue
+        key = target[len("backend/"):] if target.startswith("backend/") else target
+        if key in wrappers:
+            continue
+        path = BACKEND.parent / target
+        if path.exists():
+            units[key] = path
+    return units
+
+
+#: Units this module cannot derive but that another launch authority knows
+#: about — populated by `launch_authority` from the OBSERVED crontab, which
+#: only exists on the server. Empty elsewhere, so the derived answer is the
+#: same everywhere except where it can legitimately be larger.
+EXTRA_UNITS: dict[str, Path] = {}
+
+
+def all_units() -> dict[str, Path]:
+    """Every launchable unit whose table access this module judges."""
+    units = {s.key: s.script for s in all_steps()}
+    units.update(cron_units())
+    units.update(EXTRA_UNITS)
+    return units
+
+
 def all_steps() -> list[Step]:
     return [s for p in PIPELINES for s in pipeline_steps(p)]
 
@@ -374,6 +445,18 @@ CLASSIFICATIONS: dict[str, str] = {
     # Writes screener.universe, non-governed columns only, inside the
     # lease and after finalisation. See SUFFIX_WRITE_REASONS.
     "compute/engine/pros_cons.py": POST_PUBLICATION_WRITER,
+
+    # ── Launched by cron, not by a pipeline. See launch_authority. ──────────
+    # Reads screener.universe to pick the monthly five. A live-universe
+    # consumer, so it belongs in a suffix under the lease or must become
+    # run-pinned; an independent Sunday cron is outside the contract, which
+    # launch_authority reports separately from this classification.
+    "compute/engine/top5_strategy.py": POST_PUBLICATION,
+    # Writes market.asx_announcements, a canonical INPUT.
+    "scripts/asx/download_announcements.py": PRE_INGESTION,
+    # Writes market.daily_prices, a canonical OUTPUT. Illegal for ingestion —
+    # see ACCEPTED, where the open question is recorded.
+    "scripts/eodhd/v2/backfill_yfinance_prices.py": PRE_INGESTION,
 }
 
 #: Known, accepted boundary violations — debts, not dispensations.
@@ -383,7 +466,21 @@ CLASSIFICATIONS: dict[str, str] = {
 #: violation acceptable, and a stale entry — one whose step no longer violates
 #: — fails just as loudly as an undeclared one, because an allowlist nobody
 #: prunes is an allowlist nobody reads.
-ACCEPTED: dict[str, str] = {}
+ACCEPTED: dict[str, str] = {
+    "scripts/eodhd/v2/backfill_yfinance_prices.py":
+        "Writes market.daily_prices — a canonical OUTPUT, written by the "
+        "plan stage transform_prices — from an independent 09:00 UTC weekday "
+        "cron, fifteen minutes after daily_pipeline starts. No classification "
+        "is legal for it: PRE_INGESTION may not write an output, and "
+        "POST_PUBLICATION may not write a dependency table at all. 'Three "
+        "days is outside the yearly fingerprint's historical scope' is NOT "
+        "sufficient safety, because recent rows are exactly what daily and "
+        "technical compute consume. Two open questions this module does not "
+        "answer: whether it belongs in the daily wrapper's prefix inside the "
+        "lease, and whether market.daily_prices having two legitimate writers "
+        "means the output/input split needs revisiting. Raised 25 Sep 2026 by "
+        "the first run of the launch-authority classifier.",
+}
 
 
 def classification(step: Step) -> str | None:
@@ -406,9 +503,16 @@ def violations(include_accepted: bool = False) -> list[str]:
     # A stale exemption is its own failure. If the step named in ACCEPTED has
     # stopped violating, the entry is describing a world that no longer exists
     # and the next reader will trust it anyway.
+    # A stale exemption is its own failure — but only where the unit is
+    # actually visible. backfill_yfinance_prices exists in the runtime crontab
+    # and not in the checked-in generator, so off-server this module cannot
+    # see it at all. "I cannot see this unit here" is not "this unit no longer
+    # violates", and the first draft reported the second when it meant the
+    # first.
+    visible = all_units()
     still = {_key_of(v) for v in _all_violations()}
-    for key, reason in ACCEPTED.items():
-        if key not in still:
+    for key in ACCEPTED:
+        if key in visible and key not in still:
             found.append(
                 f"STALE EXEMPTION  {key} is listed in ACCEPTED but no longer "
                 f"violates the boundary. Remove the entry.")
@@ -423,59 +527,69 @@ def _key_of(violation: str) -> str:
     return ""
 
 
-def _all_violations() -> list[str]:
+def check_unit(key: str, script: Path) -> list[str]:
+    """The directional rules, for one launchable unit.
+
+    Factored out so cron-launched scripts go through exactly these rules
+    rather than a parallel copy in `launch_authority`. Two copies of "what may
+    a pre-ingestion step write" is two answers that drift, which is the defect
+    this module exists to prevent — it does not stop being that when both
+    copies are ours.
+    """
     inputs, outputs = canonical_tables()
-    deps = inputs | outputs
+    hits = {t: d for t, d in tables_touched(script).items()
+            if t in inputs | outputs}
+    if not hits:
+        return []
+
+    plan_keys = {p.relative_to(BACKEND).as_posix()
+                 for p in plan_scripts().values()}
+    kind = CANONICAL_DRIVER if key in plan_keys else CLASSIFICATIONS.get(key)
+    if kind is None:
+        return [f"UNCLASSIFIED  {key} touches canonical dependency tables "
+                f"{sorted(hits)} and has no classification"]
+
+    written = {t for t, d in hits.items() if "w" in d}
     found: list[str] = []
-    seen: set[str] = set()
 
-    for step in all_steps():
-        if step.key in seen:
-            continue
-        seen.add(step.key)
-
-        touched = tables_touched(step.script)
-        hits = {t: d for t, d in touched.items() if t in deps}
-        if not hits:
-            continue
-
-        kind = classification(step)
-        if kind is None:
+    if kind == PRE_INGESTION:
+        owned = written & outputs
+        if owned:
             found.append(
-                f"UNCLASSIFIED  {step.key} touches canonical dependency "
-                f"tables {sorted(hits)} and has no classification")
-            continue
+                f"{PRE_INGESTION}  {key} writes canonical OUTPUTS "
+                f"{sorted(owned)}, which the driver owns")
 
-        written = {t for t, d in hits.items() if "w" in d}
-        if kind == PRE_INGESTION:
-            owned = written & outputs
-            if owned:
+    elif kind == POST_PUBLICATION:
+        if written:
+            found.append(
+                f"{POST_PUBLICATION}  {key} writes canonical dependency "
+                f"tables {sorted(written)}; a post-publication step may read "
+                f"them but never mutate them. If the write is intended, "
+                f"classify it {POST_PUBLICATION_WRITER} and state why — it "
+                f"will then run inside the lease and its non-governed claim "
+                f"will be checked.")
+
+    elif kind == POST_PUBLICATION_WRITER:
+        if key not in SUFFIX_WRITE_REASONS:
+            found.append(
+                f"{POST_PUBLICATION_WRITER}  {key} writes a shared canonical "
+                f"table with no stated reason")
+        governed = governed_columns()
+        for table in sorted(written):
+            overlap = columns_written(script, table) & governed
+            if overlap:
                 found.append(
-                    f"{PRE_INGESTION}  {step.key} writes canonical OUTPUTS "
-                    f"{sorted(owned)}, which the driver owns")
-        elif kind == POST_PUBLICATION:
-            if written:
-                found.append(
-                    f"{POST_PUBLICATION}  {step.key} writes canonical "
-                    f"dependency tables {sorted(written)}; a post-publication "
-                    f"step may read them but never mutate them. If the write "
-                    f"is intended, classify it {POST_PUBLICATION_WRITER} and "
-                    f"state why — it will then run inside the lease and its "
-                    f"non-governed claim will be checked.")
-        elif kind == POST_PUBLICATION_WRITER:
-            if step.key not in SUFFIX_WRITE_REASONS:
-                found.append(
-                    f"{POST_PUBLICATION_WRITER}  {step.key} writes a shared "
-                    f"canonical table with no stated reason")
-            governed = governed_columns()
-            for table in sorted(written):
-                overlap = columns_written(step.script, table) & governed
-                if overlap:
-                    found.append(
-                        f"{POST_PUBLICATION_WRITER}  {step.key} writes "
-                        f"GOVERNED columns {sorted(overlap)} of {table}. A "
-                        f"suffix writer may share the table; it may not touch "
-                        f"a value the canonical run is accountable for.")
+                    f"{POST_PUBLICATION_WRITER}  {key} writes GOVERNED "
+                    f"columns {sorted(overlap)} of {table}. A suffix writer "
+                    f"may share the table; it may not touch a value the "
+                    f"canonical run is accountable for.")
+    return found
+
+
+def _all_violations() -> list[str]:
+    found: list[str] = []
+    for key, script in sorted(all_units().items()):
+        found.extend(check_unit(key, script))
     return found
 
 

@@ -22,7 +22,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi import (APIRouter, BackgroundTasks, Depends, HTTPException,
+                     Query, Request, status)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
@@ -310,6 +311,7 @@ async def pipeline_status(
 
 @router.get("/system-health")
 async def system_health(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(require_admin),
 ):
@@ -529,7 +531,59 @@ async def system_health(
         "Monitor slow queries with pg_stat_statements",
     ]
 
+    # ── Scheduler: observed runtime identities ──
+    #
+    # /health already publishes a job COUNT, and a count cannot be reconciled
+    # against static intent — twenty registrations and twenty live jobs agree
+    # numerically while naming entirely different work. This reports WHICH
+    # jobs are registered, so compute/engine/launch_authority.py can compare
+    # the running scheduler against app/main.py's add_job declarations.
+    #
+    # Read-only: it calls get_jobs() and nothing else. No job is added,
+    # removed, paused or modified here, and no database row is touched.
+    #
+    # Cadence is reported as structured fields rather than str(trigger),
+    # because a repr can change without any semantic change and would then
+    # read as drift.
+    result["scheduler"] = _scheduler_state(request)
+
     return result
+
+
+def _trigger_shape(trigger) -> dict:
+    """A trigger as comparable fields, never as its repr."""
+    name = type(trigger).__name__
+    if name == "IntervalTrigger":
+        return {"type": "interval",
+                "seconds": int(trigger.interval.total_seconds())}
+    if name == "CronTrigger":
+        # Only the fields actually constrained. APScheduler fills the rest
+        # with '*', and reporting those would make every comparison noisy.
+        return {"type": "cron",
+                "fields": {f.name: str(f) for f in trigger.fields
+                           if not f.is_default}}
+    return {"type": name}
+
+
+def _scheduler_state(request: Request) -> dict:
+    scheduler = getattr(request.app.state, "scheduler", None)
+    frozen = getattr(request.app.state, "schedulers_frozen", None)
+    if scheduler is None:
+        return {"enabled": None, "job_count": 0, "jobs": [],
+                "note": "scheduler not published on app.state"}
+
+    jobs = []
+    for job in scheduler.get_jobs():
+        jobs.append({
+            "id": job.id,
+            "name": job.name,
+            "trigger": _trigger_shape(job.trigger),
+            "next_run_time": (job.next_run_time.isoformat()
+                              if getattr(job, "next_run_time", None) else None),
+        })
+    # Derived from the identities, not counted separately, so the older
+    # count-only instrument on /health cannot disagree with this one silently.
+    return {"enabled": not bool(frozen), "job_count": len(jobs), "jobs": jobs}
 
 
 # ── Run Job Now ───────────────────────────────────────────────────────────────

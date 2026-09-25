@@ -286,6 +286,43 @@ class SchedulerJob:
     callable_name: str
     module: str
     conditional: bool
+    trigger: tuple = ()          # comparable shape, see _static_trigger
+
+    @property
+    def trigger_shape(self) -> dict:
+        return dict(self.trigger)
+
+
+def _static_trigger(call: ast.Call) -> dict:
+    """The cadence an add_job declares, as comparable fields.
+
+    Two forms in app/main.py: `trigger="interval", minutes=15` and a
+    positional `CronTrigger(hour=19, minute=10, timezone=...)`. Reported as
+    structure rather than as a rendered string, on both sides, so a repr
+    change cannot read as drift.
+    """
+    keywords = {k.arg: k.value for k in call.keywords if k.arg}
+
+    trigger = keywords.get("trigger")
+    if isinstance(trigger, ast.Constant) and trigger.value == "interval":
+        units = {"weeks": 604800, "days": 86400, "hours": 3600,
+                 "minutes": 60, "seconds": 1}
+        total = sum(int(keywords[u].value) * mult
+                    for u, mult in units.items()
+                    if u in keywords and isinstance(keywords[u], ast.Constant))
+        return {"type": "interval", "seconds": total}
+
+    for node in list(call.args) + list(keywords.values()):
+        if (isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "CronTrigger"):
+            fields = {}
+            for keyword in node.keywords:
+                if keyword.arg in (None, "timezone", "jitter"):
+                    continue
+                if isinstance(keyword.value, ast.Constant):
+                    fields[keyword.arg] = str(keyword.value.value)
+            return {"type": "cron", "fields": fields}
+    return {}
 
 
 def _module_path(dotted: str) -> Path | None:
@@ -323,9 +360,98 @@ def scheduler_registrations() -> list[SchedulerJob]:
         name = getattr(node.args[0], "id", "")
         job_id = next((k.value.value for k in node.keywords
                        if k.arg == "id" and isinstance(k.value, ast.Constant)), "")
-        found.append(SchedulerJob(job_id=job_id or name, callable_name=name,
-                                  module=imports.get(name, ""),
-                                  conditional=id(node) in guarded))
+        found.append(SchedulerJob(
+            job_id=job_id or name, callable_name=name,
+            module=imports.get(name, ""),
+            conditional=id(node) in guarded,
+            trigger=tuple(sorted(_static_trigger(node).items()))))
+    return found
+
+
+def canonical_scheduler_jobs() -> dict[str, dict[str, set[str]]]:
+    """{job_id: canonical tables it reaches}. Only jobs that intersect."""
+    deps = cb.dependency_tables()
+    found: dict[str, dict[str, set[str]]] = {}
+    for job in scheduler_registrations():
+        if not job.module:
+            continue
+        tables, _unresolved = trace_tables(job.module, job.callable_name)
+        hits = {t: d for t, d in tables.items() if t in deps}
+        if hits:
+            found[job.job_id] = hits
+    return found
+
+
+def scheduler_reconciliation(live: dict) -> list[str]:
+    """Static add_job intent versus the running scheduler's identities.
+
+    `live` is the `scheduler` object from the admin system-health payload.
+
+    A frozen scheduler is a legitimate runtime state, not a mass of missing
+    jobs. When it reports disabled, the expectation inverts: zero registered
+    jobs is correct, and ANY registered job is the finding.
+    """
+    found: list[str] = []
+    jobs = live.get("jobs")
+    if jobs is None:
+        return ["scheduler state unavailable: admin payload carried no 'jobs' "
+                "list. A count alone cannot be reconciled."]
+
+    # The old count-only instrument must not be able to disagree with the
+    # identities silently.
+    if live.get("job_count") != len(jobs):
+        found.append(
+            f"COUNT DISAGREES  job_count={live.get('job_count')} but "
+            f"{len(jobs)} identities were returned")
+
+    if not live.get("enabled"):
+        if jobs:
+            found.append(
+                f"FROZEN BUT REGISTERED  the scheduler reports disabled while "
+                f"holding {len(jobs)} jobs: "
+                f"{sorted(j.get('id') for j in jobs)}")
+        return found
+
+    static = {j.job_id: j for j in scheduler_registrations()}
+    canonical = canonical_scheduler_jobs()
+    observed_ids = {j.get("id"): j for j in jobs}
+
+    for job_id in sorted(set(observed_ids) - set(static)):
+        found.append(
+            f"UNDECLARED JOB  '{job_id}' is registered in the running "
+            f"scheduler and absent from app/main.py's add_job declarations")
+
+    for job_id in sorted(set(static) - set(observed_ids)):
+        if job_id in canonical:
+            found.append(
+                f"MISSING JOB  '{job_id}' is declared and touches canonical "
+                f"tables {sorted(canonical[job_id])}, but is not registered "
+                f"at runtime")
+
+    for job_id in sorted(set(static) & set(observed_ids)):
+        want = static[job_id].trigger_shape
+        have = observed_ids[job_id].get("trigger") or {}
+        if not want:
+            continue
+        if want.get("type") != have.get("type"):
+            found.append(
+                f"TRIGGER TYPE DRIFT  '{job_id}': declared "
+                f"{want.get('type')}, runtime {have.get('type')}")
+            continue
+        if want["type"] == "interval" and want.get("seconds") != have.get("seconds"):
+            found.append(
+                f"CADENCE DRIFT  '{job_id}': declared every "
+                f"{want.get('seconds')}s, runtime {have.get('seconds')}s")
+        elif want["type"] == "cron":
+            # Containment, not equality: APScheduler fills unspecified fields
+            # with defaults, and demanding they match would report drift on
+            # every job. Every field the declaration CONSTRAINS must agree.
+            live_fields = have.get("fields") or {}
+            for field, value in sorted(want.get("fields", {}).items()):
+                if str(live_fields.get(field)) != str(value):
+                    found.append(
+                        f"CADENCE DRIFT  '{job_id}': declared {field}={value}, "
+                        f"runtime {field}={live_fields.get(field)}")
     return found
 
 
@@ -459,7 +585,30 @@ def report(crontab: str | None = None) -> str:
 
 
 if __name__ == "__main__":
+    import json as _json
     import sys
+
+    # Runtime scheduler state is admin-authenticated, so it is fetched by the
+    # operator and handed in as a file rather than by this module holding a
+    # token:
+    #
+    #   curl -s -H "Authorization: Bearer $TOKEN" \
+    #        https://<host>/api/v1/admin/system-health \
+    #     | python -c 'import json,sys; json.dump(json.load(sys.stdin)["scheduler"], sys.stdout)' \
+    #     > /tmp/scheduler.json
+    #   python compute/engine/launch_authority.py --scheduler-json /tmp/scheduler.json
+    if "--scheduler-json" in sys.argv:
+        path = Path(sys.argv[sys.argv.index("--scheduler-json") + 1])
+        state = _json.loads(path.read_text(encoding="utf-8"))
+        problems = scheduler_reconciliation(state)
+        print(f"scheduler: enabled={state.get('enabled')} "
+              f"job_count={state.get('job_count')} "
+              f"identities={len(state.get('jobs') or [])}")
+        for line in problems:
+            print(" ", line)
+        print(f"\n{len(problems)} finding(s)")
+        sys.exit(1 if problems else 0)
+
     live = read_crontab()
     print(report(live))
     problems = independent_launches(live)

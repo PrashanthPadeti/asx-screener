@@ -187,6 +187,142 @@ def test_the_universe_writers_touch_no_governed_column():
         assert not overlap, f"{module} writes governed columns {sorted(overlap)}"
 
 
+# ── Static/live scheduler reconciliation ─────────────────────────────────────
+
+ADMIN = BACKEND / "app" / "api" / "v1" / "routes" / "admin.py"
+
+
+def test_the_scheduler_surface_requires_admin():
+    """Non-negotiable. Job identities name internal work and the endpoint must
+    never become reachable without admin auth."""
+    import ast as _ast
+    source = ADMIN.read_text(encoding="utf-8")
+    tree = _ast.parse(source)
+    for node in _ast.walk(tree):
+        if not (isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                and node.name == "system_health"):
+            continue
+        segment = _ast.get_source_segment(source, node) or ""
+        assert "Depends(require_admin)" in segment, (
+            "system_health no longer depends on require_admin")
+        return
+    raise AssertionError("system_health not found")
+
+
+def test_the_scheduler_surface_mutates_nothing():
+    """Read-only, asserted rather than claimed. It calls get_jobs() and
+    nothing else — no job added, removed, paused or rescheduled, and no row
+    written. A diagnostic that can modify what it reports on is not a
+    diagnostic."""
+    import ast as _ast
+    source = ADMIN.read_text(encoding="utf-8")
+    tree = _ast.parse(source)
+    body = ""
+    for node in _ast.walk(tree):
+        if (isinstance(node, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                and node.name == "_scheduler_state"):
+            body = _ast.get_source_segment(source, node) or ""
+    assert body, "_scheduler_state not found"
+    for forbidden in ("add_job", "remove_job", "modify_job", "reschedule_job",
+                      "pause", "resume", "shutdown", "start(",
+                      "INSERT", "UPDATE", "DELETE", "commit"):
+        assert forbidden not in body, (
+            f"_scheduler_state contains {forbidden!r}; it must only read")
+
+
+def _live(ids=None, enabled=True, count=None, triggers=None):
+    """A synthetic admin payload. The reconciler must be testable without a
+    running scheduler, or its rules could only be exercised on the server —
+    and rules exercised once are rules nobody trusts."""
+    static = {j.job_id: j for j in la.scheduler_registrations()}
+    chosen = list(static) if ids is None else list(ids)
+    jobs = [{"id": job_id, "name": job_id,
+             "trigger": (triggers or {}).get(
+                 job_id, static[job_id].trigger_shape if job_id in static else {}),
+             "next_run_time": None}
+            for job_id in chosen]
+    return {"enabled": enabled,
+            "job_count": len(jobs) if count is None else count,
+            "jobs": jobs}
+
+
+def test_a_faithful_runtime_reconciles_clean():
+    assert la.scheduler_reconciliation(_live()) == []
+
+
+def test_a_missing_canonical_job_is_detected():
+    """Mutation 1: remove one live identity."""
+    victim = "short_positions"
+    assert victim in la.canonical_scheduler_jobs(), "fixture moved"
+    remaining = [j for j in la.scheduler_registrations() if j.job_id != victim]
+    found = la.scheduler_reconciliation(_live(ids=[j.job_id for j in remaining]))
+    assert any("MISSING JOB" in f and victim in f for f in found), found
+
+
+def test_an_unexpected_job_is_detected():
+    """Mutation 2: insert one identity nothing declares."""
+    state = _live()
+    state["jobs"].append({"id": "rogue_job", "name": "rogue_job",
+                          "trigger": {}, "next_run_time": None})
+    state["job_count"] = len(state["jobs"])
+    found = la.scheduler_reconciliation(state)
+    assert any("UNDECLARED JOB" in f and "rogue_job" in f for f in found), found
+
+
+def test_a_count_that_disagrees_with_the_identities_is_detected():
+    """job_count must be derived from the list, so the older count-only
+    instrument on /health cannot disagree silently."""
+    found = la.scheduler_reconciliation(_live(count=99))
+    assert any("COUNT DISAGREES" in f for f in found), found
+
+
+def test_a_frozen_scheduler_with_no_jobs_is_legitimate():
+    """Frozen is a valid runtime state, not twenty missing jobs. This is the
+    state production is in during a canonical window, and a reconciler that
+    screamed then would be trained away."""
+    assert la.scheduler_reconciliation(_live(ids=[], enabled=False)) == []
+
+
+def test_a_frozen_scheduler_still_holding_jobs_is_a_finding():
+    """The freeze that silently failed. p0a_freeze.sh checks the count for
+    exactly this reason; here it is by identity."""
+    found = la.scheduler_reconciliation(_live(enabled=False))
+    assert any("FROZEN BUT REGISTERED" in f for f in found), found
+
+
+def test_cadence_drift_is_detected_on_an_interval_job():
+    found = la.scheduler_reconciliation(_live(
+        triggers={"alert_checker": {"type": "interval", "seconds": 60}}))
+    assert any("CADENCE DRIFT" in f and "alert_checker" in f for f in found), found
+
+
+def test_cadence_drift_is_detected_on_a_cron_job():
+    found = la.scheduler_reconciliation(_live(
+        triggers={"announcement_fetcher":
+                  {"type": "cron", "fields": {"hour": "3", "minute": "10"}}}))
+    assert any("CADENCE DRIFT" in f and "announcement_fetcher" in f
+               for f in found), found
+
+
+def test_unconstrained_cron_fields_are_not_drift():
+    """APScheduler fills unspecified fields with defaults. Demanding equality
+    rather than containment would report drift on every cron job, and a
+    reconciler that is always red is one nobody reads."""
+    found = la.scheduler_reconciliation(_live(
+        triggers={"announcement_fetcher":
+                  {"type": "cron",
+                   "fields": {"hour": "19", "minute": "10",
+                              "second": "0", "day": "*"}}}))
+    assert not any("announcement_fetcher" in f for f in found), found
+
+
+def test_a_payload_without_identities_is_refused():
+    """The whole point of the new admin field. A count alone must not read as
+    a clean reconciliation."""
+    found = la.scheduler_reconciliation({"enabled": True, "job_count": 20})
+    assert found and "count alone" in found[0], found
+
+
 # ── Reconciliation: server only ──────────────────────────────────────────────
 
 def test_desired_and_observed_agree_on_canonical_entries():

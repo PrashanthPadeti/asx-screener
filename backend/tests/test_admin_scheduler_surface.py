@@ -120,18 +120,36 @@ def test_an_absent_scheduler_is_reported_not_guessed():
 # ── Behaviour, frozen only ───────────────────────────────────────────────────
 
 def test_the_frozen_surface_reports_zero_identities():
-    """Proved in-process because it is safe to: frozen means the lifespan
-    removes every job before starting, so nothing is registered and nothing
-    can fire. The enabled path is proved against the deployed service
-    instead."""
-    import os
-    os.environ["SCHEDULERS_ENABLED"] = "false"
+    """Proved in-process because frozen is safe to run: the lifespan removes
+    every job before starting, so nothing registers and nothing fires.
+
+    The freeze is forced by setting `settings.SCHEDULERS_ENABLED` directly,
+    NOT by assigning os.environ. The first draft did the latter and passed
+    standalone while failing under pytest — because another test imports
+    app.main first, Settings reads the environment once at import time, and
+    the assignment then arrives too late. `frozen` was False, and this test
+    registered and started nineteen real APScheduler jobs on the host it ran
+    on. The assertion caught it, but a diagnostic that starts production jobs
+    to check whether production jobs are running is the exact trade this
+    surface exists to avoid, and import order must not decide it.
+    """
     try:
         from fastapi.testclient import TestClient
+        from app.core.config import settings
         from app.core.deps import require_admin
         from app.main import app
     except Exception as exc:                                   # noqa: BLE001
         raise Skipped(f"needs the API stack: {type(exc).__name__}")
+
+    try:
+        previous = settings.SCHEDULERS_ENABLED
+        settings.SCHEDULERS_ENABLED = False
+    except Exception as exc:                                   # noqa: BLE001
+        raise Skipped(f"cannot force the freeze safely: {type(exc).__name__}")
+
+    assert settings.SCHEDULERS_ENABLED is False, (
+        "the freeze did not take; refusing to start the app, because "
+        "unfrozen it would register and start every scheduled job here")
 
     app.dependency_overrides[require_admin] = lambda: {"id": 1, "is_admin": True}
     try:
@@ -141,6 +159,7 @@ def test_the_frozen_surface_reports_zero_identities():
         state = response.json()["scheduler"]
     finally:
         app.dependency_overrides.pop(require_admin, None)
+        settings.SCHEDULERS_ENABLED = previous
 
     assert state["enabled"] is False, state
     assert state["jobs"] == [], state["jobs"]

@@ -269,6 +269,52 @@ def test_an_unexpected_job_is_detected():
     assert any("UNDECLARED JOB" in f and "rogue_job" in f for f in found), found
 
 
+def _without(job_id):
+    return _live(ids=[j.job_id for j in la.scheduler_registrations()
+                      if j.job_id != job_id])
+
+
+def test_a_conditional_absence_with_the_guard_off_is_not_a_finding():
+    """anomaly_alerts is declared behind ANOMALY_ALERTS_ENABLED, which is off
+    by deliberate release decision. Absent, with the guard observed off, it is
+    not missing — it is disabled, the same shape as the frozen inversion."""
+    found = la.scheduler_reconciliation(
+        _without("anomaly_alerts"), {"ANOMALY_ALERTS_ENABLED": False})
+    assert not any("anomaly_alerts" in f for f in found), found
+
+
+def test_a_conditional_absence_with_the_guard_ON_is_a_finding():
+    """The case the excuse would have buried: the guard says register and the
+    job did not. That is a failure to register, not a disabled job."""
+    found = la.scheduler_reconciliation(
+        _without("anomaly_alerts"), {"ANOMALY_ALERTS_ENABLED": True})
+    assert any("GUARD SAYS ON" in f and "anomaly_alerts" in f
+               for f in found), found
+
+
+def test_an_unverified_guard_is_blocking():
+    """Unknown is not permission. 'Deliberately disabled' and 'failed to
+    register' look identical from here, and assuming the first is how a
+    silently missing job gets excused forever — the same reasoning as an
+    untraceable callable being UNRESOLVED rather than harmless."""
+    found = la.scheduler_reconciliation(_without("anomaly_alerts"))
+    assert any("GUARD UNVERIFIED" in f for f in found), found
+
+
+def test_a_non_conditional_canonical_absence_is_still_missing():
+    """The guard exemption must not leak to unconditional jobs."""
+    victim = "short_positions"
+    assert not {j.job_id: j for j in la.scheduler_registrations()}[victim].conditional
+    found = la.scheduler_reconciliation(_without(victim),
+                                        {"ANOMALY_ALERTS_ENABLED": False})
+    assert any("MISSING JOB" in f and victim in f for f in found), found
+
+
+def test_the_guard_name_is_the_setting_not_the_expression():
+    assert la._guard_name("settings.ANOMALY_ALERTS_ENABLED") == \
+        "ANOMALY_ALERTS_ENABLED"
+
+
 def test_a_count_that_disagrees_with_the_identities_is_detected():
     """job_count must be derived from the list, so the older count-only
     instrument on /health cannot disagree silently."""

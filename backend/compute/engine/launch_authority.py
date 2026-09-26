@@ -296,6 +296,7 @@ class SchedulerJob:
     module: str
     conditional: bool
     trigger: tuple = ()          # comparable shape, see _static_trigger
+    guard: str = ""              # the condition text, when conditional
 
     @property
     def trigger_shape(self) -> dict:
@@ -353,12 +354,18 @@ def scheduler_registrations() -> list[SchedulerJob]:
     # Which add_job calls sit inside an `if`, i.e. are conditionally
     # registered. Tracked because it is the reason runtime observation is
     # required rather than optional.
-    guarded: set[int] = set()
+    # The guard TEXT, not merely the fact of one. "conditionally registered"
+    # is not an excuse by itself — a job whose guard is ON and which is still
+    # absent has failed to register, and that is the opposite of legitimate.
+    # Naming the condition is what lets the absence be verified rather than
+    # assumed.
+    guarded: dict[int, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.If):
+            condition = ast.get_source_segment(source, node.test) or "?"
             for inner in ast.walk(node):
                 if isinstance(inner, ast.Call):
-                    guarded.add(id(inner))
+                    guarded.setdefault(id(inner), condition)
 
     found: list[SchedulerJob] = []
     for node in ast.walk(tree):
@@ -373,6 +380,7 @@ def scheduler_registrations() -> list[SchedulerJob]:
             job_id=job_id or name, callable_name=name,
             module=imports.get(name, ""),
             conditional=id(node) in guarded,
+            guard=guarded.get(id(node), ""),
             trigger=tuple(sorted(_static_trigger(node).items()))))
     return found
 
@@ -391,7 +399,20 @@ def canonical_scheduler_jobs() -> dict[str, dict[str, set[str]]]:
     return found
 
 
-def scheduler_reconciliation(live: dict) -> list[str]:
+def _guard_name(guard: str) -> str:
+    """`settings.ANOMALY_ALERTS_ENABLED` -> `ANOMALY_ALERTS_ENABLED`.
+
+    The setting name, because that is what /health publishes and what an
+    operator can check. Not the whole expression, which carries an attribute
+    path nobody types.
+    """
+    import re as _re
+    found = _re.findall(r"[A-Z][A-Z0-9_]{2,}", guard or "")
+    return found[-1] if found else (guard or "")
+
+
+def scheduler_reconciliation(live: dict,
+                             gates: dict | None = None) -> list[str]:
     """Static add_job intent versus the running scheduler's identities.
 
     `live` is the `scheduler` object from the admin system-health payload.
@@ -431,11 +452,38 @@ def scheduler_reconciliation(live: dict) -> list[str]:
             f"scheduler and absent from app/main.py's add_job declarations")
 
     for job_id in sorted(set(static) - set(observed_ids)):
-        if job_id in canonical:
+        if job_id not in canonical:
+            continue
+        job = static[job_id]
+        tables = sorted(canonical[job_id])
+
+        if not job.conditional:
             found.append(
                 f"MISSING JOB  '{job_id}' is declared and touches canonical "
-                f"tables {sorted(canonical[job_id])}, but is not registered "
-                f"at runtime")
+                f"tables {tables}, but is not registered at runtime")
+            continue
+
+        # Conditional. Its absence is legitimate ONLY when the guard is
+        # observed to be off. Unknown is blocking, for the same reason an
+        # untraceable callable is: "deliberately disabled" and "failed to
+        # register" look identical from here, and assuming the first is how a
+        # silently missing job gets excused forever.
+        state = (gates or {}).get(_guard_name(job.guard))
+        if state is False:
+            continue
+        if state is True:
+            found.append(
+                f"GUARD SAYS ON, JOB ABSENT  '{job_id}' is declared behind "
+                f"`{job.guard}`, that guard reports enabled, and the job is "
+                f"still not registered. It touches {tables}.")
+        else:
+            found.append(
+                f"GUARD UNVERIFIED  '{job_id}' is declared behind "
+                f"`{job.guard}` and is absent at runtime. That is legitimate "
+                f"if the guard is off and a failure to register if it is on, "
+                f"and this cannot tell them apart. Supply the guard's value "
+                f"(--gate {_guard_name(job.guard)}=false) — /health publishes "
+                f"it.")
 
     for job_id in sorted(set(static) & set(observed_ids)):
         want = static[job_id].trigger_shape
@@ -609,7 +657,16 @@ if __name__ == "__main__":
     if "--scheduler-json" in sys.argv:
         path = Path(sys.argv[sys.argv.index("--scheduler-json") + 1])
         state = _json.loads(path.read_text(encoding="utf-8"))
-        problems = scheduler_reconciliation(state)
+        # --gate NAME=true|false, repeatable. A conditionally registered job
+        # that is absent is legitimate only when its guard is observed off;
+        # unverified is blocking, so the operator supplies what /health
+        # publishes rather than this module assuming it.
+        gates: dict[str, bool] = {}
+        for index, argument in enumerate(sys.argv):
+            if argument == "--gate" and index + 1 < len(sys.argv):
+                name, _, value = sys.argv[index + 1].partition("=")
+                gates[name] = value.strip().lower() in ("1", "true", "yes", "on")
+        problems = scheduler_reconciliation(state, gates or None)
         print(f"scheduler: enabled={state.get('enabled')} "
               f"job_count={state.get('job_count')} "
               f"identities={len(state.get('jobs') or [])}")

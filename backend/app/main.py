@@ -322,6 +322,13 @@ async def lifespan(app: FastAPI):
     app.state.schedulers_frozen = frozen
     app.state.scheduler_jobs = len(scheduler.get_jobs())
 
+    # The scheduler itself, so the admin surface can report which jobs are
+    # registered rather than only how many. A count cannot be reconciled
+    # against static intent: twenty registrations and twenty live jobs agree
+    # numerically while naming different work. Read-only by convention —
+    # nothing outside this module may add, remove or modify a job through it.
+    app.state.scheduler = scheduler
+
     yield
 
     scheduler.shutdown(wait=False)

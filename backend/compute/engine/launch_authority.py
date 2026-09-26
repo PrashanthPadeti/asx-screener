@@ -264,10 +264,19 @@ def _classification_key(target: str) -> str:
 #
 # Same intent-versus-runtime model as cron. `app/main.py`'s add_job calls are
 # DESIRED state; the jobs the running scheduler holds are OBSERVED state. The
-# distinction is not academic here: registration is conditional — everything
-# is skipped when SCHEDULERS_ENABLED is off, and anomaly_alerts is skipped
-# unless ANOMALY_ALERTS_ENABLED — so static enumeration genuinely cannot tell
-# you what is registered.
+# distinction is not academic here, and the mechanism is worth stating
+# exactly rather than approximately:
+#
+#   anomaly_alerts is registered only when ANOMALY_ALERTS_ENABLED is on — a
+#   genuine conditional, visible statically as a guarded add_job.
+#
+#   the freeze is a REMOVAL, not a skip. Every job is registered, then
+#   `remove_all_jobs()` runs, then `start()`. Nothing ever fires, so the
+#   effect is the same — but a static reader sees twenty registrations while
+#   the running scheduler holds none, and that is not drift. It is the
+#   frozen state, which the reconciler treats as legitimate.
+#
+# Either way, static enumeration alone cannot say what is registered.
 #
 # These jobs are Python callables, not scripts, so "what does it touch?" means
 # following the call graph rather than reading one file. It is followed to a

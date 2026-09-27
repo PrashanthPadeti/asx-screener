@@ -56,16 +56,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 # The cache is the worse of the two. A cached body was projected under the
 # snapshot current when it was stored, so a second run of the gate could
 # assert against a response the gate did not cause — green because of what
-# the first run left behind. Pointing Redis at an unreachable port makes
-# caching a no-op: cache_get returns None and cache_set returns False, both
-# swallowing the error, so every response the gate judges is freshly computed.
+# the first run left behind.
+#
+# This was two bespoke workarounds here: forcing SCHEDULERS_ENABLED off and
+# pointing REDIS_URL at an unreachable port. Both are now the application's
+# own instrument mode — app/core/instrument.py, rule 6 of
+# docs/canonical_orchestration.md — because a protection reimplemented once
+# per instrument is one that gets implemented differently the third time, and
+# the third time is how it was found.
 #
 # Set here, not in the invocation, for the reason target isolation exists:
 # a guarantee that depends on the operator remembering a flag is not a
 # guarantee.
-os.environ["SCHEDULERS_ENABLED"] = "false"
-os.environ.setdefault("GATE_B_REDIS_URL", "redis://127.0.0.1:1/0")
-os.environ["REDIS_URL"] = os.environ["GATE_B_REDIS_URL"]
+os.environ["ASX_INSTRUMENT_MODE"] = "1"
 
 import psycopg2  # noqa: E402
 
@@ -82,25 +85,20 @@ from compute.engine.run_plans import PLANS, plan_requirements  # noqa: E402
 from compute.engine.run_resolution import validated_run_ids  # noqa: E402
 from compute.engine.serving_population import serving_predicate  # noqa: E402
 from compute.engine.universe_writer import persisted_governed  # noqa: E402
-from app.core.config import settings  # noqa: E402
+from app.core.instrument import instrument_mode  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-# Proved, not assumed. Settings reads the environment at import time, so an
-# assignment made one import too late is silently ignored — and the gate would
-# go on printing a docstring that says it writes nothing while starting the
-# scheduler on a frozen production host.
-if settings.SCHEDULERS_ENABLED:
+# Proved, not assumed. instrument_mode() reads the environment on every call
+# rather than caching it at import, so this cannot pass while the protection
+# is inert — but the gate still refuses to continue unless the mode it set is
+# the mode the application sees.
+if not instrument_mode():
     raise SystemExit(
-        "GATE B REFUSES TO RUN: SCHEDULERS_ENABLED is still true after the "
-        "environment was set, so importing the app would start background "
-        "jobs. A release gate must not schedule work on the system it judges.")
-if settings.REDIS_URL != os.environ["GATE_B_REDIS_URL"]:
-    raise SystemExit(
-        f"GATE B REFUSES TO RUN: REDIS_URL resolved to {settings.REDIS_URL}, "
-        f"not the isolated {os.environ['GATE_B_REDIS_URL']}. The gate would "
-        f"read and write the serving cache, and could assert against a body "
-        f"an earlier run left behind.")
+        "GATE B REFUSES TO RUN: instrument mode did not take, so importing "
+        "the app would start the scheduler and its requests could read and "
+        "write the serving cache. A release gate must not schedule work on, "
+        "or cache into, the system it judges.")
 
 # Paid, because the CSV export is gated behind one and a 401 would skip the
 # surface rather than prove it.

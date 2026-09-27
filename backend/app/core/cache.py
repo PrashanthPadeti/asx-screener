@@ -72,7 +72,18 @@ def make_key(*parts: str) -> str:
 
 
 async def cache_get(key: str) -> Optional[Any]:
-    """Return cached value (deserialized JSON) or None on miss/error."""
+    """Return cached value (deserialized JSON) or None on miss/error.
+
+    Disabled outright in instrument mode rather than merely read-only. A
+    cached body was projected under whatever contract was current when it was
+    stored, so a diagnostic that reads the serving cache can assert against a
+    response IT DID NOT CAUSE — and pass because of what an earlier run left
+    behind. Gate B hit exactly that. A miss is always a safe answer; a stale
+    hit is not.
+    """
+    from app.core.instrument import instrument_mode
+    if instrument_mode():
+        return None
     client = _get_client()
     if client is None:
         return None
@@ -87,7 +98,15 @@ async def cache_get(key: str) -> Optional[Any]:
 
 
 async def cache_set(key: str, value: Any, ttl: int = SCREENER_TTL) -> bool:
-    """Serialize value to JSON and store with TTL. Returns True on success."""
+    """Serialize value to JSON and store with TTL. Returns True on success.
+
+    Refuses LOUDLY in instrument mode. A silent no-op would be the wrong
+    trade here: writing the serving cache from a diagnostic is the mistake,
+    and a diagnostic that believes it wrote is one whose next assertion is
+    about a world that does not exist.
+    """
+    from app.core.instrument import refuse
+    refuse(f"cache write to {key!r}")
     client = _get_client()
     if client is None:
         return False
@@ -101,6 +120,8 @@ async def cache_set(key: str, value: Any, ttl: int = SCREENER_TTL) -> bool:
 
 async def cache_delete(key: str) -> bool:
     """Delete a cache key. Returns True on success."""
+    from app.core.instrument import refuse
+    refuse(f"cache delete of {key!r}")
     client = _get_client()
     if client is None:
         return False

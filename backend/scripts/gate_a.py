@@ -33,6 +33,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+# Instrument mode, before app.main is imported — importing it runs the
+# lifespan, which is where a production execution authority comes into being.
+# Gate B started nineteen APScheduler jobs on the production host exactly this
+# way. See app/core/instrument.py, rule 6 of docs/canonical_orchestration.md.
+import os  # noqa: E402
+
+os.environ["ASX_INSTRUMENT_MODE"] = "1"
+
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.api.v1.routes.screener import _EXPORT_COLS  # noqa: E402

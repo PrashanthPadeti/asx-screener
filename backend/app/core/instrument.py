@@ -89,6 +89,39 @@ def allow_writes() -> str | None:
     return value
 
 
+#: Every mutation this process suppressed, in order. Evidence rather than a
+#: log line: a test can assert the suppression happened, and an operator can
+#: see what an instrument would have done had it been the application.
+SUPPRESSED: list[str] = []
+
+
+def suppress(what: str) -> bool:
+    """Decline a mutation the APPLICATION performs incidentally. Never raises.
+
+    The distinction from `refuse` is about who is acting, and it was learned
+    by getting it wrong: the first version raised on cache writes, and Gate B
+    died — because the gate asks the screener for a page, the route writes its
+    response cache on the way out, and the exception broke the very surface
+    the gate was measuring.
+
+    A response cache is a best-effort optimisation the application does on its
+    own initiative. The instrument's requirement is that it MUST NOT LAND, not
+    that the request must fail. So it is declined, recorded and logged, and
+    the caller sees the ordinary "cache unavailable" answer it already knows
+    how to handle.
+
+    `refuse` remains right for a deliberate, irreversible action — sending
+    mail — which no instrument legitimately triggers.
+    """
+    if not instrument_mode():
+        return False
+    if allow_writes():
+        return False
+    SUPPRESSED.append(what)
+    log.warning("instrument mode: suppressed %s", what)
+    return True
+
+
 def refuse(what: str, *, detail: str = "") -> None:
     """Refuse an external mutation unless it is attested.
 

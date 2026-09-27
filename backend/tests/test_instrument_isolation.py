@@ -1,10 +1,17 @@
 """
-The protections fail loudly when the thing they protect is attempted
-====================================================================
+The protections are exercised, not asserted into existence
+==========================================================
 Rule 6 of `docs/canonical_orchestration.md`: an instrument is side-effect-free
 by default. These tests deliberately attempt the three mutations the rule
 names — scheduler startup, a cache write, and outbound mail — and require each
-to be refused.
+to be stopped.
+
+Two stop differently, and the difference was learned by getting it wrong.
+A deliberate irreversible action (mail) is REFUSED and raises. A mutation the
+application performs on its own initiative (its response cache) is SUPPRESSED:
+declined, recorded, logged, and never raised — because raising inside a
+request breaks the surface the instrument is measuring, which is exactly how
+Gate B died the first time this shipped.
 
 That direction matters. Asserting "no scheduler started" in a suite that never
 tries to start one proves nothing, and it is exactly the shape of the inert
@@ -124,20 +131,29 @@ def test_the_null_scheduler_records_what_it_refused():
 
 # ── Mutation 2: the serving cache ────────────────────────────────────────────
 
-def test_a_cache_write_is_refused_loudly():
-    """Attempted, not assumed. A silent no-op would let a diagnostic believe
-    it had written."""
+def test_a_cache_write_is_suppressed_and_recorded():
+    """Attempted, not assumed — and suppressed rather than raised.
+
+    The first version raised, and Gate B died: the gate asks the screener for
+    a page, the route writes its response cache on the way out, and the
+    exception broke the surface being measured. A response cache is something
+    the application does on its own initiative; the requirement is that the
+    write must not LAND, not that the request must fail. So it is declined,
+    recorded and logged — and the suppression is asserted here, because a
+    silent decline would be indistinguishable from a protection that has
+    stopped working.
+    """
     try:
         from app.core.cache import cache_set
     except Exception as exc:                                   # noqa: BLE001
         raise Skipped(f"needs the app stack: {type(exc).__name__}")
 
-    try:
-        asyncio.run(cache_set("asx:instrument:probe", {"x": 1}))
-    except instrument.InstrumentRefused as exc:
-        assert "cache write" in str(exc)
-        return
-    raise AssertionError("a cache write from instrument mode was permitted")
+    before = len(instrument.SUPPRESSED)
+    result = asyncio.run(cache_set("asx:instrument:probe", {"x": 1}))
+    assert result is False, "the cache write reported success"
+    assert len(instrument.SUPPRESSED) == before + 1, (
+        "the write was declined without being recorded")
+    assert "asx:instrument:probe" in instrument.SUPPRESSED[-1]
 
 
 def test_a_cache_read_returns_a_miss_rather_than_serving_state():

@@ -100,13 +100,15 @@ async def cache_get(key: str) -> Optional[Any]:
 async def cache_set(key: str, value: Any, ttl: int = SCREENER_TTL) -> bool:
     """Serialize value to JSON and store with TTL. Returns True on success.
 
-    Refuses LOUDLY in instrument mode. A silent no-op would be the wrong
-    trade here: writing the serving cache from a diagnostic is the mistake,
-    and a diagnostic that believes it wrote is one whose next assertion is
-    about a world that does not exist.
+    Suppressed in instrument mode — declined, recorded and logged, but NOT
+    raised. The application writes this cache on its own initiative at the end
+    of a request, so raising here breaks the surface an instrument is
+    measuring; Gate B died exactly that way. What matters is that the write
+    does not land, and it does not.
     """
-    from app.core.instrument import refuse
-    refuse(f"cache write to {key!r}")
+    from app.core.instrument import suppress
+    if suppress(f"cache write to {key!r}"):
+        return False
     client = _get_client()
     if client is None:
         return False
@@ -120,8 +122,9 @@ async def cache_set(key: str, value: Any, ttl: int = SCREENER_TTL) -> bool:
 
 async def cache_delete(key: str) -> bool:
     """Delete a cache key. Returns True on success."""
-    from app.core.instrument import refuse
-    refuse(f"cache delete of {key!r}")
+    from app.core.instrument import suppress
+    if suppress(f"cache delete of {key!r}"):
+        return False
     client = _get_client()
     if client is None:
         return False

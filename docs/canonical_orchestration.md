@@ -271,6 +271,85 @@ canonical publication.** It needs its own health evidence.
 
 ---
 
+## Rule 5 — a canonical output table has one publication authority
+
+Added 27 Sep 2026, once the launch-authority inventory was complete enough to
+support it.
+
+`market.daily_prices` had two writers: the plan stage `transform_prices`, and
+`backfill_yfinance_prices` on an independent 09:00 UTC weekday cron — thirty
+minutes into the daily pipeline's own window. It fits **none** of the three
+legal classifications, and that is the classifier working: a step that cannot
+be classified is the architecture being wrong, not the taxonomy being
+incomplete.
+
+**No fourth classification was invented to accommodate it.** The independent
+cron writer is eliminated:
+
+- preferred: split acquisition from publication. The yfinance job fetches and
+  backfills into raw/staging state as `PRE_INGESTION`, and `transform_prices`
+  remains the **sole** writer of `market.daily_prices`, under the lease.
+- if changing its storage path is disproportionately invasive: fold its write
+  logic into the `transform_prices` stage instead.
+
+Either way the independent cron write goes away once its replacement is
+deployed.
+
+### The three auxiliary `screener.universe` writers are a different case
+
+`short_positions`, `asx_indices` and `pros_cons` write non-governed columns.
+They stay **out** of the canonical plan, because they do not determine any of
+the 72 governed values and their success must never gate finalisation. They
+are serialized by the same table-level lease. They may keep independent
+schedules if necessary; what they may not keep is **uncoordinated write
+authority over the live canonical table**.
+
+## Rule 6 — the observer must not join the system it observes
+
+> **An instrument is side-effect-free by default. Importing or exercising
+> diagnostic/test code must never instantiate a production execution
+> authority. Any external mutation requires an explicit, independently
+> attested write-capable mode.**
+
+Frozen after the third occurrence, not the first. Gate B started nineteen
+APScheduler jobs on the production host while claiming to be read-only; Gate B
+wrote a screener response into the serving Redis, where a cached body meant a
+second run could assert against what the first had left behind; and
+`test_admin_scheduler_surface` started nineteen jobs again, because it set
+`os.environ` while `Settings` reads the environment once at import — it passed
+standalone and failed only under pytest, so **import order decided whether a
+test was safe**.
+
+What the hardening covers:
+
+- importing application modules cannot start APScheduler;
+- tests and diagnostics get a no-op scheduler unless a production bootstrap
+  explicitly supplies the real one;
+- diagnostic Redis access is read-only or disabled by default, and mutation
+  attempts fail **loudly**;
+- email and webhook delivery are disabled in instrument mode;
+- database diagnostics use read-only connections by default; scratch writes
+  require the existing scratch attestation;
+- the protections apply **before test collection and imports** can trigger
+  runtime startup, not merely inside individual tests;
+- the protections are mutation-tested by deliberately attempting scheduler
+  startup, a Redis mutation and a database write.
+
+This is not a product feature. It hardens the machinery that is about to prove
+the wrapper and lease implementation, and it comes **first**: no further
+orchestration refactor begins while the test harness can accidentally create
+production authorities.
+
+## Implementation order (frozen 27 Sep 2026)
+
+1. Instrument isolation hardening (Rule 6).
+2. Refactor the yfinance backfill so `market.daily_prices` has one
+   publication authority; retire its independent canonical-table cron write.
+3. Wrapper refactor, from the derived classifications.
+4. Coordinate the three auxiliary `screener.universe` writers with the lease.
+5. Rehearse prefix → admission/lease → driver → finalisation → leased suffix.
+6. Only then restore unattended daily/weekly canonical scheduling.
+
 ## What implementation must satisfy
 
 1. `canonical_dependency_tables` derived from plan stage SQL by the existing

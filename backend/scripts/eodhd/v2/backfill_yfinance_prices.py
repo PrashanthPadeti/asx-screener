@@ -1,10 +1,36 @@
 """
 backfill_yfinance_prices.py
 ────────────────────────────
-Fetch price history from Yahoo Finance for ASX stocks that have no rows
-in market.daily_prices (i.e. price_date IS NULL in screener.universe).
+ACQUIRES price observations from Yahoo Finance for ASX stocks that have no
+rows in market.daily_prices (i.e. price_date IS NULL in screener.universe),
+and lands them in staging_au.yfinance_prices.
 
 Typical use case: ETFs not covered by EODHD's ASX bulk-download feed.
+
+It does not publish
+-------------------
+This wrote directly into market.daily_prices until 27 Sep 2026 — a canonical
+OUTPUT, published by the plan stage transform_prices — from an independent
+09:00 UTC weekday cron, thirty minutes into the daily pipeline's own window.
+Two writers of one canonical table, coordinated by nothing, one of them
+mutating an input while downstream daily and technical computations were
+consuming it.
+
+Rule 5 of docs/canonical_orchestration.md: a canonical output table has ONE
+publication authority. So this job acquires and transform_prices publishes:
+
+    yfinance acquisition -> staging_au.yfinance_prices   (PRE_INGESTION)
+    EODHD load           -> staging_au.eod_prices        (PRE_INGESTION)
+                            ingestion barrier
+    transform_prices     -> market.daily_prices          (sole publisher)
+
+It needs no canonical lease of its own once it only writes staging. What
+matters is that transform_prices does not begin until ingestion is complete.
+
+One behavioural consequence, stated rather than discovered later: a code
+acquired here leaves the "missing" set only after transform_prices publishes
+it, not the moment this job finishes. The outcome is the same, one cycle
+later at worst.
 
 Usage:
     python scripts/eodhd/v2/backfill_yfinance_prices.py
@@ -49,17 +75,18 @@ MISSING_CODES_SQL = """
 """
 
 UPSERT_SQL = """
-    INSERT INTO market.daily_prices
-        (time, asx_code, open, high, low, close, adjusted_close, volume, data_source)
+    INSERT INTO staging_au.yfinance_prices
+        (asx_code, date, open, high, low, close, adjusted_close, volume,
+         fetched_at)
     VALUES %s
-    ON CONFLICT (time, asx_code) DO UPDATE SET
+    ON CONFLICT (asx_code, date) DO UPDATE SET
         open           = EXCLUDED.open,
         high           = EXCLUDED.high,
         low            = EXCLUDED.low,
         close          = EXCLUDED.close,
         adjusted_close = EXCLUDED.adjusted_close,
         volume         = EXCLUDED.volume,
-        data_source    = EXCLUDED.data_source
+        fetched_at     = EXCLUDED.fetched_at
 """
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -84,19 +111,19 @@ def fetch_yahoo(code: str, period_days: int) -> list[tuple]:
         else:
             date_str = str(date_idx)[:10]
 
-        # ASX market close = 16:00 AEST (UTC+10)
-        ts = f"{date_str} 16:00:00+10"
-
+        # A DATE, not a market-close timestamp. Staging holds the
+        # observation as the feed reports it; converting to the ASX close
+        # instant is publication, and publication belongs to transform_prices.
         rows.append((
-            ts,
             code,
+            date_str,
             float(row["Open"])   if row["Open"]   is not None else None,
             float(row["High"])   if row["High"]   is not None else None,
             float(row["Low"])    if row["Low"]    is not None else None,
             float(row["Close"])  if row["Close"]  is not None else None,
             float(row["Adj Close"]) if "Adj Close" in row and row["Adj Close"] is not None else None,
             int(row["Volume"])   if row["Volume"] is not None else None,
-            "yahoo",
+            datetime.now(timezone.utc),
         ))
 
     return rows

@@ -374,6 +374,79 @@ def cron_units() -> dict[str, Path]:
 EXTRA_UNITS: dict[str, Path] = {}
 
 
+#: Files that write a canonical OUTPUT but are launched by nothing — no cron
+#: entry, no pipeline step, no scheduler registration. They can only run if a
+#: person runs them.
+#:
+#: "Launched by nothing" is not the same as "cannot write". The launch
+#: authorities are enumerated; the tree is not, and a script sitting in it with
+#: an INSERT into a canonical output is one `python scripts/...` away from
+#: being a second publication authority. Rule 5 says a canonical output has one
+#: publication authority, and that claim is about the table, not about the
+#: schedule.
+#:
+#: Listed with a reason rather than deleted, because deletion is the user's
+#: call and an undeclared latent writer is worse than a declared one.
+QUARANTINED_WRITERS: dict[str, str] = {
+    "scripts/eodhd/v2/jobs/incremental_daily.py":
+        "superseded by daily_pipeline — setup_cron.sh actively removes its "
+        "crontab entry when installing the full pipeline",
+    "compute/engine/dilution_metrics.py":
+        "writes screener.universe (shares_change_1y, shares_dilution_3y and "
+        "two others, none governed) and is launched by NOTHING: no cron "
+        "entry, no pipeline step, no scheduler registration. Found 27 Sep "
+        "2026 by the tree-wide writer scan, which is the first instrument "
+        "that looked past the launch authorities. OPEN: it is either dead and "
+        "should be deleted, or it is run by hand and belongs in the suffix "
+        "under the lease like the other auxiliary writers. This module does "
+        "not decide that.",
+    "scripts/load_eodhd_prices.py": "pre-v2 loader",
+    "scripts/load_fmp_prices.py": "pre-v2 loader, FMP feed no longer used",
+    "scripts/load_prices.py": "pre-v2 loader",
+    "scripts/update_prices.py": "pre-v2 incremental updater",
+    "scripts/update_prices_eodhd.py": "pre-v2 incremental updater",
+    "scripts/update_prices_fmp.py": "pre-v2 incremental updater, FMP feed",
+    "scripts/eodhd/load_prices.py": "pre-v2 loader, superseded by "
+                                    "eodhd/v2/transforms/transform_prices.py",
+}
+
+#: Modules that perform a plan stage's writes but are not themselves launched.
+#:
+#: universe_writer is imported BY composite_score — it is the canonical
+#: writer's implementation, not a second authority. Counting it as one would
+#: count the same publication twice, under the name of the file that happens
+#: to hold the SQL.
+CANONICAL_LIBRARIES: dict[str, str] = {
+    "compute/engine/universe_writer.py":
+        "implements the canonical commit for composite_score; imported, "
+        "never launched",
+}
+
+#: Directories that are not application code: virtualenvs, caches, the
+#: discovery worktree. Scanning them would report a dependency's own SQL.
+_NOT_OURS = ("__pycache__", ".git", "node_modules", "site-packages",
+             ".venv", "asx-venv", "tests")
+
+
+def output_writers() -> dict[str, set[str]]:
+    """{canonical output: every file in the tree that writes it}.
+
+    Tree-wide, deliberately. `all_units()` answers "what does each LAUNCHED
+    thing touch"; this answers "what could write this table at all", which is
+    the question Rule 5 actually asks.
+    """
+    _inputs, outputs = canonical_tables()
+    found: dict[str, set[str]] = {t: set() for t in outputs}
+    for path in BACKEND.rglob("*.py"):
+        rel = path.relative_to(BACKEND).as_posix()
+        if any(part in rel for part in _NOT_OURS):
+            continue
+        for table, directions in tables_touched(path).items():
+            if table in found and "w" in directions:
+                found[table].add(rel)
+    return found
+
+
 def all_units() -> dict[str, Path]:
     """Every launchable unit whose table access this module judges."""
     units = {s.key: s.script for s in all_steps()}
@@ -407,6 +480,23 @@ CANONICAL_DRIVER = "CANONICAL_DRIVER"
 #: Every entry states why. The reason is not documentation — a writer with no
 #: stated reason is a violation.
 SUFFIX_WRITE_REASONS: dict[str, str] = {
+    "compute/engine/asx_indices.py":
+        "Writes shared canonical table screener.universe; non-governed "
+        "columns (is_asx20/50/100/200/300 index membership flags). Launched "
+        "by the in-process scheduler at 17:50 AEST, not by a pipeline, so it "
+        "currently holds uncoordinated write authority over the live table. "
+        "Decided 27 Sep 2026: stays OUT of the canonical plan — it determines "
+        "none of the 72 governed values and its failure must not gate "
+        "finalisation — and is serialized by the same table-level lease. It "
+        "may keep its own schedule; it may not keep uncoordinated authority.",
+    "compute/engine/short_positions.py":
+        "Writes shared canonical table screener.universe; non-governed "
+        "columns (short_pct, short_interest_chg_1w). Launched by the "
+        "in-process scheduler at 20:05 AEST. Same decision and same reasoning "
+        "as asx_indices: out of the plan, inside the lease. Its aliased "
+        "UPDATE is also what exposed the column extractor's blind spot, since "
+        "the call trace said it writes the universe while the extractor said "
+        "it writes nothing.",
     "compute/engine/pros_cons.py":
         "Writes shared canonical table screener.universe; non-governed "
         "columns (pros, cons). Decided 24 Sep 2026: it determines none of the "
@@ -451,6 +541,8 @@ CLASSIFICATIONS: dict[str, str] = {
     # Writes screener.universe, non-governed columns only, inside the
     # lease and after finalisation. See SUFFIX_WRITE_REASONS.
     "compute/engine/pros_cons.py": POST_PUBLICATION_WRITER,
+    "compute/engine/asx_indices.py": POST_PUBLICATION_WRITER,
+    "compute/engine/short_positions.py": POST_PUBLICATION_WRITER,
 
     # ── Launched by cron, not by a pipeline. See launch_authority. ──────────
     # Reads screener.universe to pick the monthly five. A live-universe
@@ -472,21 +564,13 @@ CLASSIFICATIONS: dict[str, str] = {
 #: violation acceptable, and a stale entry — one whose step no longer violates
 #: — fails just as loudly as an undeclared one, because an allowlist nobody
 #: prunes is an allowlist nobody reads.
-ACCEPTED: dict[str, str] = {
-    "scripts/eodhd/v2/backfill_yfinance_prices.py":
-        "Writes market.daily_prices — a canonical OUTPUT, written by the "
-        "plan stage transform_prices — from an independent 09:00 UTC weekday "
-        "cron, fifteen minutes after daily_pipeline starts. No classification "
-        "is legal for it: PRE_INGESTION may not write an output, and "
-        "POST_PUBLICATION may not write a dependency table at all. 'Three "
-        "days is outside the yearly fingerprint's historical scope' is NOT "
-        "sufficient safety, because recent rows are exactly what daily and "
-        "technical compute consume. Two open questions this module does not "
-        "answer: whether it belongs in the daily wrapper's prefix inside the "
-        "lease, and whether market.daily_prices having two legitimate writers "
-        "means the output/input split needs revisiting. Raised 25 Sep 2026 by "
-        "the first run of the launch-authority classifier.",
-}
+#: Empty. backfill_yfinance_prices was the only entry, and its question is
+#: resolved: it acquires into staging_au.yfinance_prices and publishes
+#: nothing, so transform_prices is the sole publication authority for
+#: market.daily_prices. The stale-exemption guard is what required this entry
+#: to be removed rather than left as a permanent excuse — it fired on the
+#: first run after the refactor.
+ACCEPTED: dict[str, str] = {}
 
 
 def classification(step: Step) -> str | None:
@@ -596,6 +680,43 @@ def _all_violations() -> list[str]:
     found: list[str] = []
     for key, script in sorted(all_units().items()):
         found.extend(check_unit(key, script))
+    found.extend(_publication_authority_violations())
+    return found
+
+
+def _publication_authority_violations() -> list[str]:
+    """Rule 5: a canonical output table has ONE publication authority."""
+    plan_keys = {p.relative_to(BACKEND).as_posix()
+                 for p in plan_scripts().values()}
+    found: list[str] = []
+    for key, kind in sorted(CLASSIFICATIONS.items()):
+        if kind == POST_PUBLICATION_WRITER and key not in SUFFIX_WRITE_REASONS:
+            found.append(
+                f"{POST_PUBLICATION_WRITER}  {key} shares a canonical table "
+                f"with no stated reason. check_unit only sees LAUNCHED units, "
+                f"and a scheduler job is not one, so the requirement is "
+                f"enforced here too.")
+
+    for table, writers in sorted(output_writers().items()):
+        permitted = {k for k, v in CLASSIFICATIONS.items()
+                     if v == POST_PUBLICATION_WRITER}
+        undeclared = sorted(writers - plan_keys - set(QUARANTINED_WRITERS)
+                            - set(CANONICAL_LIBRARIES) - permitted)
+        if undeclared:
+            found.append(
+                f"SECOND PUBLICATION AUTHORITY  {table} is written by "
+                f"{undeclared}, which are neither plan stages nor declared "
+                f"quarantined. A canonical output has one publication "
+                f"authority.")
+    # A quarantine entry for a file that no longer writes an output is a
+    # comment nobody will delete, and it makes the list look longer than the
+    # problem is.
+    live = {w for writers in output_writers().values() for w in writers}
+    live |= set(CANONICAL_LIBRARIES)
+    for path in sorted(set(QUARANTINED_WRITERS) - live):
+        found.append(
+            f"STALE QUARANTINE  {path} is listed as a latent writer but no "
+            f"longer writes any canonical output. Remove the entry.")
     return found
 
 

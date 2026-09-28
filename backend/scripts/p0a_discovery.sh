@@ -387,6 +387,12 @@ CRITICAL = [
     # transform_prices' source. Excluded from the clone until it cost a run:
     # the stage set grew and the exclusion list did not.
     "staging_au.eod_prices",
+    # transform_prices' SECOND source, added 27 Sep 2026 when
+    # backfill_yfinance_prices stopped publishing to market.daily_prices and
+    # started acquiring into staging. Listed here because the derived guard
+    # demanded it before a freeze window could be spent on the omission —
+    # which is the same guard, and the same lesson, as the line above.
+    "staging_au.yfinance_prices",
     # halfyearly_compute's source. Never in this list, so a clone that lost it
     # would have been ACCEPTED and the failure would have surfaced four stages
     # into the run instead of here.

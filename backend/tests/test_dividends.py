@@ -600,12 +600,27 @@ def test_dividends_are_materialised_before_anything_computes_over_them():
 
     transform = src.index("transform_dividends.py")
     assert_health = src.index("assert_feed_health.py")
-    yearly = src.index("yearly_compute.py")
     staging = src.index("load_to_staging_dividends.py")
+
+    # The consumer used to be `yearly_compute.py`, invoked by this pipeline.
+    # On 29 Sep 2026 it moved into the canonical driver, so the anchor is now
+    # the barrier the driver sits behind. The property is unchanged and in
+    # fact stronger: EVERYTHING that computes over dividends is behind that
+    # barrier now, not just the one stage this test happened to name.
+    consumer = src.index("with canonical_execution(")
 
     assert staging < transform, "staging load precedes the transform"
     assert transform < assert_health, "health is asserted on the loaded table"
-    assert assert_health < yearly, "nothing computes over an unasserted feed"
+    assert assert_health < consumer, "nothing computes over an unasserted feed"
+
+
+def test_the_dividend_consumer_is_still_inside_the_canonical_plan():
+    """The other half of the assertion above, and the reason it is not
+    vacuous: the barrier only protects dividends if the stage that reads them
+    is actually behind it."""
+    from compute.engine.run_plans import PLANS
+
+    assert "yearly_compute" in PLANS["FULL_FUNDAMENTALS_CANONICAL"].stages
 
 
 def test_the_scheduler_does_not_reimplement_the_health_thresholds():

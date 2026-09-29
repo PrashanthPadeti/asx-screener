@@ -217,13 +217,29 @@ def test_an_auxiliary_writer_defers_rather_than_writing_anyway():
 
 def test_contention_defers_an_auxiliary_writer_and_never_raises():
     """A crash on contention turns a deferral into a failed job, and the next
-    person to see that alert learns to ignore it."""
+    person to see that alert learns to ignore it.
+
+    Checked as an AST statement, not as the substring "raise". The first
+    draft matched the word "raises" in the function's own docstring — which
+    says it never does — and reported that it does. Prose about a behaviour
+    is not that behaviour, which is the same rule the table extractor
+    enforces and which I had just applied elsewhere.
+    """
+    import ast as _ast
     source = (cb.BACKEND / "compute/engine/canonical_lease.py").read_text(
         encoding="utf-8")
-    body = source[source.index("def auxiliary_lease("):
-                  source.index("def canonical_lease(")]
-    assert "raise" not in body, "auxiliary contention raises"
-    assert "yield acquired" in body
+    for node in _ast.walk(_ast.parse(source)):
+        if not (isinstance(node, _ast.FunctionDef)
+                and node.name == "auxiliary_lease"):
+            continue
+        raises = [n for n in _ast.walk(node) if isinstance(n, _ast.Raise)]
+        assert not raises, (
+            f"auxiliary_lease raises at line {raises[0].lineno}; contention "
+            f"must defer, not fail")
+        segment = _ast.get_source_segment(source, node) or ""
+        assert "yield acquired" in segment
+        return
+    raise AssertionError("auxiliary_lease not found")
 
 
 def test_auxiliary_writers_wait_briefly_and_the_canonical_run_waits_long():

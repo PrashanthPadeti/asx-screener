@@ -183,22 +183,43 @@ async def _update_via_market_cap(session: AsyncSession, dry_run: bool) -> None:
              counts["n20"], counts["n50"], counts["n100"], counts["n200"], counts["n300"])
 
 
+def _sync_dsn() -> str:
+    """The canonical lease needs a plain psycopg2 DSN, not the asyncpg URL."""
+    import os
+    url = os.environ.get("DATABASE_URL_SYNC", "")
+    if not url:
+        url = os.environ.get("DATABASE_URL", "").replace(
+            "postgresql+asyncpg://", "postgresql://")
+    return url
+
+
 async def run(dry_run: bool = False) -> None:
     if not DATABASE_URL:
         log.error("DATABASE_URL not set")
         sys.exit(1)
 
-    engine = create_async_engine(DATABASE_URL, echo=False)
-    async with AsyncSession(engine) as session:
-        success = await _update_via_eodhd(session, dry_run)
-        if not success:
-            await _update_via_market_cap(session, dry_run)
+    # screener.universe is a canonical table. This writes only index
+    # membership flags -- none of the 72 governed metrics -- so it stays OUT
+    # of the canonical plan and its failure must never gate finalisation. But
+    # it still mutates the table the driver owns, so it takes the same lease
+    # and defers when a canonical execution holds it.
+    from compute.engine.canonical_lease import auxiliary_lease
 
-        if not dry_run:
-            await session.commit()
-            log.info("ASX index constituent flags committed")
+    with auxiliary_lease(_sync_dsn(), why="asx_indices") as permitted:
+        if not permitted:
+            return
 
-    await engine.dispose()
+        engine = create_async_engine(DATABASE_URL, echo=False)
+        async with AsyncSession(engine) as session:
+            success = await _update_via_eodhd(session, dry_run)
+            if not success:
+                await _update_via_market_cap(session, dry_run)
+
+            if not dry_run:
+                await session.commit()
+                log.info("ASX index constituent flags committed")
+
+        await engine.dispose()
 
 
 if __name__ == "__main__":

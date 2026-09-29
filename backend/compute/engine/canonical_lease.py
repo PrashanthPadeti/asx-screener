@@ -100,6 +100,61 @@ def holder(conn) -> dict | None:
             "query": row[3]}
 
 
+#: An auxiliary writer waits briefly, then defers to the next cycle.
+#:
+#: These are not the canonical run and must never block it. asx_indices,
+#: short_positions and pros_cons write non-governed columns of
+#: screener.universe on their own schedules; if a canonical execution holds
+#: the table, the correct behaviour is to skip this cycle and say so, not to
+#: queue for ninety minutes or to write alongside it.
+AUXILIARY_WAIT_SECONDS = 5 * 60
+
+
+@contextmanager
+def auxiliary_lease(dsn: str, *, why: str, wait_seconds: int = AUXILIARY_WAIT_SECONDS):
+    """Hold the lease on a connection of its own, for an auxiliary writer.
+
+    Yields True when the lease was taken and the caller may write; False when
+    a canonical execution holds it and the caller must SKIP.
+
+    A separate connection, deliberately. These writers do their work through
+    an AsyncSession, and a session's connection can return to the pool on
+    commit — which would either drop a session-scoped advisory lock partway
+    through, or hand a still-locked connection to an unrelated caller. The
+    lock's lifetime has to be something we control, so it gets its own
+    connection and nothing else uses it.
+
+    Never raises on contention. An auxiliary writer that crashes because the
+    canonical run is busy converts a deferral into a failed job, and the next
+    person to see that alert learns to ignore it.
+    """
+    import psycopg2
+
+    conn = psycopg2.connect(dsn)
+    conn.autocommit = True
+    acquired = False
+    try:
+        deadline = time.monotonic() + max(0, wait_seconds)
+        while True:
+            acquired = try_acquire(conn)
+            if acquired or time.monotonic() >= deadline:
+                break
+            time.sleep(_POLL_SECONDS)
+
+        if not acquired:
+            log.warning(
+                "%s: canonical execution holds the lease (%s) — skipping this "
+                "cycle rather than writing alongside it. screener.universe "
+                "keeps whatever the canonical run publishes; this job's own "
+                "columns are simply not refreshed until next time.",
+                why, holder(conn) or "unidentified holder")
+        yield acquired
+    finally:
+        if acquired:
+            release(conn)
+        conn.close()
+
+
 @contextmanager
 def canonical_lease(conn, *, wait_seconds: int, why: str):
     """Hold the canonical execution lease for the duration of the block.

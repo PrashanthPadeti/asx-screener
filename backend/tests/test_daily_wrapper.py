@@ -186,6 +186,65 @@ def test_lease_unavailable_is_a_refusal_not_a_crash():
         "a lease timeout does not fall through to 'no publication'")
 
 
+# ── Item 4: the auxiliary writers are coordinated ────────────────────────────
+
+AUXILIARY = ("compute/engine/asx_indices.py",
+             "compute/engine/short_positions.py",
+             "compute/engine/pros_cons.py")
+
+
+def test_every_auxiliary_universe_writer_takes_the_lease():
+    """They write non-governed columns of screener.universe on their own
+    schedules. They may keep those schedules; they may not keep uncoordinated
+    write authority over the live canonical table.
+
+    short_positions fires at 20:05 AEST = 10:05 UTC, inside the window a
+    daily canonical run starting at 08:30 UTC is still computing. This is a
+    live overlap, not a theoretical one.
+    """
+    for module in AUXILIARY:
+        source = cb._executable_source(cb.BACKEND / module)
+        assert "auxiliary_lease" in source, f"{module} writes unleased"
+
+
+def test_an_auxiliary_writer_defers_rather_than_writing_anyway():
+    """Taking the lease is not enough — the caller has to honour a refusal."""
+    for module in AUXILIARY:
+        source = cb._executable_source(cb.BACKEND / module)
+        assert "if not permitted" in source, (
+            f"{module} acquires the lease but writes regardless of the answer")
+
+
+def test_contention_defers_an_auxiliary_writer_and_never_raises():
+    """A crash on contention turns a deferral into a failed job, and the next
+    person to see that alert learns to ignore it."""
+    source = (cb.BACKEND / "compute/engine/canonical_lease.py").read_text(
+        encoding="utf-8")
+    body = source[source.index("def auxiliary_lease("):
+                  source.index("def canonical_lease(")]
+    assert "raise" not in body, "auxiliary contention raises"
+    assert "yield acquired" in body
+
+
+def test_auxiliary_writers_wait_briefly_and_the_canonical_run_waits_long():
+    """An auxiliary writer must never block the canonical run behind it."""
+    from compute.engine import canonical_lease as cl
+    assert cl.AUXILIARY_WAIT_SECONDS < cl.SCHEDULED_WAIT_SECONDS
+    assert cl.AUXILIARY_WAIT_SECONDS == 5 * 60
+
+
+def test_the_lease_is_held_on_its_own_connection():
+    """These writers commit through their own session, and a session's
+    connection can return to the pool on commit — dropping a session-scoped
+    lock partway through, or handing a locked connection to someone else."""
+    source = (cb.BACKEND / "compute/engine/canonical_lease.py").read_text(
+        encoding="utf-8")
+    body = source[source.index("def auxiliary_lease("):
+                  source.index("def canonical_lease(")]
+    assert "psycopg2.connect(dsn)" in body
+    assert "conn.close()" in body
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

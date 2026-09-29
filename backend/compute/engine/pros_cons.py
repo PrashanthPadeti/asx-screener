@@ -382,11 +382,25 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Compute without writing to DB")
     args = parser.parse_args()
 
-    conn = psycopg2.connect(DB_URL)
-    try:
-        n = run(conn, codes=args.codes, dry_run=args.dry_run)
-    finally:
-        conn.close()
+    # screener.universe is a canonical table. pros and cons are not among the
+    # 72 governed metrics, so this stays out of the canonical plan and its
+    # failure must never gate finalisation -- but it mutates the table the
+    # driver owns, so it takes the same lease and defers when a canonical
+    # execution holds it.
+    #
+    # A separate connection holds the lease, not this one: the lock's lifetime
+    # must not depend on what the work does with its own transaction.
+    from compute.engine.canonical_lease import auxiliary_lease
+
+    with auxiliary_lease(DB_URL, why="pros_cons") as permitted:
+        if not permitted:
+            return
+
+        conn = psycopg2.connect(DB_URL)
+        try:
+            n = run(conn, codes=args.codes, dry_run=args.dry_run)
+        finally:
+            conn.close()
 
     log.info(f"Pros/cons engine complete — {n} stocks processed.")
 

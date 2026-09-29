@@ -377,8 +377,11 @@ def canonical_execution(tracker):
     """
     import psycopg2
 
+    import os
+
     from compute.engine.canonical_lease import (
-        SCHEDULED_WAIT_SECONDS, LeaseUnavailable, canonical_lease,
+        LEASE_HELD_ENV, SCHEDULED_WAIT_SECONDS, LeaseUnavailable,
+        canonical_lease,
     )
 
     conn = psycopg2.connect(_sync_db_url())
@@ -405,7 +408,13 @@ def canonical_execution(tracker):
                 tracker.finish_step(5, success=False,
                                     error=f"canonical driver exit "
                                           f"{result.returncode}")
-            yield published
+            # The suffix runs inside this lease. Tell it so, or its own
+            # auxiliary_lease would block on the lock this process holds.
+            os.environ[LEASE_HELD_ENV] = "daily_pipeline"
+            try:
+                yield published
+            finally:
+                os.environ.pop(LEASE_HELD_ENV, None)
     except LeaseUnavailable as exc:
         # Another canonical execution is in flight. The previously finalised
         # output keeps serving; this cycle simply does not publish.

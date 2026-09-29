@@ -109,6 +109,11 @@ def holder(conn) -> dict | None:
 #: queue for ninety minutes or to write alongside it.
 AUXILIARY_WAIT_SECONDS = 5 * 60
 
+#: Set by a wrapper on the environment of the suffix steps it launches while
+#: holding the lease. Those steps must NOT take a second one: advisory locks
+#: are per-session, so a child would block on its own parent's lock.
+LEASE_HELD_ENV = "ASX_CANONICAL_LEASE_HELD"
+
 
 @contextmanager
 def auxiliary_lease(dsn: str, *, why: str, wait_seconds: int = AUXILIARY_WAIT_SECONDS):
@@ -128,6 +133,24 @@ def auxiliary_lease(dsn: str, *, why: str, wait_seconds: int = AUXILIARY_WAIT_SE
     canonical run is busy converts a deferral into a failed job, and the next
     person to see that alert learns to ignore it.
     """
+    import os
+
+    # Already inside a wrapper's lease? Then do not take a second one.
+    #
+    # pros_cons is a POST_PUBLICATION_WRITER in the weekly suffix, which the
+    # wrapper runs while holding the lease on its own connection. Advisory
+    # locks are per-session, so this subprocess would block on a lock its own
+    # parent holds, wait out the timeout, and defer — every single week,
+    # quietly, while every log line said the pipeline succeeded.
+    #
+    # The wrapper sets this for the suffix it launches. It is an inheritance
+    # marker, not a bypass: the lease IS held, by the process that started
+    # this one.
+    if os.getenv(LEASE_HELD_ENV, "").strip():
+        log.info("%s: running inside the caller's canonical lease", why)
+        yield True
+        return
+
     import psycopg2
 
     conn = psycopg2.connect(dsn)

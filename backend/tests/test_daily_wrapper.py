@@ -261,6 +261,85 @@ def test_the_lease_is_held_on_its_own_connection():
     assert "conn.close()" in body
 
 
+# ── The weekly wrapper, same shape against the FULL plan ─────────────────────
+
+WEEKLY = BACKEND / "scripts/eodhd/v2/jobs/weekly_pipeline.py"
+
+
+def test_the_weekly_wrapper_runs_no_plan_stage_directly():
+    """Steps 4, 5, 8 and 9a were yearly_compute, halfyearly_compute,
+    build_screener_universe and composite_score run as separate commands.
+
+    composite_score ran with NO run id, so the weekly pipeline rebuilt the
+    universe and then wrote factor scores that no finalisation vouched for.
+    The resolver could not serve it and nothing said so.
+    """
+    invoked = {s.key for s in cb.pipeline_steps("weekly_pipeline.py")}
+    plan_keys = {p.relative_to(cb.BACKEND).as_posix()
+                 for p in cb.plan_scripts().values()}
+    assert not sorted(invoked & plan_keys), sorted(invoked & plan_keys)
+
+
+def test_the_weekly_wrapper_uses_the_full_plan():
+    source = cb._executable_source(WEEKLY)
+    assert '"FULL_FUNDAMENTALS_CANONICAL"' in source
+    assert "p0a_canonical_run.py" in source
+
+
+def test_the_weekly_input_writers_run_before_the_barrier():
+    """weekly_compute and monthly_compute write canonical INPUTS. An input
+    written after admission moves the source out from under a contract
+    already being computed against it."""
+    source = cb._executable_source(WEEKLY)
+    barrier = source.index("with canonical_execution(")
+    for step in ("weekly_compute.py", "monthly_compute.py"):
+        assert source.index(step) < barrier, f"{step} runs after the barrier"
+
+
+def test_the_weekly_suffix_is_gated_and_leased():
+    source = cb._executable_source(WEEKLY)
+    block = source[source.index("with canonical_execution("):]
+    assert "if published:" in block
+    for step in ("pros_cons.py", "sector_benchmarks.py"):
+        assert step in block, f"{step} is outside the leased block"
+
+
+def test_a_suffix_step_inherits_the_lease_instead_of_deadlocking():
+    """pros_cons takes an auxiliary lease of its own AND runs inside the
+    weekly wrapper's lease. Advisory locks are per-session, so without an
+    inheritance marker it would block on its own parent's lock, wait out the
+    timeout and defer — every week, quietly, while every log line said the
+    pipeline succeeded."""
+    from compute.engine import canonical_lease as cl
+
+    lease_source = (BACKEND / "compute/engine/canonical_lease.py").read_text(
+        encoding="utf-8")
+    assert cl.LEASE_HELD_ENV in lease_source
+    body = lease_source[lease_source.index("def auxiliary_lease("):
+                        lease_source.index("def canonical_lease(")]
+    assert f"os.getenv({cl.LEASE_HELD_ENV}" in body or "LEASE_HELD_ENV" in body
+
+    for wrapper in (WRAPPER, WEEKLY):
+        source = cb._executable_source(wrapper)
+        assert "LEASE_HELD_ENV" in source, (
+            f"{wrapper.name} does not tell its suffix that the lease is held")
+
+
+def test_the_inheritance_marker_is_honoured():
+    """Behavioural, not structural: with the marker set, an auxiliary lease
+    yields True without touching a database."""
+    import os
+
+    from compute.engine.canonical_lease import LEASE_HELD_ENV, auxiliary_lease
+
+    os.environ[LEASE_HELD_ENV] = "test"
+    try:
+        with auxiliary_lease("postgresql://unused/unused", why="probe") as ok:
+            assert ok is True
+    finally:
+        os.environ.pop(LEASE_HELD_ENV, None)
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

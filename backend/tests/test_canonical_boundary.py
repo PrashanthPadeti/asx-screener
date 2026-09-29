@@ -374,12 +374,41 @@ def test_all_three_pipelines_yield_steps():
         assert len(steps) >= 2, f"{pipeline} yielded {len(steps)} steps"
 
 
-def test_the_universe_build_is_seen_in_every_pipeline_that_runs_it():
-    """The step that revokes attribution. If the extractor stopped finding it,
-    the boundary would be describing a system where nothing invalidates."""
+def test_every_pipeline_either_builds_the_universe_or_delegates_it():
+    """The step that revokes attribution, wherever it now lives.
+
+    This used to assert that all three pipelines invoke
+    build_screener_universe directly. That was true when written and stopped
+    being true on 29 Sep 2026: daily_pipeline became a wrapper and the build
+    moved into the canonical driver, which is the entire point of the
+    refactor. The guard's purpose was never "the daily pipeline calls this
+    script" — it was "the extractor still sees the thing that invalidates".
+
+    So the property is stated as the disjunction it always was: a pipeline
+    either runs the universe build itself, or hands the whole canonical
+    sequence to the driver. A pipeline doing NEITHER is one whose rebuild the
+    boundary cannot see.
+    """
+    build = "scripts/eodhd/v2/build_screener_universe.py"
     for pipeline in cb.PIPELINES:
         keys = {s.key for s in cb.pipeline_steps(pipeline)}
-        assert "scripts/eodhd/v2/build_screener_universe.py" in keys, pipeline
+        source = (cb.JOBS / pipeline).read_text(encoding="utf-8")
+        delegates = "p0a_canonical_run.py" in source
+        assert build in keys or delegates, (
+            f"{pipeline} neither builds screener.universe nor delegates to "
+            f"the canonical driver")
+
+
+def test_the_universe_build_is_still_a_plan_stage():
+    """Wherever the wrapper puts it, the boundary must still see the
+    invalidating write — otherwise it describes a system in which nothing
+    revokes attribution, which is the opposite of true."""
+    build = "scripts/eodhd/v2/build_screener_universe.py"
+    plan_keys = {p.relative_to(cb.BACKEND).as_posix()
+                 for p in cb.plan_scripts().values()}
+    assert build in plan_keys
+    _inputs, outputs = cb.canonical_tables()
+    assert "screener.universe" in outputs
 
 
 def test_the_plans_cover_more_than_one_stage():

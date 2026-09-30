@@ -141,6 +141,26 @@ class StageResult:
     #: success, which is the opposite of what happened.
     failure_class: Optional[str] = None
 
+    #: Why this stage legitimately had nothing to do, established independently
+    #: of the fact that it wrote nothing.
+    #:
+    #: A stage with an empty expected set and an empty written set satisfies
+    #: set equality vacuously: the hashes match because both are the hash of
+    #: the empty string. That is a proof-shaped record containing no proof, and
+    #: it is indistinguishable from a producer whose source query silently
+    #: returned nothing. Observed on run 3, 30 Sep 2026 -- transform_prices
+    #: recorded success at expected 0 / written 0 / hashes_equal true.
+    #:
+    #: So zero coverage is only a success when the caller can say, from
+    #: something other than its own output, why zero was the right answer.
+    no_work_expected: Optional[str] = None
+
+    @property
+    def vacuous(self) -> bool:
+        """Nothing expected, nothing written, and no reason given for either."""
+        return (not self.expected and not self.written
+                and not self.no_work_expected)
+
     @property
     def missing(self) -> frozenset[str]:
         """Expected and not written. The missed-source class."""
@@ -155,6 +175,8 @@ class StageResult:
 
     @property
     def ok(self) -> bool:
+        if self.vacuous:
+            return False
         return not self.missing and not self.extra and not self.failure_class
 
     @property
@@ -166,6 +188,11 @@ class StageResult:
             return (f"{self.stage_name}: covered {len(self.expected):,} of "
                     f"{len(self.expected):,} expected, by {self.grain}")
         parts = []
+        if self.vacuous:
+            # Saying "0 missing; 0 extra" here would read as a clean run, which
+            # is exactly how this passed unnoticed until run 3.
+            parts.append("expected population is empty and no NO_WORK_EXPECTED "
+                         "condition was proved")
         if self.missing:
             parts.append(f"{len(self.missing):,} expected but not written")
         if self.extra:
@@ -188,6 +215,8 @@ class StageResult:
         out["grain"] = self.grain
         if self.failure_class:
             out["failure_class"] = self.failure_class
+        if self.no_work_expected:
+            out["no_work_expected"] = self.no_work_expected
         for name, keys in (("missing", self.missing), ("extra", self.extra)):
             if keys:
                 out[f"{name}_sample"] = sorted(

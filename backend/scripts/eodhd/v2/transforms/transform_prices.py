@@ -398,10 +398,33 @@ def build_population_result(cur, args, details: dict):
     cur.execute(_digest_sql("market.daily_prices", STAGING_DATE, tgt_w), params)
     written = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
+    # Zero coverage is a success only when something other than this stage's
+    # own output says zero was right.
+    #
+    # On run 3 (30 Sep 2026) this stage recorded success at expected 0 /
+    # written 0 with equal hashes -- two empty sets agree trivially, so the
+    # record proved nothing and was indistinguishable from a source query that
+    # had silently returned nothing.
+    #
+    # The distinguishing question is asked of a DIFFERENT predicate than the
+    # one that produced `expected`: is the staging table empty outright, or
+    # does it hold rows this window failed to select? The first is nothing to
+    # do. The second is a bug wearing the same shape.
+    no_work = None
+    if not expected and not written:
+        cur.execute("SELECT count(*) FROM staging_au.eod_prices")
+        staged_total = cur.fetchone()[0]
+        if staged_total == 0:
+            no_work = ("staging_au.eod_prices is empty outright, so there is "
+                       "nothing to transform in any window")
+        # Otherwise no_work stays None, the result is vacuous, and it fails --
+        # rows exist and this window selected none of them.
+
     return StageResult(
         "transform_prices",
         frozenset(expected), frozenset(written), details,
-        grain="asx_code+row_count+date_set_digest")
+        grain="asx_code+row_count+date_set_digest",
+        no_work_expected=no_work)
 
 
 if __name__ == "__main__":

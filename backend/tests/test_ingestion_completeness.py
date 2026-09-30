@@ -124,6 +124,24 @@ def test_a_non_aud_statement_is_refused_before_anything_is_written():
         f"at line {first_write}: a rejected file would leave a partial row")
 
 
+def test_the_currency_guard_reads_the_statements_not_the_listing():
+    """ATM.AU states two currencies and only one is about the numbers:
+
+        General.CurrencyCode             AUD   the LISTING currency
+        Income_Statement currency_symbol IDR   the STATEMENTS
+
+    The first version of this guard checked only General, so ATM passed
+    straight through and overflowed on write. Measured 30 Sep 2026.
+    """
+    src = (BACKEND / "scripts/eodhd/v2/load_to_staging_fundamentals.py").read_text(
+        encoding="utf-8")
+    assert "currency_symbol" in src, (
+        "the guard must read the per-statement currency, not only "
+        "General.CurrencyCode")
+    for section in ("Income_Statement", "Balance_Sheet", "Cash_Flow"):
+        assert section in src, f"{section}'s stated currency is unchecked"
+
+
 def test_the_loader_no_longer_rolls_back_the_whole_connection():
     """The amplifier, not the trigger.
 

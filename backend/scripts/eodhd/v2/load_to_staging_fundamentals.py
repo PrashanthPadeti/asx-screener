@@ -67,10 +67,16 @@ BATCH_COMMIT = 50
 # Tambang, an Indonesian listing) failed ten snapshots on 30 Sep 2026 and,
 # before per-file savepoints existed, took ATH and ATHDA down with it.
 #
-# Rejecting here rather than widening the column is the honest model: a
-# rupiah-denominated income statement is not a value this loader failed to
-# obtain, it is a value that cannot exist in the terms this schema holds.
-# That is an explained absence, and it is counted as one.
+# Do NOT "fix" this by widening the column. ATM's stated revenue is
+# 88,851,053,565,000.00 IDR; stored in a wider column it would sit beside
+# AUD revenues and dominate every size-ranked screen -- silently, and
+# wrongly. The overflow was accidentally protective. Comparability, not
+# capacity, is what is missing.
+#
+# Rejecting here is the honest model: a rupiah-denominated income statement
+# is not a value this loader failed to obtain, it is a value that cannot
+# exist in the terms this schema holds. That is an explained absence, and it
+# is counted as one.
 REPORTING_CURRENCY = "AUD"
 
 
@@ -471,9 +477,24 @@ def load_file(cur, path: Path) -> dict[str, int]:
     if not isinstance(raw, dict) or not raw:
         return {}, set(), set()
 
+    # Two different currencies are stated in one file, and only one of them
+    # is about the numbers. Measured on ATM.AU_2026-06-14 (30 Sep 2026):
+    #
+    #   General.CurrencyCode             AUD   <- the LISTING currency
+    #   Income_Statement currency_symbol IDR   <- the STATEMENTS
+    #   totalRevenue                     88,851,053,565,000.00 IDR
+    #
+    # Checking General alone passes ATM straight through, which is what the
+    # first version of this guard did.
     currency = ((raw.get("General") or {}).get("CurrencyCode") or "").upper()
     if currency and currency != REPORTING_CURRENCY:
         raise ForeignCurrency(currency)
+
+    for _section in ("Income_Statement", "Balance_Sheet", "Cash_Flow"):
+        stated = (((raw.get("Financials") or {}).get(_section) or {})
+                  .get("currency_symbol") or "").upper()
+        if stated and stated != REPORTING_CURRENCY:
+            raise ForeignCurrency(f"{stated} ({_section})")
 
     import hashlib
     checksum = hashlib.sha256(path.read_bytes()).hexdigest()

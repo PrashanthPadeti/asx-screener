@@ -106,6 +106,15 @@ PYTHON    = sys.executable
 TODAY     = date.today().isoformat()
 YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
 
+# BASE_DIR itself, so `compute.engine.*` is importable.
+#
+# This pipeline only ever INVOKED compute scripts as subprocesses, so it never
+# needed them on sys.path — until the canonical lease became an in-process
+# import. Run as `python scripts/eodhd/v2/jobs/daily_pipeline.py`, the
+# interpreter puts the script's own directory on sys.path, not backend, and
+# the import failed at the canonical block after the whole prefix had run.
+sys.path.insert(0, str(BASE_DIR))
+
 # Shared alert utility — path: backend/scripts/utils/alert.py (as weekly_pipeline)
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 from utils.alert import send_failure_alert  # noqa: E402

@@ -344,6 +344,56 @@ def test_the_inheritance_marker_is_honoured():
         os.environ.pop(LEASE_HELD_ENV, None)
 
 
+# ── The imports actually resolve ─────────────────────────────────────────────
+
+def _import_probe(wrapper: Path) -> tuple[int, str]:
+    """Execute the wrapper's module level, then import what it defers.
+
+    `run_name` is not "__main__", so main() does not run — only the top-level
+    code that establishes sys.path. The canonical lease is then imported the
+    way `canonical_execution()` imports it.
+
+    cwd is the wrapper's own directory, reproducing cron's invocation shape:
+    sys.path[0] is the script's directory, NOT backend.
+    """
+    import subprocess
+
+    probe = "\n".join([
+        "import runpy, sys",
+        "runpy.run_path(%r, run_name='probe')" % str(wrapper),
+        "import compute.engine.canonical_lease as cl",
+        "print('OK', cl.CANONICAL_LEASE_KEY)",
+    ])
+    result = subprocess.run([sys.executable, "-c", probe],
+                            capture_output=True, text=True,
+                            cwd=str(wrapper.parent))
+    return result.returncode, result.stdout + result.stderr
+
+
+def test_the_wrappers_can_actually_import_the_canonical_lease():
+    """Behavioural, because structural was not enough.
+
+    The lease import is FUNCTION-LOCAL, inside `canonical_execution()`, so it
+    resolves only when that function runs — an hour into the pipeline, after
+    the entire ingestion prefix. Twenty-three tests read the source and
+    confirmed the import was written correctly; not one loaded the module, so
+    none could notice that `compute` was not on sys.path.
+
+    daily_pipeline failed exactly that way in the first rehearsal attempt,
+    after the prefix had reloaded 171,056 staging files. weekly_pipeline
+    carried the identical defect, latent, waiting for phase 5.
+
+    A structural test that never executes what it describes cannot tell
+    working code from code that merely looks right.
+    """
+    for wrapper in (WRAPPER, WEEKLY):
+        code, output = _import_probe(wrapper)
+        assert code == 0, (
+            f"{wrapper.name} cannot import the canonical lease when invoked "
+            f"the way cron invokes it:\n{output[-800:]}")
+        assert "OK" in output, output[-400:]
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

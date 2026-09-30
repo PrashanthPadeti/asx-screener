@@ -55,6 +55,7 @@ COMPUTE  = BASE_DIR / "compute" / "engine"
 PYTHON   = sys.executable
 
 # Shared alert utility — path: backend/scripts/utils/alert.py
+sys.path.insert(0, str(BASE_DIR))
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 from utils.alert import send_failure_alert  # noqa: E402
 

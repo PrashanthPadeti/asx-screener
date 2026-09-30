@@ -101,8 +101,12 @@ def test_ingestion_completes_before_the_canonical_block():
     """
     source = _source()
     barrier = source.index("with canonical_execution(")
+    # backfill_yfinance_prices was here until 30 Sep 2026, when the job was
+    # deleted rather than relocated: its eight instruments carried prices
+    # 35-49 days stale, and absence is the honest state for an instrument
+    # with no current source.
     for ingestion in ("download_eod_prices.py", "load_to_staging_prices.py",
-                      "transform_short.py", "backfill_yfinance_prices.py"):
+                      "transform_short.py"):
         assert source.index(ingestion) < barrier, (
             f"{ingestion} runs at or after the canonical block")
 

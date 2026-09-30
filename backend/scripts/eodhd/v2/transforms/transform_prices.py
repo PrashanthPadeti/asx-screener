@@ -97,50 +97,6 @@ def _digest_sql(table: str, date_expr: str, where: str) -> str:
     """
 
 
-#: The two upstream feeds, merged with a DECLARED precedence.
-#:
-#: EODHD is the primary feed. yfinance exists to fill codes EODHD has no data
-#: for — `backfill_yfinance_prices` selects exactly those, `u.price_date IS
-#: NULL` — so overlap is rare by construction. Rare is not never, and a rule
-#: that only matters rarely is the one nobody will remember was never written
-#: down.
-#:
-#: Precedence is a literal column, resolved by DISTINCT ON. It is deliberately
-#: NOT `fetched_at`, `loaded_at`, or insertion order: an arrival-time rule
-#: means a slow primary feed silently loses to a fast fallback, and which feed
-#: won would then depend on the day rather than on the decision.
-#:
-#: `data_source` carries the winner into market.daily_prices, so the answer is
-#: recorded per row rather than inferred later.
-SOURCES = (
-    ("staging_au.eod_prices", "eodhd", 1),
-    ("staging_au.yfinance_prices", "yfinance", 2),
-)
-
-MERGED_SOURCE_SQL = """
-    SELECT asx_code, date, open, high, low, close, adjusted_close, volume,
-           source
-      FROM (
-        SELECT DISTINCT ON (asx_code, date)
-               asx_code, date, open, high, low, close, adjusted_close, volume,
-               source
-          FROM (
-            SELECT asx_code, date, open, high, low, close, adjusted_close,
-                   volume, 'eodhd'::text AS source, 1 AS precedence
-              FROM staging_au.eod_prices
-              {where}
-            UNION ALL
-            SELECT asx_code, date, open, high, low, close, adjusted_close,
-                   volume, 'yfinance'::text AS source, 2 AS precedence
-              FROM staging_au.yfinance_prices
-              {where}
-          ) feeds
-         ORDER BY asx_code, date, precedence
-      ) chosen
-     ORDER BY date
-"""
-
-
 def transform_prices_for_code(cur, code: str, from_date: str | None, to_date: str | None) -> int:
     """Fetch, transform and insert rows for a single ASX code. Returns row count."""
     filters = ["asx_code = %s"]
@@ -151,7 +107,12 @@ def transform_prices_for_code(cur, code: str, from_date: str | None, to_date: st
         filters.append("date <= %s"); params.append(to_date)
 
     where = "WHERE " + " AND ".join(filters)
-    cur.execute(MERGED_SOURCE_SQL.format(where=where), params + params)
+    cur.execute(f"""
+        SELECT asx_code, date, open, high, low, close, adjusted_close, volume
+        FROM staging_au.eod_prices
+        {where}
+        ORDER BY date
+    """, params)
 
     rows = cur.fetchall()
     if not rows:
@@ -165,7 +126,7 @@ def transform_prices_for_code(cur, code: str, from_date: str | None, to_date: st
             r[5],                    # close
             r[6],                    # adjusted_close
             r[7],                    # volume
-            r[8],                    # data_source — which feed won this row
+            "eodhd",                 # data_source
         )
         for r in rows
     ]
@@ -207,20 +168,13 @@ def main():
         # entire price history from staging; if staging is empty -- a failed
         # load upstream, a wrong database -- the reload writes nothing, and
         # every downstream producer then computes correctly over no data.
-        # Both feeds, because either alone could be empty legitimately. The
-        # yfinance table is empty whenever no backfill was needed, and
-        # refusing on that would block every ordinary full run.
-        cur.execute("SELECT (SELECT COUNT(*) FROM staging_au.eod_prices), "
-                    "(SELECT COUNT(*) FROM staging_au.yfinance_prices)")
-        primary, fallback = cur.fetchone()
-        staged = primary + fallback
+        cur.execute("SELECT COUNT(*) FROM staging_au.eod_prices")
+        staged = cur.fetchone()[0]
         if staged == 0:
-            log.error("REFUSING full run: both staging_au.eod_prices and "
-                      "staging_au.yfinance_prices are empty. Replacing "
-                      "market.daily_prices from an empty source would destroy "
-                      "the price history and report success.")
+            log.error("REFUSING full run: staging_au.eod_prices is empty. "
+                      "Replacing market.daily_prices from an empty source "
+                      "would destroy the price history and report success.")
             return 1
-        log.info("staged source rows: %s eodhd + %s yfinance", primary, fallback)
 
         # What is about to be replaced, measured before it is destroyed.
         cur.execute("SELECT count(*), count(DISTINCT asx_code) "
@@ -438,16 +392,7 @@ def build_population_result(cur, args, details: dict):
     src_w = ("WHERE " + " AND ".join(src_where)) if src_where else ""
     tgt_w = ("WHERE " + " AND ".join(tgt_where)) if tgt_where else ""
 
-    # The expected population is the MERGED source, not the primary feed.
-    #
-    # Derived from staging_au.eod_prices alone, every code that exists only in
-    # the yfinance feed would be written and not expected — reported as
-    # "extra", which is how a correct transform gets called a failure. The
-    # proof has to describe the same source the writer actually consumed, and
-    # the precedence resolution has to be inside it, or the two sides would
-    # disagree on which observation each (code, date) should carry.
-    merged_source = f"({MERGED_SOURCE_SQL.format(where=src_w)}) AS merged"
-    cur.execute(_digest_sql(merged_source, "date", ""), params + params)
+    cur.execute(_digest_sql("staging_au.eod_prices", "date", src_w), params)
     expected = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
     cur.execute(_digest_sql("market.daily_prices", STAGING_DATE, tgt_w), params)

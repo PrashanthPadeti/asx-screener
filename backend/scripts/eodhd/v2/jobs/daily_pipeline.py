@@ -10,7 +10,6 @@ Shape (rule 3 of docs/canonical_orchestration.md):
       2.  Download ASIC short positions                           -> Raw Zone
       3.  Load prices -> staging_au.eod_prices                    (UPSERT)
       4.  Load short positions -> staging_au.short_positions
-      4b. Acquire yfinance observations -> staging_au.yfinance_prices
       6.  Transform short positions -> market.short_positions
 
     ══ INGESTION BARRIER ══  acquire the canonical execution lease
@@ -487,17 +486,6 @@ def main():
     run_optional("Step 6: Transform short positions → market.short_positions", [
         PYTHON, str(ASIC / "transforms" / "transform_short.py"),
     ], tracker=tracker, step=6)
-
-    # ── Step 4b: Acquire yfinance observations (non-fatal) ───────────────────
-    #
-    # Was an independent 09:00 UTC cron writing market.daily_prices directly —
-    # a second publication authority, firing thirty minutes into this
-    # pipeline's own window. It now acquires into staging_au.yfinance_prices
-    # and transform_prices publishes. Here, inside the ingestion prefix, is
-    # where an acquisition step belongs.
-    run_optional("Step 4b: Acquire yfinance prices → staging", [
-        PYTHON, str(SCRIPTS / "backfill_yfinance_prices.py"), "--days", "3",
-    ], tracker=tracker, step=4)
 
     # ═══ INGESTION BARRIER ═══════════════════════════════════════════════════
     #

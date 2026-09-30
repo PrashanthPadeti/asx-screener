@@ -552,9 +552,6 @@ CLASSIFICATIONS: dict[str, str] = {
     "compute/engine/top5_strategy.py": POST_PUBLICATION,
     # Writes market.asx_announcements, a canonical INPUT.
     "scripts/asx/download_announcements.py": PRE_INGESTION,
-    # Writes market.daily_prices, a canonical OUTPUT. Illegal for ingestion —
-    # see ACCEPTED, where the open question is recorded.
-    "scripts/eodhd/v2/backfill_yfinance_prices.py": PRE_INGESTION,
 }
 
 #: Known, accepted boundary violations — debts, not dispensations.
@@ -564,12 +561,12 @@ CLASSIFICATIONS: dict[str, str] = {
 #: violation acceptable, and a stale entry — one whose step no longer violates
 #: — fails just as loudly as an undeclared one, because an allowlist nobody
 #: prunes is an allowlist nobody reads.
-#: Empty. backfill_yfinance_prices was the only entry, and its question is
-#: resolved: it acquires into staging_au.yfinance_prices and publishes
-#: nothing, so transform_prices is the sole publication authority for
-#: market.daily_prices. The stale-exemption guard is what required this entry
-#: to be removed rather than left as a permanent excuse — it fired on the
-#: first run after the refactor.
+#: Empty. backfill_yfinance_prices was the only entry, and the question it
+#: recorded — where a second writer of market.daily_prices belongs — was
+#: answered by deleting the writer rather than by relocating it. Its coverage
+#: was eight instruments carrying prices 35-49 days stale, and the
+#: stale-exemption guard is what forced the entry out rather than letting it
+#: become a permanent excuse.
 ACCEPTED: dict[str, str] = {}
 
 
@@ -594,11 +591,11 @@ def violations(include_accepted: bool = False) -> list[str]:
     # stopped violating, the entry is describing a world that no longer exists
     # and the next reader will trust it anyway.
     # A stale exemption is its own failure — but only where the unit is
-    # actually visible. backfill_yfinance_prices exists in the runtime crontab
-    # and not in the checked-in generator, so off-server this module cannot
-    # see it at all. "I cannot see this unit here" is not "this unit no longer
-    # violates", and the first draft reported the second when it meant the
-    # first.
+    # actually visible. A unit can exist in the runtime crontab and not in the
+    # checked-in generator — backfill_yfinance_prices did, before it was
+    # deleted — so off-server this module cannot see it at all. "I cannot see
+    # this unit here" is not "this unit no longer violates", and the first
+    # draft reported the second when it meant the first.
     visible = all_units()
     still = {_key_of(v) for v in _all_violations()}
     for key in ACCEPTED:

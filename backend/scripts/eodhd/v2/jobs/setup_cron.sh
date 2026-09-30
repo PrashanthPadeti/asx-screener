@@ -84,15 +84,18 @@ WEEKLY_COMPUTE_CMD="${DISABLED_REASON} 0 21 * * 0   cd ${PROJECT_DIR} && ${ENV_P
 WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_refresh.py >> ${LOG_DIR}/weekly_refresh.log 2>&1"
 
 # ── Previously undeclared ────────────────────────────────────────────────────
-# These three were installed in the crontab and absent from this file, so
+# These were installed in the crontab and absent from this file, so
 # production ran work that code review could not see. Two of them touch
-# canonical tables and both fire INSIDE the daily pipeline's own window —
-# 08:45 and 09:00 against a pipeline starting at 08:30 — which is a shared
-# input race, not merely untidy scheduling. Declared here so the drift is
-# visible; their placement relative to the canonical lease is a separate
-# decision the wrapper refactor settles.
+# canonical tables and fired INSIDE the daily pipeline's own window, which is
+# a shared input race rather than untidy scheduling.
+#
+# The yfinance backfill is deliberately NOT declared here any more: the job
+# was deleted on 30 Sep 2026. Its entire contribution was eight instruments
+# whose prices were 35-49 days stale, and serving a stale price as though it
+# were current is the failure this programme exists to remove. Its cron entry
+# still exists at runtime, so reconciliation will report UNDECLARED until an
+# operator removes it — which is the drift being visible, not a bug.
 ANNOUNCEMENTS_CMD="45 8 * * 1-5   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/asx/download_announcements.py >> ${LOG_DIR}/download_announcements.log 2>&1"
-YFINANCE_BACKFILL_CMD="0 9 * * 1-5   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/eodhd/v2/backfill_yfinance_prices.py --days 3 >> ${LOG_DIR}/yfinance_backfill.log 2>&1"
 PREDICTIONS_CMD="0 21 * * 1-5 ASX_ENV_FILE=${PROJECT_DIR}/backend/.env.predictions ${PROJECT_DIR}/scripts/run_predictions.sh"
 # AlphaFive: 22:00 UTC Sunday = Monday 8am AEST, after the weekly pipeline.
 ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR}/backend && ${ENV_PREFIX} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
@@ -144,13 +147,6 @@ else
     echo "  - Announcements download already in crontab — skipped"
 fi
 
-if ! grep -qF "backfill_yfinance_prices.py" "$TMPFILE"; then
-    echo "$YFINANCE_BACKFILL_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: yfinance price backfill (weekdays 19:00 AEST)"
-    CHANGED=1
-else
-    echo "  - yfinance backfill already in crontab — skipped"
-fi
 
 if ! grep -qF "run_predictions.sh" "$TMPFILE"; then
     echo "$PREDICTIONS_CMD" >> "$TMPFILE"

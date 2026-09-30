@@ -283,17 +283,40 @@ legal classifications, and that is the classifier working: a step that cannot
 be classified is the architecture being wrong, not the taxonomy being
 incomplete.
 
-**No fourth classification was invented to accommodate it.** The independent
-cron writer is eliminated:
+**No fourth classification was invented to accommodate it, and in the end no
+relocation was needed either.** The planned fix was a refactor: acquisition
+into a dedicated staging table, a declared merge precedence, a migration.
+Before building it, the evidence was measured:
 
-- preferred: split acquisition from publication. The yfinance job fetches and
-  backfills into raw/staging state as `PRE_INGESTION`, and `transform_prices`
-  remains the **sole** writer of `market.daily_prices`, under the lease.
-- if changing its storage path is disproportionately invasive: fold its write
-  logic into the `transform_prices` stage instead.
+    eodhd    6,892,731 rows   2,394 codes   latest 2026-09-23
+    yahoo        1,849 rows     484 codes   latest 2026-09-04
 
-Either way the independent cron write goes away once its replacement is
-deployed.
+    companies served ONLY by yahoo: 8, every one 35-49 days stale
+
+Seven ETFs and a deferred-settlement line, sitting in the serving population
+with prices up to seven weeks old and presented exactly like same-day ones.
+The selector only ever targeted codes with `price_date IS NULL`, so once an
+instrument had any price it was never refreshed — by design. That is not thin
+coverage, it is wrong coverage, and it is the same failure this programme
+exists to remove, sitting in the price column while we removed it from the
+governed metrics.
+
+**So the job was deleted, not relocated.** The decision, frozen 30 Sep 2026:
+
+> ASXScreener will not manufacture ETF coverage from a stale yfinance
+> backfill. Instruments without a sufficiently current supported price source
+> are excluded from the serving population. ETF pricing, if commercially
+> required later, gets a proper source and freshness contract.
+
+`transform_prices` is the sole publisher with no merge, no precedence rule and
+no second staging table. The serving population drops by the eight
+instruments, which is the honest number. The two remaining price-less actives
+stay price-less.
+
+**A note on how this was reached.** A refactor was designed, specified and
+half-built before anyone asked what the job was worth. The question "why do we
+need this at all" arrived from outside the work and dissolved it. Measure the
+value of a thing before building machinery to preserve it.
 
 ### The three auxiliary `screener.universe` writers are a different case
 

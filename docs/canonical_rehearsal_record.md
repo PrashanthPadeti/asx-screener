@@ -11,7 +11,9 @@ restoration of production scheduling.
 | | |
 |---|---|
 | P0-A-2 orchestration rehearsal | **PASS** |
-| Phase 6 production rollout | **BLOCKED** — upstream ingestion completeness and non-vacuous producer proof |
+| B1 · B2 · B3 upstream blockers | **CLOSED** — see "Closing the blockers" |
+| Cross-currency correctness (found while closing them) | **FIXED** — gate 1b, proven on run 8 |
+| Phase 6 production rollout | **your decision** — no longer blocked by the above |
 
 This document is the release record. The Phase 6 decision depends on it and on
 the machine evidence it cites, not on a reconstruction from a terminal session.
@@ -234,6 +236,175 @@ served. Gate B's `total=2114` is that boundary working.
   reproducing the known backlog item.
 - **ATH's `computed_metrics` frozen since 12 Jun 2026** — `daily_compute`
   never expected it, because it has no current price. Contractually legitimate.
+
+---
+
+## Closing the blockers
+
+All three closed on scratch with induced-failure evidence, 30 Sep 2026.
+
+### B1 — loader transaction and miscount · CLOSED
+
+Per-file `SAVEPOINT`s replace the per-connection `conn.rollback()`, and
+`written` is promoted only after the outer `conn.commit()` — releasing a
+savepoint is not durability, because a rollback of the enclosing transaction
+erases released savepoints too.
+
+Proven by induction against the real driver
+(`scripts/prove_ingestion_completeness.py`), each with a control:
+
+```
+A  induced per-file failure     victim in failed; BOTH batch-mates still written
+B  induced within-file omission the stated period lands in `unaccounted`
+C  induced outer-commit failure propagates, claims nothing;
+                                same file IS written when the commit succeeds
+8/8 proofs passed
+```
+
+**The original damage is repaired, not merely prevented.** ATH and ATHDA now
+carry 125 and 4 income rows. ATM has 83 rows from the seven of its seventeen
+files that are storable — under the old rollback those seven were destroyed
+with their batch, which is how ATH and ATHDA were lost.
+
+### B2 — independent files→staging population proof · CLOSED
+
+`expected` comes from the input manifest and is keyed at
+`file|section|period`, not at the file: a fundamentals file holds many periods
+and the loader silently dropped any whose record would not parse. One
+predicate, `period_key`, is shared by the upserts that admit records and the
+proof that counts them, so the two cannot drift.
+
+On the real corpus:
+
+```
+expected (manifest) : 7,610,371  from 29,308 files
+written (committed) : 7,610,361
+unaccounted 0   surplus 0   failed 0   skipped 10
+```
+
+**`unaccounted = 0` across 7.6 million period keys** — the expectation does not
+over-fire on real data. The ten are ATM's oversized snapshots, refused with the
+field named.
+
+### B3 — no vacuous producer success · CLOSED
+
+`expected 0 / written 0 / hashes equal` is no longer `success`. Zero is a
+success only with an independently established reason, recorded in the stage
+details so a later reader can tell a justified zero from a bare one:
+
+```json
+"no_work_expected": "staging_au.eod_prices holds nothing the target lacks:
+                     source watermark 2026-09-23, target watermark 2026-09-23",
+"source_watermark": "2026-09-23", "target_watermark": "2026-09-23"
+```
+
+The first version of the escape justified only an *empty* source, which refused
+run 4 — a FULL_FUNDAMENTALS plan downloads no prices and legitimately has
+nothing outstanding. It was also nearly circular: it justified an empty window
+by counting the same table the window had failed to select from. Watermarks ask
+a different question and separate three cases where there were two, the third
+being the one worth failing on — rows waiting that this run took none of.
+
+---
+
+## The cross-currency defect
+
+Found while closing B1, because the IDR case was loud enough to crash and made
+the field legible.
+
+EODHD states two currencies per file and only one is about the numbers:
+`General.CurrencyCode` is the **listing** currency and reads AUD for BHP;
+`Financials.*.currency_symbol` is the **statements** and reads USD. Measured
+across the newest snapshot per code:
+
+```
+NONE 1016   AUD 843   USD 89   NZD 39   CAD 16
+PGK 4  GBP 4  EUR 4  IDR 1  MYR 1  SGD 1  HKD 1
+```
+
+**160 ASX companies report in a foreign currency, including BHP, CSL and
+Amcor.** Their figures were loaded into columns meaning AUD and compared
+directly against AUD peers, so every ratio mixing a market quantity with a
+statement quantity was wrong by roughly the exchange rate.
+
+Resolution — applicability **gate 1b**, `Cause.UNIT_MISMATCH`, deliberately
+narrow in two directions:
+
+- fires only on a currency positively known to differ, so the 1,016 codes
+  stating none are untouched. Not knowing a currency is not evidence of a
+  mismatch, and treating it as one would blank half the exchange to fix 160.
+- covers only ratios mixing an AUD market quantity with a statement quantity.
+  `gross_margin`, `roe`, `debt_to_equity` divide one statement figure by
+  another, the units cancel, and those numbers are correct as they stand.
+
+Proven on run 8:
+
+```
+ccy    rows  with_pe  with_pb  with_roe  with_gm
+USD      84        0        0        77       64
+NZD      38        0        0        38       34
+AUD     755      343      721       721      460   ← untouched
+(none) 1210      162      698       698      491   ← untouched
+
+state:not_meaningful   16,765 (run 7) → 17,663 (run 8)
+```
+
+The value is withheld, not destroyed — the cause, the reason and the original
+number are all on the record:
+
+```json
+{"cause": "unit_mismatch", "state": "not_meaningful", "observed": 22.1606,
+ "reason": "price is quoted in AUD and earnings per share are stated in USD;
+            the ratio has no unit until one side is converted"}
+```
+
+**Do not "fix" the ATM overflow by widening the column.** Its stated revenue is
+88,851,053,565,000.00 IDR; in a wider column that sits beside AUD revenues and
+dominates every size-ranked screen, silently. The overflow was accidentally
+protective. Comparability, not capacity, was the missing thing.
+
+**Still open:** converting foreign statements to AUD at a stated FX rate, with
+its own as-of semantics and freshness contract, is the fix that restores those
+metrics rather than withholding them. That is a separate decision.
+
+### Two mistakes worth keeping
+
+**A gate can be correct, tested and wired, and still not fire.** Gate 1b was
+written, unit-tested, and threaded through the loader, migration, universe
+build and SELECT — and run 7 published BHP's P/E anyway. `composite_score` ran
+every selected column through `pd.to_numeric(errors="coerce")` except a
+hard-coded three, so `"USD"` became `NaN` two layers above the gate. Every
+stage proved set equality, the read-back passed, 0 violations, 2,114 rows
+published. **The population proofs cannot see a silent coercion, and they are
+not a substitute for checking that the change altered the output.** The NM
+count moved 16,768 → 16,765 and that was the only visible sign.
+
+**The driver took no lease when invoked by hand.** One command pasted twice
+started two `FULL_FUNDAMENTALS_CANONICAL` runs 22 seconds apart against one
+database. Neither reached finalisation, so nothing published — luck and a
+`pkill`, not a property. The wrapper owns the lease to protect the *suffix*;
+that reasoning left every manual invocation unserialized, which is precisely
+when a second operator is most likely to be typing. The driver now takes the
+lease itself and inherits via `ASX_CANONICAL_LEASE_HELD` when the wrapper holds
+it. Run 8 logged `canonical execution lease released by canonical_driver`.
+
+---
+
+## Gate B against run 8
+
+```
+total=2114  ranked_total=1985  excluded=129  capped=False
+csv governed cells: 166 served, 84 blank because suppressed, 0 leaked, 0 dropped
+GATE B PASSED — run 8 is published, served, and contained
+```
+
+Against run 2 (`194 served / 56 suppressed`) the suppressed count rose with
+gate 1b and **0 leaked / 0 dropped** held: withheld values stay withheld, and
+applicable values still reach the export.
+
+`A2M` retains a stale NZD-contaminated `pe_ratio` in the table with
+`compute_run_id` NULL and `status = 'delisted'` — outside the serving
+population, reaching no customer. Containment, not a gap.
 
 ---
 

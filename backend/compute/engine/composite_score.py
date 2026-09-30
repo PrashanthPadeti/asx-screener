@@ -619,6 +619,12 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     # Gate 2 needs each metric's own denominator, or it cannot run
     # and every non-positive-denominator ratio passes as applicable.
     select_cols += [c for c in OBSERVATION_COLS.values() if c not in select_cols]
+    # Gate 1b needs the unit each statement figure is stated in. It is not in
+    # OBSERVATION_COLS because it is a label rather than a quantity, and every
+    # column there is coerced numerically -- which would read "USD" as None
+    # and leave the gate unable to fire for BHP.
+    if "reporting_currency" not in select_cols:
+        select_cols.append("reporting_currency")
 
     # Every column this model version persists, because this is now the
     # canonical commit boundary: it re-emits all of them together with the

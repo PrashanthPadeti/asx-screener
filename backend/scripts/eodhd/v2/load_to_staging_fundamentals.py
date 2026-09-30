@@ -62,26 +62,81 @@ RAW_BASE = Path(os.getenv("RAW_DATA_DIR", "/opt/asx-screener/data/raw"))
 FUND_DIR    = RAW_BASE / "eodhd" / "exchange=AU" / "fundamentals" / "full_snapshot"
 BATCH_COMMIT = 50
 
-# The schema's numeric columns are sized for AUD. A statement reported in
-# rupiah is ~10^6 times larger and overflows them -- which is how ATM (Aneka
-# Tambang, an Indonesian listing) failed ten snapshots on 30 Sep 2026 and,
-# before per-file savepoints existed, took ATH and ATHDA down with it.
+# The currency every governed numeric column is implicitly labelled with.
 #
-# Do NOT "fix" this by widening the column. ATM's stated revenue is
-# 88,851,053,565,000.00 IDR; stored in a wider column it would sit beside
-# AUD revenues and dominate every size-ranked screen -- silently, and
-# wrongly. The overflow was accidentally protective. Comparability, not
-# capacity, is what is missing.
+# This is a LABEL, not a filter. 160 ASX companies state their financials in
+# something else -- 89 USD, 39 NZD, 16 CAD, and a tail -- and BHP, Amcor and
+# a2 Milk are among them. Excluding them was considered and rejected: what
+# those figures need is a unit, not deletion. The loader records the stated
+# currency and applicability gate 1b suppresses only the ratios that mix an
+# AUD market quantity with a statement one.
 #
-# Rejecting here is the honest model: a rupiah-denominated income statement
-# is not a value this loader failed to obtain, it is a value that cannot
-# exist in the terms this schema holds. That is an explained absence, and it
-# is counted as one.
+# Do NOT "fix" the ATM overflow by widening the column. Its stated revenue is
+# 88,851,053,565,000.00 IDR; in a wider column that sits beside AUD revenues
+# and dominates every size-ranked screen, silently and wrongly. The overflow
+# was accidentally protective. Comparability, not capacity, was ever the
+# missing thing.
 REPORTING_CURRENCY = "AUD"
 
 
-class ForeignCurrency(Exception):
-    """Statements denominated in something this schema cannot represent."""
+class Unrepresentable(Exception):
+    """The file states a figure this schema cannot hold at any label.
+
+    Named for what is actually wrong. It began life as ForeignCurrency, back
+    when a foreign currency was thought to be the disqualifier; it is not --
+    a foreign currency is recorded and labelled. A magnitude beyond
+    NUMERIC(20,4) has no representation to label.
+    """
+
+
+#: The widest governed numeric column is NUMERIC(20,4): sixteen integer
+#: digits. A value at or beyond this cannot be stored at all, whatever it is
+#: denominated in.
+REPRESENTABLE_LIMIT = 10 ** 16
+
+#: The sections whose stated currency describes the financial statements.
+FINANCIAL_SECTIONS = ("Income_Statement", "Balance_Sheet", "Cash_Flow")
+
+
+def stated_reporting_currency(raw: dict) -> Optional[str]:
+    """The currency the STATEMENTS are in, as the source states it.
+
+    Not ``General.CurrencyCode``: that is the listing currency and reads AUD
+    for BHP, whose statements are in USD. Returns None when the source states
+    nothing, which is not the same as AUD and must not be defaulted to it --
+    1,016 of 2,019 codes state nothing because they have no statements.
+    """
+    fin = raw.get("Financials") or {}
+    for section in FINANCIAL_SECTIONS:
+        stated = ((fin.get(section) or {}).get("currency_symbol") or "").strip()
+        if stated:
+            return stated.upper()
+    return None
+
+
+def first_unrepresentable(raw: dict):
+    """The first stated figure too large for the schema, or None.
+
+    Scanned before the first write so the refusal costs no partial row. Only
+    the financial statements are scanned: that is where the magnitudes live,
+    and walking the whole blob would spend the time on ratios and percentages
+    that cannot overflow.
+    """
+    fin = raw.get("Financials") or {}
+    for section in FINANCIAL_SECTIONS:
+        block = fin.get(section) or {}
+        for ptype in ("yearly", "quarterly"):
+            periods = block.get(ptype) or {}
+            if not isinstance(periods, dict):
+                continue
+            for period, rec in periods.items():
+                if not isinstance(rec, dict):
+                    continue
+                for field, value in rec.items():
+                    number = sf(value)
+                    if number is not None and abs(number) >= REPRESENTABLE_LIMIT:
+                        return (f"{section}.{ptype}.{period}.{field}", number)
+    return None
 
 
 def period_key(period_date_str, rec):
@@ -137,15 +192,17 @@ def st(v) -> Optional[str]:
 # ─── Insert: staging_au.fundamentals ─────────────────────────────────────────────
 
 def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
-                         source_file: str, checksum: str) -> int:
+                         source_file: str, checksum: str,
+                         reporting_currency: Optional[str] = None) -> int:
     general = raw_json.get("General", {})
     cur.execute("""
         INSERT INTO staging_au.fundamentals
             (asx_code, snapshot_date, raw_json, general_code, general_name,
              general_sector, general_industry, updated_at_eodhd,
-             source_file, checksum)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+             source_file, checksum, reporting_currency)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (asx_code) DO UPDATE SET
+            reporting_currency = EXCLUDED.reporting_currency,
             snapshot_date    = EXCLUDED.snapshot_date,
             raw_json         = EXCLUDED.raw_json,
             general_code     = EXCLUDED.general_code,
@@ -162,7 +219,7 @@ def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
         st(general.get("Code")), st(general.get("Name")),
         st(general.get("Sector")), st(general.get("Industry")),
         sd(general.get("UpdatedAt")),
-        source_file, checksum,
+        source_file, checksum, reporting_currency,
     ))
     row = cur.fetchone()
     return row[0] if row else None
@@ -484,23 +541,31 @@ def load_file(cur, path: Path) -> dict[str, int]:
     #   Income_Statement currency_symbol IDR   <- the STATEMENTS
     #   totalRevenue                     88,851,053,565,000.00 IDR
     #
-    # Checking General alone passes ATM straight through, which is what the
-    # first version of this guard did.
-    currency = ((raw.get("General") or {}).get("CurrencyCode") or "").upper()
-    if currency and currency != REPORTING_CURRENCY:
-        raise ForeignCurrency(currency)
+    # We RECORD this rather than refuse on it. Refusing would have excluded
+    # 160 companies including BHP, Amcor and a2 Milk; what those figures need
+    # is a unit label, not deletion. applicability.unit_gate then suppresses
+    # only the ratios that mix an AUD market quantity with a statement one.
+    stated_currency = stated_reporting_currency(raw)
 
-    for _section in ("Income_Statement", "Balance_Sheet", "Cash_Flow"):
-        stated = (((raw.get("Financials") or {}).get(_section) or {})
-                  .get("currency_symbol") or "").upper()
-        if stated and stated != REPORTING_CURRENCY:
-            raise ForeignCurrency(f"{stated} ({_section})")
+    # The one thing that still cannot be loaded: a magnitude the column cannot
+    # hold. ATM's rupiah figures exceed NUMERIC(20,4) (< 10^16), so there is no
+    # value to label -- this is an absence of representable data, not a
+    # labelling problem, and it is counted as an explained exclusion.
+    #
+    # Keyed on magnitude, which is the actual observable, rather than on a
+    # currency list that would rot the first time a currency redenominates.
+    oversized = first_unrepresentable(raw)
+    if oversized is not None:
+        field, magnitude = oversized
+        raise Unrepresentable(
+            f"{stated_currency or 'an unstated currency'} — {field} is "
+            f"{magnitude:.4g}, beyond the representable range (< 1e16)")
 
     import hashlib
     checksum = hashlib.sha256(path.read_bytes()).hexdigest()
 
     fund_id = upsert_fundamentals(cur, asx_code, snapshot_date, raw,
-                                   path.name, checksum)
+                                   path.name, checksum, stated_currency)
     if fund_id is None:
         return {}, set(), set()
 
@@ -639,9 +704,9 @@ def load_files(conn, cur, files, batch_commit: int = BATCH_COMMIT):
         cur.execute("SAVEPOINT one_file")
         try:
             counts, file_expected, file_written = load_file(cur, path)
-        except ForeignCurrency as exc:
+        except Unrepresentable as exc:
             cur.execute("ROLLBACK TO SAVEPOINT one_file")
-            skipped[path.name] = f"reported in {exc}"
+            skipped[path.name] = str(exc)
         except Exception as exc:                                  # noqa: BLE001
             cur.execute("ROLLBACK TO SAVEPOINT one_file")
             failed[path.name] = str(exc)

@@ -90,13 +90,14 @@ def test_no_work_expected_cannot_excuse_a_real_shortfall():
 
 # ── B1: a foreign-currency file is an explained absence, not a failure ───────
 
-def test_a_non_aud_statement_is_refused_before_anything_is_written():
-    """ATM (Aneka Tambang) reports in rupiah -- ~10^6x AUD, which overflows
-    columns sized for AUD. Ten of its snapshots failed on 30 Sep 2026.
+def test_an_unstorable_figure_is_refused_before_anything_is_written():
+    """ATM (Aneka Tambang) states revenue of 88,851,053,565,000.00 IDR, beyond
+    NUMERIC(20,4). Ten of its snapshots failed on 30 Sep 2026.
 
-    Refusing at parse time rather than widening the column is the honest
-    model: this is not a value the loader failed to obtain, it is one that
-    cannot exist in the terms the schema holds.
+    A foreign currency is NOT the disqualifier -- that is recorded and
+    labelled, because refusing it would have excluded BHP. What is refused is
+    a magnitude with no representation to label, keyed on the magnitude
+    itself rather than on a currency list that would rot.
 
     The ordering is the property: the refusal must come BEFORE the first
     write, or a rejected file still leaves a partial row behind. Proven from
@@ -113,14 +114,14 @@ def test_a_non_aud_statement_is_refused_before_anything_is_written():
     raise_line = next(
         n.lineno for n in ast.walk(load_file)
         if isinstance(n, ast.Raise)
-        and getattr(getattr(n.exc, "func", None), "id", "") == "ForeignCurrency")
+        and getattr(getattr(n.exc, "func", None), "id", "") == "Unrepresentable")
     first_write = min(
         n.lineno for n in ast.walk(load_file)
         if isinstance(n, ast.Call)
         and getattr(n.func, "id", "").startswith("upsert_"))
 
     assert raise_line < first_write, (
-        f"ForeignCurrency raised at line {raise_line}, after the first write "
+        f"Unrepresentable raised at line {raise_line}, after the first write "
         f"at line {first_write}: a rejected file would leave a partial row")
 
 

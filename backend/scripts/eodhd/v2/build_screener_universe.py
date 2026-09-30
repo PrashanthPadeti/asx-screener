@@ -88,6 +88,7 @@ INSERT INTO screener.universe (
     is_mega, is_large, is_mid, is_small, is_micro, is_nano,
     market_cap_tier,
     isin, website, description,
+    reporting_currency,
 
     -- ── Price ────────────────────────────────────────────────────────────────
     price, price_date, open, volume, avg_volume_20d, market_cap,
@@ -319,6 +320,7 @@ SELECT
     c.isin,
     c.website,
     c.description,
+    fx.reporting_currency,
 
     -- ── Price (latest close + 52w range) ─────────────────────────────────────
     dp.close          AS price,
@@ -1387,6 +1389,18 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) cp ON TRUE
 
+-- ── Reporting currency (staging — the unit the STATEMENTS are stated in) ─────
+-- Not the listing currency: General.CurrencyCode reads AUD for BHP, whose
+-- financials are in USD. NULL stays NULL; it must not be defaulted to AUD,
+-- because "the source stated none" and "the source stated AUD" have opposite
+-- consequences at applicability gate 1b.
+LEFT JOIN LATERAL (
+    SELECT reporting_currency
+    FROM staging_au.fundamentals
+    WHERE asx_code = c.asx_code
+    LIMIT 1
+) fx ON TRUE
+
 -- ── EPS earnings-surprise history (Tier 3 — quarterly beat/miss streak) ──────
 LEFT JOIN LATERAL (
     SELECT
@@ -1469,6 +1483,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     industry                = EXCLUDED.industry,
     sub_industry            = EXCLUDED.sub_industry,
     stock_type              = EXCLUDED.stock_type,
+    reporting_currency      = EXCLUDED.reporting_currency,
     status                  = EXCLUDED.status,
     fiscal_year_end_month   = EXCLUDED.fiscal_year_end_month,
     is_reit                 = EXCLUDED.is_reit,

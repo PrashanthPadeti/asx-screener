@@ -412,16 +412,35 @@ def main() -> int:
     """
     from compute.engine.canonical_lease import (
         LEASE_HELD_ENV, MANUAL_WAIT_SECONDS, LeaseUnavailable, canonical_lease,
+        lease_is_held,
     )
-
-    inherited = os.getenv(LEASE_HELD_ENV, "").strip()
-    if inherited:
-        log.info("canonical execution lease already held by %s — inheriting",
-                 inherited)
-        return _run()
 
     lease_conn = psycopg2.connect(get_database_url_sync())
     lease_conn.autocommit = True
+
+    # Inheritance is verified, not believed.
+    #
+    # ASX_CANONICAL_LEASE_HELD is an environment variable: an assertion that
+    # somebody upstream holds the lock. Trusting it means anyone who exports
+    # it -- deliberately, or by inheriting a stale shell from an earlier
+    # wrapper run -- walks past the only thing serializing canonical mutation.
+    # The claim is checked against pg_locks before it is honoured, and a claim
+    # with nothing behind it refuses rather than proceeding unserialized.
+    inherited = os.getenv(LEASE_HELD_ENV, "").strip()
+    if inherited:
+        try:
+            if not lease_is_held(lease_conn):
+                log.error("REFUSING: %s=%r claims a canonical lease that no "
+                          "session holds. An unserialized run is how two "
+                          "executions publish from half of each.",
+                          LEASE_HELD_ENV, inherited)
+                return 2
+            log.info("canonical execution lease held by %s — inheriting "
+                     "(verified against pg_locks)", inherited)
+            return _run()
+        finally:
+            lease_conn.close()
+
     try:
         with canonical_lease(lease_conn, wait_seconds=MANUAL_WAIT_SECONDS,
                              why="canonical_driver"):

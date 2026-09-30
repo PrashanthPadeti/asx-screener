@@ -115,6 +115,39 @@ AUXILIARY_WAIT_SECONDS = 5 * 60
 LEASE_HELD_ENV = "ASX_CANONICAL_LEASE_HELD"
 
 
+def lease_is_held(conn) -> bool:
+    """Is the canonical lease actually held by SOME session right now?
+
+    Asked of pg_locks, which is cluster-wide, so a caller can verify a lease
+    another process holds without being able to take it.
+
+    This exists because inheritance was claim-based. A child that found
+    ASX_CANONICAL_LEASE_HELD set skipped the lock entirely and trusted the
+    variable -- so anyone who exported it, deliberately or by inheriting a
+    stale shell, walked straight past the only thing serializing canonical
+    mutation. An environment variable is an assertion; this is the evidence
+    for it.
+
+    Note what it deliberately does NOT claim: that the lock is held by our
+    parent, or by anyone in particular. Advisory locks carry no ownership we
+    can attribute across sessions. It establishes that a canonical execution
+    is genuinely in flight, which is the thing an inheriting child needs to be
+    true, and it fails closed when the claim has nothing behind it.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT count(*) > 0
+              FROM pg_locks
+             WHERE locktype = 'advisory'
+               AND ((classid::bigint << 32) | objid::bigint) = %s
+               AND granted
+            """,
+            (CANONICAL_LEASE_KEY,),
+        )
+        return bool(cur.fetchone()[0])
+
+
 @contextmanager
 def auxiliary_lease(dsn: str, *, why: str, wait_seconds: int = AUXILIARY_WAIT_SECONDS):
     """Hold the lease on a connection of its own, for an auxiliary writer.

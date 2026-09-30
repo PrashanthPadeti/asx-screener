@@ -93,6 +93,37 @@ def test_the_body_still_runs():
     assert "_run" in body
 
 
+def test_inheritance_is_verified_not_believed():
+    """ASX_CANONICAL_LEASE_HELD is an assertion, not evidence.
+
+    A child that finds it set and skips the lock trusts whatever exported it
+    -- deliberately, or a stale shell from an earlier wrapper run. The claim
+    must be checked against pg_locks, and a claim with nothing behind it must
+    refuse rather than proceed unserialized.
+    """
+    body = ast.dump(_main())
+    assert "lease_is_held" in body, (
+        "an inherited lease claim must be verified against pg_locks")
+
+
+def test_the_refusal_precedes_the_run_body():
+    """It must refuse BEFORE create_run and before any canonical mutation.
+
+    Proven by position: every `return _run()` has to sit inside the lease
+    handling, never before it.
+    """
+    main = _main()
+    lease_calls = [n.lineno for n in ast.walk(main)
+                   if isinstance(n, ast.Call)
+                   and getattr(n.func, "id", "") in
+                   ("canonical_lease", "lease_is_held")]
+    run_calls = [n.lineno for n in ast.walk(main)
+                 if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_run"]
+    assert lease_calls and run_calls
+    assert min(lease_calls) < min(run_calls), (
+        "the run body is reachable before the lease is settled")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

@@ -398,28 +398,41 @@ def canonical_execution(tracker):
         with canonical_lease(conn, wait_seconds=SCHEDULED_WAIT_SECONDS,
                              why="daily_pipeline"):
             log.info("── canonical execution: DAILY_CANONICAL ──")
-            result = subprocess.run([
-                PYTHON, str(BASE_DIR / "scripts" / "p0a_canonical_run.py"),
-                "--plan", "DAILY_CANONICAL", "--execute", "--allow-production",
-            ])
-            published = result.returncode == 0
-            if published:
-                tracker.finish_step(5, success=True)
-            else:
+            # Set BEFORE the driver is spawned, not after.
+            #
+            # This flag began life as a message to the SUFFIX, whose own
+            # auxiliary_lease would otherwise block on the lock this process
+            # holds. The driver did not need it, because the driver took no
+            # lease. Once the driver started serializing itself -- so that a
+            # hand-invoked run could not race another -- it became a party to
+            # the same contract, and a flag set after the subprocess is a flag
+            # the subprocess never sees.
+            #
+            # Observed in production, 30 Sep 2026: the wrapper took the lease,
+            # spawned the driver, and the driver refused against its own
+            # parent. Nothing was published. subprocess inherits os.environ at
+            # spawn time, so the order is the whole mechanism.
+            os.environ[LEASE_HELD_ENV] = "daily_pipeline"
+            try:
+                result = subprocess.run([
+                    PYTHON, str(BASE_DIR / "scripts" / "p0a_canonical_run.py"),
+                    "--plan", "DAILY_CANONICAL", "--execute",
+                    "--allow-production",
+                ])
+                published = result.returncode == 0
+                if published:
+                    tracker.finish_step(5, success=True)
+                else:
                 # Not a pipeline crash. The driver's own failure semantics
                 # decide what state the database is in, and every one of them
                 # leaves something coherent serving. The wrapper records the
                 # outcome and lets the suffix be skipped.
-                log.error("canonical driver exited %d — no publication this "
-                          "cycle; see its log for which boundary it stopped "
-                          "at", result.returncode)
-                tracker.finish_step(5, success=False,
-                                    error=f"canonical driver exit "
-                                          f"{result.returncode}")
-            # The suffix runs inside this lease. Tell it so, or its own
-            # auxiliary_lease would block on the lock this process holds.
-            os.environ[LEASE_HELD_ENV] = "daily_pipeline"
-            try:
+                    log.error("canonical driver exited %d — no publication "
+                              "this cycle; see its log for which boundary it "
+                              "stopped at", result.returncode)
+                    tracker.finish_step(5, success=False,
+                                        error=f"canonical driver exit "
+                                              f"{result.returncode}")
                 yield published
             finally:
                 os.environ.pop(LEASE_HELD_ENV, None)

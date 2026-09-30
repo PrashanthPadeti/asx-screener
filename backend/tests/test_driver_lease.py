@@ -124,6 +124,70 @@ def test_the_refusal_precedes_the_run_body():
         "the run body is reachable before the lease is settled")
 
 
+# ── The other half of the contract ───────────────────────────────────────────
+#
+# Every test above checks that the DRIVER reads the inheritance flag. None of
+# them checked that the WRAPPER sets it before spawning the driver, and that
+# is where it broke in production on 30 Sep 2026:
+#
+#     22:33:14  canonical execution lease acquired by weekly_pipeline
+#     22:33:14  REFUSING: canonical execution lease held by an unidentified
+#               session; canonical_driver waited 0s and is refusing
+#     22:33:14  canonical driver exited 2 — no publication this cycle
+#
+# The wrapper set the flag AFTER subprocess.run, because it was written when
+# the flag's only audience was the suffix. subprocess inherits os.environ at
+# spawn time, so a flag set afterwards is a flag the child never sees. The
+# driver refused against its own parent and nothing published.
+#
+# A contract with two parties needs a test that spans both of them.
+
+WRAPPERS = ("scripts/eodhd/v2/jobs/weekly_pipeline.py",
+            "scripts/eodhd/v2/jobs/daily_pipeline.py")
+
+
+def _canonical_execution(path: Path) -> ast.FunctionDef:
+    tree = ast.parse((BACKEND / path).read_text(encoding="utf-8"))
+    return next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "canonical_execution")
+
+
+def test_each_wrapper_hands_the_lease_over_before_spawning_the_driver():
+    for wrapper in WRAPPERS:
+        fn = _canonical_execution(wrapper)
+
+        sets = [n.lineno for n in ast.walk(fn)
+                if isinstance(n, ast.Assign)
+                and any(isinstance(t, ast.Subscript)
+                        and getattr(t.value, "attr", "") == "environ"
+                        for t in n.targets)]
+        spawns = [n.lineno for n in ast.walk(fn)
+                  if isinstance(n, ast.Call)
+                  and getattr(n.func, "attr", "") == "run"
+                  and "p0a_canonical_run" in ast.dump(n)]
+
+        assert sets, f"{wrapper}: the wrapper never sets the inheritance flag"
+        assert spawns, f"{wrapper}: no canonical driver spawn found"
+        assert min(sets) < min(spawns), (
+            f"{wrapper}: the inheritance flag is set at line {min(sets)}, "
+            f"after the driver is spawned at line {min(spawns)}. subprocess "
+            f"inherits os.environ at spawn time, so the driver will refuse "
+            f"against its own parent and nothing will publish.")
+
+
+def test_each_wrapper_clears_the_flag_on_every_path():
+    """It must not leak into whatever the operator runs next in that shell."""
+    for wrapper in WRAPPERS:
+        fn = _canonical_execution(wrapper)
+        body = ast.dump(fn)
+        assert "pop" in body, f"{wrapper}: the flag is never cleared"
+        assert any(isinstance(n, ast.Try) and n.finalbody
+                   for n in ast.walk(fn)), (
+            f"{wrapper}: the flag must be cleared in a finally, or a driver "
+            f"failure leaves it set")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

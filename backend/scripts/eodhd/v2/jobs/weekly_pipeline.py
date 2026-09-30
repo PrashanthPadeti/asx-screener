@@ -150,16 +150,30 @@ def canonical_execution(plan: str, *, why: str):
         with canonical_lease(conn, wait_seconds=SCHEDULED_WAIT_SECONDS,
                              why=why):
             log.info("── canonical execution: %s ──", plan)
-            result = subprocess.run([
-                PYTHON, str(BASE_DIR / "scripts" / "p0a_canonical_run.py"),
-                "--plan", plan, "--execute", "--allow-production",
-            ])
-            if result.returncode != 0:
-                log.error("canonical driver exited %d — no publication this "
-                          "cycle; see its log for which boundary it stopped "
-                          "at", result.returncode)
+            # Set BEFORE the driver is spawned, not after.
+            #
+            # This flag began life as a message to the SUFFIX, whose own
+            # auxiliary_lease would otherwise block on the lock this process
+            # holds. The driver did not need it, because the driver took no
+            # lease. Once the driver started serializing itself -- so that a
+            # hand-invoked run could not race another -- it became a party to
+            # the same contract, and a flag set after the subprocess is a flag
+            # the subprocess never sees.
+            #
+            # Observed in production, 30 Sep 2026: the wrapper took the lease,
+            # spawned the driver, and the driver refused against its own
+            # parent. Nothing was published. subprocess inherits os.environ at
+            # spawn time, so the order is the whole mechanism.
             os.environ[LEASE_HELD_ENV] = why
             try:
+                result = subprocess.run([
+                    PYTHON, str(BASE_DIR / "scripts" / "p0a_canonical_run.py"),
+                    "--plan", plan, "--execute", "--allow-production",
+                ])
+                if result.returncode != 0:
+                    log.error("canonical driver exited %d — no publication "
+                              "this cycle; see its log for which boundary it "
+                              "stopped at", result.returncode)
                 yield result.returncode == 0
             finally:
                 os.environ.pop(LEASE_HELD_ENV, None)

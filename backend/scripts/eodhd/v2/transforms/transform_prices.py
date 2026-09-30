@@ -412,13 +412,39 @@ def build_population_result(cur, args, details: dict):
     # do. The second is a bug wearing the same shape.
     no_work = None
     if not expected and not written:
-        cur.execute("SELECT count(*) FROM staging_au.eod_prices")
-        staged_total = cur.fetchone()[0]
+        # Watermarks, not a recount of the window. Re-asking the query that
+        # produced the zero would justify the zero with itself; comparing the
+        # source's high-water mark against the target's asks whether anything
+        # is OUTSTANDING, which is a different question with a different
+        # failure mode.
+        #
+        #   source empty                  nothing exists to transform
+        #   source watermark <= target's  everything it holds is already in
+        #   source watermark >  target's  rows are waiting and this run took
+        #                                 none of them -- NOT justified
+        #
+        # The third case is the one worth failing on, and it is what the first
+        # version of this predicate could not express: it justified only an
+        # empty source, so a FULL_FUNDAMENTALS run -- which downloads no
+        # prices and legitimately has nothing outstanding -- was refused.
+        # Observed on run 4, 30 Sep 2026.
+        cur.execute("SELECT count(*), max(date) FROM staging_au.eod_prices")
+        staged_total, staged_high = cur.fetchone()
+        cur.execute(f"SELECT max({STAGING_DATE}) FROM market.daily_prices")
+        target_high = cur.fetchone()[0]
+
         if staged_total == 0:
             no_work = ("staging_au.eod_prices is empty outright, so there is "
                        "nothing to transform in any window")
-        # Otherwise no_work stays None, the result is vacuous, and it fails --
-        # rows exist and this window selected none of them.
+        elif staged_high is not None and target_high is not None \
+                and staged_high <= target_high:
+            no_work = (
+                f"staging_au.eod_prices holds nothing the target lacks: "
+                f"source watermark {staged_high}, target watermark "
+                f"{target_high}")
+        details = dict(details or {})
+        details["source_watermark"] = str(staged_high)
+        details["target_watermark"] = str(target_high)
 
     return StageResult(
         "transform_prices",

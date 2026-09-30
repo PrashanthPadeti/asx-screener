@@ -80,6 +80,30 @@ def test_a_real_shortfall_still_fails_for_its_own_reason():
     assert "expected but not written" in r.summary()
 
 
+def test_the_zero_justification_asks_a_different_question_than_the_zero():
+    """transform_prices must not justify an empty expected set by re-running
+    the query that produced it.
+
+    The first version asked only "is staging empty outright", which justified
+    nothing else -- so a FULL_FUNDAMENTALS run, which downloads no prices and
+    legitimately has nothing outstanding, was refused. Run 4 died on it,
+    30 Sep 2026.
+
+    The predicate now compares watermarks: does the source hold anything the
+    target lacks. Three outcomes, and only the third is a failure --
+    source empty, source already consumed, or rows waiting that this run took
+    none of.
+    """
+    src = (BACKEND / "scripts/eodhd/v2/transforms/transform_prices.py").read_text(
+        encoding="utf-8")
+    assert "watermark" in src
+    assert "max(date)" in src, "the source watermark must be read"
+    assert "market.daily_prices" in src, "the target watermark must be read"
+    # Recorded in evidence, so a later reader can tell a justified zero from a
+    # bare one without rerunning anything.
+    assert "source_watermark" in src and "target_watermark" in src
+
+
 def test_no_work_expected_cannot_excuse_a_real_shortfall():
     """A reason for emptiness must not become a reason for incompleteness."""
     r = StageResult("yearly_compute", frozenset({"BHP", "CBA"}),

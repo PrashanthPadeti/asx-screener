@@ -3,22 +3,43 @@ Daily Pipeline — ASX Screener
 ==============================
 Runs after ASX market close each weekday (08:30 UTC = 18:30 AEST).
 
-Steps:
-  1.  Download today's EOD prices (per-stock, from yesterday) → Raw Zone
-  2.  Download ASIC short positions                           → Raw Zone
-  3.  Load prices → staging_au.eod_prices                    (today's files, UPSERT)
-  4.  Load short positions → staging_au.short_positions
-  5.  Transform prices → market.daily_prices                  (from yesterday)
-  6.  Transform short positions → market.short_positions
-  7.  Daily compute engine → market.computed_metrics
-  8.  Technical compute engine → market.daily_metrics
-  9.  Half-yearly compute engine → market.halfyearly_metrics
-  10. Period metrics compute engine → market.period_metrics
-  11. [SKIPPED] ASX index prices → market.index_prices        (APScheduler handles at 5:30 PM)
-  12. [SKIPPED] ETF & fund prices → market.fund_prices        (APScheduler handles at 5:35 PM)
-  13. Build screener.universe → Golden Record
-  14. Heatmap cache → market.heatmap_cache / heatmap_labels
-  15. [SKIPPED] Market snapshots → snapshots                  (APScheduler handles at 6:45 PM)
+Shape (rule 3 of docs/canonical_orchestration.md):
+
+    INGESTION PREFIX
+      1.  Download today's EOD prices (per-stock, from yesterday) -> Raw Zone
+      2.  Download ASIC short positions                           -> Raw Zone
+      3.  Load prices -> staging_au.eod_prices                    (UPSERT)
+      4.  Load short positions -> staging_au.short_positions
+      6.  Transform short positions -> market.short_positions
+
+    ══ INGESTION BARRIER ══  acquire the canonical execution lease
+
+    CANONICAL DRIVER  p0a_canonical_run.py --plan DAILY_CANONICAL
+      admission (incl. the yearly reuse fingerprint), then transform_prices,
+      daily_compute, technical_compute, halfyearly_compute,
+      period_metrics_compute, universe_build, and the canonical tail:
+      publication-time fingerprint recheck, canonical commit, full-population
+      read-back, finalisation.
+
+    POST-PUBLICATION SUFFIX  (inside the lease, only if finalisation succeeded)
+      14. Heatmap cache -> market.heatmap_cache / heatmap_labels
+
+      11, 12, 15 remain handled by APScheduler.
+
+Why the compute steps are not here any more
+-------------------------------------------
+They used to be: six separate commands running transform_prices,
+daily_compute, technical_compute, halfyearly_compute,
+period_metrics_compute and build_screener_universe. build_screener_universe
+invalidates the canonical contract atomically -- by design -- and nothing
+here re-established it, so every run revoked the published snapshot and the
+governed surface failed closed until a human repaired it. Production ran that
+way until the cron was disabled on 23 Sep 2026.
+
+Those six steps ARE the DAILY_CANONICAL plan. They now run once, through the
+driver, which owns admission before the first derived mutation: a refused
+fingerprint leaves yesterday's validated snapshot intact rather than creating
+today's unattributed universe.
 
 Usage:
     python scripts/eodhd/v2/jobs/daily_pipeline.py
@@ -36,6 +57,7 @@ import logging
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -83,6 +105,15 @@ if not COMPUTE.is_dir():
 PYTHON    = sys.executable
 TODAY     = date.today().isoformat()
 YESTERDAY = (date.today() - timedelta(days=1)).isoformat()
+
+# BASE_DIR itself, so `compute.engine.*` is importable.
+#
+# This pipeline only ever INVOKED compute scripts as subprocesses, so it never
+# needed them on sys.path — until the canonical lease became an in-process
+# import. Run as `python scripts/eodhd/v2/jobs/daily_pipeline.py`, the
+# interpreter puts the script's own directory on sys.path, not backend, and
+# the import failed at the canonical block after the whole prefix had run.
+sys.path.insert(0, str(BASE_DIR))
 
 # Shared alert utility — path: backend/scripts/utils/alert.py (as weekly_pipeline)
 sys.path.insert(0, str(BASE_DIR / "scripts"))
@@ -309,6 +340,99 @@ def run_optional(label: str, cmd: list[str],
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def _sync_db_url() -> str:
+    """The synchronous DSN, resolved the same way PipelineTracker resolves it.
+
+    Deliberately not app.core.db.get_database_url_sync: importing the
+    application from a pipeline pulls in its settings, its routes and its
+    lifespan, and this process has no business constructing any of that.
+    """
+    import os
+
+    url = os.environ.get("DATABASE_URL_SYNC", "")
+    if not url:
+        url = os.environ.get("DATABASE_URL", "").replace(
+            "postgresql+asyncpg://", "postgresql://")
+    if not url:
+        raise SystemExit(
+            "FATAL: neither DATABASE_URL_SYNC nor DATABASE_URL is set, so the "
+            "canonical execution lease cannot be taken. Refusing to run the "
+            "canonical driver unserialized.")
+    return url
+
+
+@contextmanager
+def canonical_execution(tracker):
+    """Hold the lease, run the canonical driver, then yield to the suffix.
+
+    The wrapper owns the lease rather than the driver, because the driver
+    exits at finalisation and the suffix reads `screener.universe` after it.
+    Releasing at finalisation would let a later run's provisional rebuild
+    revoke attribution while a suffix consumer was still reading — so the
+    lease spans admission through the last consumer of live canonical state.
+
+    Yields True when a publication happened. A refused or failed driver
+    yields False and the suffix does not run: those consumers read the
+    published universe, and there is nothing newly published to read.
+
+    Failure semantics, per docs/canonical_orchestration.md:
+
+        lease timeout        prior run keeps serving, freshness may degrade
+        admission refused    no run created, nothing rebuilt, prior serves
+        producer failure     prior run keeps serving
+        tail failure         new rows unattributed, governed surface fails closed
+        finalisation         new run is authoritative
+    """
+    import psycopg2
+
+    import os
+
+    from compute.engine.canonical_lease import (
+        LEASE_HELD_ENV, SCHEDULED_WAIT_SECONDS, LeaseUnavailable,
+        canonical_lease,
+    )
+
+    conn = psycopg2.connect(_sync_db_url())
+    conn.autocommit = True
+    try:
+        with canonical_lease(conn, wait_seconds=SCHEDULED_WAIT_SECONDS,
+                             why="daily_pipeline"):
+            log.info("── canonical execution: DAILY_CANONICAL ──")
+            result = subprocess.run([
+                PYTHON, str(BASE_DIR / "scripts" / "p0a_canonical_run.py"),
+                "--plan", "DAILY_CANONICAL", "--execute", "--allow-production",
+            ])
+            published = result.returncode == 0
+            if published:
+                tracker.finish_step(5, success=True)
+            else:
+                # Not a pipeline crash. The driver's own failure semantics
+                # decide what state the database is in, and every one of them
+                # leaves something coherent serving. The wrapper records the
+                # outcome and lets the suffix be skipped.
+                log.error("canonical driver exited %d — no publication this "
+                          "cycle; see its log for which boundary it stopped "
+                          "at", result.returncode)
+                tracker.finish_step(5, success=False,
+                                    error=f"canonical driver exit "
+                                          f"{result.returncode}")
+            # The suffix runs inside this lease. Tell it so, or its own
+            # auxiliary_lease would block on the lock this process holds.
+            os.environ[LEASE_HELD_ENV] = "daily_pipeline"
+            try:
+                yield published
+            finally:
+                os.environ.pop(LEASE_HELD_ENV, None)
+    except LeaseUnavailable as exc:
+        # Another canonical execution is in flight. The previously finalised
+        # output keeps serving; this cycle simply does not publish.
+        log.error("%s", exc)
+        tracker.finish_step(5, success=False, error=str(exc)[:400])
+        yield False
+    finally:
+        conn.close()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-download", action="store_true",
@@ -362,36 +486,41 @@ def main():
         PYTHON, str(ASIC / "load_to_staging_short.py"),
     ], tracker=tracker, step=4)
 
-    # ── Step 5: Transform prices → market.daily_prices ───────────────────────
-    run("Step 5: Transform prices → market.daily_prices", [
-        PYTHON, str(SCRIPTS / "transforms" / "transform_prices.py"),
-        "--from-date", YESTERDAY,
-    ], tracker=tracker, step=5)
-
     # ── Step 6: Transform short positions (non-fatal) ────────────────────────
+    #
+    # Moved ahead of the canonical block, where it belongs. It writes
+    # market.short_positions, a canonical INPUT, so it is PRE_INGESTION and
+    # must complete before admission — not run between two compute stages
+    # while the driver is reading the table it is writing.
     run_optional("Step 6: Transform short positions → market.short_positions", [
         PYTHON, str(ASIC / "transforms" / "transform_short.py"),
     ], tracker=tracker, step=6)
 
-    # ── Step 7: Daily compute engine ──────────────────────────────────────────
-    run("Step 7: Daily compute → market.computed_metrics", [
-        PYTHON, str(COMPUTE / "daily_compute.py"),
-    ], tracker=tracker, step=7)
-
-    # ── Step 8: Technical compute engine ──────────────────────────────────────
-    run("Step 8: Technical compute → market.daily_metrics", [
-        PYTHON, str(COMPUTE / "technical_compute.py"),
-    ], tracker=tracker, step=8)
-
-    # ── Step 9: Half-yearly compute ───────────────────────────────────────────
-    run("Step 9: Half-yearly compute → market.halfyearly_metrics", [
-        PYTHON, str(COMPUTE / "halfyearly_compute.py"),
-    ], tracker=tracker, step=9)
-
-    # ── Step 10: Period metrics ────────────────────────────────────────────────
-    run("Step 10: Period metrics → market.period_metrics", [
-        PYTHON, str(COMPUTE / "period_metrics_compute.py"),
-    ], tracker=tracker, step=10)
+    # ═══ INGESTION BARRIER ═══════════════════════════════════════════════════
+    #
+    # Everything above fills source and staging state. Everything below can
+    # determine one of the 72 governed values, and belongs to the canonical
+    # driver under the execution lease.
+    #
+    # Steps 5, 7, 8, 9, 10 and 13 used to run here as six separate commands
+    # and are now ONE driver invocation, because they are exactly
+    # DAILY_CANONICAL's stages: transform_prices, daily_compute,
+    # technical_compute, halfyearly_compute, period_metrics_compute,
+    # universe_build, then the canonical tail. Running them here AND in the
+    # driver would compute everything twice; running them only here is what
+    # left the contract revoked every morning with nothing to re-establish it.
+    #
+    # The driver owns admission. Its plan preconditions — including the yearly
+    # reuse fingerprint — are evaluated AFTER the lease is acquired and BEFORE
+    # any derived mutation, so a refusal leaves yesterday's validated snapshot
+    # intact rather than creating today's unattributed universe.
+    for step, name in ((5, "Step 5: Transform prices"),
+                       (7, "Step 7: Daily compute"),
+                       (8, "Step 8: Technical compute"),
+                       (9, "Step 9: Half-yearly compute"),
+                       (10, "Step 10: Period metrics"),
+                       (13, "Step 13: Build screener.universe")):
+        tracker.skip_step(step, f"{name} — executed by the canonical driver")
 
     # ── Step 11: ASX index prices (Yahoo Finance) ─────────────────────────────
     # Skipped — APScheduler handles this at 5:30 PM (non-core screener data)
@@ -403,15 +532,23 @@ def main():
     log.info("Step 12: Skipped (handled by APScheduler at 5:35 PM)")
     tracker.skip_step(12, "Step 12: ETF & fund prices")
 
-    # ── Step 13: Build screener.universe ──────────────────────────────────────
-    run("Step 13: Build screener.universe", [
-        PYTHON, str(SCRIPTS / "build_screener_universe.py"),
-    ], tracker=tracker, step=13)
-
-    # ── Step 14: Heatmap cache ────────────────────────────────────────────────
-    run_optional("Step 14: Heatmap cache → market.heatmap_cache", [
-        PYTHON, str(COMPUTE / "heatmap_compute.py"),
-    ], tracker=tracker, step=14)
+    with canonical_execution(tracker) as published:
+        # ── Step 14: Heatmap cache — POST_PUBLICATION suffix ─────────────────
+        #
+        # Inside the lease and conditional on finalisation. It reads
+        # screener.universe, so releasing the lease at finalisation would let
+        # a later run's provisional rebuild revoke attribution underneath it
+        # and leave this reading un-attributed state.
+        #
+        # Non-fatal by design: once finalisation succeeds the publication is
+        # authoritative, and a downstream consumer failing must not
+        # retroactively invalidate it. It reports its own health instead.
+        if published:
+            run_optional("Step 14: Heatmap cache → market.heatmap_cache", [
+                PYTHON, str(COMPUTE / "heatmap_compute.py"),
+            ], tracker=tracker, step=14)
+        else:
+            tracker.skip_step(14, "Step 14: Heatmap cache — no publication")
 
     # ── Step 15: Market snapshots (runs after universe rebuild) ───────────────
     # Skipped — APScheduler handles this at 6:45 PM (admin dashboard only, non-core)

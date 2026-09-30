@@ -72,7 +72,18 @@ def make_key(*parts: str) -> str:
 
 
 async def cache_get(key: str) -> Optional[Any]:
-    """Return cached value (deserialized JSON) or None on miss/error."""
+    """Return cached value (deserialized JSON) or None on miss/error.
+
+    Disabled outright in instrument mode rather than merely read-only. A
+    cached body was projected under whatever contract was current when it was
+    stored, so a diagnostic that reads the serving cache can assert against a
+    response IT DID NOT CAUSE — and pass because of what an earlier run left
+    behind. Gate B hit exactly that. A miss is always a safe answer; a stale
+    hit is not.
+    """
+    from app.core.instrument import instrument_mode
+    if instrument_mode():
+        return None
     client = _get_client()
     if client is None:
         return None
@@ -87,7 +98,17 @@ async def cache_get(key: str) -> Optional[Any]:
 
 
 async def cache_set(key: str, value: Any, ttl: int = SCREENER_TTL) -> bool:
-    """Serialize value to JSON and store with TTL. Returns True on success."""
+    """Serialize value to JSON and store with TTL. Returns True on success.
+
+    Suppressed in instrument mode — declined, recorded and logged, but NOT
+    raised. The application writes this cache on its own initiative at the end
+    of a request, so raising here breaks the surface an instrument is
+    measuring; Gate B died exactly that way. What matters is that the write
+    does not land, and it does not.
+    """
+    from app.core.instrument import suppress
+    if suppress(f"cache write to {key!r}"):
+        return False
     client = _get_client()
     if client is None:
         return False
@@ -101,6 +122,9 @@ async def cache_set(key: str, value: Any, ttl: int = SCREENER_TTL) -> bool:
 
 async def cache_delete(key: str) -> bool:
     """Delete a cache key. Returns True on success."""
+    from app.core.instrument import suppress
+    if suppress(f"cache delete of {key!r}"):
+        return False
     client = _get_client()
     if client is None:
         return False

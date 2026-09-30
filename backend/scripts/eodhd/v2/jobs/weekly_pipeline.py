@@ -36,6 +36,7 @@ import argparse
 import logging
 import os
 import subprocess
+from contextlib import contextmanager
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -54,6 +55,7 @@ COMPUTE  = BASE_DIR / "compute" / "engine"
 PYTHON   = sys.executable
 
 # Shared alert utility — path: backend/scripts/utils/alert.py
+sys.path.insert(0, str(BASE_DIR))
 sys.path.insert(0, str(BASE_DIR / "scripts"))
 from utils.alert import send_failure_alert  # noqa: E402
 
@@ -111,6 +113,61 @@ def run_optional(label: str, cmd: list[str]) -> None:
 def is_first_monday_of_month(today: date) -> bool:
     """True if today is the first Monday of its calendar month."""
     return today.weekday() == 0 and today.day <= 7
+
+
+def _sync_dsn() -> str:
+    """The canonical lease needs a plain psycopg2 DSN, not the asyncpg URL."""
+    url = os.environ.get("DATABASE_URL_SYNC", "")
+    if not url:
+        url = os.environ.get("DATABASE_URL", "").replace(
+            "postgresql+asyncpg://", "postgresql://")
+    if not url:
+        raise SystemExit(
+            "FATAL: neither DATABASE_URL_SYNC nor DATABASE_URL is set, so the "
+            "canonical execution lease cannot be taken. Refusing to run the "
+            "canonical driver unserialized.")
+    return url
+
+
+@contextmanager
+def canonical_execution(plan: str, *, why: str):
+    """Hold the lease, run the canonical driver, then yield to the suffix.
+
+    Identical in shape to daily_pipeline's, and deliberately so: the wrapper
+    owns the lease because the driver exits at finalisation while the suffix
+    still reads screener.universe.
+    """
+    import psycopg2
+
+    from compute.engine.canonical_lease import (
+        LEASE_HELD_ENV, SCHEDULED_WAIT_SECONDS, LeaseUnavailable,
+        canonical_lease,
+    )
+
+    conn = psycopg2.connect(_sync_dsn())
+    conn.autocommit = True
+    try:
+        with canonical_lease(conn, wait_seconds=SCHEDULED_WAIT_SECONDS,
+                             why=why):
+            log.info("── canonical execution: %s ──", plan)
+            result = subprocess.run([
+                PYTHON, str(BASE_DIR / "scripts" / "p0a_canonical_run.py"),
+                "--plan", plan, "--execute", "--allow-production",
+            ])
+            if result.returncode != 0:
+                log.error("canonical driver exited %d — no publication this "
+                          "cycle; see its log for which boundary it stopped "
+                          "at", result.returncode)
+            os.environ[LEASE_HELD_ENV] = why
+            try:
+                yield result.returncode == 0
+            finally:
+                os.environ.pop(LEASE_HELD_ENV, None)
+    except LeaseUnavailable as exc:
+        log.error("%s", exc)
+        yield False
+    finally:
+        conn.close()
 
 
 def main():
@@ -213,17 +270,12 @@ def main():
         PYTHON, str(BASE_DIR / "scripts" / "assert_feed_health.py"),
     ])
 
-    # ── Step 4: Yearly compute ────────────────────────────────────────────────
-    run("Step 4: Yearly compute → market.yearly_metrics", [
-        PYTHON, str(COMPUTE / "yearly_compute.py"),
-    ])
-
-    # ── Step 5: Half-yearly compute ───────────────────────────────────────────
-    run("Step 5: Half-yearly compute → market.halfyearly_metrics", [
-        PYTHON, str(COMPUTE / "halfyearly_compute.py"),
-    ])
-
     # ── Step 6: Weekly compute ────────────────────────────────────────────────
+    #
+    # Moved ahead of the barrier with step 7. Both write canonical INPUTS —
+    # market.weekly_metrics and market.monthly_metrics — which plan stages
+    # read. An input written after admission moves the source out from under
+    # a contract already being computed against it.
     run("Step 6: Weekly compute → market.weekly_metrics", [
         PYTHON, str(COMPUTE / "weekly_compute.py"),
         "--from-date", from_date,
@@ -245,22 +297,38 @@ def main():
         log.info("Step 7: Monthly compute skipped "
                  "(not first Monday of month — use --force-monthly to override)")
 
-    # ── Step 8: Rebuild Golden Record ─────────────────────────────────────────
-    run("Step 8: Build screener.universe", [
-        PYTHON, str(SCRIPTS / "build_screener_universe.py"),
-    ])
-
-    # ── Step 9: Post-universe enrichment ──────────────────────────────────────
-    # Runs after the golden record is fully rebuilt.
-    run("Step 9a: Composite factor scores → screener.universe", [
-        PYTHON, str(COMPUTE / "composite_score.py"),
-    ])
-    run("Step 9b: Pros/Cons signals → screener.universe", [
-        PYTHON, str(COMPUTE / "pros_cons.py"),
-    ])
-    run("Step 9c: Sector benchmarks → market.sector_benchmarks", [
-        PYTHON, str(COMPUTE / "sector_benchmarks.py"),
-    ])
+    # ═══ INGESTION BARRIER ═══════════════════════════════════════════════════
+    #
+    # Steps 4, 5, 8 and 9a used to run here as separate commands —
+    # yearly_compute, halfyearly_compute, build_screener_universe and
+    # composite_score. build_screener_universe invalidates the canonical
+    # contract atomically, and composite_score ran WITHOUT a run id, so the
+    # weekly pipeline rebuilt the universe and then wrote factor scores that
+    # no finalisation vouched for. The resolver could not serve it, and
+    # nothing said so.
+    #
+    # They are now FULL_FUNDAMENTALS_CANONICAL, run once through the driver.
+    # That plan also covers transform_prices, daily_compute,
+    # technical_compute and period_metrics_compute, which the weekly pipeline
+    # never ran: a canonical publication requires every producer the plan
+    # declares, and a run missing four of them was never publishable.
+    with canonical_execution("FULL_FUNDAMENTALS_CANONICAL",
+                             why="weekly_pipeline") as published:
+        # ── Step 9: Post-publication suffix, inside the lease ────────────────
+        #
+        # pros_cons writes non-governed columns of screener.universe;
+        # sector_benchmarks reads it. Both are conditional on finalisation and
+        # neither may invalidate it — once the publication succeeded, a
+        # downstream consumer failing reports its own health instead.
+        if published:
+            run_optional("Step 9b: Pros/Cons signals → screener.universe", [
+                PYTHON, str(COMPUTE / "pros_cons.py"),
+            ])
+            run_optional("Step 9c: Sector benchmarks → market.sector_benchmarks", [
+                PYTHON, str(COMPUTE / "sector_benchmarks.py"),
+            ])
+        else:
+            log.error("Step 9: skipped — no canonical publication this cycle")
 
     log.info(f"Weekly pipeline complete for {today}")
 

@@ -129,11 +129,33 @@ async def lifespan(app: FastAPI):
     from app.workers.cleanup_worker import purge_expired_sessions, run_data_deletion
     from app.workers.mining_reit_worker import sync_mining_reit_metrics
 
-    scheduler = AsyncIOScheduler(job_defaults={
-        "misfire_grace_time": 3600,  # fire missed jobs if up to 1 hour late (survives restarts/deploys)
-        "coalesce": True,            # if multiple firings missed, run only once (no catch-up storm)
-        "max_instances": 1,          # never overlap with a still-running instance
-    })
+    # An instrument gets a scheduler that schedules nothing.
+    #
+    # Importing this module runs the lifespan, and the lifespan is where a
+    # production execution authority comes into being. Twice now a diagnostic
+    # has started nineteen real jobs on the production host purely by
+    # importing the app: Gate B while claiming to be read-only, and
+    # test_admin_scheduler_surface, which passed standalone and failed only
+    # under pytest because it set an environment variable that Settings had
+    # already read.
+    #
+    # The check is here, at the single point of creation, rather than at each
+    # of the twenty add_job call sites — a protection distributed across the
+    # places the mistake keeps being made is a protection that will be missed
+    # in the same way.
+    from app.core.instrument import NullScheduler, instrument_mode
+
+    if instrument_mode():
+        logger.warning(
+            "INSTRUMENT MODE — no scheduler is started. This process is a "
+            "diagnostic; jobs will be declared and none registered.")
+        scheduler = NullScheduler()
+    else:
+        scheduler = AsyncIOScheduler(job_defaults={
+            "misfire_grace_time": 3600,  # fire missed jobs if up to 1 hour late (survives restarts/deploys)
+            "coalesce": True,            # if multiple firings missed, run only once (no catch-up storm)
+            "max_instances": 1,          # never overlap with a still-running instance
+        })
 
     # Price alerts — every 15 min
     scheduler.add_job(check_alerts, trigger="interval", minutes=15,
@@ -297,7 +319,11 @@ async def lifespan(app: FastAPI):
     #
     # Default is on: forgetting to set this leaves production behaving exactly
     # as it does today, and the freeze is the deliberate act.
-    frozen = not settings.SCHEDULERS_ENABLED
+    # Instrument mode implies frozen. Nothing is scheduled, so reporting
+    # "enabled" would describe a scheduler that does not exist — and the admin
+    # surface would then read as twenty jobs missing rather than as a process
+    # that never had any.
+    frozen = not settings.SCHEDULERS_ENABLED or instrument_mode()
     if frozen:
         scheduler.remove_all_jobs()
 

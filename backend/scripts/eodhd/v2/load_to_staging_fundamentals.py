@@ -62,6 +62,99 @@ RAW_BASE = Path(os.getenv("RAW_DATA_DIR", "/opt/asx-screener/data/raw"))
 FUND_DIR    = RAW_BASE / "eodhd" / "exchange=AU" / "fundamentals" / "full_snapshot"
 BATCH_COMMIT = 50
 
+# The currency every governed numeric column is implicitly labelled with.
+#
+# This is a LABEL, not a filter. 160 ASX companies state their financials in
+# something else -- 89 USD, 39 NZD, 16 CAD, and a tail -- and BHP, Amcor and
+# a2 Milk are among them. Excluding them was considered and rejected: what
+# those figures need is a unit, not deletion. The loader records the stated
+# currency and applicability gate 1b suppresses only the ratios that mix an
+# AUD market quantity with a statement one.
+#
+# Do NOT "fix" the ATM overflow by widening the column. Its stated revenue is
+# 88,851,053,565,000.00 IDR; in a wider column that sits beside AUD revenues
+# and dominates every size-ranked screen, silently and wrongly. The overflow
+# was accidentally protective. Comparability, not capacity, was ever the
+# missing thing.
+REPORTING_CURRENCY = "AUD"
+
+
+class Unrepresentable(Exception):
+    """The file states a figure this schema cannot hold at any label.
+
+    Named for what is actually wrong. It began life as ForeignCurrency, back
+    when a foreign currency was thought to be the disqualifier; it is not --
+    a foreign currency is recorded and labelled. A magnitude beyond
+    NUMERIC(20,4) has no representation to label.
+    """
+
+
+#: The widest governed numeric column is NUMERIC(20,4): sixteen integer
+#: digits. A value at or beyond this cannot be stored at all, whatever it is
+#: denominated in.
+REPRESENTABLE_LIMIT = 10 ** 16
+
+#: The sections whose stated currency describes the financial statements.
+FINANCIAL_SECTIONS = ("Income_Statement", "Balance_Sheet", "Cash_Flow")
+
+
+def stated_reporting_currency(raw: dict) -> Optional[str]:
+    """The currency the STATEMENTS are in, as the source states it.
+
+    Not ``General.CurrencyCode``: that is the listing currency and reads AUD
+    for BHP, whose statements are in USD. Returns None when the source states
+    nothing, which is not the same as AUD and must not be defaulted to it --
+    1,016 of 2,019 codes state nothing because they have no statements.
+    """
+    fin = raw.get("Financials") or {}
+    for section in FINANCIAL_SECTIONS:
+        stated = ((fin.get(section) or {}).get("currency_symbol") or "").strip()
+        if stated:
+            return stated.upper()
+    return None
+
+
+def first_unrepresentable(raw: dict):
+    """The first stated figure too large for the schema, or None.
+
+    Scanned before the first write so the refusal costs no partial row. Only
+    the financial statements are scanned: that is where the magnitudes live,
+    and walking the whole blob would spend the time on ratios and percentages
+    that cannot overflow.
+    """
+    fin = raw.get("Financials") or {}
+    for section in FINANCIAL_SECTIONS:
+        block = fin.get(section) or {}
+        for ptype in ("yearly", "quarterly"):
+            periods = block.get(ptype) or {}
+            if not isinstance(periods, dict):
+                continue
+            for period, rec in periods.items():
+                if not isinstance(rec, dict):
+                    continue
+                for field, value in rec.items():
+                    number = sf(value)
+                    if number is not None and abs(number) >= REPRESENTABLE_LIMIT:
+                        return (f"{section}.{ptype}.{period}.{field}", number)
+    return None
+
+
+def period_key(period_date_str, rec):
+    """The source-stated period this record will be filed under, or None.
+
+    One definition, used both by the upserts that admit records and by the
+    population proof that counts them, because a proof that re-implements the
+    admission test is a proof that can drift away from what actually happened.
+
+    Before this existed, each section dropped unparseable periods with a bare
+    `continue`. A file could lose half its years and still be counted as
+    loaded -- a within-file loss that a file-grain proof cannot see, which is
+    why the proof is keyed at (file, section, period) rather than at the file.
+    """
+    if not isinstance(rec, dict):
+        return None
+    return sd(period_date_str)
+
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
 log = logging.getLogger(__name__)
@@ -99,15 +192,17 @@ def st(v) -> Optional[str]:
 # ─── Insert: staging_au.fundamentals ─────────────────────────────────────────────
 
 def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
-                         source_file: str, checksum: str) -> int:
+                         source_file: str, checksum: str,
+                         reporting_currency: Optional[str] = None) -> int:
     general = raw_json.get("General", {})
     cur.execute("""
         INSERT INTO staging_au.fundamentals
             (asx_code, snapshot_date, raw_json, general_code, general_name,
              general_sector, general_industry, updated_at_eodhd,
-             source_file, checksum)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+             source_file, checksum, reporting_currency)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         ON CONFLICT (asx_code) DO UPDATE SET
+            reporting_currency = EXCLUDED.reporting_currency,
             snapshot_date    = EXCLUDED.snapshot_date,
             raw_json         = EXCLUDED.raw_json,
             general_code     = EXCLUDED.general_code,
@@ -124,7 +219,7 @@ def upsert_fundamentals(cur, asx_code: str, snapshot_date: date, raw_json: dict,
         st(general.get("Code")), st(general.get("Name")),
         st(general.get("Sector")), st(general.get("Industry")),
         sd(general.get("UpdatedAt")),
-        source_file, checksum,
+        source_file, checksum, reporting_currency,
     ))
     row = cur.fetchone()
     return row[0] if row else None
@@ -286,10 +381,8 @@ def upsert_income_statement(cur, asx_code: str, periods: dict,
                              period_type: str, fund_id: int) -> int:
     rows = []
     for period_date_str, rec in periods.items():
-        if not isinstance(rec, dict):
-            continue
-        dt = sd(period_date_str)
-        if not dt:
+        dt = period_key(period_date_str, rec)
+        if dt is None:
             continue
         rows.append((
             asx_code, dt, period_type,
@@ -324,10 +417,8 @@ def upsert_balance_sheet(cur, asx_code: str, periods: dict,
                           period_type: str, fund_id: int) -> int:
     rows = []
     for period_date_str, rec in periods.items():
-        if not isinstance(rec, dict):
-            continue
-        dt = sd(period_date_str)
-        if not dt:
+        dt = period_key(period_date_str, rec)
+        if dt is None:
             continue
         rows.append((
             asx_code, dt, period_type,
@@ -367,10 +458,8 @@ def upsert_cash_flow(cur, asx_code: str, periods: dict,
                       period_type: str, fund_id: int) -> int:
     rows = []
     for period_date_str, rec in periods.items():
-        if not isinstance(rec, dict):
-            continue
-        dt = sd(period_date_str)
-        if not dt:
+        dt = period_key(period_date_str, rec)
+        if dt is None:
             continue
         rows.append((
             asx_code, dt, period_type,
@@ -405,10 +494,8 @@ def upsert_cash_flow(cur, asx_code: str, periods: dict,
 def upsert_earnings(cur, asx_code: str, history: dict, fund_id: int) -> int:
     rows = []
     for period_date_str, rec in history.items():
-        if not isinstance(rec, dict):
-            continue
-        dt = sd(period_date_str)
-        if not dt:
+        dt = period_key(period_date_str, rec)
+        if dt is None:
             continue
         rows.append((
             asx_code, dt, "actual",
@@ -445,17 +532,57 @@ def load_file(cur, path: Path) -> dict[str, int]:
         raw = json.load(f)
 
     if not isinstance(raw, dict) or not raw:
-        return {}
+        return {}, set(), set()
+
+    # Two different currencies are stated in one file, and only one of them
+    # is about the numbers. Measured on ATM.AU_2026-06-14 (30 Sep 2026):
+    #
+    #   General.CurrencyCode             AUD   <- the LISTING currency
+    #   Income_Statement currency_symbol IDR   <- the STATEMENTS
+    #   totalRevenue                     88,851,053,565,000.00 IDR
+    #
+    # We RECORD this rather than refuse on it. Refusing would have excluded
+    # 160 companies including BHP, Amcor and a2 Milk; what those figures need
+    # is a unit label, not deletion. applicability.unit_gate then suppresses
+    # only the ratios that mix an AUD market quantity with a statement one.
+    stated_currency = stated_reporting_currency(raw)
+
+    # The one thing that still cannot be loaded: a magnitude the column cannot
+    # hold. ATM's rupiah figures exceed NUMERIC(20,4) (< 10^16), so there is no
+    # value to label -- this is an absence of representable data, not a
+    # labelling problem, and it is counted as an explained exclusion.
+    #
+    # Keyed on magnitude, which is the actual observable, rather than on a
+    # currency list that would rot the first time a currency redenominates.
+    oversized = first_unrepresentable(raw)
+    if oversized is not None:
+        field, magnitude = oversized
+        raise Unrepresentable(
+            f"{stated_currency or 'an unstated currency'} — {field} is "
+            f"{magnitude:.4g}, beyond the representable range (< 1e16)")
 
     import hashlib
     checksum = hashlib.sha256(path.read_bytes()).hexdigest()
 
     fund_id = upsert_fundamentals(cur, asx_code, snapshot_date, raw,
-                                   path.name, checksum)
+                                   path.name, checksum, stated_currency)
     if fund_id is None:
-        return {}
+        return {}, set(), set()
 
     counts: dict[str, int] = {"fundamentals": 1}
+
+    # The within-file population, at the finest key the source states.
+    # `expected` is every period the JSON offers; `written` is every period
+    # admitted. A period the source states and the loader drops shows up as
+    # the difference, which is invisible at file grain.
+    expected: set[str] = set()
+    written:  set[str] = set()
+
+    def account(section: str, ptype: str, periods: dict) -> None:
+        for k, rec in periods.items():
+            expected.add(f"{path.name}|{section}|{ptype}|{k}")
+            if period_key(k, rec) is not None:
+                written.add(f"{path.name}|{section}|{ptype}|{k}")
 
     general = raw.get("General", {})
     if general:
@@ -488,6 +615,7 @@ def load_file(cur, path: Path) -> dict[str, int]:
         for ptype in ("yearly", "quarterly"):
             periods = is_.get(ptype, {})
             if isinstance(periods, dict):
+                account("income", ptype, periods)
                 n = upsert_income_statement(cur, asx_code, periods, ptype, fund_id)
                 counts[f"income_{ptype}"] = n
 
@@ -495,6 +623,7 @@ def load_file(cur, path: Path) -> dict[str, int]:
         for ptype in ("yearly", "quarterly"):
             periods = bs.get(ptype, {})
             if isinstance(periods, dict):
+                account("balance", ptype, periods)
                 n = upsert_balance_sheet(cur, asx_code, periods, ptype, fund_id)
                 counts[f"balance_{ptype}"] = n
 
@@ -502,16 +631,104 @@ def load_file(cur, path: Path) -> dict[str, int]:
         for ptype in ("yearly", "quarterly"):
             periods = cf.get(ptype, {})
             if isinstance(periods, dict):
+                account("cashflow", ptype, periods)
                 n = upsert_cash_flow(cur, asx_code, periods, ptype, fund_id)
                 counts[f"cashflow_{ptype}"] = n
 
     earnings = raw.get("Earnings", {})
     history  = earnings.get("History", {}) if isinstance(earnings, dict) else {}
     if isinstance(history, dict) and history:
+        account("earnings", "history", history)
         n = upsert_earnings(cur, asx_code, history, fund_id)
         counts["earnings"] = n
 
-    return counts
+    return counts, expected, written
+
+
+# ─── The load loop, and what it is allowed to claim ──────────────────────────
+
+def population_proof(expected, written, empty, skipped, failed) -> dict:
+    """Did every key the source stated reach one of the four terminal states?
+
+    Extracted so the proof a test exercises is the proof the loader runs. A
+    test that re-implements this arithmetic proves only that the test agrees
+    with itself.
+    """
+    accounted = set(written) | set(empty) | set(skipped) | set(failed)
+    return {
+        "unaccounted": set(expected) - accounted,   # stated, never resolved
+        "surplus":     accounted - set(expected),   # resolved, never stated
+        "failed":      set(failed),
+    }
+
+
+
+def load_files(conn, cur, files, batch_commit: int = BATCH_COMMIT):
+    """Load every file, and return what can honestly be said about each one.
+
+    Five terminal states, and every file reaches exactly one:
+
+      written   its rows survived an outer COMMIT
+      pending   admitted but not yet durable -- never promoted to `written`
+                until the enclosing transaction commits, because releasing a
+                savepoint does not make anything durable: a later rollback of
+                the outer transaction erases released savepoints too
+      empty     parsed cleanly and offered nothing (an ETF with no Financials
+                block). Observed absence, not failure.
+      skipped   deliberately excluded, with a stated reason (ForeignCurrency)
+      failed    raised. The load does not succeed with any of these.
+
+    `expected` accumulates the file AND every period the file's own JSON
+    states, so a company that silently loses one year is as visible as one
+    that loses all of them -- the within-file loss a file-grain proof is
+    structurally blind to.
+
+    Extracted from main() so the promotion rule can be driven directly by a
+    test: the defect being guarded against is a success recorded before the
+    transaction that would have made it true.
+    """
+    expected: set[str] = set()
+    written:  set[str] = set()
+    pending:  set[str] = set()
+    empty:    set[str] = set()
+    skipped:  dict[str, str] = {}
+    failed:   dict[str, str] = {}
+    total = len(files)
+
+    for i, path in enumerate(files, 1):
+        expected.add(path.name)
+        # A per-file savepoint, because conn.rollback() is per-connection: it
+        # discards everything staged since the last commit, which on 30 Sep
+        # 2026 meant one overflowing file destroyed up to 49 other companies'
+        # rows -- and they had already been counted as loaded.
+        cur.execute("SAVEPOINT one_file")
+        try:
+            counts, file_expected, file_written = load_file(cur, path)
+        except Unrepresentable as exc:
+            cur.execute("ROLLBACK TO SAVEPOINT one_file")
+            skipped[path.name] = str(exc)
+        except Exception as exc:                                  # noqa: BLE001
+            cur.execute("ROLLBACK TO SAVEPOINT one_file")
+            failed[path.name] = str(exc)
+            log.warning("  %s: %s", path.name, exc)
+        else:
+            cur.execute("RELEASE SAVEPOINT one_file")
+            expected |= file_expected
+            pending  |= file_written
+            (pending if counts else empty).add(path.name)
+
+        if i % batch_commit == 0:
+            conn.commit()
+            written |= pending          # durable only now
+            pending.clear()
+            log.info("  [%4d/%d]  written=%d  empty=%d  skipped=%d  failed=%d",
+                     i, total, len(written), len(empty), len(skipped),
+                     len(failed))
+
+    conn.commit()
+    written |= pending
+    pending.clear()
+    return expected, written, empty, skipped, failed
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
@@ -576,27 +793,47 @@ def main():
         conn.commit()
         log.info("Staging tables truncated.")
 
-    done = failed = 0
-
-    for i, path in enumerate(files, 1):
-        try:
-            counts = load_file(cur, path)
-            if counts:
-                done += 1
-        except Exception as e:
-            conn.rollback()
-            failed += 1
-            log.warning(f"  {path.name}: {e}")
-            continue
-
-        if i % BATCH_COMMIT == 0:
-            conn.commit()
-            log.info(f"  [{i:4d}/{total}]  ok={done}  err={failed}")
-
-    conn.commit()
+    expected, written, empty, skipped, failed = load_files(conn, cur, files)
     cur.close()
     conn.close()
-    log.info(f"DONE — {done} files loaded, {failed} errors")
+
+    # ── Population proof ─────────────────────────────────────────────────────
+    proof       = population_proof(expected, written, empty, skipped, failed)
+    unaccounted = proof["unaccounted"]
+    surplus     = proof["surplus"]
+
+    log.info("── files → staging  (grain: file, and file|section|period)")
+    log.info("   expected (manifest) : %d  from %d files", len(expected), total)
+    log.info("   written (committed) : %d", len(written))
+    log.info("   empty (no content)  : %d", len(empty))
+    log.info("   skipped (explained) : %d", len(skipped))
+    log.info("   failed              : %d", len(failed))
+    log.info("   unaccounted         : %d", len(unaccounted))
+    log.info("   surplus             : %d", len(surplus))
+
+    for name, why in sorted(skipped.items())[:10]:
+        log.info("   skipped: %s — %s", name, why)
+    if len(skipped) > 10:
+        log.info("   skipped: … and %d more", len(skipped) - 10)
+
+    if failed or unaccounted or surplus:
+        for name, why in sorted(failed.items())[:20]:
+            log.error("   failed: %s — %s", name, why)
+        for name in sorted(unaccounted)[:20]:
+            log.error("   unaccounted: %s", name)
+        for name in sorted(surplus)[:20]:
+            log.error("   surplus: %s", name)
+        log.error(
+            "LOAD FAILED — %d failed, %d unaccounted, %d surplus. Downstream "
+            "stages derive their expected populations from staging, so a "
+            "silently shrunken staging makes every one of their set-equality "
+            "proofs pass on an incomplete refresh. This stops here instead.",
+            len(failed), len(unaccounted), len(surplus))
+        sys.exit(1)
+
+    log.info("DONE — %d files offered, %d keys expected, %d written, %d empty, "
+             "%d skipped, 0 failed",
+             total, len(expected), len(written), len(empty), len(skipped))
 
 
 if __name__ == "__main__":

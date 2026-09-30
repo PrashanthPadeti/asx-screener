@@ -244,6 +244,24 @@ def apply_applicability(df: pd.DataFrame,
         periods = values.get("periods_available")
         if periods is not None:
             values["periods_available"] = int(periods)
+
+        # The reporting currency is a label, not a quantity, so it cannot come
+        # through OBSERVATION_COLS -- every field there is coerced by
+        # _numeric, which would turn "USD" into None and leave gate 1b unable
+        # to fire on the 160 companies it exists for.
+        #
+        # An absent column and a NULL both stay None, and None means the
+        # source stated no currency. That is deliberately NOT read as AUD:
+        # 1,016 ASX codes state nothing because they have no financial
+        # statements, and suppressing them would cost half the exchange to
+        # fix 160 companies.
+        if "reporting_currency" in df.columns:
+            stated = row.get("reporting_currency")
+            if stated is not None and not pd.isna(stated):
+                text = str(stated).strip()
+                if text:
+                    values["reporting_currency"] = text.upper()
+
         observation = Observation(**values)
         if any(getattr(observation, f) is not None
                for f in OBSERVATION_COLS):

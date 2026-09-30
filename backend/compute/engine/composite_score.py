@@ -88,6 +88,13 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+#: Columns that must NOT be run through pd.to_numeric.
+#:
+#: Every field the applicability layer reads as text belongs here. The failure
+#: is silent: a non-numeric column left out becomes a column of NaN, and the
+#: gate that needed it sees a value that was never missing in the database.
+NON_NUMERIC = {"asx_code", "sector", "industry", "reporting_currency"}
+
 _DEC2FLOAT = psycopg2.extensions.new_type(
     psycopg2.extensions.DECIMAL.values, "DEC2FLOAT",
     lambda v, c: float(v) if v is not None else None,
@@ -619,6 +626,12 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     # Gate 2 needs each metric's own denominator, or it cannot run
     # and every non-positive-denominator ratio passes as applicable.
     select_cols += [c for c in OBSERVATION_COLS.values() if c not in select_cols]
+    # Gate 1b needs the unit each statement figure is stated in. It is not in
+    # OBSERVATION_COLS because it is a label rather than a quantity, and every
+    # column there is coerced numerically -- which would read "USD" as None
+    # and leave the gate unable to fire for BHP.
+    if "reporting_currency" not in select_cols:
+        select_cols.append("reporting_currency")
 
     # Every column this model version persists, because this is now the
     # canonical commit boundary: it re-emits all of them together with the
@@ -655,8 +668,17 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     log.info(f"  Loaded {len(df):,} stocks")
 
     # Coerce numerics — domain columns stay as they are.
-    numeric_cols = [c for c in select_cols
-                    if c != "asx_code" and c not in ("sector", "industry")]
+    #
+    # An exclusion list, not a guess, because the failure is silent: any
+    # non-numeric column left in here becomes a column of NaN, and every
+    # consumer downstream sees a value that was never missing in the database.
+    #
+    # reporting_currency was added to the SELECT for applicability gate 1b and
+    # omitted here, so "USD" arrived at the gate as NaN and BHP's P/E was
+    # published from USD earnings against an AUD price -- the exact defect the
+    # gate exists to stop, undone by a coercion two layers above it. Run 7,
+    # 30 Sep 2026.
+    numeric_cols = [c for c in select_cols if c not in NON_NUMERIC]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 

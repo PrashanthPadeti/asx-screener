@@ -398,10 +398,59 @@ def build_population_result(cur, args, details: dict):
     cur.execute(_digest_sql("market.daily_prices", STAGING_DATE, tgt_w), params)
     written = {(r[0], r[1], r[2]) for r in cur.fetchall()}
 
+    # Zero coverage is a success only when something other than this stage's
+    # own output says zero was right.
+    #
+    # On run 3 (30 Sep 2026) this stage recorded success at expected 0 /
+    # written 0 with equal hashes -- two empty sets agree trivially, so the
+    # record proved nothing and was indistinguishable from a source query that
+    # had silently returned nothing.
+    #
+    # The distinguishing question is asked of a DIFFERENT predicate than the
+    # one that produced `expected`: is the staging table empty outright, or
+    # does it hold rows this window failed to select? The first is nothing to
+    # do. The second is a bug wearing the same shape.
+    no_work = None
+    if not expected and not written:
+        # Watermarks, not a recount of the window. Re-asking the query that
+        # produced the zero would justify the zero with itself; comparing the
+        # source's high-water mark against the target's asks whether anything
+        # is OUTSTANDING, which is a different question with a different
+        # failure mode.
+        #
+        #   source empty                  nothing exists to transform
+        #   source watermark <= target's  everything it holds is already in
+        #   source watermark >  target's  rows are waiting and this run took
+        #                                 none of them -- NOT justified
+        #
+        # The third case is the one worth failing on, and it is what the first
+        # version of this predicate could not express: it justified only an
+        # empty source, so a FULL_FUNDAMENTALS run -- which downloads no
+        # prices and legitimately has nothing outstanding -- was refused.
+        # Observed on run 4, 30 Sep 2026.
+        cur.execute("SELECT count(*), max(date) FROM staging_au.eod_prices")
+        staged_total, staged_high = cur.fetchone()
+        cur.execute(f"SELECT max({STAGING_DATE}) FROM market.daily_prices")
+        target_high = cur.fetchone()[0]
+
+        if staged_total == 0:
+            no_work = ("staging_au.eod_prices is empty outright, so there is "
+                       "nothing to transform in any window")
+        elif staged_high is not None and target_high is not None \
+                and staged_high <= target_high:
+            no_work = (
+                f"staging_au.eod_prices holds nothing the target lacks: "
+                f"source watermark {staged_high}, target watermark "
+                f"{target_high}")
+        details = dict(details or {})
+        details["source_watermark"] = str(staged_high)
+        details["target_watermark"] = str(target_high)
+
     return StageResult(
         "transform_prices",
         frozenset(expected), frozenset(written), details,
-        grain="asx_code+row_count+date_set_digest")
+        grain="asx_code+row_count+date_set_digest",
+        no_work_expected=no_work)
 
 
 if __name__ == "__main__":

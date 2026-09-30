@@ -14,7 +14,17 @@ log = logging.getLogger(__name__)
 
 
 def _client():
-    """Return a configured Resend client, or None if key not set."""
+    """Return a configured Resend client, or None if key not set.
+
+    The single point at which this process can send mail, which is why the
+    instrument check lives here rather than in each of the eight send_*
+    functions above it. Mail is the one side effect that cannot be undone —
+    a cache key expires and a scheduler can be stopped, but a delivered
+    message has already reached a person.
+    """
+    from app.core.instrument import refuse
+    refuse("outbound email", detail="instruments do not send mail")
+
     if not settings.RESEND_API_KEY:
         return None
     import resend

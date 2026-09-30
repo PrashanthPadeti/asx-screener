@@ -90,6 +90,17 @@ class Cause(str, Enum):
     #     we lack a required source field   -> SOURCE_MISSING
     #     the implemented method is invalid -> COMPUTATION_UNSUPPORTED
     COMPUTATION_UNSUPPORTED = "computation_unsupported"
+    # The company is fine, the model is fine, the feed is fine, and the two
+    # sides of the ratio are denominated differently. BHP states its financials
+    # in USD and trades in AUD, so price / EPS is a number with no unit -- and
+    # it has been served as though it had one.
+    #
+    # Distinct from every cause above because of how it clears. More history
+    # will not fix it, a better domain classification will not fix it, and the
+    # source is not missing anything: it clears when the pipeline converts at a
+    # stated FX rate, and not before. Measured 30 Sep 2026 -- 160 ASX companies
+    # report in a non-AUD currency: 89 USD, 39 NZD, 16 CAD, and a tail.
+    UNIT_MISMATCH = "unit_mismatch"
 
 
 class PredicateResult(str, Enum):
@@ -373,6 +384,72 @@ def domain_gate(metric: str, domain: Domain) -> Optional[tuple[Applicability, st
     return None
 
 
+# ── Gate 1b · unit validity ───────────────────────────────────────────────────
+
+#: The reporting currency every governed column is implicitly labelled with.
+BASE_CURRENCY = "AUD"
+
+#: metric -> why a foreign reporting currency makes this number unitless.
+#:
+#: Every one of these divides a quantity derived from the AUD market (price,
+#: market capitalisation, enterprise value) by a quantity taken from the
+#: financial statements. When the statements are in USD the two sides have
+#: different units and the ratio is off by the exchange rate -- BHP's P/E has
+#: been wrong by roughly that factor for as long as the column has existed.
+#:
+#: Ratios of two statement figures are deliberately ABSENT: gross_margin, roe,
+#: debt_to_equity and their kin are currency-invariant, because the units
+#: cancel. Suppressing those would delete correct numbers.
+CROSS_CURRENCY: dict[str, str] = {
+    "pe_ratio":
+        "price is quoted in AUD and earnings per share are stated in "
+        "{currency}; the ratio has no unit until one side is converted",
+    "price_to_book":
+        "price is quoted in AUD and book value per share is stated in "
+        "{currency}",
+    "price_to_sales":
+        "price is quoted in AUD and revenue is stated in {currency}",
+    "peg_ratio":
+        "inherits the AUD/{currency} mismatch in its P/E numerator",
+    "ev_ebitda":
+        "enterprise value is derived from an AUD market capitalisation and "
+        "EBITDA is stated in {currency}",
+    "ev_ebit":
+        "enterprise value is derived from an AUD market capitalisation and "
+        "EBIT is stated in {currency}",
+    "altman_z_score":
+        "the X4 term divides an AUD market value of equity by total "
+        "liabilities stated in {currency}",
+    # Not a mixed ratio but a foreign absolute presented as a dollar figure
+    # beside an AUD share price, which is the same error one step earlier.
+    "book_value_per_share":
+        "stated in {currency} and displayed as a per-share dollar amount "
+        "against an AUD price",
+}
+
+#: Metrics that are unit-sensitive at all.
+UNIT_SENSITIVE = frozenset(CROSS_CURRENCY)
+
+
+def unit_gate(metric: str,
+              reporting_currency: Optional[str]) -> Optional[tuple[Applicability, str]]:
+    """Gate 1b. Returns None when the metric's units are coherent.
+
+    Fires only on a currency we positively know to differ. ``None`` means the
+    source stated no currency -- 1,016 of 2,019 ASX codes state none, because
+    they have no financial statements at all -- and an unknown currency is not
+    evidence of a mismatch. Treating it as one would suppress half the
+    exchange to fix 160 companies.
+    """
+    reason = CROSS_CURRENCY.get(metric)
+    if reason is None or not reporting_currency:
+        return None
+    stated = reporting_currency.strip().upper()
+    if stated == BASE_CURRENCY:
+        return None
+    return (Applicability.NOT_MEANINGFUL, reason.format(currency=stated))
+
+
 # ── Gate 2 · observation validity ─────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -400,6 +477,12 @@ class Observation:
     #: yearly_compute returns an int and stops at the first year with none, so
     #: 0 is a real answer for a non-payer, not a missing one.
     dividend_years: Optional[int] = None
+    #: The currency the company's financial statements are stated in, as the
+    #: source states it -- EODHD's per-section ``currency_symbol``, not
+    #: ``General.CurrencyCode``, which reports the LISTING currency and says
+    #: AUD for BHP. None means we do not know, which is not the same as AUD;
+    #: gate 1b only fires on a currency we positively know to differ.
+    reporting_currency: Optional[str] = None
 
 
 #: metric -> (Observation field that must be positive, why it matters)
@@ -601,6 +684,17 @@ def assess(metric: str, value: Optional[float], domain: Domain,
         state, reason = gate1
         return Assessment(metric, state, None, reason, domain, observed=value,
                           cause=Cause.DOMAIN)
+
+    # Gate 1b. After domain, before observation: a metric that is meaningless
+    # for a bank stays NM whatever currency the bank reports in, and the
+    # domain reason is the more informative of the two. But units outrank
+    # availability for the same reason domain does -- a present number with
+    # incoherent units is what causes the harm, not a missing one.
+    gate1b = unit_gate(metric, obs.reporting_currency if obs else None)
+    if gate1b is not None:
+        state, reason = gate1b
+        return Assessment(metric, state, None, reason, domain, observed=value,
+                          cause=Cause.UNIT_MISMATCH)
 
     # After domain, before observation. A bank's Piotroski is NM whether or not
     # our implementation is sound, and it will still be NM once the

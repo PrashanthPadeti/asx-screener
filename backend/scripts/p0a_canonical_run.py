@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -384,6 +385,58 @@ def require_stage(conn, run_id: int, stage: str) -> None:
 
 
 def main() -> int:
+    """Serialize first, then run.
+
+    The wrapper owns the lease for a scheduled cycle, because the driver exits
+    at finalisation while the suffix is still reading screener.universe. That
+    reasoning is about the SUFFIX, and it left the driver itself unprotected
+    whenever a human invokes it directly -- during a rehearsal, during an
+    incident, in exactly the moments when a second operator is most likely to
+    be typing the same command.
+
+    Demonstrated by accident on 30 Sep 2026: one command pasted twice started
+    two FULL_FUNDAMENTALS_CANONICAL runs 22 seconds apart against the same
+    database, with nothing between them. They created runs 5 and 6 and
+    interleaved until a pkill stopped them. Neither reached finalisation, so
+    nothing was published -- which was luck and a watchful terminal, not a
+    property of the system.
+
+    Inheritance keeps the wrapper's arrangement intact: when
+    ASX_CANONICAL_LEASE_HELD is set the wrapper already holds the lock and
+    taking it again would deadlock against ourselves. Same mechanism pros_cons
+    uses, proven under real contention in rehearsal phase 4.
+
+    A manual run waits zero seconds. An operator at a terminal should be told
+    immediately that a cycle is in flight, not left staring at a prompt for
+    ninety minutes.
+    """
+    from compute.engine.canonical_lease import (
+        LEASE_HELD_ENV, MANUAL_WAIT_SECONDS, LeaseUnavailable, canonical_lease,
+    )
+
+    inherited = os.getenv(LEASE_HELD_ENV, "").strip()
+    if inherited:
+        log.info("canonical execution lease already held by %s — inheriting",
+                 inherited)
+        return _run()
+
+    lease_conn = psycopg2.connect(get_database_url_sync())
+    lease_conn.autocommit = True
+    try:
+        with canonical_lease(lease_conn, wait_seconds=MANUAL_WAIT_SECONDS,
+                             why="canonical_driver"):
+            return _run()
+    except LeaseUnavailable as exc:
+        log.error("REFUSING: %s", exc)
+        log.error("A canonical run is already in flight against this "
+                  "database. Two of them interleaving is how a publication "
+                  "gets built from half of each.")
+        return 2
+    finally:
+        lease_conn.close()
+
+
+def _run() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true",
                         help="Run the lifecycle. Without it only the "

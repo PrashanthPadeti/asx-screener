@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, Filter, Brain, Code2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
+import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
   title: 'One ASX Screener, Three Ways to Search | ASX Screener',
@@ -38,7 +39,7 @@ const MODES = [
     color: 'orange',
     desc: 'Write conditions directly using a SQL-like syntax. Supports OR logic, parentheses, and nested conditions — something the visual filter builder cannot express.',
     example: 'roe > 15 AND (roce > 15 OR roic > 15) AND debt_to_equity < 0.5',
-    pros: ['Full OR logic — not just AND', 'Nested conditions with parentheses', 'All 235+ fields available by name or alias', 'Exact, reproducible, shareable queries'],
+    pros: ['Full OR logic — not just AND', 'Nested conditions with parentheses', `All ${SCREENER_FIELDS_CLAIM} fields available by name or alias`, 'Exact, reproducible, shareable queries'],
     best: 'When you know exactly what you want and need full control over the logic.',
   },
 ]
@@ -101,7 +102,7 @@ export default function ThreeWaysToSearchPage() {
         <BarChart2 className="w-6 h-6 shrink-0" />
         <div className="flex-1">
           <p className="font-bold">Open the ASX Screener</p>
-          <p className="text-blue-200 text-sm">Try all three modes on 2,100+ ASX stocks</p>
+          <p className="text-blue-200 text-sm">Try all three modes on {UNIVERSE_CLAIM} ASX stocks</p>
         </div>
         <ChevronLeft className="w-5 h-5 rotate-180 shrink-0" />
       </Link>

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { Metadata } from 'next'
 import { BarChart2, CheckSquare, TrendingUp, Clock, ArrowRight } from 'lucide-react'
+import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
   title: 'Free ASX Investor Resources | ASX Screener',
@@ -76,7 +77,7 @@ export default function ResourcesPage() {
 
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Ready to screen ASX stocks?</h2>
-        <p className="text-blue-100 mb-5 text-sm">Use our free screener to apply your criteria across 2,000+ ASX stocks.</p>
+        <p className="text-blue-100 mb-5 text-sm">Use our free screener to apply your criteria across {UNIVERSE_CLAIM} ASX stocks.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

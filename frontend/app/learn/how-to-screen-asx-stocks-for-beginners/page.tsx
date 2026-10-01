@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, BookOpen, Filter, CheckCircle2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
+import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
   title: 'How to Screen ASX Stocks for Beginners | ASX Screener',
@@ -63,7 +64,7 @@ export default function HowToScreenASXStocksPage() {
         <BarChart2 className="w-6 h-6 shrink-0" />
         <div className="flex-1">
           <p className="font-bold">Try the ASX Screener</p>
-          <p className="text-blue-200 text-sm">Filter 2,100+ ASX stocks by P/E, ROE, dividend yield, franking, growth and more</p>
+          <p className="text-blue-200 text-sm">Filter {UNIVERSE_CLAIM} ASX stocks by P/E, ROE, dividend yield, franking, growth and more</p>
         </div>
         <ChevronLeft className="w-5 h-5 rotate-180 shrink-0" />
       </Link>

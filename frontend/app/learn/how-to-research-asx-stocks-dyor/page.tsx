@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, BarChart2, Search, ArrowRight, AlertTriangle, Zap, BookOpen, FileText, TrendingUp } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
+import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
   title: 'How to Research ASX Stocks: A Practical DYOR Workflow | ASX Screener',
@@ -172,7 +173,7 @@ export default function DYORWorkflowPage() {
         <section>
           <h2 className="text-xl font-bold text-slate-900 mb-3">Using a screener in your DYOR workflow</h2>
           <p>
-            A stock screener sits at the very beginning of your workflow — before step 1. Use it to narrow the 2,000+ ASX-listed companies down to a shortlist of candidates that meet your basic criteria. Then apply the 7-step DYOR process to each candidate.
+            A stock screener sits at the very beginning of your workflow — before step 1. Use it to narrow the {UNIVERSE_CLAIM} ASX-listed companies down to a shortlist of candidates that meet your basic criteria. Then apply the 7-step DYOR process to each candidate.
           </p>
           <div className="mt-4 bg-slate-100 rounded-xl p-4">
             <div className="flex items-center gap-3 text-sm">

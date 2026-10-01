@@ -163,6 +163,128 @@ def test_offer_availability_still_comes_from_the_backend():
     assert "Offer has ended" in src, "no copy remains for the withdrawn state"
 
 
+#: Public marketing surfaces. Admin pages are excluded: they are internal, and
+#: their numbers are documentation of the system rather than claims to buyers.
+PUBLIC_PAGES = (
+    "frontend/app/page.tsx",
+    "frontend/app/pricing/page.tsx",
+    "frontend/app/screener/page.tsx",
+    "frontend/app/learn",
+    "frontend/app/resources",
+)
+
+
+#: A scale claim stated as a literal. `(?:more\s+)?` matters: the landing page
+#: said "and 40+ more metrics", and a pattern demanding the noun immediately
+#: after the number walked straight past it.
+_SCALE_CLAIM = re.compile(
+    r"\b\d{1,3},?\d{3}\+?\s*(?:ASX|stocks|companies)"        # 2,000+ ASX
+    r"|\b\d{2,4}\+\s*(?:more\s+)?(?:fields|metrics)"         # 235+ fields
+    r"|\b\d{2,4}\+\s*ASX\b")                                 # 200+ ASX
+
+
+def _public_sources():
+    for rel in PUBLIC_PAGES:
+        p = BACKEND.parent / rel
+        files = sorted(p.rglob("*.tsx")) if p.is_dir() else [p]
+        for f in files:
+            yield f, _executable_source(f.read_text(encoding="utf-8"))
+
+
+def test_no_page_states_its_own_universe_or_field_count():
+    """On 2 Oct 2026 the universe size appeared in nine places across eight
+    files and disagreed with itself -- 2,100+, 2,000+ and 2,000 companies all
+    describing one 2,121-row universe. The field count disagreed four ways
+    (235+, 200+, 80+, 40+) against a live 309.
+
+    None were false that day. That is the point: nobody maintained them, and
+    nothing would have noticed them becoming false.
+    """
+    claim = _SCALE_CLAIM
+    offenders = []
+    for path, src in _public_sources():
+        for m in claim.finditer(src):
+            offenders.append(f"{path.name}: {m.group(0).strip()}")
+    assert not offenders, (
+        "hardcoded scale claims found; import them from lib/claims.ts so one "
+        f"edit changes them everywhere: {offenders}")
+
+
+def test_the_scale_scanner_catches_every_claim_that_was_actually_there():
+    """Mutation control, built from the real strings removed on 2 Oct 2026.
+
+    The first version of this pattern caught seven of the eight. It missed
+    "and 40+ more metrics" because a word sat between the number and the noun
+    -- a near miss that would have left the landing page's own claim
+    unguarded while the test reported success.
+    """
+    removed = [
+        "Filter 2,100+ ASX stocks by P/E, ROE,",
+        "narrow the 2,000+ ASX-listed companies",
+        "The ASX lists over 2,000 companies.",
+        "All 235+ fields available by name or alias",
+        "ASX Screener includes 80+ metrics including",
+        "across all 200+ ASX stocks.",
+        "and 40+ more metrics.",
+        "across 200+ fields.",
+    ]
+    missed = [s for s in removed if not _SCALE_CLAIM.search(s)]
+    assert not missed, f"the scanner would not have caught: {missed}"
+
+
+def test_the_scale_scanner_does_not_fire_on_everything():
+    """The other half of the control. A pattern matching any number would
+    satisfy the test above and condemn ordinary copy."""
+    innocent = [
+        "Shares held for 12+ months qualify for the 50% CGT discount.",
+        "a 4% dividend with full franking is worth up to 5.7% gross",
+        "1D / 1W / 1M / 3M return",
+        "Filter {UNIVERSE_CLAIM} ASX stocks by P/E",
+    ]
+    fired = [s for s in innocent if _SCALE_CLAIM.search(s)]
+    assert not fired, f"false positives: {fired}"
+
+
+def test_the_scale_claims_are_declared_in_one_module():
+    claims = BACKEND.parent / "frontend/lib/claims.ts"
+    assert claims.is_file(), "lib/claims.ts is gone; the numbers have scattered"
+    src = claims.read_text(encoding="utf-8")
+    for name in ("UNIVERSE_FLOOR", "SCREENER_FIELDS_FLOOR"):
+        assert re.search(rf"export\s+const\s+{name}\s*=\s*\d+", src), name
+
+
+def test_the_claim_check_reads_the_floors_rather_than_restating_them():
+    """A checker holding its own copy of the floors would verify itself and
+    pass while the site drifted. It must parse claims.ts."""
+    script = BACKEND / "scripts/assert_marketing_claims.py"
+    assert script.is_file()
+    src = script.read_text(encoding="utf-8")
+    assert "claims.ts" in src and "CLAIMS_TS" in src
+    body = src[src.index("def declared_floors"):src.index("def live_values")]
+    assert "2000" not in body and "300" not in body, (
+        "the checker restates a floor instead of reading it")
+
+
+def test_the_claim_check_cannot_modify_what_it_measures():
+    """Instrument isolation: the observer must not join the system it
+    observes. A read-only session, and no write verbs."""
+    src = (BACKEND / "scripts/assert_marketing_claims.py").read_text(
+        encoding="utf-8")
+    assert "set_session(readonly=True)" in src
+    for verb in ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "DROP", "ALTER",
+                 "commit()"):
+        assert verb not in _executable_source(src), f"{verb} in an instrument"
+
+
+def test_an_unreachable_source_is_unverified_not_passing():
+    """A check that reports success when it could not measure anything is
+    decorative. Same rule as the Cloudflare range checker."""
+    src = (BACKEND / "scripts/assert_marketing_claims.py").read_text(
+        encoding="utf-8")
+    assert src.count("return 2") >= 3, (
+        "failure-to-measure must exit 2 (unverified), distinct from exit 1")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

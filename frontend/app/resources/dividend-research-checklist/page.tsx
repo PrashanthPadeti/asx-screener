@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { BarChart2, CheckCircle2, AlertTriangle, ChevronLeft, Zap, BookOpen, TrendingDown } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
   title: 'ASX Dividend Research Checklist — Free | ASX Screener',
@@ -177,7 +178,7 @@ export default function DividendResearchChecklistPage() {
 
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Screen for ASX income stocks</h2>
-        <p className="text-blue-100 mb-5 text-sm">Filter by dividend yield, grossed-up yield, franking %, payout ratio, and 80+ more metrics.</p>
+        <p className="text-blue-100 mb-5 text-sm">Filter by dividend yield, grossed-up yield, franking %, payout ratio, and {SCREENER_FIELDS_CLAIM} filterable fields.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

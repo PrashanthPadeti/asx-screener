@@ -6,6 +6,7 @@ import {
   BarChart2, Zap, ChevronRight, Play, Bell, CheckCircle2,
   Clock, Lock, ArrowRight,
 } from 'lucide-react'
+import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 // ── Analytics helper ─────────────────────────────────────────────────────────
 // Fires to GA4 (gtag) and/or Segment (analytics.track) if either is loaded.
@@ -70,7 +71,7 @@ const BEGINNER_STEPS: BeginnerStep[] = [
   { n: 3, title: 'Company Announcements',      desc: 'How to read and interpret ASX company updates.',         href: '/learn/how-to-read-company-announcements',  icon: TrendingUp  },
   { n: 4, title: 'Key Financial Ratios',       desc: 'P/E, ROE, D/E — the metrics every investor needs.',      href: '/learn/key-financial-ratios',               icon: BarChart2   },
   { n: 5, title: 'Build Your First Watchlist', desc: 'How to build and maintain an ASX watchlist.',            href: '/learn/how-to-build-an-asx-watchlist',     icon: CheckCircle2 },
-  { n: 6, title: 'Run Your First Screen',      desc: 'Filter 200+ ASX stocks using real fundamental data.',    href: '/screener',                                icon: ArrowRight  },
+  { n: 6, title: 'Run Your First Screen',      desc: `Filter ${UNIVERSE_CLAIM} ASX stocks using real fundamental data.`,    href: '/screener',                                icon: ArrowRight  },
 ]
 
 // ── Guide catalogue ──────────────────────────────────────────────────────────
@@ -83,7 +84,7 @@ const GUIDES: { category: string; icon: React.ElementType; color: string; guides
     guides: [
       {
         title: 'What Is an ASX Stock Screener?',
-        description: 'How investors use a stock screener to filter 2,000+ ASX stocks down to a shortlist worth researching.',
+        description: `How investors use a stock screener to filter ${UNIVERSE_CLAIM} ASX stocks down to a shortlist worth researching.`,
         readTime: '7 min', level: 'Beginner',
         href: '/learn/what-is-an-asx-stock-screener', buttonLabel: 'Read guide',
       },

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, BarChart2, Search, Filter, ArrowRight, AlertTriangle, Zap, BookOpen, CheckCircle2 } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
+import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
   title: 'What Is an ASX Stock Screener? How Investors Use One | ASX Screener',
@@ -38,7 +39,7 @@ export default function WhatIsAnASXStockScreenerPage() {
           What Is an ASX Stock Screener — And How Do Investors Use One?
         </h1>
         <p className="text-lg text-slate-600 leading-relaxed">
-          The ASX lists over 2,000 companies. A stock screener lets you filter that universe down to a shortlist of stocks that meet your specific research criteria — in seconds. Here is exactly how it works.
+          The ASX lists {UNIVERSE_CLAIM} companies. A stock screener lets you filter that universe down to a shortlist of stocks that meet your specific research criteria — in seconds. Here is exactly how it works.
         </p>
       </div>
 
@@ -110,7 +111,7 @@ export default function WhatIsAnASXStockScreenerPage() {
             ))}
           </div>
           <p className="mt-4 text-sm text-slate-500">
-            ASX Screener includes 80+ metrics including ASX-specific data points like franking credits, grossed-up yield, mining resource data, and REIT-specific metrics not typically found in global screeners.
+            ASX Screener includes {SCREENER_FIELDS_CLAIM} filterable fields including ASX-specific data points like franking credits, grossed-up yield, mining resource data, and REIT-specific metrics not typically found in global screeners.
           </p>
         </section>
 
@@ -124,7 +125,7 @@ export default function WhatIsAnASXStockScreenerPage() {
               <ul className="space-y-1.5 text-sm text-emerald-900">
                 {[
                   'A research starting point',
-                  'A way to narrow 2,000+ stocks to a manageable shortlist',
+                  `A way to narrow ${UNIVERSE_CLAIM} stocks to a manageable shortlist`,
                   'A tool for applying your own investment criteria systematically',
                   'A time-saving filter across an entire market',
                 ].map(item => <li key={item} className="flex items-start gap-1.5"><span className="mt-1 shrink-0">·</span>{item}</li>)}
@@ -230,7 +231,7 @@ export default function WhatIsAnASXStockScreenerPage() {
 
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Start screening ASX stocks now</h2>
-        <p className="text-blue-100 mb-5 text-sm">Filter 2,000+ ASX stocks by PE ratio, dividend yield, franking credits, ROE, and 80+ more metrics. Free to use.</p>
+        <p className="text-blue-100 mb-5 text-sm">Filter {UNIVERSE_CLAIM} ASX stocks by PE ratio, dividend yield, franking credits, ROE and {SCREENER_FIELDS_CLAIM} filterable fields. Free to use.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

@@ -121,6 +121,29 @@ def test_the_script_fails_rather_than_reports_by_default():
     assert "return 0 if args.report else 1" in src
 
 
+def test_every_anchor_column_is_one_the_job_actually_writes():
+    """An anchor is a guess until it is checked against the writer.
+
+    The first version anchored top5_strategy on `created_at`; the job writes
+    `computed_at`. The script reported BROKEN rather than raising, which is
+    why that was a measurement instead of a 22:00 Sunday traceback -- but a
+    freshness check whose column does not exist proves nothing either.
+
+    Derived from the writing module's own SQL, so the two cannot drift.
+    """
+    anchors, _ = _covered()
+    src = SCRIPT.read_text(encoding="utf-8")
+    for job in anchors:
+        column = re.search(
+            rf'Anchor\("{re.escape(job)}",\s*"[^"]+",\s*"(\w+)"', src)
+        assert column, f"cannot read the anchor column for {job}"
+        module = BACKEND / "compute/engine" / f"{job}.py"
+        assert module.exists(), f"{job} has no module to check against"
+        assert column.group(1) in module.read_text(encoding="utf-8"), (
+            f"{job} is anchored on {column.group(1)}, which does not appear "
+            f"in {module.name} -- the job does not write that column")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

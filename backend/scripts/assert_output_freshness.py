@@ -67,7 +67,7 @@ ANCHORS = [
            "ASIC publishes weekly with a few days' lag; the job upserts on "
            "every successful download, so updated_at advances even when the "
            "report date does not"),
-    Anchor("top5_strategy", "strategy.monthly_picks", "created_at", 24 * 15,
+    Anchor("top5_strategy", "strategy.monthly_picks", "computed_at", 24 * 15,
            "runs Sunday 22:00 UTC, inside the weekly canonical window, so it "
            "is the job most likely to defer; two missed Sundays is a fault"),
 ]

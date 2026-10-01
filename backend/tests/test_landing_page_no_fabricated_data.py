@@ -338,6 +338,52 @@ def test_the_sitemap_advertises_only_reachable_pages():
         f"{gated}. Open them, or remove them from the sitemap.")
 
 
+def _sitemap_routes() -> list[str]:
+    sitemap = (BACKEND.parent / "frontend/app/sitemap.ts").read_text(
+        encoding="utf-8")
+    return sorted(set(re.findall(r"\$\{base\}(/[a-z0-9/-]*)`",
+                                 _executable_source(sitemap))))
+
+
+def test_the_sitemap_advertises_nothing_behind_a_plan_gate():
+    """The blind spot in the first version of this rule.
+
+    Reachability was checked against ClientGuard only, so /glossary and
+    /brokers passed — they are not redirected. Both wrap their entire page in
+    <PlanGate required="pro">, so an anonymous visitor (and a crawler) gets
+    "Sign in required — available on the Pro plan" and nothing else. Google
+    was being asked to index a sign-in panel.
+
+    A route is gated two ways: the router can refuse it, or the page can.
+    Only the second was invisible here, which is why it survived a release
+    that was explicitly about this contradiction.
+    """
+    app = BACKEND.parent / "frontend/app"
+    offenders = []
+    for route in _sitemap_routes():
+        page = app / (route.lstrip("/") or ".") / "page.tsx"
+        if not page.is_file():
+            continue
+        src = _executable_source(page.read_text(encoding="utf-8"))
+        # Outermost element of the component's return -- a PlanGate wrapping
+        # one widget inside an otherwise public page is not this defect.
+        if re.search(r"return\s*\(\s*\n\s*<PlanGate", src):
+            offenders.append(route)
+    assert not offenders, (
+        "the sitemap advertises pages whose entire content sits behind a plan "
+        f"gate: {offenders}. Remove them, or render public content above the "
+        f"gate.")
+
+
+def test_the_plan_gate_detector_recognises_the_real_shape():
+    """Mutation control, taken from app/brokers/page.tsx as it stood."""
+    real = "export default function BrokersPage() {\n  return (\n    <PlanGate required=\"pro\" feature=\"Broker Compare\">\n"
+    assert re.search(r"return\s*\(\s*\n\s*<PlanGate", real)
+    partial = "  return (\n    <div>\n      <h1>Public</h1>\n      <PlanGate required=\"pro\">x</PlanGate>\n"
+    assert not re.search(r"return\s*\(\s*\n\s*<PlanGate", partial), (
+        "a gate around one widget must not condemn an otherwise public page")
+
+
 def test_the_guard_and_the_sitemap_read_the_same_declaration():
     """Both consumers must import the shared module. A second copy of the
     prefix list is how these two drifted apart in the first place."""

@@ -4,6 +4,7 @@ import { getMarketMovers, getMarketSectors } from '@/lib/api'
 import type { Metadata } from 'next'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
+import { OFFER_ENDS_SHORT, OFFER_ENDS_LONG } from '@/lib/offer'
 
 export const metadata: Metadata = {
   title: 'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
@@ -25,6 +26,26 @@ async function fetchMarketSummary(): Promise<MarketSummary> {
   } catch {
     return { total_stocks: 0, asx200_stocks: 0, stocks_with_dividends: 0,
              avg_dividend_yield: null, median_pe: null, total_market_cap_bn: null, universe_built_at: null }
+  }
+}
+
+// The largest listed companies by market cap, read from the same validated
+// screener run the /screener page serves. An empty list hides the section —
+// never a fallback to remembered numbers.
+async function fetchPreviewRows(): Promise<PreviewRow[]> {
+  try {
+    const res = await fetch(`${INTERNAL_API}/api/v1/screener`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ filters: [], sort_by: 'market_cap',
+                                sort_dir: 'desc', page: 1, page_size: 8 }),
+      cache:   'no-store',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const json = await res.json()
+    return Array.isArray(json?.data) ? json.data : []
+  } catch {
+    return []
   }
 }
 
@@ -74,17 +95,22 @@ const QUICK_SCREENS = [
   { label: 'A-REIT Income',          href: '/screener?preset=areit_income',     color: 'bg-pink-50 text-pink-700 border-pink-200' },
 ]
 
-// ── Sample preview table rows (real-looking ASX data) ─────────
-const PREVIEW_STOCKS = [
-  { code: 'BHP',  name: 'BHP Group',               sector: 'Materials',    price: 43.82, pe: 11.4, yield: 5.2, roe: 28.1, rsi: 54.2, yieldColor: 'text-green-600' },
-  { code: 'CBA',  name: 'Commonwealth Bank',        sector: 'Financials',   price: 138.50, pe: 22.1, yield: 3.4, roe: 13.8, rsi: 61.7, yieldColor: 'text-green-600' },
-  { code: 'CSL',  name: 'CSL Limited',              sector: 'Health Care',  price: 292.10, pe: 38.6, yield: 1.1, roe: 22.4, rsi: 48.3, yieldColor: 'text-gray-600' },
-  { code: 'WES',  name: 'Wesfarmers',               sector: 'Cons. Disc.',  price: 74.40, pe: 29.3, yield: 3.1, roe: 41.2, rsi: 57.9, yieldColor: 'text-green-600' },
-  { code: 'NAB',  name: 'National Australia Bank',  sector: 'Financials',   price: 38.95, pe: 14.8, yield: 5.8, roe: 12.1, rsi: 52.4, yieldColor: 'text-green-600' },
-  { code: 'RIO',  name: 'Rio Tinto',                sector: 'Materials',    price: 118.20, pe: 9.7, yield: 6.4, roe: 24.7, rsi: 46.8, yieldColor: 'text-green-600' },
-  { code: 'WBC',  name: 'Westpac Banking',          sector: 'Financials',   price: 32.10, pe: 13.2, yield: 6.1, roe: 10.9, rsi: 44.5, yieldColor: 'text-green-600' },
-  { code: 'GMG',  name: 'Goodman Group',            sector: 'Real Estate',  price: 36.80, pe: 31.5, yield: 1.2, roe: 18.3, rsi: 63.1, yieldColor: 'text-gray-600' },
-]
+// ── Preview table rows ────────────────────────────────────────
+// Until 2 Oct 2026 this was a literal array of invented figures for eight
+// named ASX companies, captioned "sample preview" — which reads as stale
+// data, not as fabrication. A visitor had no way to tell that "BHP $43.82,
+// ROE 28.1%" was never measured. Real rows now, or no table: the same rule
+// the backend enforces applies at the front door.
+type PreviewRow = {
+  asx_code: string
+  company_name: string
+  sector: string | null
+  price: number | null
+  pe_ratio: number | null
+  dividend_yield: number | null   // decimal ratio
+  roe: number | null              // decimal ratio
+  rsi_14: number | null           // 0–100
+}
 
 // ── Formatting helpers ────────────────────────────────────────
 
@@ -243,14 +269,16 @@ const faqSchema = {
 // ── Page ──────────────────────────────────────────────────────
 
 export default async function HomePage() {
-  const [summary, movers, sectors] = await Promise.all([
+  const [summary, movers, sectors, preview] = await Promise.all([
     fetchMarketSummary(),
     getMarketMovers('1w').catch((): MoversResponse => ({ gainers: [], losers: [], period: '1w' })),
     getMarketSectors().catch((): SectorsResponse => ({ sectors: [] })),
+    fetchPreviewRows(),
   ])
 
   const hasMovers  = movers.gainers.length > 0 || movers.losers.length > 0
   const hasSectors = sectors.sectors.length > 0
+  const hasPreview = preview.length > 0
 
   return (
     <div className="space-y-10">
@@ -326,7 +354,7 @@ export default async function HomePage() {
           <div className="hidden lg:flex flex-col gap-3 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/30 self-stretch justify-center">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">BEST VALUE</span>
-              <span className="text-[10px] text-amber-500">Ends Sep 2026</span>
+              <span className="text-[10px] text-amber-500">Ends {OFFER_ENDS_SHORT}</span>
             </div>
             <div>
               <p className="text-slate-400 text-xs mb-1">Annual plan</p>
@@ -338,7 +366,7 @@ export default async function HomePage() {
               <span className="text-slate-500 text-xs"> · save 67%</span>
             </div>
             {/* Expiry notice */}
-            <p className="text-[10px] text-amber-500 font-semibold">Offer ends September 2026</p>
+            <p className="text-[10px] text-amber-500 font-semibold">Offer ends {OFFER_ENDS_LONG}</p>
             <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg transition-colors">
               Claim deal →
             </Link>
@@ -349,7 +377,7 @@ export default async function HomePage() {
         {/* Mobile banner — shown instead of side cards on small screens */}
         <div className="lg:hidden mt-6 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/20">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">FOUNDING MEMBER · Offer ends Sep 2026</span>
+            <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">FOUNDING MEMBER · Offer ends {OFFER_ENDS_SHORT}</span>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div className="bg-white/5 rounded-xl p-3">
@@ -496,11 +524,12 @@ export default async function HomePage() {
       </section>
 
       {/* ── Preview Table ─────────────────────────────────────── */}
+      {hasPreview && (
       <section>
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">See it in action</h2>
-            <p className="text-sm text-gray-500 mt-0.5">A snapshot of ASX stocks available in the screener</p>
+            <p className="text-sm text-gray-500 mt-0.5">The largest ASX companies by market cap, live from the screener</p>
           </div>
           <Link
             href="/screener"
@@ -528,34 +557,43 @@ export default async function HomePage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {PREVIEW_STOCKS.map((s) => (
-                  <tr key={s.code} className="hover:bg-blue-50/40 transition-colors group">
+                {preview.map((s) => (
+                  <tr key={s.asx_code} className="hover:bg-blue-50/40 transition-colors group">
                     <td className="px-4 py-3">
-                      <span className="font-mono font-bold text-blue-600">{s.code}</span>
+                      <span className="font-mono font-bold text-blue-600">{s.asx_code}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-medium text-gray-800 truncate max-w-[160px] block">{s.name}</span>
+                      <span className="font-medium text-gray-800 truncate max-w-[160px] block">{s.company_name}</span>
                     </td>
                     <td className="px-4 py-3 hidden md:table-cell">
-                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{s.sector}</span>
+                      {s.sector
+                        ? <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">{s.sector}</span>
+                        : <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-right font-semibold text-gray-800">${s.price.toFixed(2)}</td>
-                    <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell">{s.pe.toFixed(1)}x</td>
-                    <td className={`px-4 py-3 text-right font-semibold ${s.yieldColor}`}>{s.yield.toFixed(1)}%</td>
-                    <td className="px-4 py-3 text-right text-gray-600 hidden lg:table-cell">{s.roe.toFixed(1)}%</td>
+                    <td className="px-4 py-3 text-right font-semibold text-gray-800">{fmtPrice(s.price)}</td>
+                    <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell">
+                      {s.pe_ratio == null ? '—' : `${s.pe_ratio.toFixed(1)}x`}
+                    </td>
+                    <td className={cn('px-4 py-3 text-right font-semibold',
+                                      s.dividend_yield ? 'text-green-600' : 'text-gray-600')}>
+                      {fmtPct(s.dividend_yield)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-600 hidden lg:table-cell">{fmtPct(s.roe)}</td>
                     <td className="px-4 py-3 text-right hidden lg:table-cell">
+                      {s.rsi_14 == null ? <span className="text-gray-400">—</span> : (
                       <span className={cn(
                         'text-xs font-semibold px-2 py-0.5 rounded-full',
-                        s.rsi >= 70 ? 'bg-red-50 text-red-600' :
-                        s.rsi <= 30 ? 'bg-green-50 text-green-600' :
+                        s.rsi_14 >= 70 ? 'bg-red-50 text-red-600' :
+                        s.rsi_14 <= 30 ? 'bg-green-50 text-green-600' :
                         'bg-gray-100 text-gray-600'
                       )}>
-                        {s.rsi.toFixed(1)}
+                        {s.rsi_14.toFixed(1)}
                       </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link
-                        href={`/company/${s.code}`}
+                        href={`/company/${s.asx_code}`}
                         className="text-xs text-blue-600 hover:text-blue-800 font-medium opacity-0 group-hover:opacity-100 transition-opacity"
                       >
                         View →
@@ -570,17 +608,18 @@ export default async function HomePage() {
           {/* Table footer */}
           <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-4">
             <p className="text-xs text-gray-400">
-              Sample preview only — open the full screener for latest available data.
+              Live ASX end-of-day data. A dash means the figure is not available for that company.
             </p>
             <Link
               href="/screener"
               className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-1 shrink-0"
             >
-              Screen all {summary.total_stocks > 0 ? summary.total_stocks.toLocaleString() : '2,100+'} stocks <ArrowUpRight className="w-3 h-3" />
+              Screen all {summary.total_stocks > 0 ? `${summary.total_stocks.toLocaleString()} ` : ''}stocks <ArrowUpRight className="w-3 h-3" />
             </Link>
           </div>
         </div>
       </section>
+      )}
 
       {/* ── SEO Section ───────────────────────────────────────── */}
       <section className="bg-blue-50 border border-blue-100 rounded-xl p-6 md:p-8">

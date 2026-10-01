@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth'
 import { createCheckoutSession, api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import FAQSchema from '@/components/FAQSchema'
+import { OFFER_ENDS_LONG } from '@/lib/offer'
 
 const PRICING_FAQ = [
   {
@@ -222,7 +223,7 @@ export default function PricingPage() {
                 <div className="flex-1 min-w-0">
                   {founding.available ? (
                     <>
-                      <p className="font-bold text-amber-900 text-sm">Founding Members — offer ends September 2026</p>
+                      <p className="font-bold text-amber-900 text-sm">Founding Members — offer ends {OFFER_ENDS_LONG}</p>
                       <p className="text-amber-700 text-xs mt-0.5">Monthly → 6 months &nbsp;·&nbsp; Annual → 3 years. No extra charge.</p>
                     </>
                   ) : (
@@ -465,7 +466,7 @@ export default function PricingPage() {
                 {/* Expiry notice */}
                 <div className="mb-4">
                   {founding.available ? (
-                    <p className="text-[10px] text-amber-500 font-semibold">Offer ends September 2026</p>
+                    <p className="text-[10px] text-amber-500 font-semibold">Offer ends {OFFER_ENDS_LONG}</p>
                   ) : (
                     <p className="text-[10px] text-slate-500">Offer has ended</p>
                   )}

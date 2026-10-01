@@ -421,19 +421,27 @@ def test_every_observed_canonical_unit_is_classified_or_accepted():
     assert not unclassified, "\n".join(unclassified)
 
 
-def test_the_runtime_disables_are_still_in_force():
-    """daily_pipeline and weekly_pipeline are deliberately disabled while the
-    legacy self-invalidating path has no canonical tail. If either comes back
-    enabled without the orchestration landing, that is a regression of an
-    operational decision, and it should fail here rather than at 08:30."""
-    entries = {e.target: e for e in la.observed(_crontab())}
+def test_a_scheduled_pipeline_is_a_wrapper_not_a_legacy_path():
+    """Both pipelines were disabled from 23 Sep to 1 Oct 2026 because the
+    legacy path revoked canonical attribution unattended -- it rebuilt
+    screener.universe outside any run and left governed values with no
+    finalisation behind them.
+
+    They are enabled again, and what makes that safe is not the date: it is
+    that each is now a wrapper holding the canonical execution lease across
+    prefix, driver and gated suffix. This asserts the property the schedule
+    depends on, so re-enabling a pipeline that had reverted to the legacy
+    shape fails here rather than at 08:30 on a weekday.
+    """
     for pipeline in ("daily_pipeline.py", "weekly_pipeline.py"):
-        key = f"backend/scripts/eodhd/v2/jobs/{pipeline}"
-        if key not in entries:
-            continue
-        assert not entries[key].enabled, (
-            f"{pipeline} is enabled again; it revokes canonical attribution "
-            f"unattended. See docs/canonical_orchestration.md")
+        src = (BACKEND / "scripts/eodhd/v2/jobs" / pipeline).read_text(
+            encoding="utf-8")
+        assert "canonical_lease(" in src, (
+            f"{pipeline} is scheduled but no longer takes the canonical "
+            f"execution lease")
+        assert "p0a_canonical_run.py" in src, (
+            f"{pipeline} is scheduled but does not dispatch the canonical "
+            f"driver -- that is the legacy self-invalidating path")
 
 
 if __name__ == "__main__":

@@ -77,9 +77,22 @@ mkdir -p "$LOG_DIR"
 # Re-enable only when the prefix → admission/lease → canonical driver →
 # finalisation → suffix orchestration is deployed and proven. See
 # docs/canonical_orchestration.md.
-DISABLED_REASON="# DISABLED 2026-09-23 p0a bridge — legacy path revokes canonical attribution unattended:"
-DAILY_CMD="${DISABLED_REASON} 30 8 * * 1-5  cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
-WEEKLY_COMPUTE_CMD="${DISABLED_REASON} 0 21 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
+# Re-enabled 2026-10-01. The 23 Sep bridge disabled both of these because the
+# legacy path revoked canonical attribution unattended: it rebuilt
+# screener.universe outside any run, leaving governed values with no
+# finalisation behind them and nobody awake to notice.
+#
+# That is no longer what these scripts are. Both are now wrappers: prefix,
+# then the canonical execution lease, then the driver, then a gated suffix
+# that runs only if the driver published. Rehearsed end to end on a clone
+# (docs/canonical_rehearsal_record.md, phases 1-5) and proven in production
+# on 1 Oct 2026 -- run 2, 2,114 rows, 0 violations, Gate B green.
+#
+# Restoring the schedule is the last step precisely because it is the one
+# that removes the operator from the loop. Everything before it exists so
+# that an unattended run either publishes correctly or refuses.
+DAILY_CMD="30 8 * * 1-5  cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/daily_pipeline.py >> ${LOG_DIR}/daily_pipeline.log 2>&1"
+WEEKLY_COMPUTE_CMD="0 21 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_pipeline.py >> ${LOG_DIR}/weekly_pipeline.log 2>&1"
 
 WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} ${SCRIPTS_REL}/weekly_refresh.py >> ${LOG_DIR}/weekly_refresh.log 2>&1"
 

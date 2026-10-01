@@ -1,5 +1,23 @@
 import { MetadataRoute } from 'next'
 
+/**
+ * Only publicly reachable URLs belong here.
+ *
+ * Until 2 Oct 2026 this listed 58 routes while ClientGuard gated all but two
+ * of them, so search engines were being pointed at pages that answer with a
+ * login form. Opening the content pages closed most of it; the last nine were
+ * product surfaces — /screener, /market, /scans, /news, /top5, /indices,
+ * /funds, /commodities, /global-markets — which stay gated by decision and
+ * are therefore no longer advertised as indexable.
+ *
+ * The public set is declared in lib/public-routes.ts. This list stays
+ * explicit rather than generated from it: a generated sitemap would drop a
+ * URL silently the moment someone gated a route, and a silent disappearance
+ * from search is exactly the kind of invisible failure this codebase keeps
+ * uncovering. A test asserts the two agree, so divergence fails loudly
+ * instead.
+ */
+
 export default function sitemap(): MetadataRoute.Sitemap {
   const base = 'https://asxscreener.com.au'
   const now  = new Date()
@@ -7,10 +25,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     // ── Core pages ────────────────────────────────────────────────────────────
     { url: `${base}/`,          lastModified: now, changeFrequency: 'daily',   priority: 1.0 },
-    { url: `${base}/screener`,  lastModified: now, changeFrequency: 'daily',   priority: 0.9 },
-    { url: `${base}/market`,    lastModified: now, changeFrequency: 'daily',   priority: 0.8 },
-    { url: `${base}/scans`,     lastModified: now, changeFrequency: 'weekly',  priority: 0.8 },
-    { url: `${base}/news`,      lastModified: now, changeFrequency: 'daily',   priority: 0.7 },
 
     // ── Resources ─────────────────────────────────────────────────────────────
     { url: `${base}/glossary`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
@@ -46,11 +60,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────
-    { url: `${base}/indices`,        lastModified: now, changeFrequency: 'daily',   priority: 0.6 },
-    { url: `${base}/funds`,          lastModified: now, changeFrequency: 'daily',   priority: 0.6 },
-    { url: `${base}/global-markets`, lastModified: now, changeFrequency: 'daily',   priority: 0.6 },
-    { url: `${base}/commodities`,    lastModified: now, changeFrequency: 'daily',   priority: 0.6 },
-    { url: `${base}/top5`,           lastModified: now, changeFrequency: 'weekly',  priority: 0.5 },
 
     // ── Resources ─────────────────────────────────────────────────────────────
     { url: `${base}/resources`,                                      lastModified: now, changeFrequency: 'monthly', priority: 0.6 },

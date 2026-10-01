@@ -311,10 +311,41 @@ def test_no_page_appends_the_site_name_the_layout_already_appends():
 
 
 def _public_prefixes() -> list[str]:
-    src = (BACKEND.parent / "frontend/components/ClientGuard.tsx").read_text(
+    src = (BACKEND.parent / "frontend/lib/public-routes.ts").read_text(
         encoding="utf-8")
-    block = src[src.index("const PUBLIC_PREFIXES"):src.index("export function isPublic")]
+    block = src[src.index("export const PUBLIC_PREFIXES"):
+                src.index("export function isPublic")]
     return re.findall(r"'(/[a-z0-9/-]*)'", block)
+
+
+def test_the_sitemap_advertises_only_reachable_pages():
+    """A sitemap entry is a request to index a URL. Pointing a crawler at a
+    page that answers with a login form is a contradiction, and on 2 Oct 2026
+    the file did it 56 times out of 58.
+
+    The two lists are kept separately on purpose -- a sitemap generated from
+    the public set would make a URL vanish from search silently the moment
+    someone gated a route. This asserts they agree, so it fails loudly.
+    """
+    sitemap = (BACKEND.parent / "frontend/app/sitemap.ts").read_text(
+        encoding="utf-8")
+    routes = sorted(set(re.findall(r"\$\{base\}(/[a-z0-9/-]*)`",
+                                   _executable_source(sitemap))))
+    assert routes, "no routes parsed; the sitemap changed shape"
+    gated = [r for r in routes if not _is_public(r)]
+    assert not gated, (
+        f"the sitemap advertises pages that redirect to the login form: "
+        f"{gated}. Open them, or remove them from the sitemap.")
+
+
+def test_the_guard_and_the_sitemap_read_the_same_declaration():
+    """Both consumers must import the shared module. A second copy of the
+    prefix list is how these two drifted apart in the first place."""
+    guard = (BACKEND.parent / "frontend/components/ClientGuard.tsx").read_text(
+        encoding="utf-8")
+    assert "@/lib/public-routes" in guard
+    assert "const PUBLIC_PREFIXES" not in guard, (
+        "ClientGuard holds its own copy of the public set again")
 
 
 def _is_public(path: str) -> bool:

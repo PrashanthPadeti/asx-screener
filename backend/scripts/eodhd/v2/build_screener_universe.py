@@ -1029,6 +1029,7 @@ LEFT JOIN LATERAL (
            DATE(time AT TIME ZONE 'Australia/Sydney') AS price_date
     FROM market.daily_prices
     WHERE asx_code = c.asx_code
+      AND {current_source}
     ORDER BY time DESC
     LIMIT 1
 ) dp ON TRUE
@@ -1039,6 +1040,7 @@ LEFT JOIN LATERAL (
     FROM market.daily_prices
     WHERE asx_code = c.asx_code
       AND time >= NOW() - INTERVAL '365 days'
+      AND {current_source}
 ) dp52 ON TRUE
 
 -- ── 20-day avg volume (LIMIT 20 aggregate — scans only 20 rows per stock) ────
@@ -1048,6 +1050,7 @@ LEFT JOIN LATERAL (
         SELECT volume
         FROM market.daily_prices
         WHERE asx_code = c.asx_code
+          AND {current_source}
         ORDER BY time DESC
         LIMIT 20
     ) v20
@@ -1936,7 +1939,9 @@ def main():
         code_filter = base_filter
         params = base_params
 
-    sql = UPSERT_SQL.format(code_filter=code_filter)
+    from compute.engine.serving_population import current_source_predicate
+    sql = UPSERT_SQL.format(code_filter=code_filter,
+                            current_source=current_source_predicate())
 
     # The expected population, asked of the database before the write and
     # independently of it. Derived from the same source domain the upsert

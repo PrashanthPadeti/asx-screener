@@ -48,6 +48,45 @@ def serving_predicate(alias: str = "") -> str:
 SERVING_POPULATION = "active companies with a price"
 
 
+#: Price sources we no longer collect from.
+#:
+#: `yahoo` was a backfill job, deleted 30 Sep 2026 after the evidence showed
+#: it was manufacturing ETF coverage from prices up to seven weeks old, on a
+#: selector that only ever targeted codes with `price_date IS NULL` -- so once
+#: an instrument had any price it was never refreshed again, by design.
+#:
+#: Deleting the job stopped acquisition. It did not stop SERVING: 1,849 rows
+#: remain in market.daily_prices, and four instruments (DVDY, MTN, XASG,
+#: HGODB) still had them as their NEWEST price 33 and 23 sessions after the
+#: market moved on.
+#:
+#: This is not a staleness threshold and makes no claim about trading
+#: activity. The distinction it draws is narrower and provable: a price from
+#: a source we have retired can never become current, by any mechanism,
+#: because nothing will ever write another one. Measured 1 Oct 2026, the
+#: staleness tail is continuous (0,1,2,3,...,105 sessions) with no natural
+#: cut-off, and this system has NO suspension signal -- `status` separates
+#: only active from delisted, EODHD's General block carries nothing, and
+#: announcements cover 216 of 2,155 codes and none of the affected ones. So
+#: "has not traded" and "was not collected" are indistinguishable here, and a
+#: session threshold would assert a feed failure that has not been
+#: established.
+#:
+#: Storage is unaffected. The history stays; only eligibility changes.
+RETIRED_PRICE_SOURCES = ("yahoo",)
+
+
+def current_source_predicate(alias: str = "") -> str:
+    """`data_source` is one we still collect from, qualified by `alias`.
+
+    Spelled inline for the same reason excluded_types_predicate is: it lands
+    in the middle of queries that carry their own parameters.
+    """
+    prefix = f"{alias}." if alias else ""
+    retired = ", ".join(f"'{s}'" for s in RETIRED_PRICE_SOURCES)
+    return f"COALESCE({prefix}data_source, '') NOT IN ({retired})"
+
+
 #: Instrument types the screener does not carry.
 #:
 #: Hybrids, capital notes and preference shares are not ordinary equities. They

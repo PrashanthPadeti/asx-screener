@@ -55,8 +55,17 @@ STATE_FILE = Path("/var/lib/asx-screener/cloudflare_ranges.json")
 TIMEOUT = 20
 
 
+#: Cloudflare rejects urllib's default Python-urllib/3.x agent with 403, so
+#: the first real run came back UNVERIFIED. Identify the caller honestly --
+#: a borrowed browser UA would work and would also be a lie told to the
+#: service we depend on for the answer.
+USER_AGENT = ("asx-screener-range-assurance/1.0 "
+              "(+https://asxscreener.com.au; origin allowlist drift check)")
+
+
 def _fetch(url: str) -> str:
-    with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         if r.status != 200:
             raise RuntimeError(f"{url} returned HTTP {r.status}")
         return r.read().decode("utf-8", "replace")

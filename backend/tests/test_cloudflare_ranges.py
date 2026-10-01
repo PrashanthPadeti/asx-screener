@@ -222,6 +222,20 @@ def test_the_evaluator_performs_no_mutation_and_no_io():
     assert not (dangerous & called), sorted(dangerous & called)
 
 
+def test_the_fetcher_identifies_itself():
+    """Cloudflare answers urllib's default agent with 403, so the first real
+    run returned UNVERIFIED -- correctly, but uselessly.
+
+    The regression this prevents is silent: the check would keep reporting
+    unverified forever and look like a flaky network rather than a missing
+    header.
+    """
+    src = (BACKEND / "scripts/assert_cloudflare_ranges.py").read_text(
+        encoding="utf-8")
+    assert "User-Agent" in src, "the fetch must identify itself or get a 403"
+    assert "asx-screener" in src, "identify honestly, do not borrow a browser UA"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

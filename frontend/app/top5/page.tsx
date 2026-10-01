@@ -295,7 +295,7 @@ function PickCard({ pick }: { pick: Pick }) {
           <MetricCell value={fmt.price(pick.price)} label="Price" />
           <MetricCell
             value={pick.return_3m != null ? `${pick.return_3m >= 0 ? '+' : ''}${(pick.return_3m * 100).toFixed(1)}%` : null}
-            label="3M Ret"
+            label="Prior 3M"
           />
           <MetricCell value={fmt.pct(pick.grossed_up_yield)} label="Gr. Yield" />
         </div>
@@ -404,7 +404,7 @@ function PerformanceTracker({ history }: { history: HistoryMonth[] }) {
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-4 py-2.5 font-semibold text-gray-600">Week</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Avg Score</th>
-                <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Avg 3M Ret</th>
+                <th className="text-left px-3 py-2.5 font-semibold text-gray-600">Avg prior 3M</th>
                 <th className="text-left px-3 py-2.5 font-semibold text-gray-600 hidden sm:table-cell">Picks</th>
               </tr>
             </thead>
@@ -437,8 +437,12 @@ function PerformanceTracker({ history }: { history: HistoryMonth[] }) {
         </div>
         <div className="px-4 py-2.5 bg-gray-50 border-t border-gray-100">
           <p className="text-[10px] text-gray-400">
-            Avg 3M Ret = average 3-month return of that week's picks as at the time of data capture.
-            This is not a backtest. Past performance does not guarantee future results.
+            <strong>Avg prior 3M is not the performance of these picks.</strong> It is the
+            average return of those stocks in the three months <em>before</em> they were
+            selected, frozen at selection &mdash; a characteristic of why they scored well,
+            not a result. Forward performance since selection is not published, and no
+            benchmark comparison is shown, so nothing here should be read as a track record.
+            This is not a backtest, and past performance does not guarantee future results.
           </p>
         </div>
       </div>

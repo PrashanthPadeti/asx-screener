@@ -357,6 +357,25 @@ def test_a_public_route_renders_without_waiting_for_auth():
         "public pages still server-render as a spinner")
 
 
+def test_a_trailing_return_is_not_labelled_as_pick_performance():
+    """strategy.monthly_picks freezes u.return_3m at selection, so it is the
+    stock's return in the three months BEFORE it was picked -- a reason it
+    scored well, not an outcome.
+
+    Displayed as "Avg 3M Ret" under a heading reading "Historical Picks", that
+    is read as a track record by anyone who does not know the schema.
+    """
+    src = _executable_source(
+        (BACKEND.parent / "frontend/app/top5/page.tsx").read_text(
+            encoding="utf-8"))
+    assert "Avg 3M Ret" not in src, (
+        "a trailing return is labelled as though it were the picks' return")
+    assert "prior 3m" in src.lower(), "the label no longer says it is prior"
+    assert "not the performance of these picks" in src, (
+        "the disclosure that this is not a track record was removed")
+    assert "not a backtest" in src
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

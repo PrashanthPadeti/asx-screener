@@ -111,6 +111,17 @@ WEEKLY_DOWNLOAD_CMD="0 12 * * 0   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_P
 ANNOUNCEMENTS_CMD="45 8 * * 1-5   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/asx/download_announcements.py >> ${LOG_DIR}/download_announcements.log 2>&1"
 PREDICTIONS_CMD="0 21 * * 1-5 ASX_ENV_FILE=${PROJECT_DIR}/backend/.env.predictions ${PROJECT_DIR}/scripts/run_predictions.sh"
 # AlphaFive: 22:00 UTC Sunday = Monday 8am AEST, after the weekly pipeline.
+# Output freshness: 10:00 UTC daily, after the daily wrapper's window.
+#
+# A job that defers because a canonical run holds the lease exits 0 and
+# writes nothing, which is indistinguishable from a quiet week. This asserts
+# the OUTPUT advanced, per [[engineering-rule-output-freshness]].
+#
+# Known limit, stated rather than hidden: its own failures land in a log.
+# A check nobody reads has the same problem it was built to solve, so this
+# belongs on the admin system-health surface as well -- tracked separately.
+FRESHNESS_CMD="0 10 * * *   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/assert_output_freshness.py >> ${LOG_DIR}/output_freshness.log 2>&1"
+
 ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR}/backend && ${ENV_PREFIX} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
 
 # ── Install ──────────────────────────────────────────────────────────────────
@@ -163,6 +174,7 @@ upsert "weekly_pipeline.py"       "$WEEKLY_COMPUTE_CMD"  "weekly compute pipelin
 upsert "top5_strategy"            "$ALPHAFIVE_CMD"       "AlphaFive weekly picks (Monday 08:00 AEST)"
 upsert "download_announcements.py" "$ANNOUNCEMENTS_CMD"  "ASX announcements download (weekdays 18:45 AEST)"
 upsert "run_predictions.sh"       "$PREDICTIONS_CMD"     "nightly predictions (weekdays 07:00 AEST)"
+upsert "assert_output_freshness.py" "$FRESHNESS_CMD"      "output freshness check (daily 20:00 AEST)"
 
 if [ "$CHANGED" = "1" ]; then
     crontab "$TMPFILE"

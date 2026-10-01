@@ -241,6 +241,12 @@ def independent_launches(crontab: str | None = None) -> list[str]:
         written = {t for t, d in hits.items() if "w" in d}
         detail = (f"writes {sorted(written)}" if written
                   else f"reads {sorted(hits)}")
+
+        # Coordinated, not independent: it is outside a wrapper but holds the
+        # same lock the wrapper would, so it defers rather than overlapping.
+        if _takes_auxiliary_lease(entry.target):
+            continue
+
         found.append(
             f"INDEPENDENT LAUNCH  {entry.target} ({entry.cadence}) {detail} "
             f"with no wrapper and therefore no canonical execution lease"
@@ -253,6 +259,24 @@ def independent_launches(crontab: str | None = None) -> list[str]:
             if key not in cb.ACCEPTED:
                 found.append(problem)
     return found
+
+
+def _takes_auxiliary_lease(target: str) -> bool:
+    """Does this cron target serialize itself against canonical execution?
+
+    "Outside a wrapper" and "unleased" were the same thing until
+    top5_strategy took an auxiliary lease of its own. Reporting it as
+    INDEPENDENT LAUNCH after that would have the reconciler asserting
+    something untrue -- "with no wrapper and therefore no canonical execution
+    lease" -- and a finding that overstates is a finding people learn to skip.
+
+    Read from source rather than imported: several of these modules need a
+    database driver to import, and whether they take the lease does not.
+    """
+    path = cb.BACKEND / _classification_key(target)
+    if not path.exists():
+        return False
+    return "auxiliary_lease" in cb._executable_source(path)
 
 
 def _classification_key(target: str) -> str:

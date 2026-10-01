@@ -41,7 +41,50 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 TOP_N = 5
 
 
+def _sync_dsn() -> str:
+    """The canonical lease needs a plain psycopg2 DSN, not the asyncpg URL."""
+    url = os.environ.get("DATABASE_URL_SYNC", "")
+    if not url:
+        url = os.environ.get("DATABASE_URL", "").replace(
+            "postgresql+asyncpg://", "postgresql://")
+    return url
+
+
 async def run(
+    pick_month: date | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+) -> None:
+    """Serialize against canonical execution, then pick.
+
+    This writes nothing the driver owns -- it only READS screener.universe --
+    which is why it was classified POST_PUBLICATION and left unleased. Reading
+    is not the hazard; reading at the wrong moment is.
+
+    universe_build rebuilds all rows as PROVISIONAL, clearing compute_run_id
+    and metric_states, and composite_score re-attributes them roughly an hour
+    later. A reader in that window sees governed values belonging to no run --
+    not torn rows, but unattributed ones -- and would pick a month's Top 5
+    from them. No producer proof would notice, because this is not a producer.
+
+    The schedule made that a certainty rather than a risk: top5_strategy is
+    declared 0 22 * * 0 and weekly_pipeline 0 21 * * 0, and the first
+    production cycle admitted at 23:38 and published at 00:35. A cron time is
+    a convention; the lease is the invariant, so this takes the lease.
+
+    Deferring costs one week's refresh of a monthly strategy. Publishing a
+    pick computed from unattributed rows costs a number nobody can
+    substantiate, which is the thing this whole programme forbids.
+    """
+    from compute.engine.canonical_lease import auxiliary_lease
+
+    with auxiliary_lease(_sync_dsn(), why="top5_strategy") as permitted:
+        if not permitted:
+            return
+        await _pick(pick_month=pick_month, force=force, dry_run=dry_run)
+
+
+async def _pick(
     pick_month: date | None = None,
     force: bool = False,
     dry_run: bool = False,

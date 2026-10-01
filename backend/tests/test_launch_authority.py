@@ -85,11 +85,39 @@ def test_identity_ignores_inline_reasons_but_not_cadence():
 # ── The rules ────────────────────────────────────────────────────────────────
 
 def test_a_canonical_touching_cron_target_is_detected():
-    """top5_strategy reads screener.universe on its own Sunday schedule. If
-    this stops being reported, the independent-launch rule has gone quiet."""
+    """download_announcements writes market.asx_announcements on its own
+    weekday schedule, outside any wrapper and without a lease. If this stops
+    being reported, the independent-launch rule has gone quiet.
+
+    This used to assert on top5_strategy. It stopped qualifying on 1 Oct 2026
+    when it took an auxiliary lease of its own -- see the test below, which
+    now covers that transition deliberately rather than by the absence of a
+    name here.
+    """
     found = la.independent_launches()
-    assert any("top5_strategy" in f and "INDEPENDENT LAUNCH" in f
+    assert any("download_announcements" in f and "INDEPENDENT LAUNCH" in f
                for f in found), found
+
+
+def test_a_target_that_takes_the_lease_is_not_called_independent():
+    """"Outside a wrapper" and "unleased" were the same thing until
+    top5_strategy took the lease itself.
+
+    Reporting it afterwards would have the reconciler asserting something
+    untrue -- "with no wrapper and therefore no canonical execution lease" --
+    and a finding that overstates is one people learn to skip. It is
+    coordinated, not independent.
+    """
+    assert la._takes_auxiliary_lease("backend/compute/engine/top5_strategy.py")
+    found = la.independent_launches()
+    assert not any("top5_strategy" in f for f in found), found
+
+
+def test_the_lease_check_is_not_simply_true():
+    """The mutation control: a genuinely unleased target must still read
+    False, or the exemption above would silence every finding."""
+    assert not la._takes_auxiliary_lease(
+        "backend/scripts/asx/download_announcements.py")
 
 
 def test_pipelines_are_exempt_from_independent_launch():
@@ -109,7 +137,7 @@ def test_touches_canonical_agrees_with_the_boundary():
 
 def test_an_unclassified_cron_target_is_reported():
     """The mutation for the classification half."""
-    victim = "compute/engine/top5_strategy.py"
+    victim = "scripts/asx/download_announcements.py"
     saved = cb.CLASSIFICATIONS.pop(victim)
     try:
         found = la.independent_launches()

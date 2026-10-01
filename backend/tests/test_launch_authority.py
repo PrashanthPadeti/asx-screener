@@ -460,8 +460,15 @@ def test_the_generator_reconciles_rather_than_appending_if_absent():
     """
     src = (BACKEND / "scripts/eodhd/v2/jobs/setup_cron.sh").read_text(
         encoding="utf-8")
-    assert "upsert " in src, "the generator must replace managed entries"
-    assert "already in crontab — skipped" not in src, (
+
+    # Executable lines only. The first version of this test matched the phrase
+    # inside the comment that explains the defect -- the same mistake as a
+    # docstring saying "never raises" counting as a raise.
+    code = " ".join(line for line in src.splitlines()
+                    if not line.lstrip().startswith("#"))
+
+    assert "upsert " in code, "the generator must replace managed entries"
+    assert "already in crontab — skipped" not in code, (
         "append-if-absent is back; a disabled entry will never be re-enabled")
     for managed in ("daily_pipeline.py", "weekly_pipeline.py",
                     "top5_strategy", "download_announcements.py"):

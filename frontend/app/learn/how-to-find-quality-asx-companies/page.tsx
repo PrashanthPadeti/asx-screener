@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Find Quality ASX Companies | ASX Screener',
+  title: 'How to Find Quality ASX Companies',
   description:
     'What makes a quality ASX company — and how to screen for it. Covers ROIC, margins, earnings consistency, balance sheet strength, and composite quality scores.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-find-quality-asx-companies' },

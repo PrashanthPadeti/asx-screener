@@ -3,7 +3,7 @@ import { Brain, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'AI Insights Limitations | ASX Screener',
+  title: 'AI Insights Limitations',
   description: 'Important limitations of AI-generated insights on ASX Screener. Understand what AI Insights can and cannot do before relying on them for research.',
   alternates: { canonical: 'https://asxscreener.com.au/ai-insights-limitations' },
 }

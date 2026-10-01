@@ -3,7 +3,7 @@ import { AlertTriangle, Scale, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'Disclaimer | ASX Screener',
+  title: 'Disclaimer',
   description: 'ASX Screener is an educational and research tool, not a financial adviser. Read our full disclaimer before using any information on this site.',
   alternates: { canonical: 'https://asxscreener.com.au/disclaimer' },
 }

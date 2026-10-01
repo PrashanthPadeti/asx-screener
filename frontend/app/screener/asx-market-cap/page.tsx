@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, Filter } from 'lu
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: 'Screen ASX Stocks by Market Cap — Large, Mid & Small Cap | ASX Screener',
+  title: 'Screen ASX Stocks by Market Cap — Large, Mid & Small Cap',
   description: 'Filter ASX stocks by market capitalisation. Screen large-cap ASX 200 stocks, mid-cap, small-cap, and micro-cap companies. Find stocks by size category.',
   alternates: { canonical: 'https://asxscreener.com.au/screener/asx-market-cap' },
 }

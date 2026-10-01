@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'Best Metrics for ASX Dividend Investors | ASX Screener',
+  title: 'Best Metrics for ASX Dividend Investors',
   description:
     'The eight metrics every ASX dividend investor should track — from grossed-up yield and payout ratio to dividend CAGR, FCF cover, and balance sheet strength.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/best-metrics-for-asx-dividend-investors' },

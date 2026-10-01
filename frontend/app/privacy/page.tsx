@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ShieldCheck, AlertTriangle } from 'lucide-react'
 
 export const metadata = {
-  title: 'Privacy Policy | ASX Screener',
+  title: 'Privacy Policy',
   description: 'How ASX Screener collects, uses, and protects your personal information under the Australian Privacy Act 1988.',
 }
 

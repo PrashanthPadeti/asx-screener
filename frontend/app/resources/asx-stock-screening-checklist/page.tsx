@@ -2,9 +2,10 @@ import Link from 'next/link'
 import type { Metadata } from 'next'
 import { BarChart2, CheckCircle2, AlertTriangle, ChevronLeft, Zap, BookOpen } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
-  title: 'ASX Stock Screening Checklist — Free Download | ASX Screener',
+  title: 'ASX Stock Screening Checklist — Free Download',
   description: 'A free printable checklist for running a disciplined ASX stock screen. Covers setting your strategy, choosing filters, reviewing results, and building your watchlist.',
   alternates: { canonical: 'https://asxscreener.com.au/resources/asx-stock-screening-checklist' },
 }
@@ -165,7 +166,7 @@ export default function ASXScreeningChecklistPage() {
 
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Run your screen now</h2>
-        <p className="text-blue-100 mb-5 text-sm">Filter 2,000+ ASX stocks by PE ratio, ROE, dividend yield, debt, and 80+ more metrics. Free to use.</p>
+        <p className="text-blue-100 mb-5 text-sm">Filter {UNIVERSE_CLAIM} ASX stocks by PE ratio, ROE, dividend yield, debt and {SCREENER_FIELDS_CLAIM} filterable fields. Free to use.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

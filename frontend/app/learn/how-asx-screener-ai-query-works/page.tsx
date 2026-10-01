@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How ASX Screener AI Query Helps Investors Search in Plain English | ASX Screener',
+  title: 'How ASX Screener AI Query Helps Investors Search in Plain English',
   description:
     'ASX Screener AI Query lets you type investment ideas in plain English and get structured stock results instantly — no filter-building required.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-asx-screener-ai-query-works' },

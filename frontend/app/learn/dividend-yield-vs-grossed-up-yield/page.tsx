@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'Dividend Yield vs Grossed-Up Yield Explained | ASX Screener',
+  title: 'Dividend Yield vs Grossed-Up Yield Explained',
   description:
     'What grossed-up yield means for Australian investors, how franking credits increase effective yield, and how to compare fully franked and unfranked dividends on an equal basis.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/dividend-yield-vs-grossed-up-yield' },

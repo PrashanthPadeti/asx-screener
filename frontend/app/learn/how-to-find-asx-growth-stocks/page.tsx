@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Find ASX Growth Stocks Using Revenue Growth | ASX Screener',
+  title: 'How to Find ASX Growth Stocks Using Revenue Growth',
   description:
     'How to screen for ASX growth stocks using revenue growth, earnings growth, and momentum metrics. Includes example screens and key signals to watch.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-find-asx-growth-stocks' },

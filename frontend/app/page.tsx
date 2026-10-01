@@ -4,6 +4,7 @@ import { getMarketMovers, getMarketSectors } from '@/lib/api'
 import type { Metadata } from 'next'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
+import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
   title: 'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
@@ -54,7 +55,7 @@ const FEATURES = [
   {
     icon: BarChart2,
     title: 'Powerful Screener',
-    desc: 'Filter ASX stocks by price, sector, PE ratio, ROE, dividend yield, franking credits, and 40+ more metrics.',
+    desc: `Filter ASX stocks by price, sector, PE ratio, ROE, dividend yield, franking credits — ${SCREENER_FIELDS_CLAIM} filterable fields in total.`,
   },
   {
     icon: TrendingUp,
@@ -240,7 +241,7 @@ const faqSchema = {
     {
       '@type': 'Question',
       name: 'What can I screen for on ASX Screener?',
-      acceptedAnswer: { '@type': 'Answer', text: 'You can screen ASX stocks by market cap, sector, P/E ratio, ROE, ROIC, dividend yield, franking credits, revenue growth, earnings growth, cash flow, debt, returns, price momentum, Piotroski F-Score, and 80+ more metrics.' },
+      acceptedAnswer: { '@type': 'Answer', text: `You can screen ASX stocks by market cap, sector, P/E ratio, ROE, ROIC, dividend yield, franking credits, revenue growth, earnings growth, cash flow, debt, returns, price momentum, Piotroski F-Score, and ${SCREENER_FIELDS_CLAIM} filterable fields.` },
     },
     {
       '@type': 'Question',
@@ -315,7 +316,7 @@ export default async function HomePage() {
               <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
               {summary.total_stocks > 0
                 ? `${summary.total_stocks.toLocaleString()} active stocks · ASX end-of-day data`
-                : '2,100+ active stocks · ASX end-of-day data'
+                : `${UNIVERSE_CLAIM} active stocks · ASX end-of-day data`
               }
             </div>
 
@@ -650,7 +651,11 @@ export default async function HomePage() {
             },
             {
               title: 'End-of-Day ASX Pricing',
-              desc: 'Prices sourced directly from ASX end-of-day feeds — updated nightly after market close. No stale data, no US market hours confusion, no currency conversion required.',
+              desc: 'Prices sourced directly from ASX end-of-day feeds — updated nightly after market close, with no US market hours confusion. Freshness is monitored: unsupported or stale observations may be withheld rather than shown.',
+            },
+            {
+              title: 'Currency-Aware Metrics',
+              desc: 'Many ASX-listed companies report their financial statements in a currency other than AUD. Ratios that would mix an AUD share price with a non-AUD statement are withheld rather than approximated, so a number you see is a number we can stand behind.',
             },
           ].map(item => (
             <div key={item.title} className="bg-white rounded-lg p-4 border border-blue-100">

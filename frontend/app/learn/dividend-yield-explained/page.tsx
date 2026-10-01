@@ -2,9 +2,10 @@ import Link from 'next/link'
 import { ChevronLeft, BarChart2, AlertTriangle, Zap, BookOpen, TrendingDown } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
+import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'Dividend Yield Explained for ASX Investors | ASX Screener',
+  title: 'Dividend Yield Explained for ASX Investors',
   description:
     'What is dividend yield, how to calculate it, what counts as a good yield on the ASX, and how to spot yield traps. Includes grossed-up yield with franking credits for Australian investors.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/dividend-yield-explained' },
@@ -237,7 +238,7 @@ where 0.4286 = 30% ÷ (1 − 30%)`}
 
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Screen for ASX income stocks</h2>
-        <p className="text-blue-100 mb-5 text-sm">Filter by dividend yield, grossed-up yield, franking %, payout ratio, and 80+ more metrics. Free to use.</p>
+        <p className="text-blue-100 mb-5 text-sm">Filter by dividend yield, grossed-up yield, franking %, payout ratio, and {SCREENER_FIELDS_CLAIM} filterable fields. Free to use.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

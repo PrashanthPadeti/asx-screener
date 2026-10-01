@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Find ASX Dividend Stocks with Franking Credits | ASX Screener',
+  title: 'How to Find ASX Dividend Stocks with Franking Credits',
   description:
     'How to screen for ASX dividend stocks that pay fully franked or partially franked dividends. Includes key metrics, example screens, and what to check before investing.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-find-asx-dividend-stocks-with-franking' },

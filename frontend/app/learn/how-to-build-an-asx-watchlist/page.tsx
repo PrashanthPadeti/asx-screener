@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Build and Maintain an ASX Watchlist | ASX Screener',
+  title: 'How to Build and Maintain an ASX Watchlist',
   description:
     'Learn how to build and maintain an ASX stock watchlist. Covers how to choose stocks for your watchlist, what to monitor, when to set price alerts, and how to manage your watchlist over time.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-build-an-asx-watchlist' },

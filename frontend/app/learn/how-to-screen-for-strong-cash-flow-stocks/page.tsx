@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Screen for Strong Cash Flow ASX Stocks | ASX Screener',
+  title: 'How to Screen for Strong Cash Flow ASX Stocks',
   description:
     'Why free cash flow matters more than earnings, and how to screen ASX stocks for strong FCF generation, high cash conversion, and sustainable capital allocation.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-screen-for-strong-cash-flow-stocks' },

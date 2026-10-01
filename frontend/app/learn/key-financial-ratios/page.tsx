@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ChevronLeft, BarChart2, BookOpen, ArrowRight, AlertTriangle, Zap } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
+import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
   title: 'Key Financial Ratios for ASX Investors | ASX Screener Education',
@@ -247,7 +248,7 @@ export default function KeyFinancialRatiosPage() {
       {/* CTA */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Screen ASX stocks by these ratios</h2>
-        <p className="text-blue-100 mb-5 text-sm">Filter 200+ ASX stocks by P/E, ROE, D/E, EV/EBITDA and more in real time.</p>
+        <p className="text-blue-100 mb-5 text-sm">Filter {UNIVERSE_CLAIM} ASX stocks by P/E, ROE, D/E, EV/EBITDA and more in real time.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

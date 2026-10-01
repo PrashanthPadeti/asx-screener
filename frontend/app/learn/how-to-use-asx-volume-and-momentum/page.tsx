@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How ASX Traders Use Volume and Momentum | ASX Screener',
+  title: 'How ASX Traders Use Volume and Momentum',
   description:
     'How to use trading volume, price momentum, RSI, and moving averages to find ASX stocks showing strength. Practical screens for active ASX traders.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-use-asx-volume-and-momentum' },

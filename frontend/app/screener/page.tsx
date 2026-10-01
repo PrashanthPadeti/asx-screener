@@ -28,6 +28,7 @@ import {
   type SavedScreen,
 } from '@/lib/api'
 import BrowseSectors from '@/app/screener/components/BrowseSectors'
+import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -1945,7 +1946,7 @@ export default function ScreenerPage() {
           <Code2 className="w-10 h-10 text-orange-400 mx-auto mb-3" />
           <h2 className="text-lg font-bold text-white mb-2">SQL-Like Query Mode</h2>
           <p className="text-slate-400 text-sm max-w-md mx-auto mb-4">
-            Write powerful filters in plain SQL syntax — <span className="text-white">&quot;roe &gt; 15 AND roce &gt; 15 AND market_cap &gt; 500&quot;</span> — with full AND/OR/parentheses support across 200+ fields.
+            Write powerful filters in plain SQL syntax — <span className="text-white">&quot;roe &gt; 15 AND roce &gt; 15 AND market_cap &gt; 500&quot;</span> — with full AND/OR/parentheses support across {SCREENER_FIELDS_CLAIM} fields.
           </p>
           <div className="flex flex-wrap justify-center gap-1.5 mb-6">
             {['roe > 15 AND roce > 15', 'dividend_yield > 5 AND franking_pct = 100', 'pe_ratio < 10 AND earnings_growth_1y > 10', 'market_cap > 1000 AND debt_to_equity < 0.5'].map(q => (

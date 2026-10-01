@@ -1,9 +1,10 @@
 import Link from 'next/link'
 import { ChevronLeft, Zap, BarChart2, BookOpen, ArrowRight, Info, AlertTriangle } from 'lucide-react'
 import Breadcrumb from '@/components/Breadcrumb'
+import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'Franking Credits Explained — ASX Investor Guide | ASX Screener',
+  title: 'Franking Credits Explained — ASX Investor Guide',
   description:
     'Learn how Australian franking credits work, how to calculate grossed-up dividend yield, and why fully franked dividends are so valuable for ASX income investors.',
 }
@@ -218,7 +219,7 @@ where 0.4286 = Corporate Tax Rate ÷ (1 − Corporate Tax Rate)
       {/* CTA */}
       <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl p-7 text-white text-center">
         <h2 className="text-xl font-bold mb-2">Screen for the best franked dividends on the ASX</h2>
-        <p className="text-blue-100 mb-5 text-sm">Filter by grossed-up yield, franking %, payout ratio and more — across all 200+ ASX stocks.</p>
+        <p className="text-blue-100 mb-5 text-sm">Filter by grossed-up yield, franking %, payout ratio and more — across all {UNIVERSE_CLAIM} ASX stocks.</p>
         <Link
           href="/screener"
           className="inline-flex items-center gap-2 bg-white text-blue-700 font-semibold px-5 py-2.5 rounded-xl hover:bg-blue-50 transition-colors"

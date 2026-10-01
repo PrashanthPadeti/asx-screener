@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Screen for ASX Multibagger Stocks | ASX Screener',
+  title: 'How to Screen for ASX Multibagger Stocks',
   description:
     'The key metrics for identifying multibagger candidates on the ASX — growth, ROIC, cash flow, reinvestment, and valuation — with 8 practical screen examples.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-screen-for-asx-multibagger-stocks' },

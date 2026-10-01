@@ -338,6 +338,52 @@ def test_the_sitemap_advertises_only_reachable_pages():
         f"{gated}. Open them, or remove them from the sitemap.")
 
 
+def _sitemap_routes() -> list[str]:
+    sitemap = (BACKEND.parent / "frontend/app/sitemap.ts").read_text(
+        encoding="utf-8")
+    return sorted(set(re.findall(r"\$\{base\}(/[a-z0-9/-]*)`",
+                                 _executable_source(sitemap))))
+
+
+def test_the_sitemap_advertises_nothing_behind_a_plan_gate():
+    """The blind spot in the first version of this rule.
+
+    Reachability was checked against ClientGuard only, so /glossary and
+    /brokers passed — they are not redirected. Both wrap their entire page in
+    <PlanGate required="pro">, so an anonymous visitor (and a crawler) gets
+    "Sign in required — available on the Pro plan" and nothing else. Google
+    was being asked to index a sign-in panel.
+
+    A route is gated two ways: the router can refuse it, or the page can.
+    Only the second was invisible here, which is why it survived a release
+    that was explicitly about this contradiction.
+    """
+    app = BACKEND.parent / "frontend/app"
+    offenders = []
+    for route in _sitemap_routes():
+        page = app / (route.lstrip("/") or ".") / "page.tsx"
+        if not page.is_file():
+            continue
+        src = _executable_source(page.read_text(encoding="utf-8"))
+        # Outermost element of the component's return -- a PlanGate wrapping
+        # one widget inside an otherwise public page is not this defect.
+        if re.search(r"return\s*\(\s*\n\s*<PlanGate", src):
+            offenders.append(route)
+    assert not offenders, (
+        "the sitemap advertises pages whose entire content sits behind a plan "
+        f"gate: {offenders}. Remove them, or render public content above the "
+        f"gate.")
+
+
+def test_the_plan_gate_detector_recognises_the_real_shape():
+    """Mutation control, taken from app/brokers/page.tsx as it stood."""
+    real = "export default function BrokersPage() {\n  return (\n    <PlanGate required=\"pro\" feature=\"Broker Compare\">\n"
+    assert re.search(r"return\s*\(\s*\n\s*<PlanGate", real)
+    partial = "  return (\n    <div>\n      <h1>Public</h1>\n      <PlanGate required=\"pro\">x</PlanGate>\n"
+    assert not re.search(r"return\s*\(\s*\n\s*<PlanGate", partial), (
+        "a gate around one widget must not condemn an otherwise public page")
+
+
 def test_the_guard_and_the_sitemap_read_the_same_declaration():
     """Both consumers must import the shared module. A second copy of the
     prefix list is how these two drifted apart in the first place."""
@@ -367,6 +413,35 @@ def test_opening_the_seo_landing_pages_does_not_open_the_product():
                     "/learn/roe-explained", "/resources", "/pricing",
                     "/data-freshness", "/contact", "/terms"):
         assert _is_public(landing), f"{landing} is still behind the login"
+
+
+def test_a_layout_with_children_defines_a_title_template():
+    """The half of the title fix that was missed first time round.
+
+    Next resolves a plain `title: 'X'` in a layout to an ABSOLUTE title with
+    no template, so child segments inherit nothing. app/learn/layout.tsx and
+    app/screener/layout.tsx did that, which is why their 31 child pages had
+    spelled the site suffix out by hand — they were compensating for a broken
+    template chain, not duplicating one.
+
+    Removing those suffixes without repairing the chain stripped the site name
+    from five pages in production. Only `title.template` propagates.
+    """
+    app = BACKEND.parent / "frontend/app"
+    offenders = []
+    for layout in app.rglob("layout.tsx"):
+        if layout.parent == app:
+            continue                                   # the root defines it
+        src = _executable_source(layout.read_text(encoding="utf-8"))
+        if "title" not in src:
+            continue
+        has_children = any(p != layout.parent / "page.tsx"
+                           for p in layout.parent.rglob("page.tsx"))
+        if has_children and "template:" not in src:
+            offenders.append(layout.relative_to(app).as_posix())
+    assert not offenders, (
+        "these layouts set a title but no template, so their child pages "
+        f"inherit no site suffix: {offenders}")
 
 
 def test_a_public_route_renders_without_waiting_for_auth():

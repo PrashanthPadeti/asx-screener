@@ -27,7 +27,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/`,          lastModified: now, changeFrequency: 'daily',   priority: 1.0 },
 
     // ── Resources ─────────────────────────────────────────────────────────────
-    { url: `${base}/glossary`,  lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
     { url: `${base}/learn`,     lastModified: now, changeFrequency: 'weekly',  priority: 0.7 },
     { url: `${base}/learn/what-is-an-asx-stock-screener`,       lastModified: now, changeFrequency: 'monthly', priority: 0.7 },
     { url: `${base}/learn/how-to-research-asx-stocks-dyor`,     lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
@@ -57,7 +56,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${base}/learn/what-is-a-multibagger-stock`,                   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/how-to-screen-for-asx-multibagger-stocks`,      lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
     { url: `${base}/learn/lessons-from-successful-multibagger-investors`,  lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
-    { url: `${base}/brokers`,   lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
 
     // ── Premium Data ──────────────────────────────────────────────────────────
 

@@ -110,3 +110,8 @@ social-media-drafts/
 
 # Source archives belong in releases, not in the tree.
 *.zip
+
+# Runtime artefacts produced on the server, not source
+.requirements_hash
+stats
+uploads/

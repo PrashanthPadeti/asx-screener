@@ -4,7 +4,6 @@ import { getMarketMovers, getMarketSectors } from '@/lib/api'
 import type { Metadata } from 'next'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
-import { OFFER_ENDS_SHORT, OFFER_ENDS_LONG } from '@/lib/offer'
 
 export const metadata: Metadata = {
   title: 'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
@@ -354,7 +353,6 @@ export default async function HomePage() {
           <div className="hidden lg:flex flex-col gap-3 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/30 self-stretch justify-center">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">BEST VALUE</span>
-              <span className="text-[10px] text-amber-500">Ends {OFFER_ENDS_SHORT}</span>
             </div>
             <div>
               <p className="text-slate-400 text-xs mb-1">Annual plan</p>
@@ -365,8 +363,6 @@ export default async function HomePage() {
               <span className="text-emerald-400 text-xs font-semibold">3× value</span>
               <span className="text-slate-500 text-xs"> · save 67%</span>
             </div>
-            {/* Expiry notice */}
-            <p className="text-[10px] text-amber-500 font-semibold">Offer ends {OFFER_ENDS_LONG}</p>
             <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg transition-colors">
               Claim deal →
             </Link>
@@ -377,7 +373,7 @@ export default async function HomePage() {
         {/* Mobile banner — shown instead of side cards on small screens */}
         <div className="lg:hidden mt-6 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/20">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">FOUNDING MEMBER · Offer ends {OFFER_ENDS_SHORT}</span>
+            <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">FOUNDING MEMBER</span>
           </div>
           <div className="grid grid-cols-2 gap-3 mb-3">
             <div className="bg-white/5 rounded-xl p-3">

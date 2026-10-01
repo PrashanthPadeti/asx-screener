@@ -128,19 +128,39 @@ def test_unavailable_rows_hide_the_section_rather_than_substituting():
         "a numeric literal inside the fetcher suggests a fabricated fallback")
 
 
-def test_the_offer_deadline_is_declared_once():
-    """The landing page and the pricing page both advertised 'offer ends
-    September 2026' as prose, in five places. The deadline passed on 30 Sep
-    and the site kept advertising it, because nothing connected the copies."""
-    offer = BACKEND.parent / "frontend/lib/offer.ts"
-    assert offer.is_file(), "the shared deadline module is gone"
+def test_no_expiry_deadline_is_advertised():
+    """The landing and pricing pages advertised 'offer ends September 2026' as
+    prose, in five places. The deadline passed on 30 Sep and the site kept
+    advertising it, because nothing connected the copies.
+
+    The decision taken on 2 Oct 2026 was to drop the deadline rather than move
+    it: a date that must be hand-maintained to stay true will eventually stop
+    being true, and the pricing page already gates the offer on a backend
+    `founding.available` flag, which is the real signal. No date can expire if
+    no date is published.
+    """
+    months = (r"(January|February|March|April|May|June|July|August|September|"
+              r"October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|"
+              r"Nov|Dec)")
     for page in ("frontend/app/page.tsx", "frontend/app/pricing/page.tsx"):
         src = _executable_source(
             (BACKEND.parent / page).read_text(encoding="utf-8"))
-        assert not re.search(r"(January|February|March|April|May|June|July|"
-                             r"August|September|October|November|December)\s+20\d\d",
-                             src), f"a literal month/year deadline is back in {page}"
-        assert "OFFER_ENDS" in src, f"{page} no longer uses the shared deadline"
+        assert not re.search(rf"{months}\s+20\d\d", src), (
+            f"a literal month/year deadline is back in {page}")
+        assert not re.search(r"[Oo]ffer ends|[Ee]nds\s+\{", src), (
+            f"{page} advertises an expiry again")
+
+
+def test_offer_availability_still_comes_from_the_backend():
+    """Removing the deadline must not remove the ability to end the offer.
+    The pricing page keeps gating on founding.available, so the offer can
+    still be withdrawn -- by the system, not by a date typed into markup."""
+    src = _executable_source(
+        (BACKEND.parent / "frontend/app/pricing/page.tsx").read_text(
+            encoding="utf-8"))
+    assert "founding.available" in src, (
+        "the availability gate was removed along with the deadline")
+    assert "Offer has ended" in src, "no copy remains for the withdrawn state"
 
 
 if __name__ == "__main__":

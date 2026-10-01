@@ -444,6 +444,30 @@ def test_a_scheduled_pipeline_is_a_wrapper_not_a_legacy_path():
             f"driver -- that is the legacy self-invalidating path")
 
 
+def test_the_generator_reconciles_rather_than_appending_if_absent():
+    """A DISABLED entry is a comment that still contains the script name.
+
+    The generator used to ask `grep -qF "daily_pipeline.py"` and skip when it
+    matched, so once a line was commented out it could never be brought back:
+    it reported "already in crontab" and changed nothing. Observed 1 Oct 2026,
+    when both pipelines were enabled in the generator and the runtime stayed
+    disabled.
+
+    The reconciler caught it -- ENABLED-STATE DRIFT, "rerunning the generator
+    would not reproduce the running system" -- which is the property this
+    asserts directly, so the next person does not have to rediscover it from a
+    schedule that quietly never fired.
+    """
+    src = (BACKEND / "scripts/eodhd/v2/jobs/setup_cron.sh").read_text(
+        encoding="utf-8")
+    assert "upsert " in src, "the generator must replace managed entries"
+    assert "already in crontab — skipped" not in src, (
+        "append-if-absent is back; a disabled entry will never be re-enabled")
+    for managed in ("daily_pipeline.py", "weekly_pipeline.py",
+                    "top5_strategy", "download_announcements.py"):
+        assert f'upsert "{managed}"' in src, f"{managed} is not reconciled"
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

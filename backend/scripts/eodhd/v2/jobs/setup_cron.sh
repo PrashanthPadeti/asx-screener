@@ -113,61 +113,56 @@ PREDICTIONS_CMD="0 21 * * 1-5 ASX_ENV_FILE=${PROJECT_DIR}/backend/.env.predictio
 # AlphaFive: 22:00 UTC Sunday = Monday 8am AEST, after the weekly pipeline.
 ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR}/backend && ${ENV_PREFIX} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
 
-# ── Install (append only if not already present) ─────────────────────────────
+# ── Install ──────────────────────────────────────────────────────────────────
+#
+# Reconciling, not append-if-absent.
+#
+# The previous form asked `grep -qF "daily_pipeline.py"` and skipped when it
+# matched. A DISABLED entry is a comment that still CONTAINS the script name,
+# so once a line was commented out the generator could never bring it back:
+# it reported "already in crontab — skipped" and changed nothing. Observed
+# 1 Oct 2026, when both pipelines were re-enabled in this file and the runtime
+# stayed disabled. The reconciler named it ENABLED-STATE DRIFT and said
+# exactly the right thing -- "rerunning the generator would not reproduce the
+# running system" -- which is the property this file exists to provide.
+#
+# So each managed entry now REPLACES whatever matches it, commented or not.
+# The generator owns these lines; anything else in the crontab is left alone.
 TMPFILE=$(mktemp)
 crontab -l 2>/dev/null > "$TMPFILE" || true
 
 CHANGED=0
-if ! grep -qF "daily_pipeline.py" "$TMPFILE"; then
-    # Remove old incremental_daily entry if present (replaced by full pipeline)
+
+# upsert <match-string> <desired-line> <label>
+upsert() {
+    local match="$1" desired="$2" label="$3"
+    if grep -qxF "$desired" "$TMPFILE"; then
+        echo "  - ${label}: already correct"
+        return
+    fi
+    if grep -qF "$match" "$TMPFILE"; then
+        grep -vF "$match" "$TMPFILE" > "${TMPFILE}.new" && mv "${TMPFILE}.new" "$TMPFILE"
+        echo "  ✓ ${label}: replaced (enabled-state or cadence differed)"
+    else
+        echo "  ✓ ${label}: added"
+    fi
+    echo "$desired" >> "$TMPFILE"
+    CHANGED=1
+}
+
+# Superseded by the full pipeline; drop it wherever it still lives.
+if grep -qF "incremental_daily.py" "$TMPFILE"; then
     grep -vF "incremental_daily.py" "$TMPFILE" > "${TMPFILE}.new" && mv "${TMPFILE}.new" "$TMPFILE"
-    echo "$DAILY_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: daily full pipeline (weekdays 18:30 AEST)"
+    echo "  ✓ removed superseded incremental_daily entry"
     CHANGED=1
-else
-    echo "  - Daily pipeline already in crontab — skipped"
 fi
 
-if ! grep -qF "weekly_refresh.py" "$TMPFILE"; then
-    echo "$WEEKLY_DOWNLOAD_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: weekly download (Sunday 22:00 AEST)"
-    CHANGED=1
-else
-    echo "  - Weekly download already in crontab — skipped"
-fi
-
-if ! grep -qF "weekly_pipeline.py" "$TMPFILE"; then
-    echo "$WEEKLY_COMPUTE_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: weekly compute pipeline (Monday 07:00 AEST)"
-    CHANGED=1
-else
-    echo "  - Weekly compute pipeline already in crontab — skipped"
-fi
-
-if ! grep -qF "top5_strategy" "$TMPFILE"; then
-    echo "$ALPHAFIVE_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: AlphaFive weekly picks (Monday 08:00 AEST)"
-    CHANGED=1
-else
-    echo "  - AlphaFive picks already in crontab — skipped"
-fi
-
-if ! grep -qF "download_announcements.py" "$TMPFILE"; then
-    echo "$ANNOUNCEMENTS_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: ASX announcements download (weekdays 18:45 AEST)"
-    CHANGED=1
-else
-    echo "  - Announcements download already in crontab — skipped"
-fi
-
-
-if ! grep -qF "run_predictions.sh" "$TMPFILE"; then
-    echo "$PREDICTIONS_CMD" >> "$TMPFILE"
-    echo "  ✓ Added: nightly predictions (weekdays 07:00 AEST)"
-    CHANGED=1
-else
-    echo "  - Predictions run already in crontab — skipped"
-fi
+upsert "daily_pipeline.py"        "$DAILY_CMD"           "daily full pipeline (weekdays 18:30 AEST)"
+upsert "weekly_refresh.py"        "$WEEKLY_DOWNLOAD_CMD" "weekly download (Sunday 22:00 AEST)"
+upsert "weekly_pipeline.py"       "$WEEKLY_COMPUTE_CMD"  "weekly compute pipeline (Monday 07:00 AEST)"
+upsert "top5_strategy"            "$ALPHAFIVE_CMD"       "AlphaFive weekly picks (Monday 08:00 AEST)"
+upsert "download_announcements.py" "$ANNOUNCEMENTS_CMD"  "ASX announcements download (weekdays 18:45 AEST)"
+upsert "run_predictions.sh"       "$PREDICTIONS_CMD"     "nightly predictions (weekdays 07:00 AEST)"
 
 if [ "$CHANGED" = "1" ]; then
     crontab "$TMPFILE"

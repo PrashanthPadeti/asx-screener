@@ -546,6 +546,7 @@ async def system_health(
     # because a repr can change without any semantic change and would then
     # read as drift.
     result["scheduler"] = _scheduler_state(request)
+    result["output_freshness"] = await _output_freshness(db)
 
     return result
 
@@ -563,6 +564,40 @@ def _trigger_shape(trigger) -> dict:
                 "fields": {f.name: str(f) for f in trigger.fields
                            if not f.is_default}}
     return {"type": name}
+
+
+async def _output_freshness(db: AsyncSession) -> dict:
+    """Whether the deferrable jobs have actually produced output lately.
+
+    The SECOND consumer of compute.engine.output_freshness. The first is the
+    scheduled gate, scripts/assert_output_freshness.py. Both read the same
+    registry and call the same classifier; only the driver differs.
+
+    Deliberately NOT a reader of that script's log. A surface that reports a
+    report cannot distinguish "the job is fine" from "the checker stopped
+    running", and a log that stopped being written looks exactly like a log
+    with nothing to say.
+
+    `unobservable` is returned as its own state and counted separately. Two
+    jobs whose output carries no timestamp are not two healthy jobs, and this
+    endpoint must not let them read as such.
+    """
+    from compute.engine.output_freshness import (
+        ANCHORS, classify, existence_sql, latest_sql, summarise,
+        unobservable_findings,
+    )
+
+    findings = []
+    for anchor in ANCHORS:
+        exists = bool(await _scalar(db, existence_sql(anchor)))
+        latest = await _scalar(db, latest_sql(anchor)) if exists else None
+        findings.append(classify(anchor, exists, latest))
+    findings += unobservable_findings()
+
+    return {
+        "summary": summarise(findings),
+        "findings": [f.as_dict() for f in findings],
+    }
 
 
 def _scheduler_state(request: Request) -> dict:

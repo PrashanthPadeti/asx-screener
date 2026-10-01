@@ -2,39 +2,29 @@
 """
 Assert that deferrable jobs actually produced output
 =====================================================
+One of two consumers of `compute.engine.output_freshness`. The other is the
+admin `/system-health` endpoint, which evaluates the same registry through the
+same classifier with its own driver — rather than reading this script's log,
+which would make the surface a report of a report. A log that stopped being
+written looks exactly like a log with nothing to say.
+
+This one is the gate: it exits non-zero so a scheduled run means something.
+
 A job that takes the auxiliary lease and finds a canonical run in flight
 returns without writing. That is correct -- better no refresh than one
 computed from PROVISIONAL rows -- and it is indistinguishable from a quiet
-week. The process exits 0 either way.
+week, because the process exits 0 either way:
 
     short_positions: canonical execution holds the lease — skipping this cycle
-
-Nothing in the system reads that line. So "deferred" can become "never
-refreshed again" and the first evidence is a number on the site that nobody
-can date.
-
-The rule this enforces, from [[engineering-rule-output-freshness]]:
-
-    Output freshness proves a scheduled job is healthy. Not process exit,
-    not alert delivery, not the absence of errors in a log.
-
-`top5_strategy` is the sharpest case. It runs 0 22 * * 0 against a weekly
-pipeline declared 0 21 * * 0 that took 1h46m on 1 Oct 2026, so deferral is
-likely rather than rare.
-
-WHAT THIS DELIBERATELY DOES NOT CLAIM
--------------------------------------
-Two of the four deferrable jobs write only into `screener.universe`, which
-the canonical run rebuilds wholesale. Their output carries no timestamp of
-their own, so their freshness is NOT independently observable and this says
-so rather than inventing a proxy. A check that cannot run has not passed.
 
 Usage:
     python scripts/assert_output_freshness.py            # assert
     python scripts/assert_output_freshness.py --report   # never exits non-zero
+    python scripts/assert_output_freshness.py --json     # machine-readable
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -44,117 +34,76 @@ sys.path.insert(0, str(BACKEND))
 import psycopg2                                                    # noqa: E402
 
 from app.core.db import get_database_url_sync                      # noqa: E402
+from compute.engine.output_freshness import (                      # noqa: E402
+    ANCHORS, classify, existence_sql, latest_sql, summarise,
+    unobservable_findings,
+)
 
 
-class Anchor:
-    """A job, the output that proves it ran, and how stale is too stale."""
+def evaluate(conn) -> list:
+    """Execute the shared queries with psycopg2 and classify the results."""
+    findings = []
+    with conn.cursor() as cur:
+        for anchor in ANCHORS:
+            cur.execute(existence_sql(anchor))
+            exists = bool(cur.fetchone()[0])
 
-    def __init__(self, job, table, column, max_age_hours, why):
-        self.job = job
-        self.table = table
-        self.column = column
-        self.max_age_hours = max_age_hours
-        self.why = why
+            latest = None
+            if exists:
+                cur.execute(latest_sql(anchor))
+                latest = cur.fetchone()[0]
 
-
-#: Jobs whose output IS independently observable.
-#:
-#: max_age is the cadence plus one full period, so a single deferral is
-#: tolerated and a second consecutive one is not. A threshold tighter than the
-#: cadence would fire on the behaviour the lease exists to produce.
-ANCHORS = [
-    Anchor("short_positions", "market.short_positions", "updated_at", 24 * 10,
-           "ASIC publishes weekly with a few days' lag; the job upserts on "
-           "every successful download, so updated_at advances even when the "
-           "report date does not"),
-    Anchor("top5_strategy", "strategy.monthly_picks", "computed_at", 24 * 15,
-           "runs Sunday 22:00 UTC, inside the weekly canonical window, so it "
-           "is the job most likely to defer; two missed Sundays is a fault"),
-]
-
-#: Jobs whose freshness CANNOT be observed from their own output, and why.
-#:
-#: Named rather than omitted. An unchecked job missing from a report reads as
-#: a healthy one, which is the failure mode this whole file exists to remove.
-UNOBSERVABLE = {
-    "pros_cons":
-        "writes only screener.universe (pros/cons columns), which the "
-        "canonical run rebuilds wholesale -- no timestamp of its own. Its "
-        "freshness is implied by the run that published those rows, which "
-        "compute_run_finalizations already evidences.",
-    "asx_indices":
-        "writes index-membership flags into screener.universe and "
-        "market.companies with no timestamp attributable to this job. "
-        "Observing it needs a column it does not currently write.",
-}
-
-
-def _column_exists(cur, table: str, column: str) -> bool:
-    schema, name = table.split(".", 1)
-    cur.execute("""
-        SELECT count(*) = 1 FROM information_schema.columns
-         WHERE table_schema = %s AND table_name = %s AND column_name = %s
-    """, (schema, name, column))
-    return bool(cur.fetchone()[0])
+            findings.append(classify(anchor, exists, latest))
+    return findings + unobservable_findings()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--report", action="store_true",
                         help="print findings and exit 0 regardless")
+    parser.add_argument("--json", action="store_true",
+                        help="emit the same structure the admin surface returns")
     args = parser.parse_args()
 
     conn = psycopg2.connect(get_database_url_sync())
-    cur = conn.cursor()
+    try:
+        findings = evaluate(conn)
+    finally:
+        conn.close()
 
-    stale, broken = [], []
+    summary = summarise(findings)
+
+    if args.json:
+        print(json.dumps({"summary": summary,
+                          "findings": [f.as_dict() for f in findings]},
+                         indent=2))
+        return 0 if (summary["healthy"] or args.report) else 1
+
     print("── output freshness")
-    for a in ANCHORS:
-        # Verify the instrument before trusting it. A missing column would
-        # otherwise raise, and an operator reading a traceback learns the
-        # script is broken, not whether the job ran.
-        if not _column_exists(cur, a.table, a.column):
-            broken.append(f"{a.job}: {a.table}.{a.column} does not exist")
-            print(f"  BROKEN  {a.job:18s} {a.table}.{a.column} missing")
+    for f in findings:
+        if f.state == "unobservable":
             continue
-
-        cur.execute(f"""
-            SELECT max({a.column}),
-                   EXTRACT(EPOCH FROM (NOW() - max({a.column}))) / 3600
-              FROM {a.table}
-        """)
-        latest, age_hours = cur.fetchone()
-
-        if latest is None:
-            broken.append(f"{a.job}: {a.table} is empty")
-            print(f"  EMPTY   {a.job:18s} {a.table} has no rows at all")
-            continue
-
-        age_hours = float(age_hours)
-        ok = age_hours <= a.max_age_hours
-        print(f"  {'OK   ' if ok else 'STALE'}   {a.job:18s} "
-              f"{a.table}.{a.column} = {latest} "
-              f"({age_hours:.1f}h old, limit {a.max_age_hours}h)")
-        if not ok:
-            stale.append(f"{a.job}: {a.table}.{a.column} is {age_hours:.1f}h "
-                         f"old, limit {a.max_age_hours}h. {a.why}")
+        label = {"current": "OK   ", "stale": "STALE",
+                 "broken": "BROKEN"}[f.state]
+        detail = (f"{f.table}.{f.column} = {f.observed_at} "
+                  f"({f.age_hours:.1f}h old, limit {f.limit_hours}h)"
+                  if f.age_hours is not None else f.reason)
+        print(f"  {label}   {f.job:18s} {detail}")
 
     print("\n── not independently observable")
-    for job, why in sorted(UNOBSERVABLE.items()):
-        print(f"  n/a     {job:18s} {why}")
+    for f in findings:
+        if f.state == "unobservable":
+            print(f"  n/a     {f.job:18s} {f.reason}")
 
-    cur.close()
-    conn.close()
-
-    problems = stale + broken
-    if not problems:
-        print(f"\nFRESH — {len(ANCHORS)} observable output(s) current, "
-              f"{len(UNOBSERVABLE)} not observable and named")
+    if summary["healthy"]:
+        print(f"\nFRESH — {summary['current']} observable output(s) current, "
+              f"{summary['unobservable']} not observable and named")
         return 0
 
     print("\nSTALE OUTPUT:")
-    for p in problems:
-        print(f"  - {p}")
+    for f in findings:
+        if f.faulty:
+            print(f"  - {f.job}: {f.reason}")
     print("\nA deferred job is correct behaviour; a job that has deferred "
           "every cycle since its last success is not, and the two look "
           "identical in a log.")

@@ -74,25 +74,59 @@ from compute.engine.run_plans import PLANS  # noqa: E402
 DRIVER = BACKEND / "scripts" / "p0a_canonical_run.py"
 JOBS = BACKEND / "scripts" / "eodhd" / "v2" / "jobs"
 
-#: Schemas whose tables can carry state into a governed value. `users` is
-#: deliberately absent: it holds accounts and sessions, nothing the factor
-#: model reads.
-SCHEMAS = ("financials", "market", "staging_au", "screener")
+#: Schemas whose tables can carry state into a governed value.
+#:
+#: CLASSIFICATION ONLY. Extraction does not consult this and must not: a
+#: hand-maintained enumeration decides what is *visible*, and anything it
+#: omits is invisible rather than irrelevant. Until 1 Oct 2026 this tuple WAS
+#: the extraction pattern, so `users` (201 SQL references), `meta`, `support`
+#: and `strategy` could not be seen at all -- `tables_touched(top5_strategy)`
+#: returned no writes for a job that INSERTs, UPDATEs and DELETEs
+#: `strategy.monthly_picks`.
+#:
+#: The rule that replaced it: extraction discovers every schema-qualified
+#: relation; classification decides which ones matter.
+CANONICAL_SCHEMAS = ("financials", "market", "staging_au", "screener")
 
-_TABLE = rf"(?:{'|'.join(SCHEMAS)})\.\w+"
+#: Kept as an alias because callers and tests refer to it, but it no longer
+#: governs what can be seen.
+SCHEMAS = CANONICAL_SCHEMAS
+
+_IDENT = r"[A-Za-z_][A-Za-z0-9_$]*"
+#: Any schema-qualified relation, whatever the schema. Qualification is the
+#: discriminator that keeps CTEs, aliases and derived tables out: those are
+#: referenced by bare name, so they cannot match.
+_QUALIFIED = rf"{_IDENT}\.{_IDENT}"
+
+#: A relation reference the extractor cannot resolve to a name: an f-string
+#: placeholder, a %-format slot, or a psycopg2 parameter in table position.
+#: These must become UNRESOLVED and never silently "no tables" -- a producer
+#: whose target is computed at runtime is the one most worth knowing about.
+_PLACEHOLDER = r"\{[^}]*\}|%\([^)]*\)s|%s"
 
 #: Verb -> direction. Order matters inside the alternation: `DELETE FROM` and
 #: `INSERT INTO` must be tried before the bare `FROM`/`INTO` they contain, or a
 #: deletion is recorded as a read and the step looks harmless.
 _VERBS = [
     ("INSERT INTO", "w"), ("DELETE FROM", "w"), ("TRUNCATE TABLE", "w"),
-    ("TRUNCATE", "w"), ("UPDATE", "w"), ("COPY", "w"),
-    ("FROM", "r"), ("JOIN", "r"),
+    ("TRUNCATE", "w"), ("MERGE INTO", "w"), ("UPDATE", "w"), ("COPY", "w"),
+    ("FROM", "r"), ("JOIN", "r"), ("USING", "r"),
 ]
+_VERB_ALT = "|".join(v.replace(" ", r"\s+") for v, _ in _VERBS)
+
+#: The relation that follows a verb: qualified, or a placeholder, or a bare
+#: name. All three are captured; `_classify_reference` decides what each is,
+#: so an unreadable reference is reported rather than dropped.
 _PATTERN = re.compile(
-    r"\b(" + "|".join(v.replace(" ", r"\s+") for v, _ in _VERBS) + r")\s+"
-    + f"({_TABLE})", re.IGNORECASE)
+    rf"\b({_VERB_ALT})\s+(?:ONLY\s+)?({_QUALIFIED}|{_PLACEHOLDER}|{_IDENT})",
+    re.IGNORECASE)
 _DIRECTION = {v.lower(): d for v, d in _VERBS}
+
+#: Names introduced by WITH ... AS, which are referenced like relations and
+#: are not one. Collected per-statement and excluded explicitly rather than
+#: relied upon to be unqualified.
+_CTE = re.compile(rf"\b(?:WITH|,)\s+({_IDENT})\s+AS\s*(?:MATERIALIZED\s*)?\(",
+                  re.IGNORECASE)
 
 
 def _executable_source(path: Path) -> str:
@@ -117,12 +151,36 @@ def _executable_source(path: Path) -> str:
     except SyntaxError:
         tree = None
     if tree is not None:
+        # By LINE RANGE, not by string replace.
+        #
+        # ast.get_docstring returns the PARSED value, so a docstring
+        # containing an escape -- `\n`, `\t`, or a line continuation -- never
+        # matches its own source text and `src.replace(doc, "")` silently
+        # removes nothing. Ten docstrings in this tree are affected, including
+        # weekly_pipeline and monthly_pipeline.
+        #
+        # incremental_daily.py is what exposed it: its docstring says
+        # "- Does NOT update screener.universe", that line survived stripping,
+        # and the extractor recorded a WRITE to screener.universe from a
+        # sentence asserting the opposite. It was quarantined as a latent
+        # canonical writer on that basis.
+        drop: set[int] = set()
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef,
-                                 ast.AsyncFunctionDef, ast.ClassDef)):
-                doc = ast.get_docstring(node, clean=False)
-                if doc:
-                    src = src.replace(doc, "")
+            if not isinstance(node, (ast.Module, ast.FunctionDef,
+                                     ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            body = getattr(node, "body", None)
+            if not body:
+                continue
+            first = body[0]
+            if (isinstance(first, ast.Expr)
+                    and isinstance(first.value, ast.Constant)
+                    and isinstance(first.value.value, str)):
+                end = first.end_lineno or first.lineno
+                drop.update(range(first.lineno, end + 1))
+        if drop:
+            src = "\n".join(line for n, line in enumerate(src.splitlines(), 1)
+                            if n not in drop)
 
     # `--` matters as much as `#`: these files carry SQL in triple-quoted
     # strings, and a commented-out UPDATE inside one is not a write.
@@ -136,11 +194,12 @@ def _executable_source(path: Path) -> str:
 # exactly the check that exists to police it. Found when the scheduler trace
 # said that job writes screener.universe while this said it writes nothing.
 _SET_LIST = re.compile(
-    rf"\bUPDATE\s+({_TABLE})(?:\s+(?!SET\b)(?:AS\s+)?\w+)?\s+SET\s+"
+    rf"\bUPDATE\s+({_QUALIFIED})(?:\s+(?!SET\b)(?:AS\s+)?\w+)?\s+SET\s+"
     rf"(.*?)(?=\bFROM\b|\bWHERE\b|\bRETURNING\b|;|\"\"\")",
     re.IGNORECASE | re.DOTALL)
 _INSERT_LIST = re.compile(
-    rf"\bINSERT\s+INTO\s+({_TABLE})\s*\(([^)]*)\)", re.IGNORECASE | re.DOTALL)
+    rf"\bINSERT\s+INTO\s+({_QUALIFIED})\s*\(([^)]*)\)",
+    re.IGNORECASE | re.DOTALL)
 _ASSIGNED = re.compile(r"(\w+)\s*=")
 
 
@@ -175,13 +234,122 @@ def governed_columns() -> set[str]:
     return set(persisted_governed(LATEST_MODEL_VERSION).values())
 
 
-def tables_touched(path: Path) -> dict[str, set[str]]:
-    """{table: {'r', 'w'}} for one script."""
+def sql_text(path: Path) -> str:
+    """The SQL a file contains, with Python syntax removed.
+
+    Scanning raw source cannot work once extraction stops enumerating
+    schemas: `from compute.engine.run_plans import PLANS` matches
+    `FROM <qualified>` perfectly. The old allow-list was concealing that --
+    `compute` was not a known schema, so the false positive never appeared.
+
+    For a .py file the SQL lives in string literals, so those are what is
+    scanned. Docstrings are excluded for the reason _executable_source
+    exists: prose about a table is not a reference to it. For anything else
+    the whole file is SQL-bearing text with its comment lines removed.
+    """
+    if path.suffix != ".py":
+        return _executable_source(path)
+
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+    except SyntaxError:
+        return _executable_source(path)
+
+    docstrings = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            doc = ast.get_docstring(node, clean=False)
+            if doc:
+                docstrings.add(doc)
+
+    chunks = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if node.value not in docstrings:
+                chunks.append(node.value)
+        elif isinstance(node, ast.JoinedStr):
+            # An f-string: keep the literal parts and mark each interpolation
+            # so a computed table name survives as a placeholder rather than
+            # vanishing into the gap between two literal fragments.
+            parts = []
+            for v in node.values:
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    parts.append(v.value)
+                else:
+                    parts.append("{}")
+            chunks.append("".join(parts))
+
+    text = "\n".join(chunks)
+
+    # A Python import written INSIDE a string literal. budget_audit.py builds
+    # a subprocess command containing
+    #     "import asyncio; from app.workers.announcement_worker import ..."
+    # and `FROM app.workers` matched it perfectly once extraction stopped
+    # enumerating schemas. The discriminator is the `import` that follows:
+    # `from X.Y import Z` is not a shape SQL has.
+    text = re.sub(rf"\bfrom\s+{_IDENT}(?:\.{_IDENT})*\s+import\b", " ", text)
+
+    # SQL comments inside the strings are not references either.
+    text = re.sub(r"/\*.*?\*/", " ", text, flags=re.DOTALL)
+    return "\n".join(line for line in text.splitlines()
+                     if not line.strip().startswith("--"))
+
+
+def _cte_names(text: str) -> set[str]:
+    return {n.lower() for n in _CTE.findall(text)}
+
+
+def relations(path: Path) -> tuple[dict[str, set[str]], list[str]]:
+    """({relation: {'r','w'}}, unresolved) for one file.
+
+    Schema-agnostic: any `schema.table` is discoverable without being
+    enumerated anywhere. Whether a relation MATTERS is a classification
+    question answered elsewhere -- extraction that decides relevance is
+    extraction that can hide things by omission.
+
+    The second element is the honest part. A reference the extractor cannot
+    resolve to a name becomes UNRESOLVED and is returned, never silently
+    dropped: a producer whose target is computed at runtime is precisely the
+    one worth knowing about.
+    """
+    text = sql_text(path)
+    ctes = _cte_names(text)
     found: dict[str, set[str]] = {}
-    for verb, table in _PATTERN.findall(_executable_source(path)):
-        key = " ".join(verb.split()).lower()
-        found.setdefault(table.lower(), set()).add(_DIRECTION[key])
-    return found
+    unresolved: list[str] = []
+
+    for verb, ref in _PATTERN.findall(text):
+        direction = _DIRECTION[" ".join(verb.split()).lower()]
+        token = ref.strip()
+
+        if re.fullmatch(_PLACEHOLDER, token):
+            unresolved.append(f"{' '.join(verb.split()).upper()} {token}")
+            continue
+        if "." not in token:
+            # A bare name: a CTE, an alias, a derived table, or a temp
+            # relation. Not a physical schema-qualified relation, and not
+            # reported as one.
+            continue
+        if token.split(".", 1)[0].lower() in ctes:
+            continue
+        found.setdefault(token.lower(), set()).add(direction)
+
+    return found, sorted(set(unresolved))
+
+
+def tables_touched(path: Path) -> dict[str, set[str]]:
+    """{relation: {'r', 'w'}} for one script.
+
+    The historical name and shape, kept because callers depend on it. Use
+    `relations()` when the unresolved references matter -- and they usually
+    do, since this signature cannot express them.
+    """
+    return relations(path)[0]
+
+
+def unresolved_relations(path: Path) -> list[str]:
+    """Relation references this file computes at runtime."""
+    return relations(path)[1]
 
 
 # ── The plan side: what the driver owns ──────────────────────────────────────
@@ -388,9 +556,15 @@ EXTRA_UNITS: dict[str, Path] = {}
 #: Listed with a reason rather than deleted, because deletion is the user's
 #: call and an undeclared latent writer is worse than a declared one.
 QUARANTINED_WRITERS: dict[str, str] = {
-    "scripts/eodhd/v2/jobs/incremental_daily.py":
-        "superseded by daily_pipeline — setup_cron.sh actively removes its "
-        "crontab entry when installing the full pipeline",
+    # incremental_daily.py was quarantined here as a latent canonical writer.
+    # It never was one. Its module docstring says
+    #     - Does NOT update screener.universe
+    # and that line survived docstring stripping because the docstring also
+    # contains a line continuation, so `src.replace(doc, "")` matched nothing.
+    # The extractor then read the sentence as `UPDATE screener.universe` and
+    # recorded a write from prose asserting the opposite. Removed 1 Oct 2026
+    # once extraction stopped reading docstrings; the file dispatches
+    # subprocesses and issues no SQL at all.
     "compute/engine/dilution_metrics.py":
         "writes screener.universe (shares_change_1y, shares_dilution_3y and "
         "two others, none governed) and is launched by NOTHING: no cron "

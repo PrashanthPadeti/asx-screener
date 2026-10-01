@@ -41,7 +41,7 @@ const DATA_TYPES = [
     category: 'Screener Metrics (screener.universe)',
     frequency: 'Nightly',
     source: 'Computed from financials + price data',
-    notes: 'All 80+ screener metrics are recomputed each night. This includes PE ratio, EV/EBITDA, ROE, dividend yield, composite scores, and qualitative signals.',
+    notes: 'Every screener metric is recomputed each night. This includes PE ratio, EV/EBITDA, ROE, dividend yield, composite scores, and qualitative signals.',
     delay: 'Reflects previous day\'s close',
   },
   {
@@ -67,6 +67,43 @@ const DATA_TYPES = [
   },
 ]
 
+/**
+ * The four outcomes of the applicability contract, in customer language.
+ *
+ * These mirror backend/compute/engine/applicability.py exactly. The state
+ * names are the ones the engine records, so a support question about a blank
+ * can be answered with the same vocabulary the system uses internally.
+ */
+const REASONS = [
+  {
+    state: 'APPLICABLE',
+    label: 'The figure is shown',
+    detail: 'The metric is meaningful for this kind of company, the inputs exist, and the '
+          + 'units are compatible. This is the only case in which a number is published.',
+  },
+  {
+    state: 'NOT_MEANINGFUL',
+    label: 'Withheld because the number would mislead',
+    detail: 'The metric does not apply to this company, or the inputs would make it '
+          + 'meaningless. A P/E on a loss-making company, a debt ratio on a business with '
+          + 'no debt, or a ratio mixing an AUD share price with financial statements '
+          + 'reported in another currency. The data exists; publishing it would not inform you.',
+  },
+  {
+    state: 'UNAVAILABLE',
+    label: 'The metric applies, but no value could be obtained',
+    detail: 'This is deliberately distinct from the case above. Either this company has no '
+          + 'value for it, or the feed that supplies it is unhealthy. We separate "cannot '
+          + 'exist" from "we failed to obtain it", because only the second is our problem to fix.',
+  },
+  {
+    state: 'INSUFFICIENT_DATA',
+    label: 'Not enough history yet',
+    detail: 'The metric needs a longer run of observations than this company has — a recent '
+          + 'listing, or a three-year growth rate with two years of filings behind it.',
+  },
+]
+
 export default function DataFreshnessPage() {
   return (
     <div className="max-w-3xl mx-auto px-4 py-10 space-y-8">
@@ -77,11 +114,11 @@ export default function DataFreshnessPage() {
           </div>
           <h1 className="text-2xl font-bold text-slate-900">Data Freshness Policy</h1>
         </div>
-        <p className="text-sm text-slate-500">Last updated: June 2026</p>
+
       </div>
 
       <p className="text-slate-600 leading-relaxed">
-        ASX Screener aggregates financial data from multiple sources. Different data types are updated at different frequencies. This page explains when each type of data is refreshed and what delays to expect.
+        ASX Screener aggregates financial data from multiple sources. Different data types are updated at different frequencies. This page explains when each type of data is refreshed, what delays to expect, and — just as importantly — what it means when a figure is not shown at all.
       </p>
 
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
@@ -116,6 +153,53 @@ export default function DataFreshnessPage() {
             <p className="text-xs text-slate-500 mt-3 leading-relaxed border-t border-slate-100 pt-3">{notes}</p>
           </div>
         ))}
+      </div>
+
+      {/* ── What a blank means ──────────────────────────────────────────────
+          Added 2 Oct 2026. The screener withholds figures it cannot
+          substantiate, which is a deliberate design decision rather than a
+          gap, and nothing on the site said so. A dash that looks like missing
+          data undersells the work; a dash that explains itself is the whole
+          argument for the product. */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-bold text-slate-900">When a figure is not shown</h2>
+        <p className="text-slate-600 leading-relaxed text-sm">
+          A dash in place of a number is a statement, not a gap. Every governed metric
+          is classified before it is served, and a value is published only when the
+          system can substantiate it. Four outcomes are possible:
+        </p>
+
+        <div className="space-y-3">
+          {REASONS.map(({ state, label, detail }) => (
+            <div key={state} className="bg-white border border-slate-200 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-1.5">
+                <span className="font-mono text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                  {state}
+                </span>
+                <h3 className="font-semibold text-slate-800 text-sm">{label}</h3>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed">{detail}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <p className="text-sm text-blue-900 leading-relaxed">
+            <strong>Why this matters.</strong> A screener that always prints a number is
+            not more complete than one that sometimes declines — it is less honest about
+            which of its numbers mean anything. A P/E computed from an AUD share price and
+            a statement reported in another currency is arithmetic, not a valuation. We
+            would rather show you nothing than show you that.
+          </p>
+        </div>
+
+        <p className="text-slate-600 leading-relaxed text-sm">
+          Separately from classification, a price is only eligible to be served while the
+          source that produced it is still in use. When a data source is retired, prices
+          already collected from it remain stored for history but stop qualifying as a
+          current price — so an instrument whose only price came from a retired feed shows
+          no price rather than an old one.
+        </p>
       </div>
 
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-2">

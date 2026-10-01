@@ -171,6 +171,9 @@ PUBLIC_PAGES = (
     "frontend/app/screener/page.tsx",
     "frontend/app/learn",
     "frontend/app/resources",
+    "frontend/app/data-freshness",
+    "frontend/app/ai-insights-limitations",
+    "frontend/app/brokers",
 )
 
 
@@ -179,7 +182,7 @@ PUBLIC_PAGES = (
 #: after the number walked straight past it.
 _SCALE_CLAIM = re.compile(
     r"\b\d{1,3},?\d{3}\+?\s*(?:ASX|stocks|companies)"        # 2,000+ ASX
-    r"|\b\d{2,4}\+\s*(?:more\s+)?(?:fields|metrics)"         # 235+ fields
+    r"|\b\d{2,4}\+\s*(?:\w+\s+)?(?:fields|metrics)"          # 235+ fields / 80+ screener metrics
     r"|\b\d{2,4}\+\s*ASX\b")                                 # 200+ ASX
 
 
@@ -226,6 +229,7 @@ def test_the_scale_scanner_catches_every_claim_that_was_actually_there():
         "ASX Screener includes 80+ metrics including",
         "across all 200+ ASX stocks.",
         "and 40+ more metrics.",
+        "All 80+ screener metrics are recomputed each night.",
         "across 200+ fields.",
     ]
     missed = [s for s in removed if not _SCALE_CLAIM.search(s)]
@@ -304,6 +308,34 @@ def test_no_page_appends_the_site_name_the_layout_already_appends():
                      p.read_text(encoding="utf-8")))]
     assert not offenders, (
         f"these pages append a suffix the layout already adds: {offenders}")
+
+
+def _public_prefixes() -> list[str]:
+    src = (BACKEND.parent / "frontend/components/ClientGuard.tsx").read_text(
+        encoding="utf-8")
+    block = src[src.index("const PUBLIC_PREFIXES"):src.index("export function isPublic")]
+    return re.findall(r"'(/[a-z0-9/-]*)'", block)
+
+
+def _is_public(path: str) -> bool:
+    return path == "/" or any(path.startswith(p) for p in _public_prefixes())
+
+
+def test_opening_the_seo_landing_pages_does_not_open_the_product():
+    """Three SEO pages live under /screener and are public by name. A prefix
+    of '/screener' would have made the screener itself free, which is the
+    opposite of the decision taken."""
+    for product in ("/screener", "/market", "/scans", "/top5", "/news",
+                    "/indices", "/funds", "/commodities", "/global-markets",
+                    "/watchlist", "/portfolio", "/alerts", "/account",
+                    "/admin", "/company/BHP", "/stock/BHP"):
+        assert not _is_public(product), f"{product} became publicly reachable"
+
+    for landing in ("/screener/asx-dividend-yield", "/screener/asx-market-cap",
+                    "/screener/asx-moving-average", "/sectors/materials",
+                    "/learn/roe-explained", "/resources", "/pricing",
+                    "/data-freshness", "/contact", "/terms"):
+        assert _is_public(landing), f"{landing} is still behind the login"
 
 
 def test_a_public_route_renders_without_waiting_for_auth():

@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: "Lessons from the World's Best Multibagger Investors | ASX Screener",
+  title: "Lessons from the World's Best Multibagger Investors",
   description:
     'What Peter Lynch, Warren Buffett, Charlie Munger, Philip Fisher, Joel Greenblatt, Terry Smith and others have in common — and what ASX investors can learn from them.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/lessons-from-successful-multibagger-investors' },

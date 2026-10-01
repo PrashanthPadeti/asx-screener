@@ -302,12 +302,45 @@ def test_no_page_appends_the_site_name_the_layout_already_appends():
     assert "template: '%s | ASX Screener'" in layout, (
         "the title template changed; this rule needs rechecking")
 
-    doubled = re.compile(r"\btitle:\s*'[^']*\| ASX Screener'")
+    # Both quote styles, and any "| ASX Screener <Word>" tail.
+    #
+    # The first version of this pattern matched single-quoted titles ending in
+    # exactly " | ASX Screener". Three pages escaped it and shipped: one used
+    # DOUBLE quotes because its title contains an apostrophe ("the World's
+    # Best..."), and two ended " | ASX Screener Education", a different suffix
+    # the template then appended to again. The fix was right and the matcher
+    # was too narrow, which is the same failure twice over.
+    doubled = re.compile(
+        r"\btitle:\s*(['\"]).*?\|\s*ASX Screener(?:\s+\w+)?\1")
     offenders = [p.relative_to(app).as_posix() for p in app.rglob("*.tsx")
                  if doubled.search(_executable_source(
                      p.read_text(encoding="utf-8")))]
     assert not offenders, (
         f"these pages append a suffix the layout already adds: {offenders}")
+
+
+def test_the_title_matcher_covers_the_shapes_that_escaped_it():
+    """Mutation control from the three titles that shipped duplicated."""
+    doubled = re.compile(
+        r"\btitle:\s*(['\"]).*?\|\s*ASX Screener(?:\s+\w+)?\1")
+    escaped = [
+        """  title: "Lessons from the World's Best Multibagger Investors | ASX Screener",""",
+        """  title: 'Key Financial Ratios for ASX Investors | ASX Screener Education',""",
+        """  title: 'How to Read ASX Company Announcements | ASX Screener Education',""",
+        """  title: 'Data Freshness Policy | ASX Screener',""",
+    ]
+    missed = [s for s in escaped if not doubled.search(s)]
+    assert not missed, f"still not matched: {missed}"
+
+    # And it must not strike a title that merely mentions the brand inline,
+    # which is legitimate: "One ASX Screener, Three Ways to Search".
+    innocent = [
+        "  title: 'One ASX Screener, Three Ways to Search',",
+        "  title: 'How to Use ASX Screener Alpha Screens',",
+        "  title: { default: 'Education Hub', template: '%s | ASX Screener' },",
+    ]
+    fired = [s for s in innocent if doubled.search(s)]
+    assert not fired, f"false positives: {fired}"
 
 
 def _public_prefixes() -> list[str]:

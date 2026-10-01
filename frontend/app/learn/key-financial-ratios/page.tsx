@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'Key Financial Ratios for ASX Investors | ASX Screener Education',
+  title: 'Key Financial Ratios for ASX Investors',
   description:
     'P/E, P/B, ROE, EV/EBITDA, D/E — the essential financial ratios for evaluating ASX stocks explained with formulas, benchmarks, and Australian examples.',
 }

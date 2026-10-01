@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Read ASX Company Announcements | ASX Screener Education',
+  title: 'How to Read ASX Company Announcements',
   description:
     'Learn how to read and interpret ASX company announcements — earnings results, appendix 4C, capital raisings, change of director — with a guide to the most important announcement types.',
 }

@@ -369,6 +369,35 @@ def test_opening_the_seo_landing_pages_does_not_open_the_product():
         assert _is_public(landing), f"{landing} is still behind the login"
 
 
+def test_a_layout_with_children_defines_a_title_template():
+    """The half of the title fix that was missed first time round.
+
+    Next resolves a plain `title: 'X'` in a layout to an ABSOLUTE title with
+    no template, so child segments inherit nothing. app/learn/layout.tsx and
+    app/screener/layout.tsx did that, which is why their 31 child pages had
+    spelled the site suffix out by hand — they were compensating for a broken
+    template chain, not duplicating one.
+
+    Removing those suffixes without repairing the chain stripped the site name
+    from five pages in production. Only `title.template` propagates.
+    """
+    app = BACKEND.parent / "frontend/app"
+    offenders = []
+    for layout in app.rglob("layout.tsx"):
+        if layout.parent == app:
+            continue                                   # the root defines it
+        src = _executable_source(layout.read_text(encoding="utf-8"))
+        if "title" not in src:
+            continue
+        has_children = any(p != layout.parent / "page.tsx"
+                           for p in layout.parent.rglob("page.tsx"))
+        if has_children and "template:" not in src:
+            offenders.append(layout.relative_to(app).as_posix())
+    assert not offenders, (
+        "these layouts set a title but no template, so their child pages "
+        f"inherit no site suffix: {offenders}")
+
+
 def test_a_public_route_renders_without_waiting_for_auth():
     """ClientGuard returned a spinner whenever `loading` was true, and loading
     is true during server rendering -- so the server emitted a spinner for

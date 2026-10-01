@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'ROE Explained: How Investors Use Return on Equity | ASX Screener',
+  title: 'ROE Explained: How Investors Use Return on Equity',
   description:
     'What is Return on Equity (ROE), how to calculate it, what counts as a good ROE on the ASX, and how to use it alongside other metrics to find quality ASX stocks.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/roe-explained' },

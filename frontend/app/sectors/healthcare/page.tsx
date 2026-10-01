@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, TrendingUp, Shiel
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: 'ASX Healthcare Sector — Biotech, Medical Devices & Healthcare Services | ASX Screener',
+  title: 'ASX Healthcare Sector — Biotech, Medical Devices & Healthcare Services',
   description: 'Overview of the ASX Healthcare sector. Key metrics for CSL, Cochlear, Ramsay, and ASX biotech. How to screen and research Australian healthcare stocks.',
   alternates: { canonical: 'https://asxscreener.com.au/sectors/healthcare' },
 }

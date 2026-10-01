@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, TrendingUp, Filte
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: 'ASX Dividend Yield Stocks — Screen by Yield & Franking | ASX Screener',
+  title: 'ASX Dividend Yield Stocks — Screen by Yield & Franking',
   description: 'Screen ASX stocks by dividend yield, grossed-up yield, franking credits, and payout ratio. Find high-yield fully franked ASX stocks for income investing.',
   alternates: { canonical: 'https://asxscreener.com.au/screener/asx-dividend-yield' },
 }

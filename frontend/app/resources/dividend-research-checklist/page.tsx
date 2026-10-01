@@ -5,7 +5,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
-  title: 'ASX Dividend Research Checklist — Free | ASX Screener',
+  title: 'ASX Dividend Research Checklist — Free',
   description: 'A free checklist for researching ASX dividend stocks. Covers yield, franking credits, payout ratio, dividend history, sustainability checks, and yield trap warning signs.',
   alternates: { canonical: 'https://asxscreener.com.au/resources/dividend-research-checklist' },
 }

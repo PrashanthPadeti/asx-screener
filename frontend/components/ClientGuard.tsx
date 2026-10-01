@@ -33,6 +33,21 @@ export function ClientGuard({ children }: { children: React.ReactNode }) {
     }
   }, [user, loading, pathname, pub, router])
 
+  // A public route never waits on auth.
+  //
+  // `loading` is true during server rendering and again until auth hydrates
+  // from localStorage, so the spinner below was what the server emitted for
+  // EVERY route. Measured on 2 Oct 2026, the homepage shipped 68 KB of HTML
+  // containing roughly 1,000 characters of visible text -- the navbar and the
+  // footer disclaimer -- with the hero, the preview table and the whole SEO
+  // section present only inside the RSC script payload. No <h1> reached the
+  // markup on any page.
+  //
+  // Nothing about a public route depends on who is asking, so it can render
+  // immediately. This changes no access rule: it only stops a page that is
+  // already public from being withheld until JavaScript runs.
+  if (pub) return <>{children}</>
+
   // Show minimal spinner while auth hydrates from localStorage
   if (loading) {
     return (
@@ -43,7 +58,7 @@ export function ClientGuard({ children }: { children: React.ReactNode }) {
   }
 
   // Block render on protected routes until redirect fires
-  if (!pub && !user) return null
+  if (!user) return null
 
   return <>{children}</>
 }

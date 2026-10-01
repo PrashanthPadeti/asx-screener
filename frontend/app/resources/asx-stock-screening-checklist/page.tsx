@@ -5,7 +5,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
-  title: 'ASX Stock Screening Checklist — Free Download | ASX Screener',
+  title: 'ASX Stock Screening Checklist — Free Download',
   description: 'A free printable checklist for running a disciplined ASX stock screen. Covers setting your strategy, choosing filters, reviewing results, and building your watchlist.',
   alternates: { canonical: 'https://asxscreener.com.au/resources/asx-stock-screening-checklist' },
 }

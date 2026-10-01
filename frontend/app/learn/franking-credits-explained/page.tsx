@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'Franking Credits Explained — ASX Investor Guide | ASX Screener',
+  title: 'Franking Credits Explained — ASX Investor Guide',
   description:
     'Learn how Australian franking credits work, how to calculate grossed-up dividend yield, and why fully franked dividends are so valuable for ASX income investors.',
 }

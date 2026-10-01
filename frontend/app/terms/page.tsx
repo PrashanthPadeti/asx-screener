@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { Scale, AlertTriangle } from 'lucide-react'
 
 export const metadata = {
-  title: 'Terms of Service | ASX Screener',
+  title: 'Terms of Service',
   description: 'Terms and conditions for using ASX Screener — subscription, cancellation, refunds, data accuracy, and acceptable use.',
 }
 

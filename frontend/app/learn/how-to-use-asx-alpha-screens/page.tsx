@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Use ASX Screener Alpha Screens | ASX Screener',
+  title: 'How to Use ASX Screener Alpha Screens',
   description:
     'Alpha Screens are ready-made ASX stock screens for dividend, growth, value, momentum, quality, and sector strategies. Learn how to run them and customise them.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-use-asx-alpha-screens' },

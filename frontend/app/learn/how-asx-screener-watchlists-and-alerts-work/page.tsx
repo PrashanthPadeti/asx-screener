@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How ASX Screener Watchlists and Alerts Help Investors Stay Organised | ASX Screener',
+  title: 'How ASX Screener Watchlists and Alerts Help Investors Stay Organised',
   description:
     'How to use ASX Screener watchlists and price alerts to track your shortlisted stocks, get notified at your target prices, and stay on top of market moves without constant monitoring.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-asx-screener-watchlists-and-alerts-work' },

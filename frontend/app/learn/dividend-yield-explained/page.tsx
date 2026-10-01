@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'Dividend Yield Explained for ASX Investors | ASX Screener',
+  title: 'Dividend Yield Explained for ASX Investors',
   description:
     'What is dividend yield, how to calculate it, what counts as a good yield on the ASX, and how to spot yield traps. Includes grossed-up yield with franking credits for Australian investors.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/dividend-yield-explained' },

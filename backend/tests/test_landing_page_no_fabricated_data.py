@@ -285,6 +285,46 @@ def test_an_unreachable_source_is_unverified_not_passing():
         "failure-to-measure must exit 2 (unverified), distinct from exit 1")
 
 
+def test_no_page_appends_the_site_name_the_layout_already_appends():
+    """app/layout.tsx sets `template: '%s | ASX Screener'`, so a page title of
+    'Data Freshness Policy | ASX Screener' renders as
+
+        Data Freshness Policy | ASX Screener | ASX Screener
+
+    which is what Google showed for 44 pages on 2 Oct 2026.
+    """
+    app = BACKEND.parent / "frontend/app"
+    layout = (app / "layout.tsx").read_text(encoding="utf-8")
+    assert "template: '%s | ASX Screener'" in layout, (
+        "the title template changed; this rule needs rechecking")
+
+    doubled = re.compile(r"\btitle:\s*'[^']*\| ASX Screener'")
+    offenders = [p.relative_to(app).as_posix() for p in app.rglob("*.tsx")
+                 if doubled.search(_executable_source(
+                     p.read_text(encoding="utf-8")))]
+    assert not offenders, (
+        f"these pages append a suffix the layout already adds: {offenders}")
+
+
+def test_a_public_route_renders_without_waiting_for_auth():
+    """ClientGuard returned a spinner whenever `loading` was true, and loading
+    is true during server rendering -- so the server emitted a spinner for
+    every route. The homepage shipped 68 KB of HTML with ~1,000 characters of
+    visible text, all of it navbar and footer.
+
+    A public route must short-circuit before that spinner.
+    """
+    src = _executable_source(
+        (BACKEND.parent / "frontend/components/ClientGuard.tsx").read_text(
+            encoding="utf-8"))
+    body = src[src.index("export function ClientGuard"):]
+    pub_return = body.index("if (pub) return")
+    spinner = body.index("animate-spin")
+    assert pub_return < spinner, (
+        "the public short-circuit must come before the loading spinner, or "
+        "public pages still server-render as a spinner")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

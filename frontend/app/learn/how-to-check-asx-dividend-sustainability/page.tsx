@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Check If an ASX Dividend Is Sustainable | ASX Screener',
+  title: 'How to Check If an ASX Dividend Is Sustainable',
   description:
     'Five metrics ASX investors use to check whether a dividend is sustainable — payout ratio, free cash flow cover, debt, earnings trend, and franking history.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-check-asx-dividend-sustainability' },

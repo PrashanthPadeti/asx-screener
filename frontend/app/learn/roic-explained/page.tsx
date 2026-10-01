@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'ROIC Explained: Return on Invested Capital for ASX Investors | ASX Screener',
+  title: 'ROIC Explained: Return on Invested Capital for ASX Investors',
   description:
     'What is Return on Invested Capital (ROIC), how to calculate it, why it beats ROE for comparing companies, and how to screen for high-ROIC ASX stocks.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/roic-explained' },

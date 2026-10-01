@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'ASX Stock Research Checklist for Investors | ASX Screener',
+  title: 'ASX Stock Research Checklist for Investors',
   description:
     'A practical checklist for researching ASX stocks. Covers business model, financial health, valuation, management, recent announcements, and risk factors — use this before adding any stock to your watchlist.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/asx-stock-research-checklist' },

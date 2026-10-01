@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'How to Find Undervalued ASX Stocks | ASX Screener',
+  title: 'How to Find Undervalued ASX Stocks',
   description:
     'How to identify undervalued ASX stocks using P/E, P/B, EV/EBITDA, and intrinsic value metrics. Includes value investing screens and how to avoid value traps.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-find-undervalued-asx-stocks' },

@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'What Is an ASX Stock Screener? How Investors Use One | ASX Screener',
+  title: 'What Is an ASX Stock Screener? How Investors Use One',
   description:
     'Learn what an ASX stock screener is, how it works, and how Australian investors use screening criteria like PE ratio, dividend yield, and ROE to find stocks worth researching.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/what-is-an-asx-stock-screener' },

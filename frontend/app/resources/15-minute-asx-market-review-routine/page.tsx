@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, Clock, Bell, Eye,
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: '15-Minute ASX Market Review Routine | ASX Screener',
+  title: '15-Minute ASX Market Review Routine',
   description: 'A structured 15-minute routine for ASX investors to stay on top of the market without spending hours monitoring prices. Covers index check, announcements, watchlist, and alerts.',
   alternates: { canonical: 'https://asxscreener.com.au/resources/15-minute-asx-market-review-routine' },
 }

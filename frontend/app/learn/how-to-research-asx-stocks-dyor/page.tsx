@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'How to Research ASX Stocks: A Practical DYOR Workflow | ASX Screener',
+  title: 'How to Research ASX Stocks: A Practical DYOR Workflow',
   description:
     'A step-by-step DYOR (Do Your Own Research) workflow for ASX investors. Learn how to analyse a company\'s financials, announcements, management, and valuation before adding it to your watchlist.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-research-asx-stocks-dyor' },

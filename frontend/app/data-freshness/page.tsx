@@ -3,7 +3,7 @@ import { Database, Clock, RefreshCw, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 
 export const metadata: Metadata = {
-  title: 'Data Freshness Policy | ASX Screener',
+  title: 'Data Freshness Policy',
   description: 'How frequently ASX Screener updates its financial data — prices, financials, dividends, announcements, and screener metrics.',
   alternates: { canonical: 'https://asxscreener.com.au/data-freshness' },
 }

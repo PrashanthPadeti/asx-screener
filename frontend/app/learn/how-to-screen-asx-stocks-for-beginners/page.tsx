@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'How to Screen ASX Stocks for Beginners | ASX Screener',
+  title: 'How to Screen ASX Stocks for Beginners',
   description:
     'A step-by-step guide to screening ASX stocks for beginners. Learn what a stock screener does, which filters to start with, and how to research the results.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/how-to-screen-asx-stocks-for-beginners' },

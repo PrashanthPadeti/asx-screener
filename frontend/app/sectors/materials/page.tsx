@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, TrendingUp, Filte
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: 'ASX Materials Sector — Stocks, Metrics & Screen | ASX Screener',
+  title: 'ASX Materials Sector — Stocks, Metrics & Screen',
   description: 'Overview of the ASX Materials sector. Key metrics for mining and resources stocks, how to screen ASX materials companies, and what to watch when researching mining investments.',
   alternates: { canonical: 'https://asxscreener.com.au/sectors/materials' },
 }

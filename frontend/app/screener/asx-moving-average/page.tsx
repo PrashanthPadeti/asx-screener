@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, TrendingUp, Filte
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: 'Screen ASX Stocks by Moving Average | ASX Screener',
+  title: 'Screen ASX Stocks by Moving Average',
   description: 'Filter ASX stocks by 20-day, 50-day, and 200-day moving averages. Find stocks above or below key technical levels using the ASX Screener.',
   alternates: { canonical: 'https://asxscreener.com.au/screener/asx-moving-average' },
 }

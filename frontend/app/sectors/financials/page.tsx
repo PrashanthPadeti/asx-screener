@@ -4,7 +4,7 @@ import { BarChart2, AlertTriangle, ChevronLeft, Zap, BookOpen, TrendingUp, Filte
 import Breadcrumb from '@/components/Breadcrumb'
 
 export const metadata: Metadata = {
-  title: 'ASX Financials Sector — Banks, REITs & Insurance | ASX Screener',
+  title: 'ASX Financials Sector — Banks, REITs & Insurance',
   description: 'Overview of the ASX Financials sector. Key metrics for ASX banks, insurance companies, and diversified financials. How to screen and research ASX financial stocks.',
   alternates: { canonical: 'https://asxscreener.com.au/sectors/financials' },
 }

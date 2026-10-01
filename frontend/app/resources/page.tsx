@@ -4,7 +4,7 @@ import { BarChart2, CheckSquare, TrendingUp, Clock, ArrowRight } from 'lucide-re
 import { UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata: Metadata = {
-  title: 'Free ASX Investor Resources | ASX Screener',
+  title: 'Free ASX Investor Resources',
   description: 'Free checklists, guides, and routines for ASX investors. Download or print our stock screening checklist, dividend research checklist, and daily market review routine.',
   alternates: { canonical: 'https://asxscreener.com.au/resources' },
 }

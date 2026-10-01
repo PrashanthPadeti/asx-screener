@@ -5,7 +5,7 @@ import ArticleSchema from '@/components/ArticleSchema'
 import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 
 export const metadata = {
-  title: 'One ASX Screener, Three Ways to Search | ASX Screener',
+  title: 'One ASX Screener, Three Ways to Search',
   description:
     'ASX Screener offers three ways to find stocks: click filters, plain English AI queries, and SQL-like query mode. Learn which approach suits your investing style.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/asx-screener-three-ways-to-search' },

@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'What Is a Multibagger Stock? | ASX Screener',
+  title: 'What Is a Multibagger Stock?',
   description:
     'What multibagger stocks are, the traits they share before becoming big winners, and why growth, quality, reinvestment, and patience are the core ingredients.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/what-is-a-multibagger-stock' },

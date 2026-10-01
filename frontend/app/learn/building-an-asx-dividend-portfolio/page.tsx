@@ -4,7 +4,7 @@ import Breadcrumb from '@/components/Breadcrumb'
 import ArticleSchema from '@/components/ArticleSchema'
 
 export const metadata = {
-  title: 'Building a Dividend Portfolio on the ASX | ASX Screener',
+  title: 'Building a Dividend Portfolio on the ASX',
   description:
     'How to construct a diversified ASX income portfolio — sector allocation, stock selection criteria, franking credits, reinvestment, and common mistakes to avoid.',
   alternates: { canonical: 'https://asxscreener.com.au/learn/building-an-asx-dividend-portfolio' },

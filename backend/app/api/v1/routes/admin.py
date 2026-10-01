@@ -547,6 +547,7 @@ async def system_health(
     # read as drift.
     result["scheduler"] = _scheduler_state(request)
     result["output_freshness"] = await _output_freshness(db)
+    result["cloudflare_ranges"] = _cloudflare_ranges()
 
     return result
 
@@ -564,6 +565,58 @@ def _trigger_shape(trigger) -> dict:
                 "fields": {f.name: str(f) for f in trigger.fields
                            if not f.is_default}}
     return {"type": name}
+
+
+def _cloudflare_ranges() -> dict:
+    """Configuration assurance: do nginx and ufw still match Cloudflare?
+
+    Unlike output_freshness, this cannot evaluate live here. Reading `ufw
+    status` needs root, and an API worker holding that privilege to render a
+    panel would be a worse trade than the one this reports on. So the
+    privileged checker writes its verdict and this reads it.
+
+    That is deliberately NOT "reading a log". The distinction that matters:
+    a log's silence is invisible, whereas this reports the ARTIFACT'S AGE and
+    downgrades to `unverified` once the evidence is older than two check
+    cycles. A checker that stopped running therefore shows up as unverified
+    rather than as its last good answer -- which was the whole objection to
+    log-reading surfaces.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    state_file = _Path("/var/lib/asx-screener/cloudflare_ranges.json")
+    stale_after_hours = 48          # the check runs daily; two cycles
+
+    if not state_file.exists():
+        return {"state": "unverified",
+                "reason": "no check has ever run (state file absent)",
+                "checked_at": None, "age_hours": None}
+    try:
+        payload = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"state": "unverified",
+                "reason": f"state file unreadable: {exc}",
+                "checked_at": None, "age_hours": None}
+
+    checked_at = payload.get("checked_at")
+    age_hours = None
+    if checked_at:
+        try:
+            then = datetime.fromisoformat(checked_at)
+            if then.tzinfo is None:
+                then = then.replace(tzinfo=timezone.utc)
+            age_hours = (datetime.now(timezone.utc) - then).total_seconds() / 3600
+        except ValueError:
+            age_hours = None
+
+    payload["age_hours"] = round(age_hours, 1) if age_hours is not None else None
+    if age_hours is None or age_hours > stale_after_hours:
+        payload["state"] = "unverified"
+        payload["reason"] = (
+            f"the last check is {payload['age_hours']}h old (limit "
+            f"{stale_after_hours}h); its verdict is no longer evidence")
+    return payload
 
 
 async def _output_freshness(db: AsyncSession) -> dict:

@@ -120,6 +120,18 @@ PREDICTIONS_CMD="0 21 * * 1-5 ASX_ENV_FILE=${PROJECT_DIR}/backend/.env.predictio
 # Known limit, stated rather than hidden: its own failures land in a log.
 # A check nobody reads has the same problem it was built to solve, so this
 # belongs on the admin system-health surface as well -- tracked separately.
+# Cloudflare range drift: 05:30 UTC daily, well clear of the pipelines.
+#
+# Read-only by design. It compares nginx set_real_ip_from and the ufw :80/:443
+# allowances against Cloudflare's current published set, and changes neither.
+# A bad upstream response or a parsing defect must not be able to rewrite the
+# origin firewall; reconciliation is a separate decision.
+#
+# Needs root for `ufw status`. Writes its verdict where admin /system-health
+# can read it, with the age surfaced so a checker that stopped running shows
+# as unverified rather than as its last good answer.
+CFRANGES_CMD="30 5 * * *   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/assert_cloudflare_ranges.py >> ${LOG_DIR}/cloudflare_ranges.log 2>&1"
+
 FRESHNESS_CMD="0 10 * * *   cd ${PROJECT_DIR} && ${ENV_PREFIX} && ${VENV_PYTHON} backend/scripts/assert_output_freshness.py >> ${LOG_DIR}/output_freshness.log 2>&1"
 
 ALPHAFIVE_CMD="0 22 * * 0   cd ${PROJECT_DIR}/backend && ${ENV_PREFIX} && ${VENV_PYTHON} -m compute.engine.top5_strategy --force >> ${LOG_DIR}/alphafive.log 2>&1"
@@ -175,6 +187,7 @@ upsert "top5_strategy"            "$ALPHAFIVE_CMD"       "AlphaFive weekly picks
 upsert "download_announcements.py" "$ANNOUNCEMENTS_CMD"  "ASX announcements download (weekdays 18:45 AEST)"
 upsert "run_predictions.sh"       "$PREDICTIONS_CMD"     "nightly predictions (weekdays 07:00 AEST)"
 upsert "assert_output_freshness.py" "$FRESHNESS_CMD"      "output freshness check (daily 20:00 AEST)"
+upsert "assert_cloudflare_ranges.py" "$CFRANGES_CMD"     "Cloudflare range drift check (daily 15:30 AEST)"
 
 if [ "$CHANGED" = "1" ]; then
     crontab "$TMPFILE"

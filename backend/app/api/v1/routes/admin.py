@@ -363,8 +363,14 @@ async def system_health(
              ORDER BY job_id, finished_at DESC
         """))).mappings().all()
 
+        # Intent: job id -> next fire time. Passing the times (not just the
+        # ids) is what lets a weekly job awaiting its first opportunity read as
+        # `pending_first_run` rather than `unknown` — three of the twenty are
+        # weekly or monthly, and a deployment must not turn the surface red for
+        # weeks.
         scheduler = getattr(request.app.state, "scheduler", None)
-        registered = [j.id for j in scheduler.get_jobs()] if scheduler else []
+        registered = {j.id: getattr(j, "next_run_time", None)
+                      for j in scheduler.get_jobs()} if scheduler else {}
 
         result["scheduled_jobs"] = health_view(
             registered=registered,

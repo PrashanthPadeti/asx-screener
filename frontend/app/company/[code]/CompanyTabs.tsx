@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, createContext, useContext } from 'react'
+import { MetricValue } from '@/components/MetricValue'
+import type { GovernedColumns, MetricStates } from '@/lib/metric-states'
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid,
 } from 'recharts'
 import {
-  getCompanyOverview, getCompanyFinancials, getCompanyPrices,
+  getCompanyOverview, getCompanyFinancials, getCompanyPrices, getScreenerFields,
   getCompanyDividends, getCompanyPeers, getCompanyHalfYearly,
   getCompanyAnnouncements, getAISummary, getAnomalyFlags,
   getMiningMetrics, getReitMetrics, getCapitalRaises,
@@ -29,6 +31,9 @@ type Tab = 'overview' | 'financials' | 'technicals' | 'dividends' | 'peers' | 'a
 type FinancialPeriod = 'annual' | 'halfyearly'
 
 interface MetricRowProps {
+  /** Canonical-or-column metric name. When set, a withheld value explains
+   *  itself through the shared resolver instead of rendering a bare dash. */
+  field?: string
   label: string
   value: string
   sub?: string
@@ -73,17 +78,49 @@ function signedPct(v: number | null | undefined, decimals = 1): string {
 
 // ── Sub-components ────────────────────────────────────────────
 
-function MetricRow({ label, value, sub, highlight }: MetricRowProps) {
+/**
+ * The applicability sidecar for the company on screen, plus the backend's
+ * column -> canonical map.
+ *
+ * Carried by context rather than threaded through 114 MetricRow call sites.
+ * Each row names the metric it shows; nothing here knows that ev_to_ebitda is
+ * stored under ev_ebitda — that mapping is published by the API and resolved
+ * in one shared place.
+ */
+const MetricContext = createContext<{
+  states: MetricStates
+  governed: GovernedColumns
+}>({ states: null, governed: null })
+
+export function MetricStatesProvider(
+  { states, governed, children }:
+  { states: MetricStates; governed: GovernedColumns; children: React.ReactNode },
+) {
+  return (
+    <MetricContext.Provider value={{ states, governed }}>
+      {children}
+    </MetricContext.Provider>
+  )
+}
+
+function MetricRow({ label, value, sub, highlight, field }: MetricRowProps) {
+  const { states, governed } = useContext(MetricContext)
   const valueClass =
     highlight === 'green' ? 'text-emerald-600 font-semibold' :
     highlight === 'red'   ? 'text-red-500 font-semibold' :
     'text-gray-800 font-semibold'
 
+  // A governed metric renders through the shared resolver, so a withheld
+  // value carries the engine's own sentence instead of a bare dash.
+  const shown = field
+    ? <MetricValue field={field} states={states} governed={governed} value={value} />
+    : value
+
   return (
     <div className="flex items-baseline justify-between py-1.5 border-b border-gray-50/80 last:border-0 group hover:bg-blue-50/30 -mx-1 px-1 rounded transition-colors">
       <span className="text-xs text-gray-400 font-medium">{label}</span>
       <span className={`text-sm text-right ${valueClass}`}>
-        {value}
+        {shown}
         {sub && <span className="text-xs text-gray-400 ml-1 font-normal">{sub}</span>}
       </span>
     </div>
@@ -652,14 +689,14 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
         <Card title="Valuation">
           <MetricRow label="EPS (FY0)"        value={o.eps_fy0 != null ? `$${o.eps_fy0.toFixed(2)}` : '—'} />
           <MetricRow label="EPS (FY1 est.)"   value={o.eps_fy1 != null ? `$${o.eps_fy1.toFixed(2)}` : '—'} />
-          <MetricRow label="P/E Ratio"        value={fmtX(o.pe_ratio)} />
+          <MetricRow field="pe_ratio" label="P/E Ratio"        value={fmtX(o.pe_ratio)} />
           <MetricRow label="Forward P/E"      value={fmtX(o.forward_pe)} />
-          <MetricRow label="PEG Ratio"        value={fmtX(o.peg_ratio)} />
-          <MetricRow label="Price / Book"     value={fmtX(o.price_to_book)} />
-          <MetricRow label="Price / Sales"    value={fmtX(o.price_to_sales)} />
-          <MetricRow label="EV / EBITDA"      value={fmtX(o.ev_to_ebitda)} />
+          <MetricRow field="peg_ratio" label="PEG Ratio"        value={fmtX(o.peg_ratio)} />
+          <MetricRow field="price_to_book" label="Price / Book"     value={fmtX(o.price_to_book)} />
+          <MetricRow field="price_to_sales" label="Price / Sales"    value={fmtX(o.price_to_sales)} />
+          <MetricRow field="ev_to_ebitda" label="EV / EBITDA"      value={fmtX(o.ev_to_ebitda)} />
           <MetricRow label="EV / Revenue"     value={fmtX(o.ev_to_revenue)} />
-          <MetricRow label="EV / EBIT"        value={fmtX(o.ev_to_ebit)} />
+          <MetricRow field="ev_to_ebit" label="EV / EBIT"        value={fmtX(o.ev_to_ebit)} />
           <MetricRow label="Price / FCF"      value={fmtX(o.price_to_fcf)} />
           <MetricRow label="FCF Yield"        value={formatRatio(o.fcf_yield)} />
           <MetricRow label="Earnings Yield"   value={formatRatio(o.earnings_yield)} />
@@ -689,8 +726,8 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
               o.franking_pct != null && o.franking_pct > 0 ? 'neutral' : 'neutral'
             }
           />
-          <MetricRow label="DPS (TTM)"          value={o.dps_ttm != null ? `$${o.dps_ttm.toFixed(3)}` : '—'} />
-          <MetricRow label="Payout Ratio"        value={formatRatio(o.payout_ratio)} />
+          <MetricRow field="dps_ttm" label="DPS (TTM)"          value={o.dps_ttm != null ? `$${o.dps_ttm.toFixed(3)}` : '—'} />
+          <MetricRow field="payout_ratio" label="Payout Ratio"        value={formatRatio(o.payout_ratio)} />
           <MetricRow label="Ex-Dividend Date"    value={o.ex_div_date ?? '—'} />
           <MetricRow label="Consec. Div. Years"  value={o.dividend_consecutive_yrs != null ? String(o.dividend_consecutive_yrs) : '—'} />
           <MetricRow label="Div. CAGR (3Y)"      value={formatRatio(o.dividend_cagr_3y)} />
@@ -698,16 +735,16 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
 
         {/* Profitability */}
         <Card title="Profitability">
-          <MetricRow label="Gross Margin"     value={formatRatio(o.gross_margin)} />
+          <MetricRow field="gross_margin" label="Gross Margin"     value={formatRatio(o.gross_margin)} />
           <MetricRow label="EBITDA Margin"    value={formatRatio(o.ebitda_margin)} />
           <MetricRow label="Net Margin"       value={formatRatio(o.net_margin)}
             highlight={o.net_margin != null ? (o.net_margin > 0 ? 'neutral' : 'red') : 'neutral'} />
-          <MetricRow label="Operating Margin" value={formatRatio(o.operating_margin)} />
+          <MetricRow field="operating_margin" label="Operating Margin" value={formatRatio(o.operating_margin)} />
           <MetricRow label="ROE"              value={formatRatio(o.roe)}
             highlight={o.roe != null && o.roe > 0.15 ? 'green' : 'neutral'} />
           <MetricRow label="ROA"              value={formatRatio(o.roa)} />
-          <MetricRow label="ROCE"             value={formatRatio(o.roce)} />
-          <MetricRow label="Avg ROE (3Y)"     value={formatRatio(o.avg_roe_3y)} />
+          <MetricRow field="roce" label="ROCE"             value={formatRatio(o.roce)} />
+          <MetricRow field="avg_roe_3y" label="Avg ROE (3Y)"     value={formatRatio(o.avg_roe_3y)} />
         </Card>
       </div>
 
@@ -716,11 +753,11 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
         <Card title="Growth">
           <MetricRow label="Revenue (1Y)"     value={signedPct(o.revenue_growth_1y)}
             highlight={o.revenue_growth_1y != null ? (o.revenue_growth_1y > 0 ? 'green' : 'red') : 'neutral'} />
-          <MetricRow label="Revenue CAGR (3Y)" value={signedPct(o.revenue_growth_3y_cagr)} />
-          <MetricRow label="Revenue CAGR (5Y)" value={signedPct(o.revenue_cagr_5y)} />
+          <MetricRow field="revenue_growth_3y_cagr" label="Revenue CAGR (3Y)" value={signedPct(o.revenue_growth_3y_cagr)} />
+          <MetricRow field="revenue_cagr_5y" label="Revenue CAGR (5Y)" value={signedPct(o.revenue_cagr_5y)} />
           <MetricRow label="Earnings (1Y)"    value={signedPct(o.earnings_growth_1y)}
             highlight={o.earnings_growth_1y != null ? (o.earnings_growth_1y > 0 ? 'green' : 'red') : 'neutral'} />
-          <MetricRow label="EPS CAGR (3Y)"    value={signedPct(o.eps_growth_3y_cagr)} />
+          <MetricRow field="eps_growth_3y_cagr" label="EPS CAGR (3Y)"    value={signedPct(o.eps_growth_3y_cagr)} />
           {o.revenue_growth_hoh != null && (
             <MetricRow label="Revenue HoH ★"  value={signedPct(o.revenue_growth_hoh)}
               highlight={o.revenue_growth_hoh > 0 ? 'green' : 'red'} />
@@ -753,7 +790,7 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
           <MetricRow label="Total Debt"        value={fmtM(o.total_debt)} />
           <MetricRow label="Total Assets"      value={fmtM(o.total_assets)} />
           <MetricRow label="Total Equity"      value={fmtM(o.total_equity)} />
-          <MetricRow label="Book Value / Sh"   value={o.book_value_per_share != null ? `$${o.book_value_per_share.toFixed(2)}` : '—'} />
+          <MetricRow field="book_value_per_share" label="Book Value / Sh"   value={o.book_value_per_share != null ? `$${o.book_value_per_share.toFixed(2)}` : '—'} />
           <MetricRow label="Cash"              value={fmtM(o.cash)} />
         </Card>
 
@@ -799,13 +836,13 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
           <MetricRow label="Quick Ratio (Acid Test)" value={fmtX(o.quick_ratio)}
             highlight={o.quick_ratio == null ? 'neutral' : o.quick_ratio >= 1 ? 'green' : o.quick_ratio < 0.5 ? 'red' : 'neutral'} />
           <MetricRow label="Cash Ratio"             value={fmtX(o.cash_ratio)} />
-          <MetricRow label="Working Capital"        value={fmtM(o.working_capital)} />
+          <MetricRow field="working_capital" label="Working Capital"        value={fmtM(o.working_capital)} />
           <MetricRow label="Capital Employed"       value={fmtM(o.capital_employed)} />
           <MetricRow label="Interest Coverage"      value={fmtX(o.interest_coverage)}
             highlight={o.interest_coverage == null ? 'neutral' : o.interest_coverage >= 3 ? 'green' : o.interest_coverage < 1.5 ? 'red' : 'neutral'} />
           <MetricRow label="EBITDA Int. Coverage"   value={fmtX(o.ebitda_interest_coverage)} />
           <MetricRow label="Debt / EBITDA"          value={fmtX(o.debt_to_ebitda)} />
-          <MetricRow label="Net Debt / EBITDA"      value={fmtX(o.net_debt_to_ebitda)} />
+          <MetricRow field="net_debt_to_ebitda" label="Net Debt / EBITDA"      value={fmtX(o.net_debt_to_ebitda)} />
           <MetricRow label="Debt / Assets"          value={fmtX(o.debt_to_assets)} />
           <MetricRow label="LT Debt / Capital"      value={fmtX(o.lt_debt_to_capital)} />
           <MetricRow label="Equity Ratio"           value={formatRatio(o.equity_ratio)} />
@@ -818,10 +855,10 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
           <MetricRow label="Pre-tax Margin"         value={formatRatio(o.pretax_margin)} />
           <MetricRow label="OCF Margin"             value={formatRatio(o.ocf_margin)} />
           <MetricRow label="FCF Margin"             value={formatRatio(o.fcf_margin)} />
-          <MetricRow label="Asset Turnover"         value={fmtX(o.asset_turnover)} />
+          <MetricRow field="asset_turnover" label="Asset Turnover"         value={fmtX(o.asset_turnover)} />
           <MetricRow label="Fixed Asset Turnover"   value={fmtX(o.fixed_asset_turnover)} />
           <MetricRow label="Receivables Turnover"   value={fmtX(o.receivables_turnover)} />
-          <MetricRow label="Inventory Turnover"     value={fmtX(o.inventory_turnover)} />
+          <MetricRow field="inventory_turnover" label="Inventory Turnover"     value={fmtX(o.inventory_turnover)} />
           <MetricRow label="Days Sales Outstanding"  value={o.days_sales_outstanding != null ? `${o.days_sales_outstanding.toFixed(0)} days` : '—'} />
           <MetricRow label="Days Inventory Outst."   value={o.days_inventory_outstanding != null ? `${o.days_inventory_outstanding.toFixed(0)} days` : '—'} />
           <MetricRow label="Capex Intensity"        value={formatRatio(o.capex_intensity)} />
@@ -2930,6 +2967,8 @@ function AIInsightsTab({ code }: { code: string }) {
 export default function CompanyTabs({ code }: { code: string }) {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [overview, setOverview]   = useState<CompanyOverview | null>(null)
+  // Column -> canonical metric, published by the API. Never rebuilt here.
+  const [governed, setGoverned]   = useState<GovernedColumns>(null)
   const [financials, setFinancials] = useState<FinancialsResponse | null>(null)
   const [halfYearly, setHalfYearly] = useState<HalfYearlyResponse | null>(null)
   const [prices, setPrices]         = useState<PricesResponse | null>(null)
@@ -2964,6 +3003,11 @@ export default function CompanyTabs({ code }: { code: string }) {
     getAnomalyFlags(code)
       .then(r => setAnomalyFlags(r.flags))
       .catch(() => {}) // silently ignore — table may not exist yet
+    // Without this map a governed blank falls back to a plain dash rather
+    // than guessing that a column name doubles as its canonical name.
+    getScreenerFields()
+      .then(d => setGoverned(d.governed_columns ?? null))
+      .catch(() => setGoverned(null))
   }, [code])
 
   // Lazy-load per tab — re-fetch prices when period changes
@@ -3043,6 +3087,7 @@ export default function CompanyTabs({ code }: { code: string }) {
   }
 
   return (
+    <MetricStatesProvider states={overview?.metric_states ?? null} governed={governed}>
     <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
 
       {/* ── Tab bar — dark slate ─────────────────────────────── */}
@@ -3203,5 +3248,6 @@ export default function CompanyTabs({ code }: { code: string }) {
         ) : null}
       </div>
     </div>
+    </MetricStatesProvider>
   )
 }

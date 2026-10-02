@@ -1,3 +1,4 @@
+import type { MetricStates } from './metric-states'
 import axios from 'axios'
 import { getStoredAccessToken } from './auth'
 
@@ -85,6 +86,11 @@ export interface ScreenerFilter {
  *   franking_pct, percent_insiders, percent_institutions, short_pct, rsi_14, adx_14
  */
 export interface ScreenerRow {
+  /** Sparse applicability sidecar: canonical metric -> {state, cause, reason}
+   *  for each governed metric the engine declined to publish. Typed by the
+   *  shared definition so the state union stays single-sourced. */
+  metric_states?: MetricStates
+
   // Identity
   asx_code: string
   company_name: string
@@ -251,6 +257,10 @@ export interface ScreenerFieldsResponse {
     text: { value: string; label: string }[]
   }
   total_fields: number
+  /** Physical column -> canonical metric, for every governed metric. The
+   *  applicability sidecar is keyed canonically; rows are keyed by column. */
+  governed_columns?: Record<string, string>
+  model_version?: string
 }
 
 export interface ScreenerPreset {
@@ -374,6 +384,10 @@ export const getScreenerBatch = async (codes: string[]): Promise<ScreenerRow[]> 
  *   rsi_14, adx_14
  */
 export interface CompanyOverview {
+  /** Sparse applicability sidecar: canonical metric -> {state, cause, reason}
+   *  for each governed metric the engine declined to publish. */
+  metric_states?: MetricStates
+
   // Price
   price: number | null
   price_date: string | null

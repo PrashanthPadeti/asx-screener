@@ -39,7 +39,7 @@ from app.core.parsed_query import (
     AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
     canonicalise,
 )
-from app.core.row_projection import expected_outputs, project_row
+from app.core.row_projection import expected_outputs, governed_columns, project_row
 from app.core.screener_fields import UnknownField, build_registry
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 # The writer and the reader must agree on what "published" means, so the
@@ -1614,18 +1614,38 @@ async def get_screener_fields():
     Categories are returned in CATEGORY_ORDER order so the dropdown
     shows a logical, user-friendly hierarchy.
     """
+    # Canonical identity travels with the field that needs it.
+    #
+    # The applicability sidecar on every row is keyed by CANONICAL metric name;
+    # a row's values are keyed by PHYSICAL column. For 8 of the 72 governed
+    # metrics those spellings differ (ev_ebitda/ev_to_ebitda,
+    # dividend_per_share/dps_ttm, ...), and row_projection records that this is
+    # "how ev_to_ebitda escaped assessment once already".
+    #
+    # So the mapping is published here, per descriptor, rather than left for a
+    # caller to reconstruct. A client may consume canonical identity; it must
+    # never redeclare it. `canonical_metric` is null for an ungoverned field,
+    # which is a statement — not a missing value.
+    canonical_for_column = {
+        column: metric
+        for metric, column in governed_columns(LATEST_MODEL_VERSION).items()
+    }
+
     # Group fields by category (unordered first pass)
     raw_cats: dict[str, list] = {}
     for key, info in ALLOWED_FIELDS.items():
         cat = info["cat"]
         if cat not in raw_cats:
             raw_cats[cat] = []
+        canonical = canonical_for_column.get(key)
         raw_cats[cat].append({
             "key":   key,
             "label": info["label"],
             "type":  info["type"],
             "unit":  info.get("unit", ""),
             "scale": info.get("scale", 1.0),
+            "canonical_metric": canonical,
+            "governed":         canonical is not None,
         })
 
     # Sort categories by CATEGORY_ORDER; unlisted ones go alphabetically at end
@@ -1657,6 +1677,20 @@ async def get_screener_fields():
             ],
         },
         "total_fields": len(ALLOWED_FIELDS),
+
+        # Physical column -> canonical metric, for every governed metric.
+        #
+        # `canonical_metric` on each descriptor covers the 69 governed metrics
+        # that are also filterable. Three are not filterable at all — dps_ttm,
+        # gross_margin_expansion, operating_margin_expansion — so they have no
+        # descriptor to carry the mapping, and a client resolving only through
+        # descriptors could never explain a withheld value for them.
+        #
+        # This map is the complete authority. Both are produced from
+        # governed_columns() here, so there is still exactly one declaration of
+        # canonical identity; a client consumes it and never restates it.
+        "governed_columns": canonical_for_column,
+        "model_version":    LATEST_MODEL_VERSION,
     }
 
 

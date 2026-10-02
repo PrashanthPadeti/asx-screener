@@ -29,6 +29,8 @@ import {
 } from '@/lib/api'
 import BrowseSectors from '@/app/screener/components/BrowseSectors'
 import { SCREENER_FIELDS_CLAIM } from '@/lib/claims'
+import { MetricValue } from '@/components/MetricValue'
+import type { GovernedColumns } from '@/lib/metric-states'
 
 // ── Column definitions ────────────────────────────────────────────────────────
 
@@ -808,6 +810,9 @@ export default function ScreenerPage() {
   const [fieldsByCategory, setFieldsByCategory] =
     useState<Record<string, ScreenerFieldMeta[]>>({})
   const [allFields, setAllFields] = useState<ScreenerFieldMeta[]>([])
+  // Column -> canonical metric, from the API. Never reconstructed locally:
+  // 8 of the 72 governed metrics spell column and canonical differently.
+  const [governed, setGoverned] = useState<GovernedColumns>(null)
 
   // Presets
   const [presets, setPresets] = useState<ScreenerPreset[]>([])
@@ -926,6 +931,7 @@ export default function ScreenerPage() {
       setFieldsByCategory(d.categories)
       const flat = Object.values(d.categories).flat()
       setAllFields(flat)
+      setGoverned(d.governed_columns ?? null)
     }).catch(console.error)
 
     getScreenerPresets().then(d => {
@@ -1872,7 +1878,9 @@ export default function ScreenerPage() {
                               <td key={col.key as string}
                                 className={cn('px-3 py-2.5',
                                   col.align === 'right' ? 'text-right' : 'text-left')}>
-                                {col.render(r)}
+                                <MetricValue field={col.key as string}
+                          states={r.metric_states} governed={governed}
+                          value={col.render(r)} />
                               </td>
                             ))}
                           </tr>

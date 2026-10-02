@@ -165,6 +165,7 @@ def health_view(*,
                 latest_terminal: Mapping[str, Execution],
                 now: datetime,
                 scheduler_enabled: bool = True,
+                disabled: Optional[Mapping[str, str]] = None,
                 ) -> dict[str, Any]:
     """The operator's two questions, answered together.
 
@@ -182,6 +183,16 @@ def health_view(*,
     next_runs: Mapping[str, Optional[datetime]] = registered
     registered = sorted(next_runs)
     running = list(running)
+
+    # A declaration that is intentionally not live must be ACCOUNTED FOR, not
+    # merely absent. `anomaly_alerts` is registered behind
+    # settings.ANOMALY_ALERTS_ENABLED and is currently off, so the scheduler
+    # holds 19 jobs while 20 call sites exist. Leaving it out of the view would
+    # make a deliberate exclusion indistinguishable from a job that silently
+    # failed to register — the exact ambiguity this instrument exists to
+    # remove. The reason is supplied by the caller from live state, never from
+    # a second static list here.
+    disabled = dict(disabled or {})
 
     now_running = [
         {
@@ -247,6 +258,20 @@ def health_view(*,
             },
         })
 
+    for job_id, reason in sorted(disabled.items()):
+        if job_id in next_runs:
+            # Declared disabled yet live: the flag and the scheduler disagree,
+            # which is a real inconsistency rather than a tidy exclusion.
+            unknown.append(job_id)
+            jobs.append({"job_id": job_id, "coverage": "instrumented",
+                         "state": "unknown", "last_terminal": None,
+                         "detail": f"reported disabled ({reason}) but the "
+                                   f"scheduler holds it"})
+            continue
+        jobs.append({"job_id": job_id, "coverage": "declared_not_live",
+                     "state": "disabled", "reason": reason,
+                     "last_terminal": None})
+
     stale = [r for r in now_running if r["state"] == "stale_running"]
     failed = [j["job_id"] for j in jobs if j.get("state") == FAILED]
 
@@ -280,4 +305,9 @@ def health_view(*,
         "unknown": unknown,
         "unexpected_job_ids": unexpected,
         "registered_count": len(registered),
+        # Live vs declared, stated rather than left to arithmetic. An operator
+        # seeing 19 where 20 call sites exist should find the difference
+        # explained here, not have to go and read main.py.
+        "disabled_registrations": sorted(disabled),
+        "declared_count": len(registered) + len(disabled),
     }

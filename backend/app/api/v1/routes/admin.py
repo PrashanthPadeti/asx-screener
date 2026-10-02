@@ -372,8 +372,18 @@ async def system_health(
         registered = {j.id: getattr(j, "next_run_time", None)
                       for j in scheduler.get_jobs()} if scheduler else {}
 
+        # Declarations intentionally not live, with the live reason. Read from
+        # settings — the same signal /health reports — so the explanation comes
+        # from runtime state rather than a second static list.
+        disabled = {}
+        if not getattr(settings, "ANOMALY_ALERTS_ENABLED", False):
+            disabled["anomaly_alerts"] = (
+                "ANOMALY_ALERTS_ENABLED is off; the job is registered behind "
+                "that flag and is deliberately not scheduled")
+
         result["scheduled_jobs"] = health_view(
             registered=registered,
+            disabled=disabled,
             running=[Execution(**dict(r)) for r in running_rows],
             latest_terminal={r["job_id"]: Execution(**dict(r)) for r in terminal_rows},
             now=datetime.now(timezone.utc),

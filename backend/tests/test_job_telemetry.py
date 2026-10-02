@@ -132,6 +132,50 @@ def test_declared_registrations_may_exceed_live_ones():
         "now agree — update the deployment acceptance accordingly")
 
 
+def test_a_deliberately_disabled_registration_is_accounted_for_not_absent():
+    """19 live against 20 declared must be explained on the surface.
+
+    Leaving `anomaly_alerts` simply absent would make a deliberate exclusion
+    indistinguishable from a job that silently failed to register — the exact
+    ambiguity this instrument exists to remove.
+    """
+    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5)},
+                    running=[], latest_terminal={}, now=NOW,
+                    disabled={"anomaly_alerts": "ANOMALY_ALERTS_ENABLED is off"})
+    assert v["disabled_registrations"] == ["anomaly_alerts"]
+    assert v["declared_count"] == 2 and v["registered_count"] == 1
+    entry = next(j for j in v["jobs"] if j["job_id"] == "anomaly_alerts")
+    assert entry["coverage"] == "declared_not_live"
+    assert entry["state"] == "disabled" and entry["reason"]
+    assert v["unknown"] == [] and v["missed"] == []
+    assert v["verdict"] == "ok", "an intentional exclusion must not fail the view"
+
+
+def test_disabled_but_still_scheduled_is_a_real_inconsistency():
+    """The flag says off and the scheduler holds it anyway. That is not a tidy
+    exclusion; it means a protected job could fire while reported disabled."""
+    v = health_view(registered={"anomaly_alerts": NOW + timedelta(minutes=5)},
+                    running=[], latest_terminal={}, now=NOW,
+                    disabled={"anomaly_alerts": "ANOMALY_ALERTS_ENABLED is off"})
+    assert v["unknown"] == ["anomaly_alerts"]
+    assert v["verdict"] == "unresolved"
+    entry = next(j for j in v["jobs"]
+                 if j["job_id"] == "anomaly_alerts" and j["state"] == "unknown")
+    assert "scheduler holds it" in entry["detail"]
+
+
+def test_the_disabled_reason_comes_from_live_state_not_a_static_list():
+    """A second hard-coded list of 'jobs we know are off' would drift from the
+    flag that actually governs them."""
+    src = (BACKEND / "app/api/v1/routes/admin.py").read_text(encoding="utf-8")
+    block = src[src.index("disabled = {}"):src.index("result[\"scheduled_jobs\"]")]
+    # `settings` may be reached as an attribute or via getattr; match the name
+    # itself rather than one spelling of its use.
+    assert re.search(r"\bsettings\b", block), (
+        "the disabled reason is not read from settings")
+    assert "ANOMALY_ALERTS_ENABLED" in block
+
+
 def test_unobservable_entries_carry_a_reason():
     for job_id, reason in UNOBSERVABLE.items():
         assert reason and len(reason) > 10, (

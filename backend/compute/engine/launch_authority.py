@@ -397,7 +397,18 @@ def scheduler_registrations() -> list[SchedulerJob]:
                 and getattr(node.func, "attr", "") == "add_job"
                 and node.args):
             continue
-        name = getattr(node.args[0], "id", "")
+        # See through the telemetry wrapper. `instrumented("job_id", fn)` is
+        # transparent at runtime — it returns what fn returns and raises what
+        # fn raises — so the launch authority is still fn, and a static reader
+        # that stopped at the wrapper would report every job as unresolvable.
+        # Added 2 Oct 2026 when execution telemetry wrapped all 20 call sites
+        # and this parser reported `callable has no resolvable import` for each.
+        target = node.args[0]
+        if (isinstance(target, ast.Call)
+                and getattr(target.func, "id", "") == "instrumented"
+                and len(target.args) >= 2):
+            target = target.args[1]
+        name = getattr(target, "id", "")
         job_id = next((k.value.value for k in node.keywords
                        if k.arg == "id" and isinstance(k.value, ast.Constant)), "")
         found.append(SchedulerJob(

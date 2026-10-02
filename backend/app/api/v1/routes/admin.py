@@ -331,6 +331,72 @@ async def system_health(
         "phases": [],
     }
 
+    # ── Scheduled job execution telemetry ────────────────────────────────────
+    # APScheduler reports intent: a trigger and a next-fire time. It cannot say
+    # whether a job is running right now, how long the last run took, or
+    # whether it failed. On 2 Oct 2026 an in-process job ran ~55 minutes while
+    # the site was unavailable, and that runtime was known only because the job
+    # happened to log every outbound call during an outage under investigation.
+    #
+    # Intent and execution are joined here and nowhere else: a job registered
+    # with the scheduler but never observed to finish shows as `unknown`, which
+    # is a failing state rather than an absence.
+    #
+    # Read-only, like the rest of this endpoint. A telemetry failure degrades
+    # the view; it must never degrade the endpoint.
+    try:
+        from compute.engine.job_telemetry import Execution, health_view
+
+        running_rows = (await db.execute(text("""
+            SELECT run_id, job_id, started_at
+              FROM ops.job_executions
+             WHERE status = 'running'
+             ORDER BY started_at
+        """))).mappings().all()
+
+        terminal_rows = (await db.execute(text("""
+            SELECT DISTINCT ON (job_id)
+                   run_id, job_id, started_at, finished_at, duration_ms,
+                   status, failure_class, failure_message
+              FROM ops.job_executions
+             WHERE status IN ('success', 'failed')
+             ORDER BY job_id, finished_at DESC
+        """))).mappings().all()
+
+        # Intent: job id -> next fire time. Passing the times (not just the
+        # ids) is what lets a weekly job awaiting its first opportunity read as
+        # `pending_first_run` rather than `unknown` — three of the twenty are
+        # weekly or monthly, and a deployment must not turn the surface red for
+        # weeks.
+        scheduler = getattr(request.app.state, "scheduler", None)
+        registered = {j.id: getattr(j, "next_run_time", None)
+                      for j in scheduler.get_jobs()} if scheduler else {}
+
+        # Declarations intentionally not live, with the live reason. Read from
+        # settings — the same signal /health reports — so the explanation comes
+        # from runtime state rather than a second static list.
+        disabled = {}
+        if not getattr(settings, "ANOMALY_ALERTS_ENABLED", False):
+            disabled["anomaly_alerts"] = (
+                "ANOMALY_ALERTS_ENABLED is off; the job is registered behind "
+                "that flag and is deliberately not scheduled")
+
+        result["scheduled_jobs"] = health_view(
+            registered=registered,
+            disabled=disabled,
+            running=[Execution(**dict(r)) for r in running_rows],
+            latest_terminal={r["job_id"]: Execution(**dict(r)) for r in terminal_rows},
+            now=datetime.now(timezone.utc),
+            scheduler_enabled=bool(scheduler and getattr(scheduler, "running", False)),
+        )
+    except Exception as exc:                                     # noqa: BLE001
+        # Unavailable is a state, not a silence: saying "ok" here would be the
+        # same error as a monitor that reports no drift when it could not fetch.
+        result["scheduled_jobs"] = {
+            "verdict": "unavailable",
+            "reason": f"{type(exc).__name__}: {exc}"[:200],
+        }
+
     try:
         # ── Memory Usage ──
         import psutil

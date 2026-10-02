@@ -13,6 +13,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
+from app.core.job_instrumentation import instrumented
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 # Nothing configured the root logger before this. With no handler on it,
@@ -158,15 +159,15 @@ async def lifespan(app: FastAPI):
         })
 
     # Price alerts — every 15 min
-    scheduler.add_job(check_alerts, trigger="interval", minutes=15,
+    scheduler.add_job(instrumented("alert_checker", check_alerts), trigger="interval", minutes=15,
                       id="alert_checker", replace_existing=True)
 
     # Portfolio threshold alerts — every 30 min
-    scheduler.add_job(check_portfolio_thresholds, trigger="interval", minutes=30,
+    scheduler.add_job(instrumented("portfolio_threshold_checker", check_portfolio_thresholds), trigger="interval", minutes=30,
                       id="portfolio_threshold_checker", replace_existing=True)
 
     # Weekly portfolio summary — Monday 8am AEST
-    scheduler.add_job(send_weekly_portfolio_summaries,
+    scheduler.add_job(instrumented("weekly_portfolio_summary", send_weekly_portfolio_summaries),
                       CronTrigger(day_of_week="mon", hour=8, minute=0,
                                   timezone="Australia/Sydney"),
                       id="weekly_portfolio_summary", replace_existing=True)
@@ -179,37 +180,37 @@ async def lifespan(app: FastAPI):
     # ingestion and the US Screener that shares the key. Daily costs 1,000.
     #
     # ASX Screener is an end-of-day product: nothing here needs intraday polling.
-    scheduler.add_job(fetch_announcements,
+    scheduler.add_job(instrumented("announcement_fetcher", fetch_announcements),
                       CronTrigger(hour=19, minute=10, timezone="Australia/Sydney"),
                       id="announcement_fetcher", replace_existing=True)
 
     # Watchlist daily digest — 7:30am AEST
-    scheduler.add_job(send_watchlist_digests,
+    scheduler.add_job(instrumented("watchlist_digest", send_watchlist_digests),
                       CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
                       id="watchlist_digest", replace_existing=True)
 
     # ASX index prices — daily at 5:30pm AEST (30 min after market close)
-    scheduler.add_job(compute_index_prices,
+    scheduler.add_job(instrumented("index_prices", compute_index_prices),
                       CronTrigger(hour=17, minute=30, timezone="Australia/Sydney"),
                       id="index_prices", replace_existing=True)
 
     # ASX ETF/fund prices — daily at 5:35pm AEST
-    scheduler.add_job(compute_fund_prices,
+    scheduler.add_job(instrumented("fund_prices", compute_fund_prices),
                       CronTrigger(hour=17, minute=35, timezone="Australia/Sydney"),
                       id="fund_prices", replace_existing=True)
 
     # Global market indices + AUD FX — daily at 5:40pm AEST
-    scheduler.add_job(compute_global_markets,
+    scheduler.add_job(instrumented("global_markets", compute_global_markets),
                       CronTrigger(hour=17, minute=40, timezone="Australia/Sydney"),
                       id="global_markets", replace_existing=True)
 
     # Commodity prices — daily at 5:45pm AEST
-    scheduler.add_job(compute_commodities,
+    scheduler.add_job(instrumented("commodities", compute_commodities),
                       CronTrigger(hour=17, minute=45, timezone="Australia/Sydney"),
                       id="commodities", replace_existing=True)
 
     # ASX index constituent flags (is_asx200/300) — daily at 5:50pm AEST
-    scheduler.add_job(run_asx_indices,
+    scheduler.add_job(instrumented("asx_indices", run_asx_indices),
                       CronTrigger(hour=17, minute=50, timezone="Australia/Sydney"),
                       id="asx_indices", replace_existing=True)
 
@@ -218,7 +219,7 @@ async def lifespan(app: FastAPI):
     # steps 2/4/6; running APScheduler at the same time caused simultaneous writes to
     # staging_au.short_positions / market.short_positions.  8:05pm is well after the
     # pipeline finishes (~7:30-7:40pm) and still covers ASIC's ~6pm publication lag.
-    scheduler.add_job(run_short_positions,
+    scheduler.add_job(instrumented("short_positions", run_short_positions),
                       CronTrigger(hour=20, minute=5, timezone="Australia/Sydney"),
                       id="short_positions", replace_existing=True)
 
@@ -228,14 +229,14 @@ async def lifespan(app: FastAPI):
     # period_metrics and an incomplete screener.universe.  7:50pm gives a 10-15 min
     # buffer after the pipeline's own step 14 snapshot (~7:30-7:40pm) and acts as a
     # safety-net rerun with fully-settled data.
-    scheduler.add_job(run_market_snapshot,
+    scheduler.add_job(instrumented("market_snapshot", run_market_snapshot),
                       CronTrigger(hour=19, minute=50, timezone="Australia/Sydney"),
                       id="market_snapshot", replace_existing=True)
 
     # Anomaly detection — daily at 8:20pm AEST (after snapshot safety-net at 7:50pm)
     # Moved from 7:00pm: anomaly detection reads mover_snapshots; running at 7:00pm
     # meant the pipeline step 14 snapshot (~7:30pm) had not yet written fresh data.
-    scheduler.add_job(run_anomaly_detect,
+    scheduler.add_job(instrumented("anomaly_detect", run_anomaly_detect),
                       CronTrigger(hour=20, minute=20, timezone="Australia/Sydney"),
                       id="anomaly_detect", replace_existing=True)
 
@@ -252,7 +253,7 @@ async def lifespan(app: FastAPI):
     # reminder, not an exclusion -- and it would fail for anyone who restarts
     # the service by any other route.
     if settings.ANOMALY_ALERTS_ENABLED:
-        scheduler.add_job(send_anomaly_alerts,
+        scheduler.add_job(instrumented("anomaly_alerts", send_anomaly_alerts),
                           CronTrigger(hour=20, minute=35, timezone="Australia/Sydney"),
                           id="anomaly_alerts", replace_existing=True)
         logger.warning(
@@ -266,33 +267,33 @@ async def lifespan(app: FastAPI):
             "Detection still runs and records flags; nothing is emailed.")
 
     # Capital raise scanner — daily at 7:30am AEST (after announcement fetch settles)
-    scheduler.add_job(scan_capital_raises,
+    scheduler.add_job(instrumented("capital_raise_scan", scan_capital_raises),
                       CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
                       id="capital_raise_scan", replace_existing=True)
 
     # Mining & REIT metrics sync — weekly Sunday at 7:00am AEST
-    scheduler.add_job(sync_mining_reit_metrics,
+    scheduler.add_job(instrumented("mining_reit_metrics", sync_mining_reit_metrics),
                       CronTrigger(day_of_week="sun", hour=7, minute=0, timezone="Australia/Sydney"),
                       id="mining_reit_metrics", replace_existing=True)
 
     # Top 5 monthly picks — 2nd of each month at 8pm AEST (after universe + composite scores settle)
-    scheduler.add_job(run_top5_strategy,
+    scheduler.add_job(instrumented("top5_strategy", run_top5_strategy),
                       CronTrigger(day=2, hour=20, minute=0, timezone="Australia/Sydney"),
                       id="top5_strategy", replace_existing=True)
 
     # Nightly cleanup — 2:00am AEST (low traffic window)
-    scheduler.add_job(purge_expired_sessions,
+    scheduler.add_job(instrumented("session_cleanup", purge_expired_sessions),
                       CronTrigger(hour=2, minute=0, timezone="Australia/Sydney"),
                       id="session_cleanup", replace_existing=True)
 
     # Premium data deletion — 2:15am AEST (after session cleanup)
     # Removes portfolios/alerts for cancelled users whose 12-month window has passed
-    scheduler.add_job(run_data_deletion,
+    scheduler.add_job(instrumented("data_deletion", run_data_deletion),
                       CronTrigger(hour=2, minute=15, timezone="Australia/Sydney"),
                       id="data_deletion", replace_existing=True)
 
     # ASX companies list sync — daily at 6:00am AEST (before universe build)
-    scheduler.add_job(sync_asx_companies,
+    scheduler.add_job(instrumented("asx_companies", sync_asx_companies),
                       CronTrigger(hour=6, minute=0, timezone="Australia/Sydney"),
                       id="asx_companies", replace_existing=True)
 

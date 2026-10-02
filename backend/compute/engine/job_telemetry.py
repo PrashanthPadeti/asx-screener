@@ -65,6 +65,44 @@ CEILING_SECONDS: dict[str, int] = {
 #: coverage contract is that silence is not evidence of health.
 UNOBSERVABLE: dict[str, str] = {}
 
+#: Every job id declared by an `add_job` call in app/main.py.
+#:
+#: Available at runtime without reading source, because the surface needs to
+#: answer "is a declared job missing?" on every request and parsing a file to
+#: do that would make a parse failure look like an empty declaration — the
+#: shape of a false reassurance.
+#:
+#: Mechanically forced to agree with the source: the structural test asserts
+#: this set equals the ids the AST finds in main.py, so adding a job without
+#: listing it here fails, and listing a job that no longer exists fails too.
+#: Drift is not possible quietly.
+#:
+#: DECLARATION is separate from REGISTRATION. A job is declared by having a
+#: call site; it is registered only if that call actually ran. anomaly_alerts
+#: is declared here and is deliberately not registered.
+DECLARED_JOB_IDS: frozenset[str] = frozenset({
+    "alert_checker",
+    "announcement_fetcher",
+    "anomaly_alerts",
+    "anomaly_detect",
+    "asx_companies",
+    "asx_indices",
+    "capital_raise_scan",
+    "commodities",
+    "data_deletion",
+    "fund_prices",
+    "global_markets",
+    "index_prices",
+    "market_snapshot",
+    "mining_reit_metrics",
+    "portfolio_threshold_checker",
+    "session_cleanup",
+    "short_positions",
+    "top5_strategy",
+    "watchlist_digest",
+    "weekly_portfolio_summary",
+})
+
 #: Failure text is bounded before it reaches an admin response. An exception
 #: payload can carry a connection string, a token, or a megabyte of SQL.
 MAX_FAILURE_CHARS = 300
@@ -166,6 +204,7 @@ def health_view(*,
                 now: datetime,
                 scheduler_enabled: bool = True,
                 disabled: Optional[Mapping[str, str]] = None,
+                declared: Optional[Iterable[str]] = None,
                 ) -> dict[str, Any]:
     """The operator's two questions, answered together.
 
@@ -185,14 +224,22 @@ def health_view(*,
     running = list(running)
 
     # A declaration that is intentionally not live must be ACCOUNTED FOR, not
-    # merely absent. `anomaly_alerts` is registered behind
-    # settings.ANOMALY_ALERTS_ENABLED and is currently off, so the scheduler
-    # holds 19 jobs while 20 call sites exist. Leaving it out of the view would
-    # make a deliberate exclusion indistinguishable from a job that silently
-    # failed to register — the exact ambiguity this instrument exists to
-    # remove. The reason is supplied by the caller from live state, never from
-    # a second static list here.
+    # merely absent — and "accounted for" has to mean an explicit live
+    # predicate names that exact identity.
+    #
+    # Before this, `health_view` never learned the declared set: it saw 19 live
+    # registrations and had no idea 20 call sites existed. A declared job that
+    # failed to register — an exception during registration, a renamed id, a
+    # guard that silently evaluated false — was omitted entirely and the
+    # verdict read `ok`. That is precisely the false assurance this instrument
+    # exists to prevent, so the four cases are now exhaustive:
+    #
+    #   declared ∩ registered                  -> normal evaluation
+    #   declared - registered, predicate says  -> declared_not_live / disabled
+    #   declared - registered, nothing says    -> unknown / unhealthy
+    #   registered - declared                  -> unexpected / unhealthy
     disabled = dict(disabled or {})
+    declared_ids = set(DECLARED_JOB_IDS if declared is None else declared)
 
     now_running = [
         {
@@ -215,7 +262,10 @@ def health_view(*,
     # genuinely unresolvable: runtime fact with no matching intent. It may be a
     # renamed job still writing under its old id, or a second process. Either
     # way it is `unknown` in the strict sense — not merely unobserved.
-    unexpected = sorted({e.job_id for e in running} - set(registered))
+    unexpected = sorted(
+        ({e.job_id for e in running} | set(next_runs)) - set(DECLARED_JOB_IDS
+                                                             if declared is None
+                                                             else declared))
     for job_id in registered:
         if job_id in UNOBSERVABLE:
             jobs.append({"job_id": job_id, "coverage": "unobservable",
@@ -258,19 +308,31 @@ def health_view(*,
             },
         })
 
+    # Declared disabled yet live: the flag and the scheduler disagree. Not a
+    # tidy exclusion — it means a job reported as unable to fire can fire.
     for job_id, reason in sorted(disabled.items()):
         if job_id in next_runs:
-            # Declared disabled yet live: the flag and the scheduler disagree,
-            # which is a real inconsistency rather than a tidy exclusion.
             unknown.append(job_id)
             jobs.append({"job_id": job_id, "coverage": "instrumented",
                          "state": "unknown", "last_terminal": None,
                          "detail": f"reported disabled ({reason}) but the "
                                    f"scheduler holds it"})
-            continue
-        jobs.append({"job_id": job_id, "coverage": "declared_not_live",
-                     "state": "disabled", "reason": reason,
-                     "last_terminal": None})
+
+    # Every declaration that is not live, classified by whether anything
+    # actually accounts for it.
+    for job_id in sorted(declared_ids - set(registered)):
+        if job_id in disabled:
+            jobs.append({"job_id": job_id, "coverage": "declared_not_live",
+                         "state": "disabled", "reason": disabled[job_id],
+                         "last_terminal": None})
+        else:
+            unknown.append(job_id)
+            jobs.append({
+                "job_id": job_id, "coverage": "declared_not_live",
+                "state": "unknown", "last_terminal": None,
+                "detail": "declared in main.py but not registered with the "
+                          "scheduler, and no live predicate accounts for it",
+            })
 
     stale = [r for r in now_running if r["state"] == "stale_running"]
     failed = [j["job_id"] for j in jobs if j.get("state") == FAILED]
@@ -309,5 +371,5 @@ def health_view(*,
         # seeing 19 where 20 call sites exist should find the difference
         # explained here, not have to go and read main.py.
         "disabled_registrations": sorted(disabled),
-        "declared_count": len(registered) + len(disabled),
+        "declared_count": len(declared_ids),
     }

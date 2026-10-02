@@ -28,8 +28,8 @@ sys.path.insert(0, str(BACKEND))
 
 from compute.engine.job_telemetry import (                       # noqa: E402
     DEFAULT_CEILING_SECONDS, Execution, FAILED, MAX_FAILURE_CHARS, RUNNING,
-    MISSED_GRACE_SECONDS, SUCCESS, UNOBSERVABLE, bound_failure, ceiling_for,
-    classify, first_run_state, health_view,
+    DECLARED_JOB_IDS, MISSED_GRACE_SECONDS, SUCCESS, UNOBSERVABLE,
+    bound_failure, ceiling_for, classify, first_run_state, health_view,
 )
 
 MAIN = BACKEND / "app/main.py"
@@ -132,6 +132,74 @@ def test_declared_registrations_may_exceed_live_ones():
         "now agree — update the deployment acceptance accordingly")
 
 
+def test_the_runtime_manifest_equals_the_declared_registrations():
+    """DECLARED_JOB_IDS is available at runtime without reading source, so a
+    parse failure can never masquerade as an empty declaration. The price of
+    that is a second place the ids live — so agreement is forced here.
+
+    Adding a job without listing it fails. Listing one that no longer exists
+    fails. Drift cannot happen quietly.
+    """
+    from_source = set(_registrations())
+    assert from_source == set(DECLARED_JOB_IDS), (
+        f"manifest and source disagree — "
+        f"in source only: {sorted(from_source - set(DECLARED_JOB_IDS))}, "
+        f"in manifest only: {sorted(set(DECLARED_JOB_IDS) - from_source)}")
+    assert len(DECLARED_JOB_IDS) == 20
+
+
+def test_a_declared_job_missing_at_runtime_is_unknown_not_absent():
+    """The hole this closed. Before it, `health_view` never learned the
+    declared set: a declared job that failed to register — an exception during
+    registration, a renamed id, a guard that silently evaluated false — was
+    omitted from the view entirely and the verdict read `ok`.
+
+    That is the precise false assurance this instrument exists to prevent.
+    """
+    v = health_view(declared={"alert_checker", "market_snapshot"},
+                    registered={"market_snapshot": NOW + timedelta(hours=1)},
+                    running=[], latest_terminal={}, now=NOW)
+    assert v["unknown"] == ["alert_checker"]
+    assert v["verdict"] == "unresolved", "a missing declaration must be unhealthy"
+    entry = next(j for j in v["jobs"] if j["job_id"] == "alert_checker")
+    assert entry["coverage"] == "declared_not_live"
+    assert "no live predicate accounts for it" in entry["detail"]
+
+
+def test_only_an_exact_live_predicate_can_classify_a_missing_job_disabled():
+    """`disabled` is not a bucket for whatever is missing. It admits an
+    identity only when a live predicate names that exact id; everything else
+    stays unknown no matter how many other jobs are legitimately disabled."""
+    v = health_view(declared={"anomaly_alerts", "short_positions"},
+                    registered={}, running=[], latest_terminal={}, now=NOW,
+                    disabled={"anomaly_alerts": "ANOMALY_ALERTS_ENABLED is off"})
+    assert v["disabled_registrations"] == ["anomaly_alerts"]
+    assert v["unknown"] == ["short_positions"], (
+        "a missing job was swept into disabled without its own predicate")
+    assert v["verdict"] == "unresolved"
+
+
+def test_a_registered_job_absent_from_the_declaration_is_unexpected():
+    """Runtime holds an identity no call site declares — a renamed job, or a
+    registration from somewhere other than main.py."""
+    v = health_view(declared={"alert_checker"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5),
+                                "mystery_job": NOW + timedelta(minutes=5)},
+                    running=[], latest_terminal={}, now=NOW)
+    assert v["unexpected_job_ids"] == ["mystery_job"]
+    assert v["verdict"] == "unresolved"
+
+
+def test_an_empty_declaration_fails_closed():
+    """If the declared set were ever lost, every live job becomes unexpected
+    and the view goes unresolved. It must not degrade to 'everything is fine'."""
+    v = health_view(declared=set(),
+                    registered={"alert_checker": NOW + timedelta(minutes=5)},
+                    running=[], latest_terminal={}, now=NOW)
+    assert v["verdict"] == "unresolved"
+    assert v["unexpected_job_ids"] == ["alert_checker"]
+
+
 def test_a_deliberately_disabled_registration_is_accounted_for_not_absent():
     """19 live against 20 declared must be explained on the surface.
 
@@ -139,7 +207,8 @@ def test_a_deliberately_disabled_registration_is_accounted_for_not_absent():
     indistinguishable from a job that silently failed to register — the exact
     ambiguity this instrument exists to remove.
     """
-    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5)},
+    v = health_view(declared={"alert_checker", "anomaly_alerts"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5)},
                     running=[], latest_terminal={}, now=NOW,
                     disabled={"anomaly_alerts": "ANOMALY_ALERTS_ENABLED is off"})
     assert v["disabled_registrations"] == ["anomaly_alerts"]
@@ -154,7 +223,8 @@ def test_a_deliberately_disabled_registration_is_accounted_for_not_absent():
 def test_disabled_but_still_scheduled_is_a_real_inconsistency():
     """The flag says off and the scheduler holds it anyway. That is not a tidy
     exclusion; it means a protected job could fire while reported disabled."""
-    v = health_view(registered={"anomaly_alerts": NOW + timedelta(minutes=5)},
+    v = health_view(declared={"anomaly_alerts"},
+                    registered={"anomaly_alerts": NOW + timedelta(minutes=5)},
                     running=[], latest_terminal={}, now=NOW,
                     disabled={"anomaly_alerts": "ANOMALY_ALERTS_ENABLED is off"})
     assert v["unknown"] == ["anomaly_alerts"]
@@ -234,7 +304,8 @@ def test_it_answers_both_operator_questions():
     latest = {"alert_checker": _exec(run_id=8, job_id="alert_checker",
                                      status=SUCCESS, finished_at=_ago(minutes=3),
                                      duration_ms=1200)}
-    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5),
+    v = health_view(declared={"alert_checker", "announcement_fetcher"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5),
                                 "announcement_fetcher": NOW + timedelta(hours=8)},
                     running=running, latest_terminal=latest, now=NOW)
     assert v["running"][0]["job_id"] == "announcement_fetcher"
@@ -248,7 +319,8 @@ def test_a_weekly_job_awaiting_its_first_run_is_healthy_not_unknown():
     today legitimately has no terminal execution for weeks; calling that
     `unknown` would keep the surface red for a healthy system, which is exactly
     how an operator learns to ignore it."""
-    v = health_view(registered={"mining_reit_metrics": NOW + timedelta(days=5)},
+    v = health_view(declared={"mining_reit_metrics"},
+                    registered={"mining_reit_metrics": NOW + timedelta(days=5)},
                     running=[], latest_terminal={}, now=NOW)
     assert v["pending_first_run"] == ["mining_reit_metrics"]
     assert v["unknown"] == [] and v["missed"] == []
@@ -260,7 +332,7 @@ def test_a_job_whose_fire_time_passed_with_no_evidence_is_missed():
     """Past the grace, absence stops being a timing artefact and becomes a
     finding: either the scheduler did not run it, or it ran untelemetered."""
     overdue = NOW - timedelta(seconds=MISSED_GRACE_SECONDS + 60)
-    v = health_view(registered={"alert_checker": overdue},
+    v = health_view(declared={"alert_checker"}, registered={"alert_checker": overdue},
                     running=[], latest_terminal={}, now=NOW)
     assert v["missed"] == ["alert_checker"]
     assert v["verdict"] == "missed"
@@ -270,7 +342,8 @@ def test_a_job_whose_fire_time_passed_with_no_evidence_is_missed():
 def test_within_the_grace_it_is_still_pending():
     """A job firing right now must not be reported missed because the view was
     read a second after its trigger."""
-    v = health_view(registered={"alert_checker": NOW - timedelta(seconds=30)},
+    v = health_view(declared={"alert_checker"},
+                    registered={"alert_checker": NOW - timedelta(seconds=30)},
                     running=[], latest_terminal={}, now=NOW)
     assert v["pending_first_run"] == ["alert_checker"]
     assert v["verdict"] == "ok"
@@ -278,7 +351,7 @@ def test_within_the_grace_it_is_still_pending():
 
 def test_unknown_is_reserved_for_the_genuinely_unresolvable():
     """Registered, but APScheduler reports no intent for it at all."""
-    v = health_view(registered={"ghost": None}, running=[],
+    v = health_view(declared={"ghost"}, registered={"ghost": None}, running=[],
                     latest_terminal={}, now=NOW)
     assert v["unknown"] == ["ghost"]
     assert v["verdict"] == "unresolved"
@@ -289,7 +362,8 @@ def test_an_execution_with_no_matching_registration_is_unresolved():
     its old id, or a second process. Not merely unobserved."""
     stray = _exec(run_id=77, job_id="job_that_no_longer_exists", status=RUNNING,
                   started_at=_ago(seconds=10))
-    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5)},
+    v = health_view(declared={"alert_checker"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5)},
                     running=[stray], latest_terminal={}, now=NOW)
     assert v["unexpected_job_ids"] == ["job_that_no_longer_exists"]
     assert v["verdict"] == "unresolved"
@@ -298,14 +372,15 @@ def test_an_execution_with_no_matching_registration_is_unresolved():
 def test_a_bare_id_list_is_ignorance_not_health():
     """Passing ids without fire times means nothing is known about intent, and
     that must classify as unknown rather than quietly passing."""
-    v = health_view(registered=["x"], running=[], latest_terminal={}, now=NOW)
+    v = health_view(declared={"x"}, registered=["x"], running=[], latest_terminal={}, now=NOW)
     assert v["unknown"] == ["x"] and v["verdict"] == "unresolved"
 
 
 def test_a_stale_running_job_makes_the_view_suspect():
     stale = _exec(run_id=3, status=RUNNING,
                   started_at=_ago(seconds=DEFAULT_CEILING_SECONDS + 600))
-    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5)}, running=[stale],
+    v = health_view(declared={"alert_checker"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5)}, running=[stale],
                     latest_terminal={"alert_checker": _exec(
                         status=SUCCESS, finished_at=_ago(hours=2), duration_ms=5)},
                     now=NOW)
@@ -318,7 +393,8 @@ def test_a_disabled_scheduler_running_nothing_is_not_a_failure():
     scheduler is a legitimate operating mode. Neither may read as broken."""
     latest = {"alert_checker": _exec(status=SUCCESS, finished_at=_ago(hours=1),
                                      duration_ms=10)}
-    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5)}, running=[],
+    v = health_view(declared={"alert_checker"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5)}, running=[],
                     latest_terminal=latest, now=NOW, scheduler_enabled=False)
     assert v["verdict"] == "ok"
     assert v["scheduler_enabled"] is False
@@ -328,7 +404,8 @@ def test_a_failed_terminal_run_is_reported_as_failing():
     latest = {"alert_checker": _exec(status=FAILED, finished_at=_ago(minutes=1),
                                      duration_ms=50, failure_class="TypeError",
                                      failure_message="Object of type Decimal is not JSON serializable")}
-    v = health_view(registered={"alert_checker": NOW + timedelta(minutes=5)}, running=[],
+    v = health_view(declared={"alert_checker"},
+                    registered={"alert_checker": NOW + timedelta(minutes=5)}, running=[],
                     latest_terminal=latest, now=NOW)
     assert v["verdict"] == "failing"
     assert v["failing"] == ["alert_checker"]
@@ -337,7 +414,8 @@ def test_a_failed_terminal_run_is_reported_as_failing():
 def test_an_unobservable_job_is_neither_unknown_nor_failing():
     UNOBSERVABLE["probe_only"] = "a diagnostic shim with no execution boundary"
     try:
-        v = health_view(registered={"probe_only": NOW + timedelta(minutes=5)}, running=[],
+        v = health_view(declared={"probe_only"},
+                        registered={"probe_only": NOW + timedelta(minutes=5)}, running=[],
                         latest_terminal={}, now=NOW)
         assert v["unknown"] == []
         assert v["verdict"] == "ok"
@@ -363,7 +441,7 @@ def test_the_view_bounds_failure_text_too():
     latest = {"j": _exec(job_id="j", status=FAILED, finished_at=NOW,
                          duration_ms=1, failure_class="E",
                          failure_message="y" * 5000)}
-    v = health_view(registered={"j": NOW + timedelta(minutes=5)}, running=[], latest_terminal=latest, now=NOW)
+    v = health_view(declared={"j"}, registered={"j": NOW + timedelta(minutes=5)}, running=[], latest_terminal=latest, now=NOW)
     assert len(v["jobs"][0]["last_terminal"]["failure_message"]) <= MAX_FAILURE_CHARS
 
 

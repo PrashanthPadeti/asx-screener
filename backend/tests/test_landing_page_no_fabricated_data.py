@@ -496,6 +496,88 @@ def test_a_public_route_renders_without_waiting_for_auth():
         "public pages still server-render as a spinner")
 
 
+def test_a_withheld_metric_explains_itself():
+    """The API has always sent the reason; the UI threw it away.
+
+    Every screener row carries `metric_states`: for each governed metric the
+    engine declined to publish, a state, a cause and a sentence. BHP's P/E
+    reads "price is quoted in AUD and earnings per share are stated in USD;
+    the ratio has no unit until one side is converted" — and the landing page
+    rendered a bare em dash, making the most defensible thing this product
+    does indistinguishable from missing data.
+    """
+    page = _executable_source(
+        (BACKEND.parent / "frontend/app/page.tsx").read_text(encoding="utf-8"))
+    assert "MetricValue" in page, "the preview table renders bare dashes again"
+    assert "metric_states" in page, "the sidecar is no longer read"
+    for field in ("pe_ratio", "dividend_yield", "roe"):
+        assert f'field="{field}"' in page, f"{field} is not explained"
+
+
+def test_every_explained_field_is_keyed_the_way_the_sidecar_is():
+    """The trap this lookup walks into.
+
+    The sidecar is keyed by CANONICAL metric name; a screener row is keyed by
+    physical COLUMN. For 8 of the 72 governed metrics those differ —
+    ev_ebitda/ev_to_ebitda, dividend_per_share/dps_ttm, and so on — and
+    row_projection carries a comment saying this is "how ev_to_ebitda escaped
+    assessment once already".
+
+    A field passed to MetricValue is looked up in the sidecar directly, so it
+    must be one whose two spellings agree. Wiring a mismatched metric would
+    silently render an unexplained dash while the explanation sat in the
+    payload under another name.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(BACKEND))
+    from compute.engine.metric_states import (                     # noqa: PLC0415
+        GOVERNED_METRICS, LATEST_MODEL_VERSION)
+    from compute.engine.universe_writer import column_for          # noqa: PLC0415
+
+    governed = GOVERNED_METRICS[LATEST_MODEL_VERSION]
+    page = _executable_source(
+        (BACKEND.parent / "frontend/app/page.tsx").read_text(encoding="utf-8"))
+    used = set(re.findall(r'<MetricValue\s+field="([a-z0-9_]+)"', page))
+    assert used, "no explained metrics found on the landing page"
+
+    for field in sorted(used):
+        assert field in governed, (
+            f"{field} is not a governed metric, so the sidecar will never "
+            f"carry an entry for it")
+        assert column_for(field) == field, (
+            f"{field} is stored as column '{column_for(field)}'; a direct "
+            f"sidecar lookup by column name will miss it. Map canonical to "
+            f"column before wiring this metric.")
+
+
+def test_the_explanation_reaches_the_markup_not_just_the_client():
+    """A tooltip that only exists after hydration is not in the HTML a crawler
+    or a screen reader receives. MetricValue must stay a server component with
+    the reason on the element itself."""
+    src = (BACKEND.parent / "frontend/components/MetricValue.tsx").read_text(
+        encoding="utf-8")
+    assert "'use client'" not in src, (
+        "MetricValue became a client component; the explanation would then be "
+        "absent from server-rendered HTML")
+    body = _executable_source(src)
+    assert "title=" in body and "aria-label=" in body, (
+        "the reason must be carried by the element, not by a JS-only tooltip")
+    assert "sr-only" in body, "no screen-reader text for the state"
+
+
+def test_an_unexplained_blank_claims_nothing():
+    """A dash with no sidecar entry must not be labelled 'unavailable'.
+    Asserting a cause we do not have would be the same error as inventing the
+    number, in miniature."""
+    src = _executable_source(
+        (BACKEND.parent / "frontend/components/MetricValue.tsx").read_text(
+            encoding="utf-8"))
+    guard = src[src.index("const e = explain("):src.index("return (")]
+    assert "if (!e)" in guard, "no branch for the no-entry case"
+    assert "unavailable" not in guard.lower(), (
+        "the no-entry branch asserts a cause it was not given")
+
+
 def test_a_trailing_return_is_not_labelled_as_pick_performance():
     """strategy.monthly_picks freezes u.return_3m at selection, so it is the
     stock's return in the three months BEFORE it was picked -- a reason it

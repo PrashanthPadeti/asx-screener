@@ -5,6 +5,8 @@ import type { Metadata } from 'next'
 import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
 import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
+import { MetricValue } from '@/components/MetricValue'
+import type { MetricStates } from '@/lib/metric-states'
 
 export const metadata: Metadata = {
   title: 'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
@@ -110,6 +112,9 @@ type PreviewRow = {
   dividend_yield: number | null   // decimal ratio
   roe: number | null              // decimal ratio
   rsi_14: number | null           // 0–100
+  // The applicability sidecar: for each metric the engine declined to
+  // publish, the state, cause and a sentence saying why.
+  metric_states?: MetricStates
 }
 
 // ── Formatting helpers ────────────────────────────────────────
@@ -569,13 +574,18 @@ export default async function HomePage() {
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-800">{fmtPrice(s.price)}</td>
                     <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell">
-                      {s.pe_ratio == null ? '—' : `${s.pe_ratio.toFixed(1)}x`}
+                      <MetricValue field="pe_ratio" states={s.metric_states}
+                        value={s.pe_ratio == null ? null : `${s.pe_ratio.toFixed(1)}x`} />
                     </td>
                     <td className={cn('px-4 py-3 text-right font-semibold',
                                       s.dividend_yield ? 'text-green-600' : 'text-gray-600')}>
-                      {fmtPct(s.dividend_yield)}
+                      <MetricValue field="dividend_yield" states={s.metric_states}
+                        value={s.dividend_yield == null ? null : fmtPct(s.dividend_yield)} />
                     </td>
-                    <td className="px-4 py-3 text-right text-gray-600 hidden lg:table-cell">{fmtPct(s.roe)}</td>
+                    <td className="px-4 py-3 text-right text-gray-600 hidden lg:table-cell">
+                      <MetricValue field="roe" states={s.metric_states}
+                        value={s.roe == null ? null : fmtPct(s.roe)} />
+                    </td>
                     <td className="px-4 py-3 text-right hidden lg:table-cell">
                       {s.rsi_14 == null ? <span className="text-gray-400">—</span> : (
                       <span className={cn(
@@ -605,7 +615,7 @@ export default async function HomePage() {
           {/* Table footer */}
           <div className="px-4 py-3 bg-gray-50 border-t border-gray-100 flex items-center justify-between gap-4">
             <p className="text-xs text-gray-400">
-              Live ASX end-of-day data. A dash means the figure is not available for that company.
+              Live ASX end-of-day data. A dash means the figure was deliberately withheld &mdash; hover it to see why.
             </p>
             <Link
               href="/screener"

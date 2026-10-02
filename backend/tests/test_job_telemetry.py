@@ -105,6 +105,33 @@ def test_the_wrapper_is_given_the_same_id_the_scheduler_registers():
     assert not mismatched, f"wrapper label != registered id: {mismatched}"
 
 
+def test_declared_registrations_may_exceed_live_ones():
+    """20 declared, 19 live — and that is correct, not drift.
+
+    `anomaly_alerts` is registered inside a guard and production reports
+    `anomaly_alerts: False`, so it is wrapped in source but absent from the
+    running scheduler. Coverage is therefore asserted against DECLARED
+    registrations (every call site must be instrumented), while the health
+    view reads LIVE ones (only what APScheduler actually holds).
+
+    Recorded because the two counts differing looks like a defect, and
+    "correcting" either direction would break something real: forcing 20 live
+    would re-enable a job held behind its own gate, and asserting coverage
+    against live registrations would let a disabled job ship uninstrumented
+    and become invisible the moment it was switched on.
+    """
+    declared = _registrations()
+    assert len(declared) >= 19, f"only {len(declared)} registrations parsed"
+    assert "anomaly_alerts" in declared, (
+        "the conditionally-registered job is gone; this rule needs rechecking")
+
+    src = MAIN.read_text(encoding="utf-8")
+    call = src[src.index('id="anomaly_alerts"') - 400:src.index('id="anomaly_alerts"')]
+    assert "if " in call, (
+        "anomaly_alerts is no longer conditional, so declared and live should "
+        "now agree — update the deployment acceptance accordingly")
+
+
 def test_unobservable_entries_carry_a_reason():
     for job_id, reason in UNOBSERVABLE.items():
         assert reason and len(reason) > 10, (

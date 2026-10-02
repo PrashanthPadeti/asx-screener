@@ -485,6 +485,10 @@ function getAnomalyMeta(flagType: string) {
 // ── Overview Tab ──────────────────────────────────────────────
 
 function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: string; anomalyFlags: CompanyAnomalyFlag[] }) {
+  // The Key Statistics strip renders from a plain array rather than through
+  // MetricRow, so it reads the same context MetricRow does instead of
+  // growing its own notion of applicability.
+  const { states: metricStates, governed: governedCols } = useContext(MetricContext)
   // Use DB-computed pros/cons when available; fall back to client-side engine
   const hasDatabaseSignals = (o.pros?.length ?? 0) > 0 || (o.cons?.length ?? 0) > 0
   const { pros, cons } = hasDatabaseSignals
@@ -526,24 +530,28 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
           {[
             { label: 'EPS (FY0)',     value: o.eps_fy0 != null ? `$${o.eps_fy0.toFixed(2)}` : '—' },
             { label: 'EPS (FY1)',     value: o.eps_fy1 != null ? `$${o.eps_fy1.toFixed(2)}` : '—' },
-            { label: 'P/E Ratio',     value: fmtX(o.pe_ratio) },
-            { label: 'P/B Ratio',     value: fmtX(o.price_to_book) },
-            { label: 'EV/EBITDA',     value: fmtX(o.ev_to_ebitda) },
-            { label: 'PEG Ratio',     value: fmtX(o.peg_ratio) },
-            { label: 'Div Yield',     value: formatRatio(o.dividend_yield) },
-            { label: 'Grossed-Up',    value: formatRatio(o.grossed_up_yield) },
-            { label: 'D/E Ratio',     value: fmtX(o.debt_to_equity) },
+            { label: 'P/E Ratio',     value: fmtX(o.pe_ratio), field: 'pe_ratio' },
+            { label: 'P/B Ratio',     value: fmtX(o.price_to_book), field: 'price_to_book' },
+            { label: 'EV/EBITDA',     value: fmtX(o.ev_to_ebitda), field: 'ev_to_ebitda' },
+            { label: 'PEG Ratio',     value: fmtX(o.peg_ratio), field: 'peg_ratio' },
+            { label: 'Div Yield',     value: formatRatio(o.dividend_yield), field: 'dividend_yield' },
+            { label: 'Grossed-Up',    value: formatRatio(o.grossed_up_yield), field: 'grossed_up_yield' },
+            { label: 'D/E Ratio',     value: fmtX(o.debt_to_equity), field: 'debt_to_equity' },
             { label: 'FCF Yield',     value: formatRatio(o.fcf_yield) },
             { label: 'Rev Growth 1Y', value: signedPct(o.revenue_growth_1y) },
-            { label: 'Net Margin',    value: formatRatio(o.net_margin) },
-            { label: 'ROE',           value: formatRatio(o.roe) },
+            { label: 'Net Margin',    value: formatRatio(o.net_margin), field: 'net_margin' },
+            { label: 'ROE',           value: formatRatio(o.roe), field: 'roe' },
             { label: 'EV/Revenue',    value: fmtX(o.ev_to_revenue) },
-            { label: 'Book Val/Sh',   value: o.book_value_per_share != null ? `$${o.book_value_per_share.toFixed(2)}` : '—' },
-            { label: 'DPS (TTM)',     value: o.dps_ttm != null ? `$${o.dps_ttm.toFixed(3)}` : '—' },
-          ].map(({ label, value }) => (
+            { label: 'Book Val/Sh',   value: o.book_value_per_share != null ? `$${o.book_value_per_share.toFixed(2)}` : '—', field: 'book_value_per_share' },
+            { label: 'DPS (TTM)',     value: o.dps_ttm != null ? `$${o.dps_ttm.toFixed(3)}` : '—', field: 'dps_ttm' },
+          ].map(({ label, value, field }) => (
             <div key={label} className="px-4 py-3 flex flex-col gap-0.5">
               <span className="text-[10px] text-gray-400 font-medium uppercase tracking-wide">{label}</span>
-              <span className="text-sm font-bold text-gray-800">{value}</span>
+              <span className="text-sm font-bold text-gray-800">
+                {field
+                  ? <MetricValue field={field} states={metricStates} governed={governedCols} value={value} />
+                  : value}
+              </span>
             </div>
           ))}
         </div>
@@ -1513,18 +1521,23 @@ function HalfYearlyTable({ halfYearly }: { halfYearly: HalfYearlyResponse }) {
 // ── Key Metrics Snapshot ──────────────────────────────────────
 
 function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
-  type KMRow = { label: string; value: string; highlight?: 'green' | 'red' | 'neutral' }
+  // Same applicability context MetricRow and the Key Statistics strip read,
+  // so every surface on this page resolves a withheld metric identically.
+  const { states: metricStates, governed: governedCols } = useContext(MetricContext)
+  type KMRow = { label: string; value: string; highlight?: 'green' | 'red' | 'neutral'
+                 /** Governed metric name; a withheld value then explains itself. */
+                 field?: string }
 
   const valuation: KMRow[] = [
-    { label: 'P/E Ratio',     value: fmtX(o.pe_ratio),
+    { label: 'P/E Ratio', field: 'pe_ratio',     value: fmtX(o.pe_ratio),
       highlight: o.pe_ratio == null ? 'neutral' : o.pe_ratio > 0 && o.pe_ratio < 20 ? 'green' : o.pe_ratio > 40 ? 'red' : 'neutral' },
     { label: 'Forward P/E',   value: fmtX(o.forward_pe),
       highlight: o.forward_pe == null ? 'neutral' : o.forward_pe > 0 && o.forward_pe < 18 ? 'green' : o.forward_pe > 35 ? 'red' : 'neutral' },
-    { label: 'PEG Ratio',     value: fmtX(o.peg_ratio),
+    { label: 'PEG Ratio', field: 'peg_ratio',     value: fmtX(o.peg_ratio),
       highlight: o.peg_ratio == null ? 'neutral' : o.peg_ratio < 1 ? 'green' : o.peg_ratio > 2 ? 'red' : 'neutral' },
-    { label: 'P/B Ratio',     value: fmtX(o.price_to_book),
+    { label: 'P/B Ratio', field: 'price_to_book',     value: fmtX(o.price_to_book),
       highlight: o.price_to_book == null ? 'neutral' : o.price_to_book < 1.5 ? 'green' : o.price_to_book > 5 ? 'red' : 'neutral' },
-    { label: 'EV / EBITDA',   value: fmtX(o.ev_to_ebitda),
+    { label: 'EV / EBITDA', field: 'ev_to_ebitda',   value: fmtX(o.ev_to_ebitda),
       highlight: o.ev_to_ebitda == null ? 'neutral' : o.ev_to_ebitda < 10 ? 'green' : o.ev_to_ebitda > 25 ? 'red' : 'neutral' },
     { label: 'EV / Revenue',  value: fmtX(o.ev_to_revenue) },
   ]
@@ -1534,11 +1547,11 @@ function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
       highlight: o.eps_fy0 == null ? 'neutral' : o.eps_fy0 > 0 ? 'green' : 'red' },
     { label: 'EPS (FY1 est.)',    value: o.eps_fy1 != null ? `$${o.eps_fy1.toFixed(2)}` : '—',
       highlight: o.eps_fy1 == null ? 'neutral' : o.eps_fy1 > 0 ? 'green' : 'red' },
-    { label: 'Dividend Yield',    value: o.dividend_yield != null ? `${(o.dividend_yield * 100).toFixed(2)}%` : '—',
+    { label: 'Dividend Yield', field: 'dividend_yield',    value: o.dividend_yield != null ? `${(o.dividend_yield * 100).toFixed(2)}%` : '—',
       highlight: o.dividend_yield != null && o.dividend_yield > 0.04 ? 'green' : 'neutral' },
-    { label: 'Grossed-Up Yield ★', value: o.grossed_up_yield != null ? `${(o.grossed_up_yield * 100).toFixed(2)}%` : '—',
+    { label: 'Grossed-Up Yield ★', field: 'grossed_up_yield', value: o.grossed_up_yield != null ? `${(o.grossed_up_yield * 100).toFixed(2)}%` : '—',
       highlight: o.grossed_up_yield != null && o.grossed_up_yield > 0.06 ? 'green' : 'neutral' },
-    { label: 'Franking',          value: o.franking_pct != null ? `${o.franking_pct.toFixed(0)}%` : '—',
+    { label: 'Franking', field: 'franking_pct',          value: o.franking_pct != null ? `${o.franking_pct.toFixed(0)}%` : '—',
       highlight: o.franking_pct === 100 ? 'green' : 'neutral' },
     { label: 'FCF Yield',         value: o.fcf_yield != null ? `${(o.fcf_yield * 100).toFixed(2)}%` : '—',
       highlight: o.fcf_yield != null && o.fcf_yield > 0.04 ? 'green' : o.fcf_yield != null && o.fcf_yield < 0 ? 'red' : 'neutral' },
@@ -1553,9 +1566,9 @@ function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
       label: 'Revenue Growth HoH ★', value: signedPct(o.revenue_growth_hoh),
       highlight: (o.revenue_growth_hoh > 0 ? 'green' : 'red') as 'green' | 'red',
     }] : []),
-    { label: 'D/E Ratio',           value: fmtX(o.debt_to_equity),
+    { label: 'D/E Ratio', field: 'debt_to_equity',           value: fmtX(o.debt_to_equity),
       highlight: o.debt_to_equity == null ? 'neutral' : o.debt_to_equity < 0.3 ? 'green' : o.debt_to_equity > 2 ? 'red' : 'neutral' },
-    { label: 'Free Cash Flow (FY0)', value: fmtM(o.fcf_fy0),
+    { label: 'Free Cash Flow (FY0)', field: 'fcf_fy0', value: fmtM(o.fcf_fy0),
       highlight: o.fcf_fy0 == null ? 'neutral' : o.fcf_fy0 > 0 ? 'green' : 'red' },
     { label: 'CFO (FY0)',            value: fmtM(o.cfo_fy0) },
   ]
@@ -1569,7 +1582,11 @@ function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
             r.highlight === 'green' ? 'text-emerald-600' :
             r.highlight === 'red'   ? 'text-red-500' :
             'text-gray-800'
-          }`}>{r.value}</span>
+          }`}>
+            {r.field
+              ? <MetricValue field={r.field} states={metricStates} governed={governedCols} value={r.value} />
+              : r.value}
+          </span>
         </div>
       ))}
     </div>

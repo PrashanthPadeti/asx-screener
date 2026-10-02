@@ -555,6 +555,53 @@ def test_the_frontend_never_redeclares_canonical_identity():
                 f"come from the API's governed_columns map")
 
 
+def test_every_displayed_governed_metric_on_the_company_page_is_wired():
+    """Wiring MetricRow was not the same as wiring the page.
+
+    The Key Statistics strip — the most prominent card on /company/{code} —
+    renders from an inline {label, value} array into plain divs, not through
+    MetricRow. So after the first pass BHP's P/E, P/B, EV/EBITDA, PEG and
+    Book Val/Sh showed unexplained dashes there while the feature was reported
+    as delivered. It was found by looking at the rendered page: a plain dash
+    and an explained dash are indistinguishable in a screenshot, which is
+    exactly why this needs to be a test.
+
+    Rule: any {label, value} entry whose value expression reads exactly one
+    governed column must also name that column in `field`.
+    """
+    import sys as _sys
+    _sys.path.insert(0, str(BACKEND))
+    from compute.engine.metric_states import (                     # noqa: PLC0415
+        GOVERNED_METRICS, LATEST_MODEL_VERSION)
+    from compute.engine.universe_writer import column_for          # noqa: PLC0415
+    governed = {column_for(m) for m in GOVERNED_METRICS[LATEST_MODEL_VERSION]}
+
+    src = _executable_source(
+        (BACKEND.parent / "frontend/app/company/[code]/CompanyTabs.tsx")
+        .read_text(encoding="utf-8"))
+
+    # An entry spans from its `label:` to the next one. Bounding it that way
+    # needs no brace matching, which two earlier attempts got wrong against
+    # real JS: a `(.+?)\},` capture ran past entries carrying `highlight:` and
+    # mis-paired two metrics, and a lookahead on `}` stopped inside a template
+    # literal's `${...}` and truncated an entry before its `field:`.
+    starts = [m for m in re.finditer(r"\{\s*label:\s*'([^']+)',", src)]
+    unwired = []
+    for i, m in enumerate(starts):
+        label = m.group(1)
+        end = starts[i + 1].start() if i + 1 < len(starts) else len(src)
+        span = src[m.start():end]
+        if "value:" not in span:
+            continue
+        cols = {c for c in re.findall(r"\bo\.([a-z0-9_]+)", span)
+                if c in governed}
+        if len(cols) == 1 and "field:" not in span:
+            unwired.append(f"{label} ({cols.pop()})")
+    assert not unwired, (
+        "these displayed governed metrics render an unexplained dash: "
+        f"{unwired}")
+
+
 def test_the_resolver_unit_tests_exist_and_cover_the_alias_case():
     """These run under node against the real module (npm run test:units).
     Asserted structurally here so the Python suite fails if they are deleted."""

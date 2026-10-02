@@ -1,0 +1,58 @@
+# External uptime sentinel.
+#
+# Runs on GitHub's infrastructure — outside the production host and outside the
+# application stack it observes — so it keeps working exactly when the thing it
+# watches does not. That is the whole point: on 2 Oct 2026 the site was
+# unavailable for ~40 minutes and every mechanism that might have noticed was
+# running on the host that was down.
+#
+# What this is, stated honestly:
+#
+#     external detection and a durable, version-controlled record
+#     NOT operational paging
+#
+# GitHub's scheduler runs late under load, and a workflow-failure email is not
+# a pager. A real monitor with notifications is a separate, still-necessary
+# thing. This closes "nothing outside the host noticed"; it does not close
+# "someone gets woken up".
+#
+# Secret-free by construction: every URL probed is public, and a sentinel that
+# needed credentials could not run here.
+
+name: uptime sentinel
+
+on:
+  schedule:
+    # Deliberately off the top of the hour. This is a secondary sentinel, not a
+    # precision pager, and the top of the hour is when GitHub's scheduler is
+    # most congested.
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never stack runs: a late-scheduled run arriving during an outage should not
+  # queue behind the previous one.
+  group: uptime-sentinel
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify the probe's own logic before trusting its verdict
+        # The evaluation logic is exercised with no network, so a failure here
+        # means the sentinel is broken rather than the site.
+        run: python3 .github/scripts/uptime_probe.py --self-test
+
+      - name: Probe production
+        # Three independent observations per target, never short-circuiting on
+        # success. Fails only when a target fails every observation; partial
+        # failures are printed and kept as the record.
+        run: python3 .github/scripts/uptime_probe.py

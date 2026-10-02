@@ -14,8 +14,14 @@
  * so the single most defensible thing this product does — refusing to serve a
  * number it cannot substantiate — was indistinguishable from missing data.
  *
- * A dash that explains itself is the argument for the product. A dash that
- * does not looks like a gap.
+ * ── Canonical identity is consumed here, never declared ──────────────────────
+ * The sidecar is keyed by CANONICAL metric name; a row's values are keyed by
+ * PHYSICAL column. For 8 of the 72 governed metrics those differ
+ * (ev_ebitda/ev_to_ebitda, dividend_per_share/dps_ttm, ...). The mapping comes
+ * from GET /api/v1/screener/fields — `canonical_metric` on each descriptor and
+ * the complete `governed_columns` map — and is never restated in this file.
+ * An alias table here would be a second authority for identity, which is how
+ * ev_to_ebitda escaped assessment once already.
  */
 
 export type MetricState =
@@ -32,24 +38,54 @@ export type MetricExplanation = {
 
 export type MetricStates = Record<string, MetricExplanation> | null | undefined
 
+/** Physical column -> canonical metric, exactly as the API published it. */
+export type GovernedColumns = Record<string, string> | null | undefined
+
+/** The four ways a cell can resolve. Distinguished because they are not the same fact. */
+export type Resolution =
+  | { kind: 'value' }                                   // the value stands
+  | { kind: 'explained'; explanation: MetricExplanation } // withheld, with a reason
+  | { kind: 'plain' }                                   // null, nothing asserted
+  | { kind: 'unmapped' }                                // no canonical key: fail closed
+
 /**
- * The explanation for one field, or null when the value simply stands.
+ * Resolve one cell.
  *
- * Absence of an entry means APPLICABLE — the sidecar is sparse by design, so
- * "no entry" is a statement, not a missing one.
+ * `field` is the display/column name. The canonical key is looked up in the
+ * backend-supplied map — when that map has no entry for a field the engine
+ * governs, the explanation path fails CLOSED and renders a plain dash, rather
+ * than guessing that the column name doubles as the canonical one. Guessing
+ * would be right 64 times out of 72 and quietly wrong 8 times.
  */
-export function explain(
-  states: MetricStates,
+export function resolveMetric(
   field: string,
-): MetricExplanation | null {
-  if (!states) return null
-  return states[field] ?? null
+  hasValue: boolean,
+  states: MetricStates,
+  governed: GovernedColumns,
+): Resolution {
+  if (hasValue) return { kind: 'value' }
+  if (!states) return { kind: 'plain' }
+
+  // An ungoverned field has no canonical key and never carries a state.
+  const canonical = governed?.[field]
+  if (!canonical) {
+    return governed ? { kind: 'plain' } : { kind: 'unmapped' }
+  }
+
+  const explanation = states[canonical]
+  // Governed, null, and no entry: the sidecar is sparse by design, so this is
+  // "nothing was asserted", not "unavailable". Claiming a cause we were not
+  // given would be the same error as inventing the number.
+  return explanation ? { kind: 'explained', explanation } : { kind: 'plain' }
 }
 
-/** A short label for the state, in the reader's language rather than the engine's. */
+/**
+ * A short label for the state, in the reader's language rather than the engine's.
+ * Supporting text only — the persisted reason leads.
+ */
 export function stateLabel(state: MetricState): string {
   switch (state) {
-    case 'not_meaningful':    return 'Not meaningful here'
+    case 'not_meaningful':    return 'Withheld'
     case 'unavailable':       return 'Unavailable'
     case 'insufficient_data': return 'Not enough history'
     default:                  return 'Available'
@@ -57,14 +93,14 @@ export function stateLabel(state: MetricState): string {
 }
 
 /**
- * The full sentence shown on hover.
+ * What the reader sees.
  *
- * The engine's `reason` is already written for a reader, so it is used as
- * given rather than paraphrased — paraphrasing is how a precise statement
- * becomes an approximate one.
+ * Leads with the engine's own sentence, used verbatim. That sentence is the
+ * contract a person can actually understand; `not_meaningful` and
+ * `unit_mismatch` are implementation vocabulary and stay out of the primary
+ * presentation. They remain on the element as data attributes for diagnostics.
  */
 export function explanationText(e: MetricExplanation): string {
-  const head = stateLabel(e.state)
-  const body = e.reason?.trim()
-  return body ? `${head} — ${body}` : head
+  const reason = e.reason?.trim()
+  return reason || stateLabel(e.state)
 }

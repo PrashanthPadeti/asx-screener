@@ -6,7 +6,7 @@ import type { MarketSummary, MoversResponse, SectorsResponse } from '@/lib/api'
 import { cn, SECTOR_COLORS } from '@/lib/utils'
 import { SCREENER_FIELDS_CLAIM, UNIVERSE_CLAIM } from '@/lib/claims'
 import { MetricValue } from '@/components/MetricValue'
-import type { MetricStates } from '@/lib/metric-states'
+import type { GovernedColumns, MetricStates } from '@/lib/metric-states'
 
 export const metadata: Metadata = {
   title: 'ASX Screener | ASX Stock Screener & Australian Stock Research Tool',
@@ -48,6 +48,20 @@ async function fetchPreviewRows(): Promise<PreviewRow[]> {
     return Array.isArray(json?.data) ? json.data : []
   } catch {
     return []
+  }
+}
+
+// Column -> canonical metric, published by the API. The sidecar is keyed
+// canonically and rows are keyed by column; for 8 of the 72 governed metrics
+// those spellings differ. Never reconstructed here.
+async function fetchGovernedColumns(): Promise<GovernedColumns> {
+  try {
+    const res = await fetch(`${INTERNAL_API}/api/v1/screener/fields`, { cache: 'no-store' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const json = await res.json()
+    return json?.governed_columns ?? null
+  } catch {
+    return null
   }
 }
 
@@ -274,11 +288,12 @@ const faqSchema = {
 // ── Page ──────────────────────────────────────────────────────
 
 export default async function HomePage() {
-  const [summary, movers, sectors, preview] = await Promise.all([
+  const [summary, movers, sectors, preview, governed] = await Promise.all([
     fetchMarketSummary(),
     getMarketMovers('1w').catch((): MoversResponse => ({ gainers: [], losers: [], period: '1w' })),
     getMarketSectors().catch((): SectorsResponse => ({ sectors: [] })),
     fetchPreviewRows(),
+    fetchGovernedColumns(),
   ])
 
   const hasMovers  = movers.gainers.length > 0 || movers.losers.length > 0
@@ -574,16 +589,16 @@ export default async function HomePage() {
                     </td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-800">{fmtPrice(s.price)}</td>
                     <td className="px-4 py-3 text-right text-gray-600 hidden sm:table-cell">
-                      <MetricValue field="pe_ratio" states={s.metric_states}
+                      <MetricValue field="pe_ratio" states={s.metric_states} governed={governed}
                         value={s.pe_ratio == null ? null : `${s.pe_ratio.toFixed(1)}x`} />
                     </td>
                     <td className={cn('px-4 py-3 text-right font-semibold',
                                       s.dividend_yield ? 'text-green-600' : 'text-gray-600')}>
-                      <MetricValue field="dividend_yield" states={s.metric_states}
+                      <MetricValue field="dividend_yield" states={s.metric_states} governed={governed}
                         value={s.dividend_yield == null ? null : fmtPct(s.dividend_yield)} />
                     </td>
                     <td className="px-4 py-3 text-right text-gray-600 hidden lg:table-cell">
-                      <MetricValue field="roe" states={s.metric_states}
+                      <MetricValue field="roe" states={s.metric_states} governed={governed}
                         value={s.roe == null ? null : fmtPct(s.roe)} />
                     </td>
                     <td className="px-4 py-3 text-right hidden lg:table-cell">

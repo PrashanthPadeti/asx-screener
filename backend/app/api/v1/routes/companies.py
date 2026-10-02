@@ -241,7 +241,12 @@ async def get_company_overview(
             cfi, dividends_paid,
             (1.0 / NULLIF(pe_ratio, 0)) AS earnings_yield, price_to_cash_flow,
             COALESCE(pros, '{}') AS pros,
-            COALESCE(cons, '{}') AS cons
+            COALESCE(cons, '{}') AS cons,
+            -- The applicability sidecar. A nullable numeric column cannot say
+            -- why it is null, and this surface is where a customer reads the
+            -- metric. Without it the page shows a bare dash and the engine's
+            -- deliberate refusal is indistinguishable from missing data.
+            metric_states
         FROM screener.universe
         WHERE asx_code = :asx_code
     """

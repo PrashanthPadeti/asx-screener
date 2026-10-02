@@ -100,6 +100,11 @@ class CompanyOverview(BaseModel):
     Already 0-100 fields:
         franking_pct, short_pct, percent_insiders, percent_institutions, rsi_14, adx_14
     """
+    #: Sparse applicability sidecar: canonical metric -> {state, cause, reason}
+    #: for each governed metric the engine declined to publish. Absent from the
+    #: map means applicable; an entry means a value was deliberately withheld.
+    metric_states: Optional[dict] = None
+
     # ── Price ─────────────────────────────────────────────────────────────────
     price: Optional[float] = None
     price_date: Optional[date] = None

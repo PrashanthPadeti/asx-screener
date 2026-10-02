@@ -514,6 +514,63 @@ def test_a_withheld_metric_explains_itself():
         assert f'field="{field}"' in page, f"{field} is not explained"
 
 
+def test_the_fields_endpoint_publishes_canonical_identity():
+    """The backend is the only authority for canonical <-> physical identity.
+
+    The sidecar is keyed canonically and rows are keyed by column; 8 of the 72
+    governed metrics spell those differently. Before 2 Oct 2026 nothing
+    published the mapping, so any client wanting to explain a withheld value
+    had to reconstruct it — a second declaration of identity, which is exactly
+    how ev_to_ebitda escaped assessment once already.
+    """
+    route = (BACKEND / "app/api/v1/routes/screener.py").read_text(
+        encoding="utf-8")
+    assert "governed_columns" in route, "the fields endpoint stopped publishing the map"
+    assert '"canonical_metric"' in route, "field descriptors no longer carry canonical identity"
+    assert '"governed"' in route
+
+    # And it must be derived, not typed out.
+    block = route[route.index("canonical_for_column = {"):
+                  route.index("# Group fields by category")]
+    assert "governed_columns(" in block, (
+        "the mapping is hand-written rather than derived from the engine")
+    assert "ev_ebitda" not in block, "an alias is spelled out by hand"
+
+
+def test_the_frontend_never_redeclares_canonical_identity():
+    """A client may consume canonical identity; it may never restate it.
+
+    An alias table in the frontend would drift from the engine silently, and
+    the drift would look exactly like a metric that simply has no explanation.
+    """
+    fe = BACKEND.parent / "frontend"
+    for rel in ("lib/metric-states.ts", "components/MetricValue.tsx",
+                "app/page.tsx", "app/screener/page.tsx",
+                "app/company/[code]/CompanyTabs.tsx"):
+        src = _executable_source((fe / rel).read_text(encoding="utf-8"))
+        for alias in ("ev_ebitda", "dividend_per_share", "dividend_payout_ratio",
+                      "net_income_cagr_3y", "eps_cagr_3y", "revenue_cagr_3y"):
+            assert alias not in src, (
+                f"{rel} names the canonical metric '{alias}' directly; it must "
+                f"come from the API's governed_columns map")
+
+
+def test_the_resolver_unit_tests_exist_and_cover_the_alias_case():
+    """These run under node against the real module (npm run test:units).
+    Asserted structurally here so the Python suite fails if they are deleted."""
+    t = (BACKEND.parent / "frontend/lib/metric-states.test.mts")
+    assert t.is_file(), "the resolver unit tests are gone"
+    src = t.read_text(encoding="utf-8")
+    assert "ev_to_ebitda surfaces the state stored under ev_ebitda" in src, (
+        "the alias regression case was removed")
+    for case in ("fails CLOSED", "applicable metric shows no explanation",
+                 "plain dash", "not the enum"):
+        assert case in src, f"missing absence-semantics case: {case}"
+
+    pkg = (BACKEND.parent / "frontend/package.json").read_text(encoding="utf-8")
+    assert "test:units" in pkg, "the unit tests are not runnable from package.json"
+
+
 def test_every_explained_field_is_keyed_the_way_the_sidecar_is():
     """The trap this lookup walks into.
 
@@ -562,7 +619,11 @@ def test_the_explanation_reaches_the_markup_not_just_the_client():
     body = _executable_source(src)
     assert "title=" in body and "aria-label=" in body, (
         "the reason must be carried by the element, not by a JS-only tooltip")
-    assert "sr-only" in body, "no screen-reader text for the state"
+    # aria-label carries the state word plus the reason, so a screen reader
+    # announces the dash as withheld rather than as an empty cell. (An earlier
+    # version used a visually-hidden span; aria-label avoids the element being
+    # announced twice.)
+    assert "stateLabel(" in body, "the accessible name does not say it was withheld"
 
 
 def test_an_unexplained_blank_claims_nothing():
@@ -572,10 +633,21 @@ def test_an_unexplained_blank_claims_nothing():
     src = _executable_source(
         (BACKEND.parent / "frontend/components/MetricValue.tsx").read_text(
             encoding="utf-8"))
-    guard = src[src.index("const e = explain("):src.index("return (")]
-    assert "if (!e)" in guard, "no branch for the no-entry case"
-    assert "unavailable" not in guard.lower(), (
-        "the no-entry branch asserts a cause it was not given")
+    # The branch that renders a dash for anything other than 'explained'.
+    guard = src[src.index("if (r.kind !== 'explained')"):]
+    guard = guard[:guard.index("const text")]
+    assert "—" in guard, "no plain-dash branch"
+    for enum in ("unavailable", "not_meaningful", "insufficient_data"):
+        assert enum not in guard.lower(), (
+            f"the no-entry branch asserts '{enum}', a cause it was not given")
+
+    # And the resolver must keep the two unexplained cases distinct, so a
+    # failed map load is visible in diagnostics rather than silently equal to
+    # "nothing was asserted".
+    res = _executable_source(
+        (BACKEND.parent / "frontend/lib/metric-states.ts").read_text(
+            encoding="utf-8"))
+    assert "'unmapped'" in res and "'plain'" in res
 
 
 def test_a_trailing_return_is_not_labelled_as_pick_performance():

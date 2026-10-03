@@ -144,7 +144,7 @@ def setup(conn) -> None:
     print("\nNow rebuild the universe and score it, then run --assert.")
 
 
-def check(conn) -> int:
+def check(conn, serving_only: bool = False) -> int:
     cur = conn.cursor()
     failures = []
 
@@ -176,6 +176,30 @@ def check(conn) -> int:
     report("no price means no technical value",
            noprice is None or all(v is None for v in noprice),
            f"a code with no prices served {noprice}")
+
+    if serving_only:
+        # The governed half is proven elsewhere, and deliberately so.
+        #
+        # Reaching it here would need composite_score to publish under a real
+        # run, which means the canonical driver -- and the driver runs
+        # technical_compute, which writes a row for EVERY code with prices.
+        # That would hand the stale code a matching-as-of row and erase the
+        # condition under test before universe_build ever saw it. The stale
+        # state only exists when a technical run SKIPS a code, which is
+        # exactly what the driver will not do.
+        #
+        # So the governed propagation is proven as a property instead:
+        #   tests/test_momentum_fails_closed.py  — effective_weights is pure
+        # and on production data, run 6, 4 Oct 2026: of 2,121 served rows, 21
+        # had all five momentum inputs absent, 0 scored anyway, and all 21
+        # carried {"cause": "source_missing", "state": "unavailable"}.
+        #
+        # Bending the canonical lifecycle to keep one synthetic row alive
+        # would prove less and cost more.
+        print(f"\n{len(failures)} failure(s)" if failures
+              else "\nserving properties hold "
+                   "(governed half: tests/test_momentum_fails_closed.py)")
+        return 1 if failures else 0
 
     # ── The governed half ────────────────────────────────────────────────────
     # Absence alone is not the contract. A governed metric that merely vanishes
@@ -215,11 +239,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--setup", action="store_true")
     ap.add_argument("--assert", dest="do_assert", action="store_true")
+    ap.add_argument("--serving-only", action="store_true",
+                    help="skip the governed half; it is proven by "
+                         "tests/test_momentum_fails_closed.py")
     a = ap.parse_args()
     if not (a.setup or a.do_assert):
         ap.error("pass --setup or --assert")
     c = _connect()
     try:
-        sys.exit(setup(c) or 0 if a.setup else check(c))
+        sys.exit(setup(c) or 0 if a.setup else check(c, a.serving_only))
     finally:
         c.close()

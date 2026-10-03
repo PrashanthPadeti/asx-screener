@@ -86,15 +86,27 @@ def setup(conn) -> None:
     if newest is None:
         raise SystemExit(f"{STALE_CODE} has no daily_metrics rows in scratch")
 
+    # market.daily_metrics is a TimescaleDB hypertable partitioned on `date`,
+    # so UPDATE ... SET date moves the row out of its chunk's range and the
+    # chunk's own CHECK constraint rejects it. The row is COPIED to the stale
+    # date instead, which lands it in the correct chunk, and the originals are
+    # then removed.
+    cur.execute("""
+        SELECT string_agg(quote_ident(column_name), ', ' ORDER BY ordinal_position)
+        FROM information_schema.columns
+        WHERE table_schema='market' AND table_name='daily_metrics'
+    """)
+    cols = cur.fetchone()[0]
+    projected = ", ".join(
+        f"DATE %s" if c.strip() == "date" else c.strip()
+        for c in cols.split(","))
+
     cur.execute(f"""
-        INSERT INTO market.daily_metrics
-        SELECT * FROM market.daily_metrics
+        INSERT INTO market.daily_metrics ({cols})
+        SELECT {projected} FROM market.daily_metrics
          WHERE asx_code = %s AND date = %s
-        ON CONFLICT DO NOTHING
-    """, (STALE_CODE, newest))
-    cur.execute("UPDATE market.daily_metrics SET date = %s "
-                "WHERE asx_code = %s AND date = %s",
-                (STALE_DATE, STALE_CODE, newest))
+        ON CONFLICT (asx_code, date) DO NOTHING
+    """, (STALE_DATE, STALE_CODE, newest))
     cur.execute("DELETE FROM market.daily_metrics "
                 "WHERE asx_code = %s AND date <> %s", (STALE_CODE, STALE_DATE))
 

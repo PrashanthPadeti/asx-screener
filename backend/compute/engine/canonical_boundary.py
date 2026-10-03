@@ -924,3 +924,41 @@ if __name__ == "__main__":
         print(" ", line)
     print(f"{len(bad)} new violation(s)")
     sys.exit(1 if bad else 0)
+
+
+def freshness_relevant_tables() -> set[str]:
+    """Tables where staleness is a customer-visible fault.
+
+    The intersection of two facts already derivable from the source: the API
+    READS the table to serve a request, and a scheduled job WRITES it. Both
+    halves matter. A table nothing serves cannot show a customer a stale
+    number; a table nothing produces cannot go stale because nothing was
+    keeping it fresh.
+
+    Derived rather than listed, because a hand-written list is exactly how
+    market.daily_prices came to be unwatched while a four-day hole opened in
+    it and the freshness check reported FRESH for a week.
+    """
+    def scan(paths) -> tuple[set[str], set[str]]:
+        reads: set[str] = set()
+        writes: set[str] = set()
+        for path in paths:
+            try:
+                touched, _ = relations(path)
+            except Exception:                                   # noqa: BLE001
+                continue
+            for table, directions in touched.items():
+                if "." not in table:
+                    continue
+                if "r" in directions:
+                    reads.add(table)
+                if "w" in directions:
+                    writes.add(table)
+        return reads, writes
+
+    api_reads, _ = scan(sorted((BACKEND / "app/api/v1/routes").glob("*.py")))
+    _, produced = scan(
+        list((BACKEND / "app/workers").glob("*.py"))
+        + list((BACKEND / "scripts").rglob("*.py"))
+        + list((BACKEND / "compute/engine").glob("*.py")))
+    return api_reads & produced

@@ -28,7 +28,7 @@ instrument defect, reported as itself rather than as a stale job.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 
@@ -48,6 +48,22 @@ class Anchor:
     #: impossible to set usefully — a 7-day floor on daily prices would be
     #: slower to notice than the outage it exists to catch.
     cadence_hours: int = 24
+    #: When set, staleness is measured in WEEKDAYS BEHIND rather than in
+    #: elapsed hours, and this field governs instead of max_age_hours.
+    #:
+    #: Elapsed hours is the wrong unit for a market that closes on weekends.
+    #: To avoid firing every Sunday, an hour-based limit has to be widened to
+    #: span the whole weekend — which made the price anchor 120h, four times
+    #: looser than intended, and pushed detection of the September gap from
+    #: Friday to Monday. Counting weekdays handles the weekend exactly, so the
+    #: tolerance can be one day.
+    #:
+    #: Known limitation, stated rather than hidden: CONSECUTIVE market
+    #: closures (Good Friday + Easter Monday, Christmas + Boxing Day) will
+    #: read as stale, roughly twice a year. That is a cheap, explainable false
+    #: positive in exchange for detecting a real stoppage the next morning
+    #: instead of three days later. A single public holiday does not trip it.
+    max_weekdays_behind: Optional[int] = None
     #: The file that writes this column. An anchor is a guess until it is
     #: checked against its writer: the first version of this registry anchored
     #: top5_strategy on `created_at` when the job writes `computed_at`. Stated
@@ -74,22 +90,25 @@ ANCHORS: tuple[Anchor, ...] = (
     # customer actually experiences: "how recent is the newest price I can
     # see?"
     #
-    # 120 hours, from the worst legitimate gap rather than from preference.
-    # The pipeline loads a day's close at 08:30 UTC Mon-Fri. A Friday close is
-    # 58h old by Sunday's 10:00 UTC check, and 106h old by Tuesday's if Monday
-    # is a public holiday. 120h clears that and still fires on the real fault:
-    # the September hole would have been caught on Monday 28th at 130h, two
-    # trading days in, instead of never.
+    # Measured in WEEKDAYS BEHIND, not elapsed hours. The first version used
+    # 120h, which had to be that wide to survive a weekend, and would have
+    # caught the September hole on Monday the 28th. Counting weekdays handles
+    # the weekend exactly, so one day of tolerance is enough: the same hole
+    # reads stale on FRIDAY the 25th, one trading day after prices stopped.
+    #
+    # max_age_hours is retained as the declared cadence bound and is what the
+    # finding reports, but max_weekdays_behind governs the verdict.
     Anchor("daily_prices", "market.daily_prices", "time", 24 * 5,
            "the newest trading day in the price table. No prices for five "
            "days means ingestion has stopped, which is the single most "
            "customer-visible failure this product has",
-           cadence_hours=24, writer="scripts/eodhd/load_prices.py"),
+           cadence_hours=24, max_weekdays_behind=1,
+           writer="scripts/eodhd/load_prices.py"),
     Anchor("screener_universe", "screener.universe", "universe_built_at", 24 * 5,
            "the canonical daily run rebuilds the served universe; if its "
            "timestamp stops advancing, every metric on the site is being "
            "served from an older computation than customers assume",
-           cadence_hours=24,
+           cadence_hours=24, max_weekdays_behind=1,
            writer="scripts/eodhd/v2/build_screener_universe.py"),
     Anchor("short_positions", "market.short_positions", "updated_at", 24 * 10,
            "ASIC publishes weekly with a few days' lag; the job upserts on "
@@ -161,6 +180,24 @@ class Finding:
         }
 
 
+def weekdays_behind(latest: date, now: date) -> int:
+    """Weekdays in (latest, now]. Saturdays and Sundays do not count.
+
+    The unit that matters for a market that is shut two days a week: a Friday
+    close observed on Sunday is zero weekdays behind, not fifty-eight hours
+    stale.
+    """
+    if now <= latest:
+        return 0
+    n = 0
+    d = latest + timedelta(days=1)
+    while d <= now:
+        if d.weekday() < 5:
+            n += 1
+        d += timedelta(days=1)
+    return n
+
+
 def existence_sql(anchor: Anchor) -> str:
     """Does the anchor's column exist? Asked before it is trusted.
 
@@ -217,6 +254,18 @@ def classify(anchor: Anchor, column_exists: bool,
     if latest.tzinfo is None:
         latest = latest.replace(tzinfo=timezone.utc)
     age = (now - latest).total_seconds() / 3600.0
+
+    if anchor.max_weekdays_behind is not None:
+        behind = weekdays_behind(latest.date(), now.date())
+        state = "current" if behind <= anchor.max_weekdays_behind else "stale"
+        return Finding(
+            anchor.job, state, anchor.table, anchor.column,
+            observed_at=latest.isoformat(), age_hours=age,
+            limit_hours=anchor.max_age_hours,
+            reason="" if state == "current" else
+            (f"{behind} weekdays behind, limit "
+             f"{anchor.max_weekdays_behind} — {anchor.why}"))
+
     state = "current" if age <= anchor.max_age_hours else "stale"
     return Finding(
         anchor.job, state, anchor.table, anchor.column,

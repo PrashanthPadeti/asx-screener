@@ -40,7 +40,10 @@ ADMIN = BACKEND / "app/api/v1/routes/admin.py"
 MODULE = BACKEND / "compute/engine/output_freshness.py"
 
 NOW = datetime(2026, 10, 1, 6, 0, tzinfo=timezone.utc)
-PICKS = ANCHORS[1]
+# By name, never by position: this was ANCHORS[1] until two anchors were
+# inserted ahead of it, at which point three tests began exercising a
+# different anchor than they named.
+PICKS = next(a for a in ANCHORS if a.job == "top5_strategy")
 
 
 # ── Coverage: no deferrable job is silently absent ───────────────────────────
@@ -287,9 +290,20 @@ def test_a_normal_weekend_does_not_fire():
     prices = next(a for a in ANCHORS if a.job == "daily_prices")
     sunday = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
     assert classify(prices, True, date(2026, 9, 25), sunday).state == "current"
-    # Tuesday after a Monday public holiday — the longest legitimate gap.
+    # A single public holiday on the Monday: checked that Monday, Friday's
+    # close is one weekday behind and legitimate.
+    monday = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 25), monday).state == "current"
+
+
+def test_two_weekdays_behind_is_a_fault_even_after_a_holiday():
+    """Friday's close still newest on Tuesday means Monday AND Tuesday
+    produced nothing. A Monday holiday does not excuse it: Tuesday's run
+    should have loaded Tuesday."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
     tuesday = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc)
-    assert classify(prices, True, date(2026, 9, 25), tuesday).state == "current"
+    assert classify(prices, True, date(2026, 9, 25), tuesday).state == "stale"
 
 
 def test_a_date_column_is_handled_as_midnight_utc():
@@ -324,6 +338,67 @@ def test_coverage_does_not_claim_completeness_when_it_knows_nothing():
     assert c["anchored_outside_population"], (
         "anchors outside the derived population must be visible, not silently "
         "counted as covering it")
+
+
+# ── The ratchet: the unwatched set may shrink, never grow ────────────────────
+
+#: Measured 3 Oct 2026, the day prices were first anchored. This is a DEBT,
+#: not a target. Lower it whenever a table is anchored or named; never raise
+#: it to make a build pass.
+MAX_UNWATCHED = 38
+
+
+def test_the_unwatched_set_does_not_grow():
+    """The gate that was missing when market.daily_prices went unwatched.
+
+    Classifying all 41 freshness-relevant tables is real work, and demanding
+    it in one go would either block this fix or invite someone to mark them
+    all observable without checking. A ratchet gives the contract teeth today:
+    a NEW table that the API serves and a job writes must be anchored or named
+    at the time it is added, because it cannot push this count up.
+
+    If this fails because the derived population grew, that is the test
+    working. Anchor the new table, name it unobservable with a reason, or
+    establish that it does not belong in the population — but do not raise the
+    number to make it pass.
+    """
+    from compute.engine.canonical_boundary import freshness_relevant_tables
+    from compute.engine.output_freshness import coverage
+    c = coverage(freshness_relevant_tables())
+    assert c["unclassified_count"] <= MAX_UNWATCHED, (
+        f"{c['unclassified_count']} freshness-relevant tables are unwatched, "
+        f"up from {MAX_UNWATCHED}. New: "
+        f"{c['unclassified'][:5]}")
+
+
+def test_the_ratchet_is_tightened_when_coverage_improves():
+    """A ratchet left slack is not a ratchet. If the real count has fallen
+    below the recorded debt, record the lower number."""
+    from compute.engine.canonical_boundary import freshness_relevant_tables
+    from compute.engine.output_freshness import coverage
+    actual = coverage(freshness_relevant_tables())["unclassified_count"]
+    assert actual >= MAX_UNWATCHED, (
+        f"coverage improved to {actual} unwatched; lower MAX_UNWATCHED to "
+        f"{actual} so the gain cannot be silently given back")
+
+
+def test_the_population_is_derived_not_listed():
+    """A hand-written population is how prices came to be unwatched."""
+    import ast
+    import inspect
+    from compute.engine import canonical_boundary
+    src = inspect.getsource(canonical_boundary.freshness_relevant_tables)
+    assert "relations(" in src, "the population is no longer derived from source"
+
+    # Docstring stripped first. It names market.daily_prices while explaining
+    # why hand-listing is dangerous, and the first version of this assertion
+    # read that explanation as the offence it warns about.
+    fn = ast.parse(src.lstrip()).body[0]
+    if (fn.body and isinstance(fn.body[0], ast.Expr)
+            and isinstance(fn.body[0].value, ast.Constant)):
+        fn.body = fn.body[1:]
+    code = ast.unparse(fn)
+    assert "daily_prices" not in code, "the population names a table by hand"
 
 
 if __name__ == "__main__":

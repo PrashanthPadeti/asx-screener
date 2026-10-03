@@ -41,6 +41,20 @@ class Anchor:
     column: str
     max_age_hours: int
     why: str
+    #: How often the job is SUPPOSED to produce. The limit must be at least two
+    #: of these, so one tolerated deferral never fires the alarm. Carried per
+    #: anchor because the jobs genuinely differ: prices are daily, the monthly
+    #: strategy is weekly, and a single blanket floor made the price anchor
+    #: impossible to set usefully — a 7-day floor on daily prices would be
+    #: slower to notice than the outage it exists to catch.
+    cadence_hours: int = 24
+    #: The file that writes this column. An anchor is a guess until it is
+    #: checked against its writer: the first version of this registry anchored
+    #: top5_strategy on `created_at` when the job writes `computed_at`. Stated
+    #: rather than inferred from the job name, because the producers do not all
+    #: live in one directory — prices are loaded from scripts/, not
+    #: compute/engine/.
+    writer: str = ""
 
 
 #: Jobs whose output IS independently observable.
@@ -49,13 +63,43 @@ class Anchor:
 #: tolerated and a second consecutive one is not. A threshold tighter than the
 #: cadence would fire on exactly the behaviour the lease exists to produce.
 ANCHORS: tuple[Anchor, ...] = (
+    # Added 3 Oct 2026, after a customer reported week-old prices that nothing
+    # here had noticed. market.daily_prices held NO rows for 24, 25, 28 and 29
+    # September; this check reported FRESH throughout, truthfully, because it
+    # had only ever been asked about short positions and a monthly strategy
+    # table. The product's primary output was not in its population.
+    #
+    # The observable is max(time) — the newest trading day present — because
+    # the table carries no ingestion timestamp. That is also the property a
+    # customer actually experiences: "how recent is the newest price I can
+    # see?"
+    #
+    # 120 hours, from the worst legitimate gap rather than from preference.
+    # The pipeline loads a day's close at 08:30 UTC Mon-Fri. A Friday close is
+    # 58h old by Sunday's 10:00 UTC check, and 106h old by Tuesday's if Monday
+    # is a public holiday. 120h clears that and still fires on the real fault:
+    # the September hole would have been caught on Monday 28th at 130h, two
+    # trading days in, instead of never.
+    Anchor("daily_prices", "market.daily_prices", "time", 24 * 5,
+           "the newest trading day in the price table. No prices for five "
+           "days means ingestion has stopped, which is the single most "
+           "customer-visible failure this product has",
+           cadence_hours=24, writer="scripts/eodhd/load_prices.py"),
+    Anchor("screener_universe", "screener.universe", "universe_built_at", 24 * 5,
+           "the canonical daily run rebuilds the served universe; if its "
+           "timestamp stops advancing, every metric on the site is being "
+           "served from an older computation than customers assume",
+           cadence_hours=24,
+           writer="scripts/eodhd/v2/build_screener_universe.py"),
     Anchor("short_positions", "market.short_positions", "updated_at", 24 * 10,
            "ASIC publishes weekly with a few days' lag; the job upserts on "
            "every successful download, so updated_at advances even when the "
-           "report date does not"),
+           "report date does not",
+           cadence_hours=24, writer="compute/engine/short_positions.py"),
     Anchor("top5_strategy", "strategy.monthly_picks", "computed_at", 24 * 15,
            "runs Sunday 22:00 UTC, inside the weekly canonical window, so it "
-           "is the job most likely to defer; two missed Sundays is a fault"),
+           "is the job most likely to defer; two missed Sundays is a fault",
+           cadence_hours=24 * 7, writer="compute/engine/top5_strategy.py"),
 )
 
 #: Jobs whose freshness CANNOT be observed from their own output, and why.
@@ -163,6 +207,13 @@ def classify(anchor: Anchor, column_exists: bool,
                        reason=f"{anchor.table} has no rows at all")
 
     now = now or datetime.now(timezone.utc)
+    # A DATE column (market.daily_prices.time) comes back as `date`, which has
+    # no tzinfo and would raise here. Midnight UTC is the conservative reading:
+    # it makes the row look OLDER than any intraday timestamp would, so the
+    # conversion can never understate staleness.
+    if not isinstance(latest, datetime):
+        latest = datetime(latest.year, latest.month, latest.day,
+                          tzinfo=timezone.utc)
     if latest.tzinfo is None:
         latest = latest.replace(tzinfo=timezone.utc)
     age = (now - latest).total_seconds() / 3600.0
@@ -177,6 +228,42 @@ def classify(anchor: Anchor, column_exists: bool,
 def unobservable_findings() -> list[Finding]:
     return [Finding(job, "unobservable", reason=why)
             for job, why in sorted(UNOBSERVABLE.items())]
+
+
+def coverage(relevant_tables: set[str]) -> dict:
+    """How much of the freshness-relevant surface is actually watched.
+
+    Added 3 Oct 2026. Before this, the check reported FRESH on two anchors and
+    said nothing about the dozens of tables it had never been asked about —
+    and `market.daily_prices`, the product's primary output, was one of them.
+    A customer found a four-day hole that this check had been green through.
+
+    "We enumerated some" must never again read as "we covered it", so the
+    size of the unwatched set is reported every run. A shrinking `unclassified`
+    count is progress; a silent two-anchor PASS is not.
+
+    Pure: the caller derives `relevant_tables` and passes it in, because this
+    module does no I/O. The intended derivation is the tables the API reads to
+    serve customers AND that a scheduled job writes — staleness is only a
+    fault where something is supposed to keep it fresh.
+    """
+    anchored = {a.table for a in ANCHORS}
+    named = set(UNOBSERVABLE)
+    unclassified = sorted(relevant_tables - anchored)
+    return {
+        "relevant": len(relevant_tables),
+        "anchored": sorted(anchored & relevant_tables),
+        "anchored_outside_population": sorted(anchored - relevant_tables),
+        "named_unobservable": sorted(named),
+        "unclassified": unclassified,
+        "unclassified_count": len(unclassified),
+        # Deliberately NOT a pass/fail. Classifying 41 tables is real work, and
+        # gating on it today would either block the release or invite someone
+        # to mark them all observable without checking. Visible and shrinking
+        # beats hidden and complete-looking.
+        "note": ("unclassified tables have no freshness anchor and no stated "
+                 "reason; staleness in them would not be detected"),
+    }
 
 
 def summarise(findings: list[Finding]) -> dict:

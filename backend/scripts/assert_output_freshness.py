@@ -35,9 +35,47 @@ import psycopg2                                                    # noqa: E402
 
 from app.core.db import get_database_url_sync                      # noqa: E402
 from compute.engine.output_freshness import (                      # noqa: E402
-    ANCHORS, classify, existence_sql, latest_sql, summarise,
+    ANCHORS, classify, coverage, existence_sql, latest_sql, summarise,
     unobservable_findings,
 )
+
+
+def freshness_relevant_tables() -> set[str]:
+    """Tables the API reads to serve customers AND a scheduled job writes.
+
+    Staleness is only a fault where something is supposed to keep a table
+    fresh, so the population is the intersection: read on the serving path,
+    written by a producer that can stop.
+
+    Derived rather than listed, because a hand-written list is exactly how
+    market.daily_prices came to be unwatched. If the derivation fails the
+    caller reports UNKNOWN coverage rather than claiming full coverage — an
+    unreadable population is not an empty one.
+    """
+    from compute.engine.canonical_boundary import relations     # noqa: PLC0415
+
+    def scan(paths):
+        reads, writes = set(), set()
+        for path in paths:
+            try:
+                touched, _ = relations(path)
+            except Exception:                                   # noqa: BLE001
+                continue
+            for table, directions in touched.items():
+                if "." not in table:
+                    continue
+                if "r" in directions:
+                    reads.add(table)
+                if "w" in directions:
+                    writes.add(table)
+        return reads, writes
+
+    api_reads, _ = scan(sorted((BACKEND / "app/api/v1/routes").glob("*.py")))
+    _, produced = scan(
+        list((BACKEND / "app/workers").glob("*.py"))
+        + list((BACKEND / "scripts").rglob("*.py"))
+        + list((BACKEND / "compute/engine").glob("*.py")))
+    return api_reads & produced
 
 
 def evaluate(conn) -> list:
@@ -89,6 +127,25 @@ def main() -> int:
                   f"({f.age_hours:.1f}h old, limit {f.limit_hours}h)"
                   if f.age_hours is not None else f.reason)
         print(f"  {label}   {f.job:18s} {detail}")
+
+    # How much of the relevant surface is watched at all. Printed every run so
+    # that "two anchors are green" can never again be mistaken for "the data is
+    # fresh" — which is exactly what happened through the 24-29 Sep price gap.
+    try:
+        cov = coverage(freshness_relevant_tables())
+        print(f"\n── coverage: {len(cov['anchored'])} anchored, "
+              f"{len(cov['named_unobservable'])} named unobservable, "
+              f"{cov['unclassified_count']} UNWATCHED "
+              f"of {cov['relevant']} freshness-relevant tables")
+        if cov["unclassified"]:
+            shown = ", ".join(cov["unclassified"][:8])
+            more = (f" (+{cov['unclassified_count'] - 8} more)"
+                    if cov["unclassified_count"] > 8 else "")
+            print(f"  unwatched: {shown}{more}")
+            print("  staleness in those would not be detected")
+    except Exception as exc:                                     # noqa: BLE001
+        # An unreadable population is not an empty one.
+        print(f"\n── coverage: UNKNOWN ({type(exc).__name__}: {exc})")
 
     print("\n── not independently observable")
     for f in findings:

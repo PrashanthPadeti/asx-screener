@@ -89,11 +89,17 @@ def test_every_anchor_column_is_one_the_job_actually_writes():
     exactly as much as no check at all.
     """
     for a in ANCHORS:
-        module = BACKEND / "compute/engine" / f"{a.job}.py"
-        assert module.exists(), f"{a.job} has no module to check against"
+        # The writer is NAMED by the anchor rather than inferred from the job
+        # name. Inferring it assumed every producer lived in compute/engine/,
+        # which was true until prices were anchored — they are loaded from
+        # scripts/eodhd/load_prices.py, and the inference would have rejected a
+        # correct anchor.
+        assert a.writer, f"{a.job} does not name the file that writes it"
+        module = BACKEND / a.writer
+        assert module.exists(), f"{a.job}: writer {a.writer} does not exist"
         assert a.column in module.read_text(encoding="utf-8"), (
             f"{a.job} is anchored on {a.column}, which does not appear in "
-            f"{module.name} -- the job does not write that column")
+            f"{a.writer} -- the job does not write that column")
 
 
 def test_unobservable_entries_carry_a_reason():
@@ -107,10 +113,17 @@ def test_a_threshold_is_not_tighter_than_the_cadence():
     """A limit below the job's own period would fire on one deferral --
     exactly the behaviour the lease exists to produce -- and train people to
     ignore it."""
+    # Measured against each job's OWN cadence. The original rule was a flat
+    # 7-day floor, which was right while every anchor was weekly and became
+    # wrong the moment a daily output was added: a 7-day floor on prices would
+    # take longer to notice a stoppage than the September gap that prompted
+    # the anchor. The property is "tolerates one deferral", not "is at least a
+    # week".
     for a in ANCHORS:
-        assert a.max_age_hours >= 24 * 7, (
-            f"{a.job}: {a.max_age_hours}h is tighter than a weekly cadence "
-            f"plus one tolerated deferral")
+        assert a.cadence_hours > 0, f"{a.job} declares no cadence"
+        assert a.max_age_hours >= 2 * a.cadence_hours, (
+            f"{a.job}: {a.max_age_hours}h is under two cadences "
+            f"({a.cadence_hours}h), so one tolerated deferral would fire it")
 
 
 # ── The classifier, behaviourally ────────────────────────────────────────────
@@ -239,6 +252,78 @@ def test_the_gate_fails_by_default():
     """--report exists for a dashboard. The default must exit non-zero, or
     scheduling it proves nothing."""
     assert "return 0 if args.report else 1" in SCRIPT.read_text(encoding="utf-8")
+
+
+# ── The September price gap: the fault this check was blind to ───────────────
+
+def test_prices_are_anchored_at_all():
+    """The defect, stated as a test.
+
+    On 3 Oct 2026 a customer reported week-old prices. market.daily_prices had
+    NO rows for 24, 25, 28 and 29 September, and this check reported FRESH
+    throughout — truthfully, because its population was two secondary tables
+    and the product's primary output was not in it.
+    """
+    anchored = {a.table for a in ANCHORS}
+    assert "market.daily_prices" in anchored, (
+        "prices are unwatched again; a customer will find the next gap")
+    assert "screener.universe" in anchored, (
+        "the served universe is unwatched; every metric could be stale")
+
+
+def test_the_anchor_would_have_caught_the_real_gap():
+    """Not a hypothetical. The newest trading day was 23 Sep; the check runs
+    at 10:00 UTC daily. By Monday the 28th it must read stale."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    monday = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 23), monday).state == "stale"
+
+
+def test_a_normal_weekend_does_not_fire():
+    """The control. An alarm that cries on every Sunday gets ignored by the
+    second Sunday, and then the real gap goes unnoticed anyway."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    sunday = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 25), sunday).state == "current"
+    # Tuesday after a Monday public holiday — the longest legitimate gap.
+    tuesday = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 25), tuesday).state == "current"
+
+
+def test_a_date_column_is_handled_as_midnight_utc():
+    """market.daily_prices.time is a DATE. `date` has no tzinfo, so the
+    classifier would have raised on the very anchor that matters most."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    f = classify(prices, True, date(2026, 10, 2),
+                 datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc))
+    assert f.state == "current" and f.age_hours == 12.0
+
+
+# ── Coverage: the unwatched set is reported, not hidden ──────────────────────
+
+def test_coverage_reports_what_is_not_watched():
+    """Two green anchors must never again read as "the data is fresh"."""
+    from compute.engine.output_freshness import coverage
+    relevant = {"market.daily_prices", "screener.universe",
+                "market.dividends", "market.fx_rates"}
+    c = coverage(relevant)
+    assert c["relevant"] == 4
+    assert "market.daily_prices" in c["anchored"]
+    assert sorted(c["unclassified"]) == ["market.dividends", "market.fx_rates"]
+    assert c["unclassified_count"] == 2
+
+
+def test_coverage_does_not_claim_completeness_when_it_knows_nothing():
+    """An empty population is not full coverage."""
+    from compute.engine.output_freshness import coverage
+    c = coverage(set())
+    assert c["relevant"] == 0 and c["anchored"] == []
+    assert c["anchored_outside_population"], (
+        "anchors outside the derived population must be visible, not silently "
+        "counted as covering it")
 
 
 if __name__ == "__main__":

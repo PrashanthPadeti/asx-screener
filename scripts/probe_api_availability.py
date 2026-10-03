@@ -147,8 +147,10 @@ def run(minutes: float, interval: float, out_path: str,
     meta = {
         "record": "probe_meta",
         "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "probe_sha256": hashlib.sha256(
-            open(__file__, "rb").read()).hexdigest()[:16],
+        # Full digest, not truncated. This is a measurement identity: there
+        # is no benefit in making it lossy, and a short hash invites a later
+        # reader to assume collision resistance it does not have.
+        "probe_sha256": hashlib.sha256(open(__file__, "rb").read()).hexdigest(),
         "interval_s": interval,
         "timeout_s": TIMEOUT_SECONDS,
         "targets": [t["name"] for t in targets],
@@ -157,8 +159,9 @@ def run(minutes: float, interval: float, out_path: str,
 
     print(f"probing {meta['targets']} every {interval}s "
           f"for {minutes} min -> {out_path}")
-    print(f"probe_sha256={meta['probe_sha256']}  "
-          f"(must match between the before and after runs)")
+    print(f"probe_sha256={meta['probe_sha256']}")
+    print("  (this digest, the interval, the timeout and the targets must all "
+          "match between the before and after runs)")
     print("ctrl-c to stop early; the file keeps everything written so far\n")
 
     with open(out_path, "a", encoding="utf-8") as fh:

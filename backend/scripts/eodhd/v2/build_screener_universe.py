@@ -1298,6 +1298,24 @@ LEFT JOIN LATERAL (
            up_down_vol_ratio_20d, obv_rising, volume_breakout
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
+      -- The row must be AS-OF the latest price it claims to summarise.
+      --
+      -- This was ORDER BY date DESC LIMIT 1 with no bound at all, so a code
+      -- whose technical row was last written months ago kept serving it
+      -- forever. ALPH served dma200_ratio = 1.0175 from 19 Jun 2026 until
+      -- 3 Oct, against prices running to 1 Oct: three and a half months of a
+      -- number presented as current. It had exactly two rows in this table.
+      --
+      -- Not an age threshold. Elapsed time is a bad proxy, because a
+      -- genuinely suspended instrument has an old price AND an old metric,
+      -- and the two agreeing is correct rather than stale. The question is
+      -- whether the derived row corresponds to the source state it summarises
+      -- -- so it is asked against dp.price_date, not against now().
+      --
+      -- Fails closed: no matching row leaves every column NULL, which the
+      -- governed layer renders as unavailable. A missing metric says "this
+      -- could not be computed"; the old behaviour said June was today.
+      AND date = dp.price_date
     ORDER BY date DESC
     LIMIT 1
 ) dm ON TRUE

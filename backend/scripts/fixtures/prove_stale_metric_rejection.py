@@ -125,6 +125,23 @@ def setup(conn) -> None:
          WHERE asx_code = %s AND date = %s
     """, (STALE_CODE, STALE_DATE))
 
+    # Sentinels in the weekly and monthly sources.
+    #
+    # The first version of this patch bounded only the daily lateral, and the
+    # fixture still failed -- because the served columns COALESCEd across three
+    # cadences, so rejecting the stale daily row PROMOTED the weekly one. The
+    # universe served sma_200 = 54.6245 from market.weekly_metrics while the
+    # daily row said 11.0564.
+    #
+    # Distinctive values make that leak impossible to miss: if 91.23 or 123.45
+    # ever appears in a daily-semantic column, a coarser cadence has occupied a
+    # daily metric's identity.
+    for code in (STALE_CODE, NOPRICE_CODE):
+        cur.execute("UPDATE market.monthly_metrics SET rsi_14 = 91.23 "
+                    "WHERE asx_code = %s", (code,))
+        cur.execute("UPDATE market.weekly_metrics SET sma_20w = 123.45, "
+                    "sma_40w = 123.45 WHERE asx_code = %s", (code,))
+
     # NOPRICE: remove the price history entirely, keep a metric row.
     cur.execute("DELETE FROM market.daily_prices WHERE asx_code = %s",
                 (NOPRICE_CODE,))
@@ -176,6 +193,24 @@ def check(conn, serving_only: bool = False) -> int:
     report("no price means no technical value",
            noprice is None or all(v is None for v in noprice),
            f"a code with no prices served {noprice}")
+
+    # No coarser cadence may occupy a daily metric's identity, whatever the
+    # daily source happens to hold. Checked by value rather than by NULLness,
+    # because the first patch produced the right shape from the wrong source.
+    cur.execute(f"""
+        SELECT asx_code, {cols} FROM screener.universe
+         WHERE asx_code = ANY(%s)
+    """, ([STALE_CODE, NOPRICE_CODE],))
+    leaked = []
+    for row in cur.fetchall():
+        for name, value in zip(("asx_code",) + WATCHED, row)   :
+            if name != "asx_code" and value is not None and \
+                    str(value) in ("91.23", "123.45", "91.2300", "123.4500"):
+                leaked.append(f"{row[0]}.{name} = {value}")
+    report("no weekly or monthly sentinel reaches a daily-semantic column",
+           not leaked,
+           "a coarser cadence occupied a daily metric's name: " +
+           ", ".join(leaked))
 
     if serving_only:
         # The governed half is proven elsewhere, and deliberately so.

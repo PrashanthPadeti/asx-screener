@@ -125,6 +125,29 @@ def test_every_technical_source_is_bounded_not_just_the_daily_one():
             f"here is a second path for stale evidence")
 
 
+def test_no_daily_field_falls_back_to_a_weekly_or_monthly_source():
+    """Canonical identity governs. A proxy may not occupy another metric's name.
+
+    `rsi_14` used to COALESCE into `mm.rsi_14`, which monthly_compute builds
+    on monthly close bars -- a 14-MONTH oscillator served under a name every
+    reader takes as 14-day, and consumed by governed momentum_score. `sma_20`
+    fell back to a 20-WEEK average: a 100-day line called a 20-day one.
+
+    Even the matching horizons were not the same metric. A 10-week average of
+    weekly closes is not a 50-day average of daily closes; 10 observations are
+    not 50 observations. Same horizon is not canonical identity.
+    """
+    raw = BUILDER.read_text(encoding="utf-8")
+    source = "\n".join(line for line in raw.splitlines()
+                       if not line.strip().startswith("--"))
+    offenders = re.findall(
+        r"COALESCE\(\s*dm\.(\w+)\s*,\s*((?:wm|mm|ym)\.\w+)[^)]*\)\s*AS\s*(\w+)",
+        source)
+    assert not offenders, (
+        "a daily-semantic field falls back to a coarser cadence: " +
+        "; ".join(f"{alias} <- {other}" for _, other, alias in offenders))
+
+
 def test_the_check_can_actually_fail():
     """Mutation control, against the exact text this replaced.
 

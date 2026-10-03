@@ -94,15 +94,36 @@ def test_every_anchor_column_is_one_the_job_actually_writes():
     for a in ANCHORS:
         # The writer is NAMED by the anchor rather than inferred from the job
         # name. Inferring it assumed every producer lived in compute/engine/,
-        # which was true until prices were anchored — they are loaded from
-        # scripts/eodhd/load_prices.py, and the inference would have rejected a
-        # correct anchor.
+        # which was true until prices were anchored — they are written by
+        # scripts/eodhd/v2/transforms/transform_prices.py, and the inference
+        # would have rejected a correct anchor.
         assert a.writer, f"{a.job} does not name the file that writes it"
         module = BACKEND / a.writer
         assert module.exists(), f"{a.job}: writer {a.writer} does not exist"
         assert a.column in module.read_text(encoding="utf-8"), (
             f"{a.job} is anchored on {a.column}, which does not appear in "
             f"{a.writer} -- the job does not write that column")
+
+
+def test_no_anchor_attributes_its_table_to_a_quarantined_writer():
+    """Existing on disk is not the same as still being the writer.
+
+    v11.2.1 anchored market.daily_prices to scripts/eodhd/load_prices.py,
+    which canonical_boundary lists as a pre-v2 loader superseded by
+    eodhd/v2/transforms/transform_prices.py. The test above passed throughout:
+    the file exists and contains the column name, because a superseded loader
+    writes the same columns the live one does. Existence is not authorship.
+
+    This matters beyond tidiness. The writer is what an operator opens when
+    the anchor goes STALE, so a wrong one sends whoever is debugging a halted
+    price feed into a script that has not run in a year.
+    """
+    from compute.engine.canonical_boundary import QUARANTINED_WRITERS
+
+    for a in ANCHORS:
+        assert a.writer not in QUARANTINED_WRITERS, (
+            f"{a.job} names {a.writer} as its writer, but the canonical "
+            f"boundary quarantines it: {QUARANTINED_WRITERS.get(a.writer)}")
 
 
 def test_unobservable_entries_carry_a_reason():
@@ -439,6 +460,29 @@ def test_the_freshness_semantic_is_described_conservatively():
         "the limit of the heuristic is no longer stated")
     assert "CONSECUTIVE market" in src, (
         "the known consecutive-closure limitation was removed")
+
+
+def test_the_report_shows_the_rule_that_decided():
+    """v11.2.1 shipped a weekday-governed verdict rendered as "23.9h old,
+    limit 120h". The verdict was right and the presentation told an operator
+    the threshold was still 120 hours. A finding must carry the rule that
+    actually decided it."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    f = classify(prices, True, date(2026, 10, 2),
+                 datetime(2026, 10, 3, 10, 0, tzinfo=timezone.utc))
+    assert f.weekdays_behind == 0 and f.limit_weekdays == 1
+    assert f.as_dict()["limit_weekdays"] == 1, (
+        "the machine-readable surface omits the governing rule")
+
+    # And an hour-governed anchor must NOT claim a weekday verdict.
+    g = classify(PICKS, True, NOW - timedelta(hours=81), NOW)
+    assert g.weekdays_behind is None and g.limit_weekdays is None
+
+    src = (BACKEND / "scripts/assert_output_freshness.py").read_text(
+        encoding="utf-8")
+    assert "weekdays behind" in src, (
+        "the report no longer renders the weekday rule")
 
 
 if __name__ == "__main__":

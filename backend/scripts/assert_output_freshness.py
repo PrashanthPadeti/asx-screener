@@ -88,9 +88,18 @@ def main() -> int:
             continue
         label = {"current": "OK   ", "stale": "STALE",
                  "broken": "BROKEN"}[f.state]
-        detail = (f"{f.table}.{f.column} = {f.observed_at} "
-                  f"({f.age_hours:.1f}h old, limit {f.limit_hours}h)"
-                  if f.age_hours is not None else f.reason)
+        # Report the rule that actually decided. A weekday-governed verdict
+        # shown as "23.9h old, limit 120h" tells an operator the threshold is
+        # 120 hours, which stopped being true in v11.2.1.
+        if f.weekdays_behind is not None:
+            detail = (f"{f.table}.{f.column} = {f.observed_at} "
+                      f"({f.weekdays_behind} weekdays behind, "
+                      f"limit {f.limit_weekdays}; {f.age_hours:.1f}h elapsed)")
+        elif f.age_hours is not None:
+            detail = (f"{f.table}.{f.column} = {f.observed_at} "
+                      f"({f.age_hours:.1f}h old, limit {f.limit_hours}h)")
+        else:
+            detail = f.reason
         print(f"  {label}   {f.job:18s} {detail}")
 
     # How much of the relevant surface is watched at all. Printed every run so

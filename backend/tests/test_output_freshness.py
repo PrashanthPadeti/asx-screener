@@ -40,7 +40,10 @@ ADMIN = BACKEND / "app/api/v1/routes/admin.py"
 MODULE = BACKEND / "compute/engine/output_freshness.py"
 
 NOW = datetime(2026, 10, 1, 6, 0, tzinfo=timezone.utc)
-PICKS = ANCHORS[1]
+# By name, never by position: this was ANCHORS[1] until two anchors were
+# inserted ahead of it, at which point three tests began exercising a
+# different anchor than they named.
+PICKS = next(a for a in ANCHORS if a.job == "top5_strategy")
 
 
 # ── Coverage: no deferrable job is silently absent ───────────────────────────
@@ -89,11 +92,17 @@ def test_every_anchor_column_is_one_the_job_actually_writes():
     exactly as much as no check at all.
     """
     for a in ANCHORS:
-        module = BACKEND / "compute/engine" / f"{a.job}.py"
-        assert module.exists(), f"{a.job} has no module to check against"
+        # The writer is NAMED by the anchor rather than inferred from the job
+        # name. Inferring it assumed every producer lived in compute/engine/,
+        # which was true until prices were anchored — they are loaded from
+        # scripts/eodhd/load_prices.py, and the inference would have rejected a
+        # correct anchor.
+        assert a.writer, f"{a.job} does not name the file that writes it"
+        module = BACKEND / a.writer
+        assert module.exists(), f"{a.job}: writer {a.writer} does not exist"
         assert a.column in module.read_text(encoding="utf-8"), (
             f"{a.job} is anchored on {a.column}, which does not appear in "
-            f"{module.name} -- the job does not write that column")
+            f"{a.writer} -- the job does not write that column")
 
 
 def test_unobservable_entries_carry_a_reason():
@@ -107,10 +116,17 @@ def test_a_threshold_is_not_tighter_than_the_cadence():
     """A limit below the job's own period would fire on one deferral --
     exactly the behaviour the lease exists to produce -- and train people to
     ignore it."""
+    # Measured against each job's OWN cadence. The original rule was a flat
+    # 7-day floor, which was right while every anchor was weekly and became
+    # wrong the moment a daily output was added: a 7-day floor on prices would
+    # take longer to notice a stoppage than the September gap that prompted
+    # the anchor. The property is "tolerates one deferral", not "is at least a
+    # week".
     for a in ANCHORS:
-        assert a.max_age_hours >= 24 * 7, (
-            f"{a.job}: {a.max_age_hours}h is tighter than a weekly cadence "
-            f"plus one tolerated deferral")
+        assert a.cadence_hours > 0, f"{a.job} declares no cadence"
+        assert a.max_age_hours >= 2 * a.cadence_hours, (
+            f"{a.job}: {a.max_age_hours}h is under two cadences "
+            f"({a.cadence_hours}h), so one tolerated deferral would fire it")
 
 
 # ── The classifier, behaviourally ────────────────────────────────────────────
@@ -239,6 +255,190 @@ def test_the_gate_fails_by_default():
     """--report exists for a dashboard. The default must exit non-zero, or
     scheduling it proves nothing."""
     assert "return 0 if args.report else 1" in SCRIPT.read_text(encoding="utf-8")
+
+
+# ── The September price gap: the fault this check was blind to ───────────────
+
+def test_prices_are_anchored_at_all():
+    """The defect, stated as a test.
+
+    On 3 Oct 2026 a customer reported week-old prices. market.daily_prices had
+    NO rows for 24, 25, 28 and 29 September, and this check reported FRESH
+    throughout — truthfully, because its population was two secondary tables
+    and the product's primary output was not in it.
+    """
+    anchored = {a.table for a in ANCHORS}
+    assert "market.daily_prices" in anchored, (
+        "prices are unwatched again; a customer will find the next gap")
+    assert "screener.universe" in anchored, (
+        "the served universe is unwatched; every metric could be stale")
+
+
+def test_the_anchor_would_have_caught_the_real_gap():
+    """Not a hypothetical. The newest trading day was 23 Sep; the check runs
+    at 10:00 UTC daily. By Monday the 28th it must read stale."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    monday = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 23), monday).state == "stale"
+
+
+def test_a_normal_weekend_does_not_fire():
+    """The control. An alarm that cries on every Sunday gets ignored by the
+    second Sunday, and then the real gap goes unnoticed anyway."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    sunday = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 25), sunday).state == "current"
+    # A single public holiday on the Monday: checked that Monday, Friday's
+    # close is one weekday behind and legitimate.
+    monday = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 25), monday).state == "current"
+
+
+def test_two_weekdays_behind_is_a_fault_even_after_a_holiday():
+    """Friday's close still newest on Tuesday means Monday AND Tuesday
+    produced nothing. A Monday holiday does not excuse it: Tuesday's run
+    should have loaded Tuesday."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    tuesday = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc)
+    assert classify(prices, True, date(2026, 9, 25), tuesday).state == "stale"
+
+
+def test_a_date_column_is_handled_as_midnight_utc():
+    """market.daily_prices.time is a DATE. `date` has no tzinfo, so the
+    classifier would have raised on the very anchor that matters most."""
+    from datetime import date
+    prices = next(a for a in ANCHORS if a.job == "daily_prices")
+    f = classify(prices, True, date(2026, 10, 2),
+                 datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc))
+    assert f.state == "current" and f.age_hours == 12.0
+
+
+# ── Coverage: the unwatched set is reported, not hidden ──────────────────────
+
+def test_coverage_reports_what_is_not_watched():
+    """Two green anchors must never again read as "the data is fresh"."""
+    from compute.engine.output_freshness import coverage
+    relevant = {"market.daily_prices", "screener.universe",
+                "market.dividends", "market.fx_rates"}
+    c = coverage(relevant)
+    assert c["relevant"] == 4
+    assert "market.daily_prices" in c["anchored"]
+    assert sorted(c["unclassified"]) == ["market.dividends", "market.fx_rates"]
+    assert c["unclassified_count"] == 2
+
+
+def test_coverage_does_not_claim_completeness_when_it_knows_nothing():
+    """An empty population is not full coverage."""
+    from compute.engine.output_freshness import coverage
+    c = coverage(set())
+    assert c["relevant"] == 0 and c["anchored"] == []
+    assert c["anchored_outside_population"], (
+        "anchors outside the derived population must be visible, not silently "
+        "counted as covering it")
+
+
+# ── The ratchet: the unwatched set may shrink, never grow ────────────────────
+
+#: Measured 3 Oct 2026, the day prices were first anchored. This is a DEBT,
+#: not a target. Lower it whenever a table is anchored or named; never raise
+#: it to make a build pass.
+MAX_UNWATCHED = 38
+
+
+def test_the_unwatched_set_does_not_grow():
+    """The gate that was missing when market.daily_prices went unwatched.
+
+    Classifying all 41 freshness-relevant tables is real work, and demanding
+    it in one go would either block this fix or invite someone to mark them
+    all observable without checking. A ratchet gives the contract teeth today:
+    a NEW table that the API serves and a job writes must be anchored or named
+    at the time it is added, because it cannot push this count up.
+
+    If this fails because the derived population grew, that is the test
+    working. Anchor the new table, name it unobservable with a reason, or
+    establish that it does not belong in the population — but do not raise the
+    number to make it pass.
+    """
+    from compute.engine.canonical_boundary import freshness_relevant_tables
+    from compute.engine.output_freshness import coverage
+    c = coverage(freshness_relevant_tables())
+    assert c["unclassified_count"] <= MAX_UNWATCHED, (
+        f"{c['unclassified_count']} freshness-relevant tables are unwatched, "
+        f"up from {MAX_UNWATCHED}. New: "
+        f"{c['unclassified'][:5]}")
+
+
+def test_the_ratchet_is_tightened_when_coverage_improves():
+    """A ratchet left slack is not a ratchet. If the real count has fallen
+    below the recorded debt, record the lower number."""
+    from compute.engine.canonical_boundary import freshness_relevant_tables
+    from compute.engine.output_freshness import coverage
+    actual = coverage(freshness_relevant_tables())["unclassified_count"]
+    assert actual >= MAX_UNWATCHED, (
+        f"coverage improved to {actual} unwatched; lower MAX_UNWATCHED to "
+        f"{actual} so the gain cannot be silently given back")
+
+
+def test_the_population_is_derived_not_listed():
+    """A hand-written population is how prices came to be unwatched."""
+    import ast
+    import inspect
+    from compute.engine import canonical_boundary
+    src = inspect.getsource(canonical_boundary.freshness_relevant_tables)
+    assert "relations(" in src, "the population is no longer derived from source"
+
+    # Docstring stripped first. It names market.daily_prices while explaining
+    # why hand-listing is dangerous, and the first version of this assertion
+    # read that explanation as the offence it warns about.
+    fn = ast.parse(src.lstrip()).body[0]
+    if (fn.body and isinstance(fn.body[0], ast.Expr)
+            and isinstance(fn.body[0].value, ast.Constant)):
+        fn.body = fn.body[1:]
+    code = ast.unparse(fn)
+    assert "daily_prices" not in code, "the population names a table by hand"
+
+
+# ── Registry members are selected by identity, never by position ─────────────
+
+def test_no_positional_references_into_the_anchor_registry():
+    """`PICKS = ANCHORS[1]` silently repointed three tests at a different
+    anchor the moment two anchors were inserted ahead of it. Insertion order
+    is not identity, and a registry is exactly the kind of thing that grows in
+    the middle."""
+    # Matched STRUCTURALLY, via the AST. A text search found this test's own
+    # docstring, which quotes the pattern while explaining it — the third time
+    # today a matcher in this repo has read prose as code. A subscript node is
+    # not something a sentence can accidentally be.
+    import ast
+    for rel in ("tests/test_output_freshness.py",
+                "compute/engine/output_freshness.py",
+                "scripts/assert_output_freshness.py"):
+        tree = ast.parse((BACKEND / rel).read_text(encoding="utf-8"))
+        hits = [
+            ast.unparse(n) for n in ast.walk(tree)
+            if isinstance(n, ast.Subscript)
+            and isinstance(n.value, ast.Name) and n.value.id == "ANCHORS"
+            and isinstance(n.slice, ast.Constant)
+            and isinstance(n.slice.value, int)
+        ]
+        assert not hits, (
+            f"{rel} indexes ANCHORS positionally ({hits}); select by job name")
+
+
+def test_the_freshness_semantic_is_described_conservatively():
+    """Weekday/closure-aware lag is not an exchange trading calendar, and the
+    consecutive-closure limitation is the proof. Promoting the heuristic in
+    prose would make a future reader trust a session calendar that does not
+    exist."""
+    src = (BACKEND / "compute/engine/output_freshness.py").read_text(
+        encoding="utf-8")
+    assert "NOT an exchange trading calendar" in src, (
+        "the limit of the heuristic is no longer stated")
+    assert "CONSECUTIVE market" in src, (
+        "the known consecutive-closure limitation was removed")
 
 
 if __name__ == "__main__":

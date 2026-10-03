@@ -34,8 +34,11 @@ sys.path.insert(0, str(BACKEND))
 import psycopg2                                                    # noqa: E402
 
 from app.core.db import get_database_url_sync                      # noqa: E402
+from compute.engine.canonical_boundary import (                   # noqa: E402
+    freshness_relevant_tables,
+)
 from compute.engine.output_freshness import (                      # noqa: E402
-    ANCHORS, classify, existence_sql, latest_sql, summarise,
+    ANCHORS, classify, coverage, existence_sql, latest_sql, summarise,
     unobservable_findings,
 )
 
@@ -89,6 +92,25 @@ def main() -> int:
                   f"({f.age_hours:.1f}h old, limit {f.limit_hours}h)"
                   if f.age_hours is not None else f.reason)
         print(f"  {label}   {f.job:18s} {detail}")
+
+    # How much of the relevant surface is watched at all. Printed every run so
+    # that "two anchors are green" can never again be mistaken for "the data is
+    # fresh" — which is exactly what happened through the 24-29 Sep price gap.
+    try:
+        cov = coverage(freshness_relevant_tables())
+        print(f"\n── coverage: {len(cov['anchored'])} anchored, "
+              f"{len(cov['named_unobservable'])} named unobservable, "
+              f"{cov['unclassified_count']} UNWATCHED "
+              f"of {cov['relevant']} freshness-relevant tables")
+        if cov["unclassified"]:
+            shown = ", ".join(cov["unclassified"][:8])
+            more = (f" (+{cov['unclassified_count'] - 8} more)"
+                    if cov["unclassified_count"] > 8 else "")
+            print(f"  unwatched: {shown}{more}")
+            print("  staleness in those would not be detected")
+    except Exception as exc:                                     # noqa: BLE001
+        # An unreadable population is not an empty one.
+        print(f"\n── coverage: UNKNOWN ({type(exc).__name__}: {exc})")
 
     print("\n── not independently observable")
     for f in findings:

@@ -1260,6 +1260,16 @@ LEFT JOIN LATERAL (
            above_sma10w, above_sma40w, golden_cross, death_cross
     FROM market.weekly_metrics
     WHERE asx_code = c.asx_code
+      -- As-of, same contract as the daily lateral below. Bounding only the
+      -- daily source would have made this WORSE, not better: the served
+      -- columns COALESCE across the three, so suppressing a stale daily row
+      -- PROMOTES whatever the weekly one holds. A scratch fixture caught
+      -- exactly that -- the stale daily row was correctly rejected and the
+      -- universe served sma_200 = 54.6245 from here instead.
+      --
+      -- Weekly grain, so equality is the wrong relation: the row must cover
+      -- the week the latest price falls in, not carry its exact date.
+      AND week_date >= date_trunc('week', dp.price_date)::date
     ORDER BY week_date DESC
     LIMIT 1
 ) wm ON TRUE
@@ -1273,6 +1283,11 @@ LEFT JOIN LATERAL (
            rsi_14, macd_line, macd_signal
     FROM market.monthly_metrics
     WHERE asx_code = c.asx_code
+      -- As-of at monthly grain. rsi_14, return_3m and return_6m are all
+      -- COALESCEd from here when the daily row is absent, so an unbounded
+      -- monthly row is a second path for stale evidence into governed
+      -- momentum -- the same defect, one lateral over.
+      AND month_date >= date_trunc('month', dp.price_date)::date
     ORDER BY month_date DESC
     LIMIT 1
 ) mm ON TRUE

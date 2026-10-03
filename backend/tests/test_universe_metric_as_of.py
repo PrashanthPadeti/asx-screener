@@ -93,6 +93,38 @@ def test_no_lateral_on_daily_metrics_is_left_unbounded():
             "the price date it summarises")
 
 
+def test_every_technical_source_is_bounded_not_just_the_daily_one():
+    """The served columns COALESCE across three laterals.
+
+        COALESCE(dm.return_3m, mm.return_3m) AS return_3m
+        COALESCE(dm.rsi_14,    mm.rsi_14)    AS rsi_14
+        COALESCE(dm.sma_200,   wm.sma_40w)   AS sma_200
+
+    So bounding only `daily_metrics` made things WORSE: suppressing a stale
+    daily row promotes whatever the weekly or monthly lateral holds, and those
+    had no bound at all. The scratch fixture caught it -- the stale daily row
+    was correctly rejected and the universe served sma_200 = 54.6245 from the
+    weekly source instead. Four source guards passed while the behaviour was
+    wrong, which is why this one exists.
+    """
+    # Comments are stripped BEFORE the boundary is located, not after.
+    # Locating "LIMIT 1" in the raw text found it inside this file's own
+    # explanatory comment -- "This was ORDER BY date DESC LIMIT 1 with no
+    # bound at all" -- which truncated the block before the predicate and
+    # reported the bug the comment describes. Fourth time in this codebase.
+    raw = BUILDER.read_text(encoding="utf-8")
+    source = "\n".join(line for line in raw.splitlines()
+                       if not line.strip().startswith("--"))
+    for table in ("market.daily_metrics", "market.weekly_metrics",
+                  "market.monthly_metrics"):
+        start = source.index(f"FROM {table}")
+        block = source[start:source.index("LIMIT 1", start)]
+        assert "dp.price_date" in block, (
+            f"the {table} lateral is unbounded. It feeds columns that are "
+            f"COALESCEd into the served technical values, so an unbounded row "
+            f"here is a second path for stale evidence")
+
+
 def test_the_check_can_actually_fail():
     """Mutation control, against the exact text this replaced.
 

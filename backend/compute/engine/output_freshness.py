@@ -111,7 +111,7 @@ ANCHORS: tuple[Anchor, ...] = (
            "behind means ingestion has stopped, which is the single most "
            "customer-visible failure this product has",
            cadence_hours=24, max_weekdays_behind=1,
-           writer="scripts/eodhd/load_prices.py"),
+           writer="scripts/eodhd/v2/transforms/transform_prices.py"),
     Anchor("screener_universe", "screener.universe", "universe_built_at", 24 * 5,
            "the canonical daily run rebuilds the served universe; if its "
            "timestamp stops advancing, every metric on the site is being "
@@ -157,6 +157,13 @@ class Finding:
     observed_at: Optional[str] = None
     age_hours: Optional[float] = None
     limit_hours: Optional[int] = None
+    #: Populated only when the verdict was reached by weekday lag. Carried so
+    #: a reader is shown the rule that ACTUALLY decided, not an hour figure
+    #: that merely happens to be on the anchor: the first report printed
+    #: "23.9h old, limit 120h" for a verdict decided by weekdays, which would
+    #: lead an operator to believe 120h was still the threshold.
+    weekdays_behind: Optional[int] = None
+    limit_weekdays: Optional[int] = None
     reason: str = ""
 
     @property
@@ -184,6 +191,8 @@ class Finding:
             "age_hours": (round(self.age_hours, 1)
                           if self.age_hours is not None else None),
             "limit_hours": self.limit_hours,
+            "weekdays_behind": self.weekdays_behind,
+            "limit_weekdays": self.limit_weekdays,
             "reason": self.reason,
         }
 
@@ -270,6 +279,8 @@ def classify(anchor: Anchor, column_exists: bool,
             anchor.job, state, anchor.table, anchor.column,
             observed_at=latest.isoformat(), age_hours=age,
             limit_hours=anchor.max_age_hours,
+            weekdays_behind=behind,
+            limit_weekdays=anchor.max_weekdays_behind,
             reason="" if state == "current" else
             (f"{behind} weekdays behind, limit "
              f"{anchor.max_weekdays_behind} — {anchor.why}"))

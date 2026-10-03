@@ -31,8 +31,26 @@ to 1 October. The governed contract was satisfied in form — a value, a state,
 a cause — while the evidence underneath did not correspond to the instrument's
 current price state.
 
-33 codes remained source-relative stale after run 6, so the condition recurs
-whenever a technical run skips a code.
+## Exposure: historical real, current none
+
+Measured 4 Oct, after run 6:
+
+    stale codes (metric row behind their own latest price)   33
+    of those, present in screener.universe                    0
+    of those, actually served (compute_run_id NOT NULL)       0
+
+So the patch is **preventive**, not corrective of live customer data. Every
+code still carrying a source-relative stale metric row is outside the served
+universe; run 6 cleared the condition for everything customers can see.
+
+The HISTORICAL exposure is real and proven — ALPH served a June value against
+October prices, and its governed `momentum_score` was built from June's
+`rsi_14` and `adx_14`. The before/after sample of run 4 → run 6 is the
+evidence. "33 codes affected" would be the wrong claim: the served count was
+zero when measured.
+
+The recurrence condition remains, and that is what the patch closes: it
+returns whenever a technical run skips a code that IS in the universe.
 
 ## Why this crosses the reopening threshold
 
@@ -74,7 +92,11 @@ AND an old latest metric, and those agreeing is not staleness.
    governed-absent with the appropriate state/cause. **Never zero, never a
    normal score.**
 5. Matching fixture → `momentum_score` computes normally.
-6. The exact current 33-code stale population preserved before repair.
+6. The stale population preserved before repair. DONE 4 Oct: 33 codes stale,
+   **0 of them served**, so the preserved served-population file is empty by
+   fact rather than by omission
+   (`logs/stale_metric_population_pre_fix_20261003.csv`, header only,
+   sha256 `39ce32ac9133175143f26cffb1ba0b8625c73bb529f347338ecfecaaa75c9a70`).
 7. Patch released independently, then one `DAILY_CANONICAL` publication.
 8. Post-publication: zero source-relative stale technical joins among served
    values; governed readback and finalisation clean; previously affected

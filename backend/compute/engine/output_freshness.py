@@ -58,11 +58,19 @@ class Anchor:
     #: Friday to Monday. Counting weekdays handles the weekend exactly, so the
     #: tolerance can be one day.
     #:
+    #: This is WEEKDAY/CLOSURE-AWARE lag, NOT an exchange trading calendar.
+    #: It knows that Saturday and Sunday are not business days and tolerates
+    #: one further closure; it has no knowledge of ASX sessions, half-days or
+    #: published holidays. The limitation below is the proof of that
+    #: distinction, and nothing in this file, /system-health or the docs may
+    #: describe it as trading-day logic unless an authoritative exchange
+    #: calendar is introduced.
+    #:
     #: Known limitation, stated rather than hidden: CONSECUTIVE market
     #: closures (Good Friday + Easter Monday, Christmas + Boxing Day) will
     #: read as stale, roughly twice a year. That is a cheap, explainable false
     #: positive in exchange for detecting a real stoppage the next morning
-    #: instead of three days later. A single public holiday does not trip it.
+    #: instead of three days later. A single closure day does not trip it.
     max_weekdays_behind: Optional[int] = None
     #: The file that writes this column. An anchor is a guess until it is
     #: checked against its writer: the first version of this registry anchored
@@ -94,13 +102,13 @@ ANCHORS: tuple[Anchor, ...] = (
     # 120h, which had to be that wide to survive a weekend, and would have
     # caught the September hole on Monday the 28th. Counting weekdays handles
     # the weekend exactly, so one day of tolerance is enough: the same hole
-    # reads stale on FRIDAY the 25th, one trading day after prices stopped.
+    # reads stale on FRIDAY the 25th, the weekday after prices stopped.
     #
     # max_age_hours is retained as the declared cadence bound and is what the
     # finding reports, but max_weekdays_behind governs the verdict.
     Anchor("daily_prices", "market.daily_prices", "time", 24 * 5,
-           "the newest trading day in the price table. No prices for five "
-           "days means ingestion has stopped, which is the single most "
+           "the newest dated row in the price table. More than one weekday "
+           "behind means ingestion has stopped, which is the single most "
            "customer-visible failure this product has",
            cadence_hours=24, max_weekdays_behind=1,
            writer="scripts/eodhd/load_prices.py"),

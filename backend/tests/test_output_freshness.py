@@ -401,6 +401,46 @@ def test_the_population_is_derived_not_listed():
     assert "daily_prices" not in code, "the population names a table by hand"
 
 
+# ── Registry members are selected by identity, never by position ─────────────
+
+def test_no_positional_references_into_the_anchor_registry():
+    """`PICKS = ANCHORS[1]` silently repointed three tests at a different
+    anchor the moment two anchors were inserted ahead of it. Insertion order
+    is not identity, and a registry is exactly the kind of thing that grows in
+    the middle."""
+    # Matched STRUCTURALLY, via the AST. A text search found this test's own
+    # docstring, which quotes the pattern while explaining it — the third time
+    # today a matcher in this repo has read prose as code. A subscript node is
+    # not something a sentence can accidentally be.
+    import ast
+    for rel in ("tests/test_output_freshness.py",
+                "compute/engine/output_freshness.py",
+                "scripts/assert_output_freshness.py"):
+        tree = ast.parse((BACKEND / rel).read_text(encoding="utf-8"))
+        hits = [
+            ast.unparse(n) for n in ast.walk(tree)
+            if isinstance(n, ast.Subscript)
+            and isinstance(n.value, ast.Name) and n.value.id == "ANCHORS"
+            and isinstance(n.slice, ast.Constant)
+            and isinstance(n.slice.value, int)
+        ]
+        assert not hits, (
+            f"{rel} indexes ANCHORS positionally ({hits}); select by job name")
+
+
+def test_the_freshness_semantic_is_described_conservatively():
+    """Weekday/closure-aware lag is not an exchange trading calendar, and the
+    consecutive-closure limitation is the proof. Promoting the heuristic in
+    prose would make a future reader trust a session calendar that does not
+    exist."""
+    src = (BACKEND / "compute/engine/output_freshness.py").read_text(
+        encoding="utf-8")
+    assert "NOT an exchange trading calendar" in src, (
+        "the limit of the heuristic is no longer stated")
+    assert "CONSECUTIVE market" in src, (
+        "the known consecutive-closure limitation was removed")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

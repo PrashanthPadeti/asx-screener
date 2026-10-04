@@ -63,9 +63,9 @@ LATERALS = {
 }
 
 
-def mappings() -> list[tuple[str, str, str, str]]:
+def mappings(builder: Path = None) -> list[tuple[str, str, str, str]]:
     """(served_as, daily_col, fallback_alias, fallback_col) from the builder."""
-    raw = BUILDER.read_text(encoding="utf-8")
+    raw = (builder or BUILDER).read_text(encoding="utf-8")
     source = "\n".join(l for l in raw.splitlines()
                        if not l.strip().startswith("--"))
     out = []
@@ -145,9 +145,13 @@ def freshness(conn) -> tuple[int, int]:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv")
+    ap.add_argument("--builder", type=Path,
+                    help="read the mappings from this builder instead. "
+                         "Needed to measure the PRE-patch exposure from a "
+                         "worktree whose builder is already patched.")
     args = ap.parse_args()
 
-    maps = mappings()
+    maps = mappings(args.builder)
     conn = psycopg2.connect(get_database_url_sync())
     try:
         if not maps:

@@ -1,4 +1,37 @@
-# P0-A REOPENED — governed momentum input freshness
+# P0-A REOPENED — technical evidence identity and freshness
+
+**Final statement of the defect.** Governed `momentum_score` could inherit
+stale OR cross-frequency technical evidence through unbounded/fallback serving
+composition. Applicability propagation is correct once invalid inputs are
+removed; the defect is that invalid evidence was allowed to acquire the
+identity of current daily evidence.
+
+## Measured exposure, 4 Oct 2026, before the patch
+
+    freshness   33 codes with a daily metric row behind their latest price
+                 0 of them served
+    identity    20 fallback mappings; the fallback won on 2 rows in total
+                 sma_50        <- weekly sma_10w      1 fallback, 1 ACTIVE
+                 volatility_60d <- monthly vol_3m     1 fallback, 0 active
+    governed     0 active rows where a momentum constituent came from a
+                 coarser cadence
+
+One served row carries an identity substitution; none reach governed state.
+The patch is **preventive on both axes**. The daily source is populated for
+1,800–2,348 codes per field because run 6 wrote a technical row for all 2,346
+codes with `keep_uncomputable`, so the fallbacks rarely fire — but the
+mechanism was live, and a skipped technical run would fire them.
+
+Two exposure claims made during this investigation were wrong: "current
+exposure is zero" (measured freshness only, said nothing about identity) and
+"expect identity exposure to be substantial" (predicted, not measured).
+
+Instrument: `scripts/diagnostics/measure_evidence_identity_exposure.py`.
+Artifact: `logs/evidence_exposure_pre_fix_20261004.csv`.
+
+---
+
+# Original entry — governed momentum input freshness
 
 **3 October 2026. Narrow corrective scope.** This does not reopen the P0-A
 architecture, FX, lifecycle, explainability, or technical metrics generally.

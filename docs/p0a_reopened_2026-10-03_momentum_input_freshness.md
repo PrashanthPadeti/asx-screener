@@ -40,7 +40,41 @@ exposure is zero" (measured freshness only, said nothing about identity) and
 "expect identity exposure to be substantial" (predicted, not measured).
 
 Instrument: `scripts/diagnostics/measure_evidence_identity_exposure.py`.
-Artifact: `logs/evidence_exposure_pre_fix_20261004.csv`.
+
+### The measurement, reproducibly stamped
+
+    builder          : /opt/asx-screener/backend/scripts/eodhd/v2/build_screener_universe.py
+    builder_sha256   : ea94a9dd9167
+    canonical_run    : 6
+    served_rows      : 2121 of 2539
+    mappings_parsed  : 20
+    comparisons      : 50780
+    reconstruction_mismatches : 0
+
+    artifact : logs/evidence_exposure_pre_fix_20261004.csv
+    sha256   : c1ad434d41857dd31cee9f32cf7ef18717c8692bbfb850d327b4b525264ea34d
+
+That header is what makes the zero meaningful. The same script run from a
+patched tree parses 0 mappings and reports no identity exposure BY
+CONSTRUCTION — indistinguishable, without the stamp, from a measurement that
+looked and found none.
+
+### Post-release acceptance: two different kinds of zero
+
+    cross-frequency mappings = 0   STRUCTURAL -- a consequence of the new
+                                   projection; true the moment it deploys
+    served stale technical   = 0   RUNTIME -- a property of what the canonical
+                                   run actually published
+
+Both go in the acceptance record. The structural zero must not be allowed to
+stand in for the runtime one; that substitution is the same error as a source
+guard standing in for behaviour, which is what this whole branch was about.
+
+Post-release acceptance is "no active served daily-semantic field is sourced
+from stale or cross-frequency evidence" — NOT a manufactured example of a
+suppressed `momentum_score`. Governed exposure is already zero, so there may
+be no production row whose momentum visibly changes, and requiring one would
+be requiring the wrong thing.
 
 ---
 

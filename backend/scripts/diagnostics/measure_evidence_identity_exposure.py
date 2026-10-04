@@ -151,9 +151,29 @@ def main() -> int:
                          "worktree whose builder is already patched.")
     args = ap.parse_args()
 
+    builder = args.builder or BUILDER
     maps = mappings(args.builder)
     conn = psycopg2.connect(get_database_url_sync())
     try:
+        # Provenance, printed before any count.
+        #
+        # "0 mismatches" is only meaningful about a SPECIFIC implementation
+        # and a SPECIFIC publication. Without this header a later rerun from a
+        # patched tree reports zero exposure BY CONSTRUCTION and reads exactly
+        # like a measurement that found none.
+        import hashlib
+        digest = hashlib.sha256(builder.read_bytes()).hexdigest()[:12]
+        with conn.cursor() as cur:
+            cur.execute("SELECT max(compute_run_id), "
+                        "count(*) FILTER (WHERE compute_run_id IS NOT NULL), "
+                        "count(*) FROM screener.universe")
+            run_id, served, total = cur.fetchone()
+        print(f"  builder            : {builder}")
+        print(f"  builder_sha256     : {digest}")
+        print(f"  canonical_run      : {run_id}")
+        print(f"  served_rows        : {served} of {total}")
+        print(f"  mappings_parsed    : {len(maps)}")
+        print(f"  comparisons        : {len(maps) * total}")
         if not maps:
             print("no cross-frequency fallbacks in the deployed builder "
                   "-- identity exposure is zero BY CONSTRUCTION")

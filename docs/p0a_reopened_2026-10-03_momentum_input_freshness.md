@@ -16,6 +16,19 @@ identity of current daily evidence.
     governed     0 active rows where a momentum constituent came from a
                  coarser cadence
 
+**Reconstruction control: 0 mismatches.** The diagnostic replays the
+builder's lateral selection rather than reading what the universe stored, so
+the counts were reconstructed until this was checked. Comparing
+`COALESCE(daily_v, fb_v)` against the stored column, row by row, across all
+20 mappings, reproduces every stored value. The counts are therefore
+**measured evidence of run 6's served state**, not estimates.
+
+The run now stamps its own provenance first — builder path, that file's
+sha256, the canonical run compared against, rows served, comparisons made —
+because "0 mismatches" is only meaningful about a specific implementation and
+a specific publication. A rerun from a patched tree would otherwise report
+zero exposure BY CONSTRUCTION and read exactly like a measurement.
+
 One served row carries an identity substitution; none reach governed state.
 The patch is **preventive on both axes**. The daily source is populated for
 1,800–2,348 codes per field because run 6 wrote a technical row for all 2,346

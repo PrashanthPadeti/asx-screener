@@ -90,20 +90,35 @@ def measure(conn, maps) -> list[dict]:
                            ORDER BY d.date DESC LIMIT 1) AS daily_v,
                          (SELECT f.{fb_col} FROM {fb_table} f
                            WHERE f.asx_code = u.asx_code
-                           ORDER BY f.{fb_key} DESC LIMIT 1) AS fb_v
+                           ORDER BY f.{fb_key} DESC LIMIT 1) AS fb_v,
+                         u.{served} AS stored
                     FROM screener.universe u)
                 SELECT count(*) FILTER (WHERE daily_v IS NOT NULL),
                        count(*) FILTER (WHERE daily_v IS NULL AND fb_v IS NOT NULL),
                        count(*) FILTER (WHERE daily_v IS NULL AND fb_v IS NULL),
                        count(*) FILTER (WHERE daily_v IS NULL AND fb_v IS NOT NULL
-                                          AND compute_run_id IS NOT NULL)
+                                          AND compute_run_id IS NOT NULL),
+                       -- Reconstruction control.
+                       --
+                       -- Everything above REPLAYS the builder's lateral
+                       -- selection; it does not read what the universe
+                       -- actually stored. If an older build wrote that row
+                       -- with different logic, the replay describes a
+                       -- publication that never happened.
+                       --
+                       -- So compare the replay against the stored value. A
+                       -- non-zero count here means the counts are estimates
+                       -- and must be recorded as such.
+                       count(*) FILTER (
+                         WHERE COALESCE(daily_v, fb_v) IS DISTINCT FROM stored)
                   FROM src
             """)
-            d, f, absent, f_active = cur.fetchone()
+            d, f, absent, f_active, mismatch = cur.fetchone()
             rows.append(dict(served_as=served, daily=daily,
                              fallback=f"{fb_table}.{fb_col}",
                              daily_won=d, fallback_won=f, absent=absent,
                              fallback_won_active=f_active,
+                             reconstruction_mismatches=mismatch,
                              momentum_input=served in MOMENTUM))
     return rows
 
@@ -158,6 +173,14 @@ def main() -> int:
                   f"{r['daily_won']:7d} {r['fallback_won']:7d} "
                   f"{r['fallback_won_active']:7d}  "
                   f"{'YES' if r['momentum_input'] else ''}")
+        bad = sum(r["reconstruction_mismatches"] for r in rows)
+        if bad:
+            print(f"\n  RECONSTRUCTION MISMATCHES: {bad} -- the replay "
+                  f"disagrees with what the universe stored, so the counts "
+                  f"above are ESTIMATES, not served-history evidence")
+        else:
+            print("\n  reconstruction control: 0 mismatches -- the replay "
+                  "reproduces every stored value, so the counts are evidence")
         gov = sum(r["fallback_won_active"] for r in rows if r["momentum_input"])
         print(f"\n  governed exposure: {gov} active rows where a momentum "
               f"constituent was supplied by a coarser cadence")

@@ -1,0 +1,276 @@
+{
+  "taken_at": "2026-10-05T06:30:12.683475+00:00",
+  "main_tip": "62e89d9b195791f89babf9a818c52262a0b6eb53",
+  "branches": [
+    {
+      "branch": "chore/verify-served-technicals",
+      "tip": "70ada68f",
+      "last": "2026-10-05",
+      "upstream": "origin/chore/verify-served-technicals",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/fixture-scratch-guard",
+      "tip": "50ebfcd6",
+      "last": "2026-10-05",
+      "upstream": "origin/fix/fixture-scratch-guard",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/stale-derived-serving",
+      "tip": "fe76e6df",
+      "last": "2026-10-05",
+      "upstream": "origin/fix/stale-derived-serving",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/freshness-watches-prices",
+      "tip": "3942b12a",
+      "last": "2026-10-03",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/september-price-gap",
+      "tip": "2458bb02",
+      "last": "2026-10-03",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "ops/availability-probe",
+      "tip": "5e22a6fd",
+      "last": "2026-10-03",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "ops/scheduler-execution-telemetry",
+      "tip": "21f3c539",
+      "last": "2026-10-03",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "feat/explain-withheld-metrics",
+      "tip": "a146658c",
+      "last": "2026-10-02",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/landing-page-fabricated-data",
+      "tip": "96352ed3",
+      "last": "2026-10-02",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/title-suffix-remaining",
+      "tip": "db55576c",
+      "last": "2026-10-02",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/title-template-chain",
+      "tip": "21c43e9b",
+      "last": "2026-10-02",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/website-claims-provenance",
+      "tip": "68f407de",
+      "last": "2026-10-02",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "ops/availability-incident-2026-10-02",
+      "tip": "83461726",
+      "last": "2026-10-02",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "orchestration-design",
+      "tip": "291b8eaa",
+      "last": "2026-10-01",
+      "upstream": "origin/orchestration-design",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "admin-scheduler-identity",
+      "tip": "cd7d998b",
+      "last": "2026-09-26",
+      "upstream": "origin/admin-scheduler-identity",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "p0a-correctness",
+      "tip": "f497019c",
+      "last": "2026-09-24",
+      "upstream": "origin/p0a-correctness",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "billing-hotfix",
+      "tip": "17fa0717",
+      "last": "2026-09-15",
+      "upstream": "origin/main",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/freeze-check-both-fields",
+      "tip": "f1239421",
+      "last": "2026-09-12",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/freeze-message",
+      "tip": "25dd3b36",
+      "last": "2026-09-12",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/freeze-observable-state",
+      "tip": "ccaeb3a6",
+      "last": "2026-09-12",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/freeze-transactional",
+      "tip": "0dcd3910",
+      "last": "2026-09-12",
+      "upstream": "-",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/scheduler-switch-settings",
+      "tip": "7d865162",
+      "last": "2026-09-12",
+      "upstream": "origin/fix/scheduler-switch-settings",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "freeze/scheduler-switch",
+      "tip": "71725eff",
+      "last": "2026-09-12",
+      "upstream": "origin/freeze/scheduler-switch",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "fix/db-pool-memory",
+      "tip": "a5546962",
+      "last": "2026-09-11",
+      "upstream": "origin/fix/db-pool-memory",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "claude/busy-elbakyan-fb9883",
+      "tip": "29531ce8",
+      "last": "2026-05-19",
+      "upstream": "origin/main",
+      "worktree": true,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "claude/compassionate-antonelli-5bb4e5",
+      "tip": "3ec7820b",
+      "last": "2026-05-17",
+      "upstream": "origin/main",
+      "worktree": true,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "claude/ecstatic-chatterjee-f10328",
+      "tip": "aa4313c8",
+      "last": "2026-05-17",
+      "upstream": "origin/main",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "claude/pedantic-bardeen-260bc9",
+      "tip": "3ec7820b",
+      "last": "2026-05-17",
+      "upstream": "origin/main",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "claude/brave-almeida-cea87d",
+      "tip": "5846f5c2",
+      "last": "2026-05-15",
+      "upstream": "origin/main",
+      "worktree": false,
+      "unique": 0,
+      "verdict": "MERGED (ancestor of main)"
+    },
+    {
+      "branch": "chore/remove-founding-offer",
+      "tip": "aa8b370d",
+      "last": "2026-10-05",
+      "upstream": "origin/chore/remove-founding-offer",
+      "worktree": false,
+      "unique": 1,
+      "verdict": "UNIQUE x1"
+    }
+  ]
+}

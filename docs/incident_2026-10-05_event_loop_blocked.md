@@ -49,12 +49,22 @@ because holding blocking work in a sync function is the remedy, not the bug. A
 guard that forbade both would push people to delete the backoff instead of
 moving it. Mutation-controlled: restoring `time.sleep(2)` fails it.
 
-## This is the second time
+## Second outage in the same risk class — not the same proven mechanism
 
-2 October: ~40 minutes of unavailability while an in-process job made hundreds
-of serial outbound calls. The remediation — move long external I/O out of the
-API process, starting with `announcement_fetcher` — was recorded and not done.
-`fund_prices` is the same defect class in a different job.
+2 October: ~40 minutes of unavailability, with `announcement_fetcher`
+co-located in the API process making hundreds of serial outbound calls. That
+established co-location as an availability **risk**; which resource was
+actually starved was never proven, only inferred from log lines that happened
+to be present.
+
+Today's mechanism **is** proven: blocking calls inside an async scheduler
+coroutine froze the event loop, with `load 0.00` and a listening socket ruling
+out CPU, memory and crash.
+
+So: second outage in the same architectural risk class — long external work
+co-located with the serving process — and the first with a demonstrated
+mechanism. The 2 October remediation, moving that work out of the API process,
+was recorded and not done.
 
 Fixing the blocking call removes **this** outage. It does not remove the
 design: 19 jobs still run inside the API process, several of them outbound-call

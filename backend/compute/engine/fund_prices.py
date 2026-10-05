@@ -314,18 +314,35 @@ async def run(
         if seed_only:
             return
 
-        import time
         total_rows = 0
         for i, fund in enumerate(FUNDS):
             code   = fund["asx_code"]
             ticker = _yf_ticker(code)
             log.info(f"  [{i+1}/{len(FUNDS)}] {code} ({ticker}) …")
 
-            # Polite delay — avoid Yahoo Finance rate limits
+            # Polite delay — avoid Yahoo Finance rate limits.
+            #
+            # asyncio.sleep, not time.sleep. This function is a coroutine and
+            # AsyncIOScheduler runs coroutines ON THE EVENT LOOP, so a blocking
+            # sleep here stops the API answering anything at all.
             if i > 0:
-                time.sleep(2)
+                await asyncio.sleep(2)
 
-            df = fetch_fund_data(ticker, start_date, target_date)
+            # fetch_fund_data is synchronous -- yfinance is -- and it sleeps
+            # 30s, 60s then 90s internally when Yahoo rate-limits. Called
+            # directly from this coroutine those sleeps land on the event loop
+            # too, which is what took production down.
+            #
+            # 5 Oct 2026, 06:35 UTC: every ticker rate-limited, 182s of
+            # blocking sleep each, 47 funds. /health timed out at 10s with
+            # load average 0.00 -- the process was not busy, it was asleep.
+            # Customers could not log in for 35 minutes until the service was
+            # restarted, and it had ~1.8 hours still to go.
+            #
+            # to_thread moves the whole blocking call, sleeps included, off
+            # the loop. The job still takes as long; the API stays up.
+            df = await asyncio.to_thread(
+                fetch_fund_data, ticker, start_date, target_date)
             if df is None:
                 continue
 

@@ -80,10 +80,34 @@ immediately into the same outage. It did not — `coalesce` plus the in-progress
 run advancing the next fire time is the likely reason. That was not verified
 beforehand.
 
-**Nothing detected it.** No alert, no page. It was found because a human tried
-to log in. The external uptime sentinel added after 2 October runs on GitHub
-Actions at `17,47 * * * *` and should have caught a 35-minute outage — why it
-did not is unexamined and belongs in its own investigation.
+**The sentinel DID detect it. Nobody was told. And it was not the first.**
+
+The external uptime sentinel caught this outage, and two before it:
+
+    #5   2026-10-03T08:07:38Z  failure  "Probe production"
+    #11  2026-10-04T08:49:31Z  failure  "Probe production"
+    #16  2026-10-05T07:04:06Z  failure  "Probe production"
+
+All three fall in the window after that day's 06:35 UTC `fund_prices`
+trigger — 1h32m, 2h14m and 29m after it. All thirteen other runs succeeded,
+and every one of them sits outside that window.
+
+**So this has been happening daily since at least 3 October.** Today is only
+the day a human happened to try logging in during it. The 2 October incident
+record said an external sentinel "closes 'nothing outside the host noticed'; it
+does not close 'someone gets woken up'". That turned out to be exactly right,
+and the consequence was three days of unobserved multi-hour outages.
+
+The sentinel is not defective. It worked three times out of three. The missing
+piece is the notification path, recorded as necessary on 2 October and not
+built.
+
+**Second, sparser finding.** `cron: '17,47 * * * *'` asks for 48 runs a day.
+Actual: **16 runs across three days**, gaps of 3–6 hours — roughly 11% of the
+schedule. GitHub deprioritises scheduled workflows on low-activity repos. The
+workflow anticipated "runs late under load"; this is mostly skipped, not late.
+So three detected failures may understate how many mornings were affected:
+most windows were never sampled.
 
 ## Not in scope
 

@@ -1,3 +1,78 @@
+# P0-A REOPENING CLOSED — v11.2.4, 5 October 2026
+
+Governed `momentum_score` can no longer inherit stale or cross-frequency
+technical evidence. Daily-semantic technical evidence is accepted only when it
+corresponds to the instrument's latest price state, and weekly/monthly/yearly
+values can no longer acquire a daily metric's identity.
+
+## Evidence
+
+    release identity   HEAD 50468b7, tag v11.2.4 (exact), clean tree,
+                       VERSION / package.json / APP_VERSION all 11.2.4,
+                       /health 11.2.4, deployed via deploy.sh
+    canonical run      run 8, PUBLISHED, 2,121 rows, 0 violations;
+                       lease acquired AND released by canonical_driver;
+                       yearly_compute NOT executed, reuse licensed by a
+                       matching fingerprint
+    stage evidence     6/6 producers, expected == written on every one
+    finalisation       full_population readback, 0 failures,
+                       fingerprint still current at publication
+    attribution        2121/2121 active rows to a single run;
+                       418 delisted unattributed = the known boundary
+    structural zero    0 cross-frequency mappings in the deployed builder
+                       (sha256 8f5ea04111f6)
+    freshness zero     33 codes with a stale daily row, 0 of them served
+    behavioural zero   91,203 field comparisons (2,121 rows x 43 fields),
+                       0 mismatching field-values, momentum coverage 5/5
+    harness safety     exact-database-identity guard, negative-tested,
+                       5/5 hermetic with mutation control
+    scratch proof      4/4 behavioural properties against the RELEASED
+                       builder, byte-identical to production (sha256 match)
+
+## Exposure, measured before the fix
+
+    freshness   33 stale codes, 0 served
+    identity    2 fallback wins total; 1 on an active served instrument
+                (sma_50 <- weekly sma_10w)
+    governed    0 active rows
+    reconstruction control: 0 mismatches against run 6
+
+Preventive on both axes. The historical exposure was real — ALPH served a June
+`dma200_ratio` against October prices, and its governed `momentum_score` was
+built from June's `rsi_14` and `adx_14` — but no live customer exposure
+remained when measured.
+
+## Three defects found by the release and acceptance gates, not by the branch
+
+1. **The branch's own suites were green while it violated a system boundary.**
+   `test_canonical_boundary` saw the behavioural fixture as a SECOND
+   PUBLICATION AUTHORITY on `market.daily_metrics`, because it mutates
+   canonical tables and sat under `scripts/`. Moving it to `tests/` was the
+   fix; teaching the guard to tolerate it would not have been.
+
+2. **The fixture's own safety guard was a substring test.**
+   `"scratch" not in url` admitted `postgresql://scratch:nobody@host/asx_screener`
+   and `.../asx_screener?application_name=scratch` — both resolving to
+   PRODUCTION. Two of three negative cases reached `psycopg2.connect`. Only a
+   dead port prevented destructive setup against the real database. Now parsed
+   and matched against an exact allowlist.
+
+3. **The behavioural diagnostic's population parser found 21 of 43 fields.**
+   It matched `dm.x AS y` and missed 22 bare `dm.x,` projections — `adx_14`
+   among them, a governed momentum constituent. It would have reported a clean
+   zero over under half the repair. Found only by asserting momentum coverage
+   against the model contract rather than trusting the field count.
+
+## Not in scope, still open
+
+- the 18-19 June producer event: 379 codes with an `sma_200` first written
+  when fewer than 200 prices existed
+- the 72-instrument short-history classification
+- technical-metric explainability (V3)
+- post-publication derived-cache invalidation (heatmap; see backlog)
+
+---
+
 # P0-A REOPENED — technical evidence identity and freshness
 
 **Final statement of the defect.** Governed `momentum_score` could inherit

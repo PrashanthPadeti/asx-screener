@@ -92,22 +92,35 @@ All three fall in the window after that day's 06:35 UTC `fund_prices`
 trigger — 1h32m, 2h14m and 29m after it. All thirteen other runs succeeded,
 and every one of them sits outside that window.
 
-**So this has been happening daily since at least 3 October.** Today is only
-the day a human happened to try logging in during it. The 2 October incident
-record said an external sentinel "closes 'nothing outside the host noticed'; it
-does not close 'someone gets woken up'". That turned out to be exactly right,
-and the consequence was three days of unobserved multi-hour outages.
+**What this proves, and what it does not.** Three externally observed
+availability incidents on three consecutive mornings. Today's duration is
+evidenced -- backend logs bracket it from ~06:36 to the 07:11 restart. For 3
+and 4 October the sentinel gives only a POINT observation inside the expected
+blocking window; without backend logs bracketing start and end, the full
+~2.4-hour duration is inferred, not established, and is not recorded as fact.
 
-The sentinel is not defective. It worked three times out of three. The missing
-piece is the notification path, recorded as necessary on 2 October and not
-built.
+The 2 October record said an external sentinel "closes 'nothing outside the
+host noticed'; it does not close 'someone gets woken up'". That was exactly
+right.
 
-**Second, sparser finding.** `cron: '17,47 * * * *'` asks for 48 runs a day.
-Actual: **16 runs across three days**, gaps of 3–6 hours — roughly 11% of the
-schedule. GitHub deprioritises scheduled workflows on low-activity repos. The
-workflow anticipated "runs late under load"; this is mostly skipped, not late.
-So three detected failures may understate how many mornings were affected:
-most windows were never sampled.
+Stated precisely: **the sentinel detected every outage sample it happened to
+take during the affected morning windows, but its execution cadence was sparse
+and no operational paging path existed.** It is not defective; it is
+unmonitored and under-sampled.
+
+**Second, independent finding -- cadence.** The workflow requests 48 runs a day
+(`cron: '17,47 * * * *'`). Observed: **16 runs across the examined three-day
+period**, with multi-hour gaps. Why is not established here; the observed
+property is sufficient -- this scheduler is not providing the intended sampling
+cadence. Consequently the three detected failures may understate how many
+mornings were affected, because most windows were never sampled.
+
+**Two independent defects, not one:**
+
+    detection DELIVERY   the detector failed visibly three times and no
+                         person was alerted
+    detection CADENCE    the detector ran far less often than configured,
+                         so outage coverage was sparse
 
 ## Not in scope
 

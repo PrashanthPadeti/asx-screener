@@ -8,16 +8,35 @@
 #
 # What this is, stated honestly:
 #
-#     external detection and a durable, version-controlled record
-#     NOT operational paging
+#     external detection, a durable version-controlled record, AND an
+#     outbound notification when a probe fails
 #
-# GitHub's scheduler runs late under load, and a workflow-failure email is not
-# a pager. A real monitor with notifications is a separate, still-necessary
-# thing. This closes "nothing outside the host noticed"; it does not close
-# "someone gets woken up".
+# The "NOT operational paging" caveat that stood here was accurate and it cost
+# three days. The sentinel detected production unavailable on 3, 4 and 5 Oct
+# 2026 -- runs #5, #11 and #16, each failing the "Probe production" step, each
+# in the window after the 06:35 UTC fund_prices trigger. Nobody was told. It
+# was found when a human tried to log in on the third morning.
 #
-# Secret-free by construction: every URL probed is public, and a sentinel that
-# needed credentials could not run here.
+# Detection was never the problem. Delivery did not exist. It does now.
+#
+# NO LONGER SECRET-FREE, deliberately.
+#
+# This file used to say "secret-free by construction: a sentinel that needed
+# credentials could not run here". That property was real and it is now
+# traded away on purpose: RESEND_API_KEY, ALERT_EMAIL_TO and ALERT_EMAIL_FROM
+# live in this repository's Actions secrets. A detector that cannot reach a
+# human is not worth the property it was protecting. The probe itself still
+# touches only public URLs; the credential is used solely to send the alert,
+# and notify_outage.py never prints it.
+#
+# Still outstanding, and not closed by this file:
+#
+#   CADENCE. The schedule below asks for 48 runs a day. Across 2-5 Oct 2026,
+#   16 ran, with gaps of three to six hours. Why is not established here. The
+#   measured property is enough: this scheduler does not deliver the intended
+#   sampling rate, so an outage can begin and end unsampled. A dependable
+#   external monitor remains necessary; this workflow is the durable record
+#   and a best-effort alert, not a guaranteed one.
 
 name: uptime sentinel
 
@@ -28,6 +47,15 @@ on:
     # most congested.
     - cron: '17,47 * * * *'
   workflow_dispatch:
+    inputs:
+      base_url:
+        description: >-
+          Override the probed base URL. Exists so the NOTIFICATION path can be
+          proven against a deliberately unreachable target -- the probe must
+          fail, the alert must arrive, and the run must record that delivery
+          succeeded. Leave empty to probe production.
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -51,8 +79,40 @@ jobs:
         # means the sentinel is broken rather than the site.
         run: python3 .github/scripts/uptime_probe.py --self-test
 
+      - name: Verify the notifier's own logic before trusting its silence
+        # Same reasoning as the probe self-test. A notifier that cannot build a
+        # valid request, or that degrades quietly when a secret is missing,
+        # produces silence indistinguishable from "no outage".
+        run: python3 .github/scripts/notify_outage.py --self-test
+
       - name: Probe production
         # Three independent observations per target, never short-circuiting on
         # success. Fails only when a target fails every observation; partial
         # failures are printed and kept as the record.
+        env:
+          SENTINEL_BASE_URL: ${{ inputs.base_url }}
         run: python3 .github/scripts/uptime_probe.py
+
+      - name: Tell a human
+        # Runs ONLY when the probe failed, and fails itself if the message was
+        # not accepted -- so "the alert step ran" can never be mistaken for
+        # "someone was told". A delivery failure is a monitoring failure and
+        # is recorded as one.
+        if: failure()
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+        run: |
+          python3 .github/scripts/notify_outage.py             --subject "ASX Screener: production probe FAILED"             --body "The external uptime sentinel could not reach production.
+
+          target   : ${{ inputs.base_url || 'https://asxscreener.com.au' }}
+          run      : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          started  : ${{ github.event.repository.updated_at }}
+          trigger  : ${{ github.event_name }}
+
+          This is an external detection, not a diagnosis. The probe makes three
+          observations per target and fails only when every one of them fails.
+
+          On 3, 4 and 5 October 2026 this condition occurred and no alert was
+          sent, because there was no notification path. There is one now.

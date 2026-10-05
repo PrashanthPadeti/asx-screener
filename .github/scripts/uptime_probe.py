@@ -47,13 +47,18 @@ cannot run in a public workflow.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import urllib.error
 import urllib.request
 from typing import Any, Callable, Optional
 
-BASE = "https://asxscreener.com.au"
+#: Production by default. Overridable ONLY so the notification path can be
+#: proven against a deliberately unreachable target -- "the notify step exists"
+#: is not evidence that an alert arrives. An unset variable probes production,
+#: so a forgotten override cannot silently point the sentinel at nothing.
+BASE = os.environ.get("SENTINEL_BASE_URL") or "https://asxscreener.com.au"
 
 #: Identify honestly. Borrowing a browser's agent would be a lie that also
 #: makes the sentinel's traffic indistinguishable from a visitor's.

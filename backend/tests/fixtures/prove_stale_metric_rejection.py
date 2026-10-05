@@ -32,8 +32,8 @@ Three cases in ONE build, so a single pass exercises all of them:
     NOPRICE  no price rows at all                   -> nothing serves
 
 Usage (from a worktree, against scratch):
-    python scripts/fixtures/prove_stale_metric_rejection.py --setup
-    python scripts/fixtures/prove_stale_metric_rejection.py --assert
+    python tests/fixtures/prove_stale_metric_rejection.py --setup
+    python tests/fixtures/prove_stale_metric_rejection.py --assert
 """
 
 import argparse

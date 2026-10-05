@@ -530,37 +530,64 @@ SELECT
     ym.eps_growth_1y                                             AS eps_growth_1y,
 
     -- ── Returns (daily → weekly/monthly fallback) ─────────────────────────────
-    COALESCE(dm.return_1w,  wm.weekly_return)  AS return_1w,
-    COALESCE(dm.return_1m,  mm.monthly_return) AS return_1m,
-    COALESCE(dm.return_3m,  mm.return_3m)      AS return_3m,
-    COALESCE(dm.return_6m,  mm.return_6m)      AS return_6m,
-    COALESCE(dm.return_1y,  mm.return_12m)     AS return_1y,
-    COALESCE(dm.return_ytd, mm.return_ytd)     AS return_ytd,
+    dm.return_1w  AS return_1w,
+    dm.return_1m AS return_1m,
+    dm.return_3m      AS return_3m,
+    dm.return_6m      AS return_6m,
+    dm.return_1y     AS return_1y,
+    dm.return_ytd     AS return_ytd,
     mm.momentum_3m      AS momentum_3m,
     mm.momentum_6m      AS momentum_6m,
     mm.momentum_12m     AS momentum_12m,
 
     -- ── Volatility & risk ────────────────────────────────────────────────────
-    COALESCE(dm.hv_20d, mm.volatility_1m)      AS volatility_20d,
-    COALESCE(dm.hv_60d, mm.volatility_3m)      AS volatility_60d,
+    dm.hv_20d      AS volatility_20d,
+    dm.hv_60d      AS volatility_60d,
     ym.sharpe_1y        AS sharpe_1y,
-    COALESCE(dm.pct_from_ath, mm.drawdown_from_ath, ym.max_drawdown_1y) AS drawdown_from_ath,
+    dm.pct_from_ath AS drawdown_from_ath,
     ym.beta_1y          AS beta_1y,
 
-    -- ── Technicals: daily metrics preferred; weekly/monthly as fallback ───────
-    COALESCE(dm.rsi_14,     mm.rsi_14)         AS rsi_14,
-    COALESCE(dm.macd_line,  mm.macd_line)      AS macd,
-    COALESCE(dm.macd_signal,mm.macd_signal)    AS macd_signal,
+    -- ── Technicals: the daily source, or nothing ──────────────────────────────
+    --
+    -- These used to COALESCE into weekly and monthly sources. The comment
+    -- called them "weekly approximations"; some were not approximations at all:
+    --
+    --     rsi_14   <- mm.rsi_14     14 MONTHS, not 14 days  (~20x)
+    --     macd     <- mm.macd_line  12/26 month, not 12/26 day
+    --     sma_20   <- wm.sma_20w    20 weeks = 100 days      (5x)
+    --     ema_20   <- wm.ema_13w    13 weeks = 65 days       (3x)
+    --
+    -- and the ones whose HORIZON did match were still not the same metric: a
+    -- 10-week average of weekly closes is not a 50-day average of daily
+    -- closes, because 10 observations are not 50 observations. Same horizon is
+    -- not canonical identity.
+    --
+    -- This reached governed state. momentum_score is built from return_1m,
+    -- return_3m, return_6m, rsi_14 and adx_14, so a 14-month oscillator could
+    -- be scored as a 14-day one and published with an ordinary valid state.
+    --
+    -- The as-of predicates on the laterals made it worse rather than better:
+    -- suppressing a stale daily row PROMOTED the weekly or monthly value. A
+    -- scratch fixture caught that -- the stale daily row was correctly
+    -- rejected and the universe served sma_200 = 54.6245 from the weekly
+    -- source instead. Four source guards had passed.
+    --
+    -- So the field means what its name says or it is absent. weekly_metrics
+    -- and monthly_metrics keep their own identities and may be served under
+    -- them; they may not occupy a daily metric's name.
+    dm.rsi_14         AS rsi_14,
+    dm.macd_line      AS macd,
+    dm.macd_signal    AS macd_signal,
     -- SMAs: exact daily values preferred over weekly approximations
-    COALESCE(dm.sma_20,  wm.sma_20w)           AS sma_20,
-    COALESCE(dm.sma_50,  wm.sma_10w)           AS sma_50,
-    COALESCE(dm.sma_200, wm.sma_40w)           AS sma_200,
-    COALESCE(dm.ema_20,  wm.ema_13w)           AS ema_20,
-    COALESCE(dm.bb_upper,wm.bb_upper)          AS bb_upper,
-    COALESCE(dm.bb_lower,wm.bb_lower)          AS bb_lower,
-    COALESCE(dm.atr_14,  wm.atr_14)            AS atr_14,
+    dm.sma_20           AS sma_20,
+    dm.sma_50           AS sma_50,
+    dm.sma_200           AS sma_200,
+    dm.ema_20           AS ema_20,
+    dm.bb_upper          AS bb_upper,
+    dm.bb_lower          AS bb_lower,
+    dm.atr_14            AS atr_14,
     dm.adx_14,
-    COALESCE(dm.obv,     wm.obv)               AS obv,
+    dm.obv               AS obv,
 
     -- ── Multi-year quality & CAGR (from yearly_metrics — latest FY) ──────────
     ym.piotroski_f_score,
@@ -1260,6 +1287,16 @@ LEFT JOIN LATERAL (
            above_sma10w, above_sma40w, golden_cross, death_cross
     FROM market.weekly_metrics
     WHERE asx_code = c.asx_code
+      -- As-of, same contract as the daily lateral below. Bounding only the
+      -- daily source would have made this WORSE, not better: the served
+      -- columns COALESCE across the three, so suppressing a stale daily row
+      -- PROMOTES whatever the weekly one holds. A scratch fixture caught
+      -- exactly that -- the stale daily row was correctly rejected and the
+      -- universe served sma_200 = 54.6245 from here instead.
+      --
+      -- Weekly grain, so equality is the wrong relation: the row must cover
+      -- the week the latest price falls in, not carry its exact date.
+      AND week_date >= date_trunc('week', dp.price_date)::date
     ORDER BY week_date DESC
     LIMIT 1
 ) wm ON TRUE
@@ -1273,6 +1310,11 @@ LEFT JOIN LATERAL (
            rsi_14, macd_line, macd_signal
     FROM market.monthly_metrics
     WHERE asx_code = c.asx_code
+      -- As-of at monthly grain. rsi_14, return_3m and return_6m are all
+      -- COALESCEd from here when the daily row is absent, so an unbounded
+      -- monthly row is a second path for stale evidence into governed
+      -- momentum -- the same defect, one lateral over.
+      AND month_date >= date_trunc('month', dp.price_date)::date
     ORDER BY month_date DESC
     LIMIT 1
 ) mm ON TRUE
@@ -1298,6 +1340,24 @@ LEFT JOIN LATERAL (
            up_down_vol_ratio_20d, obv_rising, volume_breakout
     FROM market.daily_metrics
     WHERE asx_code = c.asx_code
+      -- The row must be AS-OF the latest price it claims to summarise.
+      --
+      -- This was ORDER BY date DESC LIMIT 1 with no bound at all, so a code
+      -- whose technical row was last written months ago kept serving it
+      -- forever. ALPH served dma200_ratio = 1.0175 from 19 Jun 2026 until
+      -- 3 Oct, against prices running to 1 Oct: three and a half months of a
+      -- number presented as current. It had exactly two rows in this table.
+      --
+      -- Not an age threshold. Elapsed time is a bad proxy, because a
+      -- genuinely suspended instrument has an old price AND an old metric,
+      -- and the two agreeing is correct rather than stale. The question is
+      -- whether the derived row corresponds to the source state it summarises
+      -- -- so it is asked against dp.price_date, not against now().
+      --
+      -- Fails closed: no matching row leaves every column NULL, which the
+      -- governed layer renders as unavailable. A missing metric says "this
+      -- could not be computed"; the old behaviour said June was today.
+      AND date = dp.price_date
     ORDER BY date DESC
     LIMIT 1
 ) dm ON TRUE

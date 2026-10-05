@@ -40,6 +40,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 BACKEND = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND))
@@ -60,14 +61,50 @@ WATCHED = ("return_1m", "return_3m", "return_6m", "rsi_14", "adx_14",
            "dma200_ratio", "sma_200")
 
 
+#: The only databases this fixture may mutate. An allowlist of exact names,
+#: not a pattern: a pattern is how the first version of this guard failed.
+APPROVED_TARGETS = frozenset({"asx_screener_scratch"})
+
+
+def _target_database(url: str) -> str:
+    """The database this URL actually resolves to, by parsing -- not by eye.
+
+    urlsplit().path is "/name"; a query string, credentials, host and port all
+    live elsewhere in the structure and cannot be mistaken for it.
+    """
+    return urlsplit(url).path.lstrip("/").split("?")[0]
+
+
 def _connect():
-    """Scratch only. A fixture that mutates production is not a fixture."""
+    """Scratch only. A fixture that mutates production is not a fixture.
+
+    The first version of this guard asked `"scratch" not in url`, which is a
+    substring test standing in for a database-identity test. Three URLs, all
+    resolving to the PRODUCTION database, were tried against it:
+
+        postgresql://nobody:nobody@host/asx_screener            REFUSED
+        postgresql://scratch:nobody@host/asx_screener           ADMITTED
+        postgresql://nobody:nobody@host/asx_screener?application_name=scratch
+                                                                ADMITTED
+
+    Two of three got through to psycopg2, because `scratch` appeared in a
+    username and in a connection parameter. Only a dead port stopped the
+    destructive setup from running against production.
+
+    The governed property is not "the word scratch appears somewhere in this
+    string". It is "the database this URL resolves to is one I am allowed to
+    destroy". So the URL is parsed and the resolved name is matched against an
+    exact allowlist, before any connection is opened.
+    """
     url = get_database_url_sync()
-    if "scratch" not in url:
+    target = _target_database(url)
+    if target not in APPROVED_TARGETS:
         raise SystemExit(
-            f"REFUSING: this fixture mutates data and the target is not a "
-            f"scratch database.\n  target: ...{url[-40:]}\n"
-            f"Point DATABASE_URL_SYNC at asx_screener_scratch.")
+            f"REFUSING: this fixture mutates data and {target!r} is not an "
+            f"approved scratch database.\n"
+            f"  resolved database : {target!r}\n"
+            f"  approved          : {', '.join(sorted(APPROVED_TARGETS))}\n"
+            f"Point DATABASE_URL_SYNC at an approved scratch database.")
     conn = psycopg2.connect(url)
     conn.autocommit = False
     return conn

@@ -55,12 +55,32 @@ MOMENTUM = {"return_1m", "return_3m", "return_6m", "rsi_14", "adx_14"}
 
 
 def projection(builder: Path) -> list[tuple[str, str]]:
-    """[(served_as, daily_metrics_column)] straight out of the SELECT list."""
+    """[(served_as, daily_metrics_column)] straight out of the SELECT list.
+
+    TWO forms, and the second is easy to miss:
+
+        dm.return_3m  AS return_3m     aliased
+        dm.adx_14,                     bare -- served under its own name
+
+    The first version of this function matched only the aliased form and
+    found 21 of 43 fields. Among the 22 it missed was adx_14, a governed
+    momentum constituent -- so the instrument would have reported a clean
+    behavioural zero while covering under half the repair, including a field
+    whose corruption reaches a governed metric.
+
+    Caught by asserting momentum coverage rather than trusting the count,
+    which is the only reason it is not still wrong.
+    """
     raw = builder.read_text(encoding="utf-8")
     source = "\n".join(l for l in raw.splitlines()
                        if not l.strip().startswith("--"))
-    return [(served, col) for col, served in
-            re.findall(r"\bdm\.(\w+)\s+AS\s+(\w+)\b", source)]
+
+    found: dict[str, str] = {}
+    for col, served in re.findall(r"\bdm\.(\w+)\s+AS\s+(\w+)\b", source):
+        found[served] = col
+    for col in re.findall(r"^\s+dm\.(\w+)\s*,\s*$", source, re.MULTILINE):
+        found.setdefault(col, col)          # bare: served under its own name
+    return sorted(found.items())
 
 
 def main() -> int:
@@ -80,8 +100,22 @@ def main() -> int:
 
     print(f"  builder : {args.builder}")
     print(f"  fields  : {len(fields)} daily-semantic columns")
-    print(f"  of which momentum constituents: "
-          f"{sorted(s for s, _ in fields if s in MOMENTUM)}\n")
+
+    # Coverage assertion, not a printed note.
+    #
+    # The parser once found 21 of 43 fields and would have reported a clean
+    # zero over that subset. Momentum is the population whose corruption
+    # reaches a governed metric, so its absence is a refusal rather than a
+    # smaller number in a report nobody reads closely.
+    covered = {s for s, _ in fields} & MOMENTUM
+    if covered != MOMENTUM:
+        print(f"REFUSING: the projection parser did not find "
+              f"{sorted(MOMENTUM - covered)}, which feed governed "
+              f"momentum_score. A zero over a partial field set is not "
+              f"an acceptance.")
+        conn.close()
+        return 2
+    print(f"  momentum constituents covered: {sorted(covered)}\n")
 
     # One pass, one predicate per field, so a single scan answers for all of
     # them and the per-field counts come back together.

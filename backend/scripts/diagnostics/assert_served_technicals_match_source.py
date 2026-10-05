@@ -145,7 +145,12 @@ def main() -> int:
     conn.close()
 
     mismatched = [(s, n) for (s, _), n in zip(fields, counts) if n]
-    print(f"  served rows checked: {served}")
+    total_mismatched_values = sum(counts)
+    print(f"  active rows checked      : {served}")
+    print(f"  field comparisons        : {served * len(fields):,} "
+          f"({served} rows x {len(fields)} fields)")
+    print(f"  mismatching field-values : {total_mismatched_values}")
+    print(f"  fields with any mismatch : {len(mismatched)}")
     if not mismatched:
         print("\n  every served daily-semantic value equals its "
               "matching-as-of source row")

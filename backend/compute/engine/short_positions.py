@@ -185,9 +185,9 @@ async def run(target_date: date | None = None, dry_run: bool = False) -> None:
     # The whole block is leased rather than just the universe sync. Splitting
     # them would leave the staging write racing the driver's read of the same
     # table, which is the harder failure to see.
-    from compute.engine.canonical_lease import auxiliary_lease
+    from compute.engine.canonical_lease import auxiliary_lease_async
 
-    with auxiliary_lease(_sync_dsn(), why="short_positions") as permitted:
+    async with auxiliary_lease_async(_sync_dsn(), why="short_positions") as permitted:
         if not permitted:
             return
 

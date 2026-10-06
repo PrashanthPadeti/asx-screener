@@ -38,6 +38,29 @@ SCANNED = ("app/workers", "compute/engine", "app/api")
 
 #: Calls that block the thread they run on. In a coroutine that thread is the
 #: event loop, and everything the process serves stops with it.
+#: Blocking callables that live in ANOTHER module, so the intra-module call
+#: graph below cannot reach them. Listed by name, deliberately and visibly:
+#: this analyzer is bounded, and the honest way to handle a boundary is to
+#: name what crosses it rather than imply the analysis is complete.
+#:
+#: auxiliary_lease polls with time.sleep for up to AUXILIARY_WAIT_SECONDS --
+#: five minutes. asx_indices, short_positions and top5_strategy all entered it
+#: from `async def run`. short_positions fires at 09:05 UTC, inside the window
+#: the 08:30 canonical run holds the lease: a five-minute outage on an
+#: ordinary weekday, by design.
+CROSS_MODULE_BLOCKING = {
+    "auxiliary_lease": "async with auxiliary_lease_async(...)",
+}
+
+#: Coroutines whose job IS to offload blocking work. They necessarily mention
+#: the blocking thing, and flagging them would push someone to delete the
+#: remedy. Same reasoning as permitting a blocking call inside a nested sync
+#: def: holding blocking work somewhere it cannot reach the loop is the fix.
+#:
+#: Named individually, never matched by a pattern like "*_async" -- a pattern
+#: would let any future function exempt itself by what it is called.
+OFFLOADING_WRAPPERS = {"auxiliary_lease_async"}
+
 BLOCKING = {
     ("time", "sleep"): "await asyncio.sleep(...)",
     ("requests", "get"): "httpx.AsyncClient, or asyncio.to_thread(...)",
@@ -123,6 +146,7 @@ def blocking_reachable_from_coroutines(tree: ast.AST) -> list:
     # Sync functions that block, directly or by calling another that does.
     blockers = {n for n, f in funcs.items()
                 if isinstance(f, ast.FunctionDef) and _direct_blocking(f)}
+    blockers |= set(CROSS_MODULE_BLOCKING)
     changed = True
     while changed:
         changed = False
@@ -135,15 +159,17 @@ def blocking_reachable_from_coroutines(tree: ast.AST) -> list:
 
     findings = []
     for name, f in funcs.items():
-        if not isinstance(f, ast.AsyncFunctionDef):
+        if not isinstance(f, ast.AsyncFunctionDef) or name in OFFLOADING_WRAPPERS:
             continue
         for lineno, call, remedy in _direct_blocking(f):
             findings.append((lineno, f"{name}() calls {call}(...)", remedy))
         for lineno, callee in _calls_to(f, blockers):
+            remedy = CROSS_MODULE_BLOCKING.get(
+                callee, f"await asyncio.to_thread({callee}, ...)")
             findings.append((
                 lineno,
                 f"{name}() calls {callee}(), which blocks",
-                f"await asyncio.to_thread({callee}, ...)"))
+                remedy))
     return findings
 
 
@@ -196,6 +222,67 @@ def test_the_scan_reaches_the_file_that_caused_the_outage():
     assert "compute/engine/fund_prices.py" in scanned, (
         "the scan does not cover the file that took production down")
     assert len(scanned) > 20, f"only {len(scanned)} files scanned"
+
+
+def test_every_scheduled_job_lives_inside_the_scanned_population():
+    """The population comes from the SCHEDULER, not from filenames.
+
+    Both earlier misses were population errors, not analysis errors:
+
+        index_prices        missed because I grepped a hand-picked list of
+                            engine files and left it out
+        commodities,        missed because I grepped for time.sleep and they
+        global_markets      block on requests
+
+    So the expected population is derived from what actually executes inside
+    the serving event loop: every target registered with AsyncIOScheduler. If
+    one of those resolves to a module the scan does not cover, this fails --
+    whatever the scan happens to find in the modules it does cover.
+
+    A scan is only as complete as its population, and a population chosen by
+    hand is a guess wearing an instrument's clothes.
+    """
+    main = ast.parse((BACKEND / "app" / "main.py").read_text(encoding="utf-8"))
+
+    # instrumented("job_id", target) -> target name
+    targets = set()
+    for node in ast.walk(main):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "instrumented"
+                and len(node.args) == 2
+                and isinstance(node.args[1], ast.Name)):
+            targets.add(node.args[1].id)
+
+    assert len(targets) >= 15, (
+        f"only {len(targets)} scheduled targets parsed from app/main.py; the "
+        f"registration shape has changed and this check has stopped covering "
+        f"the scheduler")
+
+    # Resolve each to the module that defines it.
+    module_of = {}
+    for node in ast.walk(main):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                if (alias.asname or alias.name) in targets:
+                    module_of[alias.asname or alias.name] = node.module
+
+    unresolved = sorted(targets - set(module_of))
+    assert not unresolved, (
+        f"scheduled targets with no import to resolve: {unresolved}")
+
+    scanned = {p.resolve() for p in _files()}
+    outside = []
+    for name, module in sorted(module_of.items()):
+        path = (BACKEND / Path(module.replace(".", "/"))).with_suffix(".py")
+        if not path.exists():
+            outside.append(f"{name}: {module} has no file at {path}")
+        elif path.resolve() not in scanned:
+            outside.append(f"{name}: {module} is outside the scanned roots")
+
+    assert not outside, (
+        "a job runs inside the event loop but its module is not scanned for "
+        "blocking work:\n  " + "\n  ".join(outside))
 
 
 def test_the_check_can_actually_fail():

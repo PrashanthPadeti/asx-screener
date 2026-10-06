@@ -48,18 +48,36 @@ PICKS = next(a for a in ANCHORS if a.job == "top5_strategy")
 
 # ── Coverage: no deferrable job is silently absent ───────────────────────────
 
+#: Both spellings. The sync context manager and the async wrapper added in
+#: v11.2.6 are the same deferral contract -- a job that may skip a cycle
+#: because a canonical execution holds the lease. Matching only the original
+#: name silently stopped detecting every real job the moment the three
+#: schedulers moved to the async variant, which is the failure this coverage
+#: check exists to prevent, one level up.
+_LEASE_CALLS = {"auxiliary_lease", "auxiliary_lease_async"}
+
+#: The module that DEFINES them is not a job. It began matching when
+#: auxiliary_lease_async was added, because the wrapper necessarily calls the
+#: thing it wraps.
+_LEASE_MODULE = "canonical_lease"
+
+
 def _deferrable_jobs() -> set[str]:
-    """Modules that CALL auxiliary_lease, not ones that merely mention it.
+    """Modules that CALL a lease, not ones that merely mention one.
 
     Matching the bare string catches canonical_lease, which defines it, and
-    launch_authority, which names it in a message -- neither is a job.
+    launch_authority, which names it in a message -- neither is a job. The
+    defining module is excluded by name because an AST call check cannot
+    distinguish "wraps it" from "uses it".
     """
     jobs = set()
     for path in (BACKEND / "compute/engine").glob("*.py"):
+        if path.stem == _LEASE_MODULE:
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (isinstance(node, ast.Call)
-                    and getattr(node.func, "id", "") == "auxiliary_lease"):
+                    and getattr(node.func, "id", "") in _LEASE_CALLS):
                 jobs.add(path.stem)
                 break
     return jobs

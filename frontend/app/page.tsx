@@ -309,28 +309,9 @@ export default async function HomePage() {
 
       {/* ── Hero ──────────────────────────────────────────────── */}
       <section className="py-10 px-4">
-        <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr_220px] gap-6 items-center">
+        <div className="max-w-5xl mx-auto">
 
-          {/* ── Left: Monthly founding deal ── */}
-          <div className="hidden lg:flex flex-col gap-3 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/20 self-stretch justify-center">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">FOUNDING MEMBER</span>
-            </div>
-            <div>
-              <p className="text-slate-400 text-xs mb-1">Monthly plan</p>
-              <p className="text-white text-sm font-semibold leading-snug">Pay <span className="text-amber-400">1 month</span></p>
-              <p className="text-slate-300 text-xs mt-0.5">→ get <span className="text-amber-400 font-semibold">6 months</span> access</p>
-            </div>
-            <div className="bg-white/5 rounded-lg px-3 py-1.5 text-center">
-              <span className="text-emerald-400 text-xs font-semibold">5× value</span>
-              <span className="text-slate-500 text-xs"> · save 83%</span>
-            </div>
-            <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg transition-colors">
-              Claim deal →
-            </Link>
-          </div>
-
-          {/* ── Centre: existing hero content (unchanged) ── */}
+          {/* ── Hero content ── */}
           <div className="text-center">
             <div className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 text-sm font-medium px-3 py-1 rounded-full mb-4">
               <span className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
@@ -370,48 +351,8 @@ export default async function HomePage() {
             </div>
           </div>
 
-          {/* ── Right: Annual founding deal + scarcity ── */}
-          <div className="hidden lg:flex flex-col gap-3 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/30 self-stretch justify-center">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full tracking-wide">BEST VALUE</span>
-            </div>
-            <div>
-              <p className="text-slate-400 text-xs mb-1">Annual plan</p>
-              <p className="text-white text-sm font-semibold leading-snug">Pay <span className="text-amber-400">1 year</span></p>
-              <p className="text-slate-300 text-xs mt-0.5">→ get <span className="text-amber-400 font-semibold">3 years</span> access</p>
-            </div>
-            <div className="bg-white/5 rounded-lg px-3 py-1.5 text-center">
-              <span className="text-emerald-400 text-xs font-semibold">3× value</span>
-              <span className="text-slate-500 text-xs"> · save 67%</span>
-            </div>
-            <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-xs font-semibold py-2 rounded-lg transition-colors">
-              Claim deal →
-            </Link>
-          </div>
-
         </div>
 
-        {/* Mobile banner — shown instead of side cards on small screens */}
-        <div className="lg:hidden mt-6 bg-[#0f172a] rounded-2xl p-4 border border-amber-500/20">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="text-[10px] font-semibold bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2 py-0.5 rounded-full">FOUNDING MEMBER</span>
-          </div>
-          <div className="grid grid-cols-2 gap-3 mb-3">
-            <div className="bg-white/5 rounded-xl p-3">
-              <p className="text-slate-400 text-xs mb-1">Monthly</p>
-              <p className="text-white text-sm font-semibold">Pay 1 month</p>
-              <p className="text-amber-400 text-xs mt-0.5">→ get 6 months</p>
-            </div>
-            <div className="bg-white/5 rounded-xl p-3 border border-amber-500/20">
-              <p className="text-slate-400 text-xs mb-1">Annual</p>
-              <p className="text-white text-sm font-semibold">Pay 1 year</p>
-              <p className="text-amber-400 text-xs mt-0.5">→ get 3 years</p>
-            </div>
-          </div>
-          <Link href="/pricing" className="block text-center bg-amber-500 hover:bg-amber-400 text-slate-900 text-sm font-semibold py-2.5 rounded-lg transition-colors">
-            Claim founding member deal →
-          </Link>
-        </div>
       </section>
 
       {/* ── Market Snapshot ───────────────────────────────────── */}

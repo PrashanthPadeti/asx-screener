@@ -86,19 +86,29 @@ jobs:
         run: python3 .github/scripts/notify_outage.py --self-test
 
       - name: Probe production
+        id: probe
         # Three independent observations per target, never short-circuiting on
         # success. Fails only when a target fails every observation; partial
         # failures are printed and kept as the record.
         env:
-          SENTINEL_BASE_URL: ${{ inputs.base_url }}
-        run: python3 .github/scripts/uptime_probe.py
+          # Scheduled runs are PINNED to production. The override is readable
+          # only on workflow_dispatch, so a value cannot reach a scheduled run
+          # by any path and the sentinel cannot be left quietly pointing
+          # somewhere harmless.
+          SENTINEL_BASE_URL: >-
+            ${{ github.event_name == 'workflow_dispatch' && inputs.base_url || '' }}
+        run: |
+          python3 .github/scripts/uptime_probe.py
+          echo "probe_failed=false" >> "$GITHUB_OUTPUT"
 
       - name: Tell a human
-        # Runs ONLY when the probe failed, and fails itself if the message was
-        # not accepted -- so "the alert step ran" can never be mistaken for
-        # "someone was told". A delivery failure is a monitoring failure and
-        # is recorded as one.
-        if: failure()
+        # Fires on the PROBE failing, not on any failure in the job. If a
+        # self-test fails the sentinel itself is broken, which is a different
+        # thing from the site being down and must not send an outage alert.
+        #
+        # Fails itself when the provider does not accept the message, so "the
+        # alert step ran" can never be mistaken for "someone was told".
+        if: failure() && steps.probe.conclusion == 'failure' 
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}

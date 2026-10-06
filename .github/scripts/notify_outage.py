@@ -20,8 +20,11 @@ on. A notifier that degrades quietly is worse than none, because the silence
 afterwards reads as "no outage" rather than "no notifier" -- which is precisely
 the confusion that cost three days here.
 
-Delivery is reported as the API's own verdict: the HTTP status and the message
-id it returns. "The step ran" is not evidence that a message was sent.
+Acceptance is reported as the API's own verdict: the HTTP status and the
+message id it returns. "The step ran" is not evidence that a message was sent
+-- and acceptance is not evidence that one arrived. A 2xx means the provider
+took it; a human seeing the mail is what establishes reception, and that is
+recorded in the acceptance evidence rather than inferred by this script.
 
 Environment:
     RESEND_API_KEY     required
@@ -116,12 +119,23 @@ def main() -> int:
             message_id = json.loads(body).get("id", "(none)")
         except ValueError:
             message_id = "(unparseable)"
-        print(f"notification_delivered=true message_id={message_id}")
+        # ACCEPTED, not delivered.
+        #
+        # A 2xx and a message id prove the provider took the message. They do
+        # not prove it reached an inbox -- it can still bounce, be filtered, or
+        # be dropped by the receiving domain. Calling that "delivered" would
+        # recreate, one layer up, the exact error this whole exercise is about:
+        # a proxy standing in for the property. Reception is established by a
+        # human seeing the mail, and is recorded in the acceptance evidence,
+        # never inferred here.
+        print("provider=resend")
+        print(f"notification_accepted=true message_id={message_id}")
         return 0
 
-    print("notification_delivered=false")
-    print("The outage WAS detected and the alert was NOT delivered. "
-          "Treat this as a monitoring failure in its own right.")
+    print("provider=resend")
+    print("notification_accepted=false")
+    print("The outage WAS detected and the provider did NOT accept the "
+          "alert. Treat this as a monitoring failure in its own right.")
     return 1
 
 

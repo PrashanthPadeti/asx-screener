@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "11.2.7"
+    APP_VERSION: str = "11.2.8"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
@@ -107,12 +107,26 @@ class Settings(BaseSettings):
     RATE_LIMIT_PRO: int = 120
     RATE_LIMIT_PREMIUM: int = 300
 
-    # Founding Members promotion
-    # First N paying subscribers get extended access:
+    # Founding Members promotion — ENDED 6 Oct 2026.
+    #
+    # First N paying subscribers got extended access:
     #   Monthly plan → 6 months access  (instead of 1 month)
     #   Annual plan  → 3 years access   (instead of 1 year)
-    # Set to 0 to disable the promotion entirely.
-    FOUNDING_MEMBER_LIMIT: int = 100
+    #
+    # Zero disables it everywhere, by design and in one place:
+    #   - /billing/founding-member-status returns enabled: False, so the
+    #     pricing page renders no offer at all
+    #   - _claim_founding_member refuses, so no new subscriber is granted it
+    #
+    # The DEFAULT is zero rather than an override in .env. At 100 the
+    # promotion would silently return on any host whose .env lacked the key
+    # -- a fresh deploy, a restored config, a new environment. An ended
+    # promotion should need a deliberate act to restart, not an omission to
+    # resume.
+    #
+    # Members who already claimed keep is_founding_member and their extended
+    # access. This stops OFFERING it; it does not retract what was granted.
+    FOUNDING_MEMBER_LIMIT: int = 0
 
     # Rollout freeze. False stops app/main.py registering any background job,
     # so a maintenance window can halt computation while the API keeps serving.

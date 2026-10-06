@@ -53,6 +53,100 @@ def _files():
                         if "__pycache__" not in p.parts)
 
 
+def _module_functions(tree: ast.AST) -> dict:
+    """Module-level functions by name, with their async-ness."""
+    return {n.name: n for n in tree.body
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+
+def _direct_blocking(node) -> list:
+    """Blocking calls in this function's own body, not nested defs."""
+    out = []
+
+    def walk(n):
+        for c in ast.iter_child_nodes(n):
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(c, ast.Call):
+                f = c.func
+                if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name):
+                    key = (f.value.id, f.attr)
+                    if key in BLOCKING:
+                        out.append((c.lineno, ".".join(key), BLOCKING[key]))
+            walk(c)
+
+    walk(node)
+    return out
+
+
+def _calls_to(node, names: set) -> list:
+    """Calls to any of `names`, by bare name, in this function's body.
+
+    A function PASSED to asyncio.to_thread is an ast.Name argument, not an
+    ast.Call -- so the remedy is invisible here by construction, which is what
+    makes this check mean "called on the loop" rather than "mentioned".
+    """
+    out = []
+
+    def walk(n):
+        for c in ast.iter_child_nodes(n):
+            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            if isinstance(c, ast.Call) and isinstance(c.func, ast.Name)                     and c.func.id in names:
+                out.append((c.lineno, c.func.id))
+            walk(c)
+
+    walk(node)
+    return out
+
+
+def blocking_reachable_from_coroutines(tree: ast.AST) -> list:
+    """Coroutines that block, directly OR through a sync function they call.
+
+    The first version of this guard checked only the coroutine's own body. It
+    would NOT have caught the defect it was written for: fund_prices.run called
+    fetch_fund_data, a module-level sync function, and the 30/60/90 sleeps were
+    in there. The one line it did catch -- a bare time.sleep(2) -- was the
+    smaller half.
+
+    It also missed index_prices entirely, which has the identical shape and
+    took the API down for five minutes on 6 Oct 2026, the morning after the
+    fund_prices fix shipped.
+
+    So the call graph is followed one module deep: a sync function that blocks
+    taints every coroutine that CALLS it. Passing it to asyncio.to_thread is
+    not a call, so the remedy is distinguished from the defect structurally
+    rather than by naming convention.
+    """
+    funcs = _module_functions(tree)
+
+    # Sync functions that block, directly or by calling another that does.
+    blockers = {n for n, f in funcs.items()
+                if isinstance(f, ast.FunctionDef) and _direct_blocking(f)}
+    changed = True
+    while changed:
+        changed = False
+        for name, f in funcs.items():
+            if name in blockers or isinstance(f, ast.AsyncFunctionDef):
+                continue
+            if _calls_to(f, blockers):
+                blockers.add(name)
+                changed = True
+
+    findings = []
+    for name, f in funcs.items():
+        if not isinstance(f, ast.AsyncFunctionDef):
+            continue
+        for lineno, call, remedy in _direct_blocking(f):
+            findings.append((lineno, f"{name}() calls {call}(...)", remedy))
+        for lineno, callee in _calls_to(f, blockers):
+            findings.append((
+                lineno,
+                f"{name}() calls {callee}(), which blocks",
+                f"await asyncio.to_thread({callee}, ...)"))
+    return findings
+
+
 def _blocking_calls_in_coroutines(tree: ast.AST):
     """Blocking calls lexically inside an `async def`, in the coroutine's own
     body -- not inside a nested plain `def`, which runs on whatever thread
@@ -87,7 +181,7 @@ def test_no_coroutine_blocks_the_event_loop():
     offences = []
     for path in _files():
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        for lineno, call, remedy in _blocking_calls_in_coroutines(tree):
+        for lineno, call, remedy in blocking_reachable_from_coroutines(tree):
             offences.append(
                 f"{path.relative_to(BACKEND)}:{lineno}  {call}(...)  "
                 f"-> use {remedy}")

@@ -203,9 +203,9 @@ async def run(dry_run: bool = False) -> None:
     # of the canonical plan and its failure must never gate finalisation. But
     # it still mutates the table the driver owns, so it takes the same lease
     # and defers when a canonical execution holds it.
-    from compute.engine.canonical_lease import auxiliary_lease
+    from compute.engine.canonical_lease import auxiliary_lease_async
 
-    with auxiliary_lease(_sync_dsn(), why="asx_indices") as permitted:
+    async with auxiliary_lease_async(_sync_dsn(), why="asx_indices") as permitted:
         if not permitted:
             return
 

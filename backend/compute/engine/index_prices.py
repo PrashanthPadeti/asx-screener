@@ -240,7 +240,12 @@ async def run(
         total_rows = 0
         for index_code, ticker in TICKER_MAP.items():
             log.info(f"  {index_code} ({ticker}) …")
-            df = fetch_index_data(ticker, start_date, target_date)
+            # Off the loop. AsyncIOScheduler runs this coroutine ON the
+            # event loop; a blocking fetch here stops the API answering
+            # anything. index_prices did exactly that for five minutes on
+            # 6 Oct 2026, the morning after the fund_prices fix shipped.
+            df = await asyncio.to_thread(
+                fetch_index_data, ticker, start_date, target_date)
             if df is None:
                 continue
 

@@ -76,9 +76,9 @@ async def run(
     pick computed from unattributed rows costs a number nobody can
     substantiate, which is the thing this whole programme forbids.
     """
-    from compute.engine.canonical_lease import auxiliary_lease
+    from compute.engine.canonical_lease import auxiliary_lease_async
 
-    with auxiliary_lease(_sync_dsn(), why="top5_strategy") as permitted:
+    async with auxiliary_lease_async(_sync_dsn(), why="top5_strategy") as permitted:
         if not permitted:
             return
         await _pick(pick_month=pick_month, force=force, dry_run=dry_run)

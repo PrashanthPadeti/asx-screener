@@ -376,14 +376,18 @@ async def run(
             log.info(f"  [{i+1}/{len(COMMODITIES)}] {code} ({ticker}, {source}) …")
 
             if source == "eodhd":
-                df = fetch_eodhd_forex(ticker, start_date, target_date, eodhd_key)
+                df = await asyncio.to_thread(
+                    fetch_eodhd_forex, ticker, start_date, target_date,
+                    eodhd_key)
             elif source == "av":
                 if not av_key:
                     log.warning(f"  {code}: skipped (no ALPHA_VANTAGE_API_KEY)")
                     continue
-                df = fetch_av_commodity(ticker, start_date, target_date, av_key)
+                df = await asyncio.to_thread(
+                    fetch_av_commodity, ticker, start_date, target_date, av_key)
             elif source == "yahoo":
-                df = fetch_yahoo_commodity(ticker, start_date, target_date)
+                df = await asyncio.to_thread(
+                    fetch_yahoo_commodity, ticker, start_date, target_date)
             else:
                 log.warning(f"  {code}: unknown source '{source}'")
                 continue

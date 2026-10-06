@@ -38,7 +38,8 @@ from __future__ import annotations
 
 import logging
 import time
-from contextlib import contextmanager
+import asyncio
+from contextlib import asynccontextmanager, contextmanager
 
 log = logging.getLogger(__name__)
 
@@ -210,6 +211,36 @@ def auxiliary_lease(dsn: str, *, why: str, wait_seconds: int = AUXILIARY_WAIT_SE
             release(conn)
         conn.close()
 
+
+
+@asynccontextmanager
+async def auxiliary_lease_async(dsn: str, *, why: str,
+                                wait_seconds: int = AUXILIARY_WAIT_SECONDS):
+    """auxiliary_lease, for a caller running on an event loop.
+
+    The synchronous version polls with time.sleep for up to
+    AUXILIARY_WAIT_SECONDS -- five minutes -- while waiting for a canonical
+    execution to finish. Three scheduled jobs entered it from `async def run`:
+    asx_indices, short_positions and top5_strategy. AsyncIOScheduler runs
+    coroutines ON the event loop, so each of those could stop the API
+    answering anything for the whole wait.
+
+    short_positions fires at 20:05 AEDT = 09:05 UTC, inside the window the
+    08:30 UTC canonical run holds the lease. That is a five-minute outage on
+    an ordinary weekday, by design, with nothing anomalous happening.
+
+    Identical semantics, deliberately: this wraps the existing context manager
+    rather than reimplementing the protocol. Acquisition and release -- the
+    only blocking parts -- happen on a worker thread; everything about
+    locking, contention, logging and the skip-rather-than-fail behaviour is
+    the same code as before.
+    """
+    manager = auxiliary_lease(dsn, why=why, wait_seconds=wait_seconds)
+    permitted = await asyncio.to_thread(manager.__enter__)
+    try:
+        yield permitted
+    finally:
+        await asyncio.to_thread(manager.__exit__, None, None, None)
 
 @contextmanager
 def canonical_lease(conn, *, wait_seconds: int, why: str):

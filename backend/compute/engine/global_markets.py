@@ -308,7 +308,13 @@ async def run(
         # Indices
         for i, idx in enumerate(GLOBAL_INDICES):
             log.info(f"  [{i+1}/{len(GLOBAL_INDICES)}] {idx['code']} ({idx['ticker']}) …")
-            df = fetch_eodhd_data(idx["ticker"], start_date, target_date, api_key)
+            # Off the loop. AsyncIOScheduler runs this coroutine ON the
+            # event loop; a blocking fetch here stops the API answering
+            # anything. index_prices did exactly that for five minutes on
+            # 6 Oct 2026, the morning after the fund_prices fix shipped.
+            df = await asyncio.to_thread(
+                fetch_eodhd_data, idx["ticker"], start_date, target_date,
+                api_key)
             if df is None or df.empty:
                 continue
             # Compute on full history (needs 400-day context for 1Y returns),
@@ -322,7 +328,13 @@ async def run(
         # FX pairs
         for j, fx in enumerate(FX_PAIRS):
             log.info(f"  [{j+1}/{len(FX_PAIRS)}] {fx['pair']} ({fx['ticker']}) …")
-            df = fetch_eodhd_data(fx["ticker"], start_date, target_date, api_key)
+            # Off the loop. AsyncIOScheduler runs this coroutine ON the
+            # event loop; a blocking fetch here stops the API answering
+            # anything. index_prices did exactly that for five minutes on
+            # 6 Oct 2026, the morning after the fund_prices fix shipped.
+            df = await asyncio.to_thread(
+                fetch_eodhd_data, fx["ticker"], start_date, target_date,
+                api_key)
             if df is None or df.empty:
                 continue
             # Same fix: compute on full history, filter output to target window.

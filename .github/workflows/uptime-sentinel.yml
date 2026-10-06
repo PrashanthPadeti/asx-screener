@@ -29,6 +29,27 @@
 # touches only public URLs; the credential is used solely to send the alert,
 # and notify_outage.py never prints it.
 #
+# Containment of that secret:
+#
+#   - permissions: contents: read, and nothing else.
+#   - triggers are `schedule` and `workflow_dispatch` ONLY. There is no
+#     `pull_request` trigger, so code from a fork can never reach the step
+#     that holds the credential.
+#   - use a RESEND KEY SCOPED TO THIS MONITOR, not the application's
+#     production key. A monitor is a low-trust context running on shared
+#     infrastructure; it should not be able to send as the product.
+#
+# What a failing run records, and the one thing it cannot:
+#
+#     probe_failed=true
+#     provider=resend
+#     notification_accepted=true  message_id=...
+#
+# ACCEPTED is the provider taking the message. It is NOT arrival. Reception is
+# established by a human seeing the mail and written into the acceptance
+# evidence -- never inferred from a 2xx, which would be the same
+# proxy-for-property substitution this sentinel exists to catch.
+#
 # Still outstanding, and not closed by this file:
 #
 #   CADENCE. The schedule below asks for 48 runs a day. Across 2-5 Oct 2026,
@@ -114,6 +135,7 @@ jobs:
           ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
           ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
         run: |
+          echo "probe_failed=true"
           python3 .github/scripts/notify_outage.py             --subject "ASX Screener: production probe FAILED"             --body "The external uptime sentinel could not reach production.
 
           target   : ${{ inputs.base_url || 'https://asxscreener.com.au' }}

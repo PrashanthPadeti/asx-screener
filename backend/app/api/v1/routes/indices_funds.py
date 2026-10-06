@@ -412,7 +412,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
                    u.sector, u.market_cap, u.price,
                    u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
-            LEFT JOIN LATERAL (SELECT company_name FROM market.companies WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
+            LEFT JOIN LATERAL (SELECT company_name FROM market.companies_current WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
             WHERE u.price IS NOT NULL AND u.market_cap IS NOT NULL
             ORDER BY u.market_cap DESC NULLS LAST
             LIMIT :n
@@ -423,7 +423,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
                    u.sector, u.market_cap, u.price,
                    u.return_1w AS return_1d, u.return_1y, u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
-            LEFT JOIN LATERAL (SELECT company_name FROM market.companies WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
+            LEFT JOIN LATERAL (SELECT company_name FROM market.companies_current WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
             WHERE u.price IS NOT NULL AND u.sector = :sector
             ORDER BY u.market_cap DESC NULLS LAST
             LIMIT 50
@@ -760,7 +760,7 @@ async def get_fund_constituents(asx_code: str, db: AsyncSession = Depends(get_db
                    u.return_1w AS return_1d, u.return_1y,
                    u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
-            LEFT JOIN LATERAL (SELECT company_name FROM market.companies WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
+            LEFT JOIN LATERAL (SELECT company_name FROM market.companies_current WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
             WHERE u.price IS NOT NULL AND u.market_cap IS NOT NULL
             ORDER BY u.market_cap DESC NULLS LAST
             LIMIT :n
@@ -772,7 +772,7 @@ async def get_fund_constituents(asx_code: str, db: AsyncSession = Depends(get_db
                    u.return_1w AS return_1d, u.return_1y,
                    u.pe_ratio, u.dividend_yield, u.franking_pct
             FROM screener.universe u
-            LEFT JOIN LATERAL (SELECT company_name FROM market.companies WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
+            LEFT JOIN LATERAL (SELECT company_name FROM market.companies_current WHERE asx_code = u.asx_code LIMIT 1) c ON TRUE
             WHERE u.price IS NOT NULL AND u.sector = :sector
             ORDER BY u.market_cap DESC NULLS LAST
             LIMIT 50

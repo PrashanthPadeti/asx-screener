@@ -94,7 +94,7 @@ async def _run_checks(db: AsyncSession) -> None:
         FROM users.alerts a
         JOIN users.users u             ON u.id   = a.user_id
         LEFT JOIN screener.universe s  ON s.asx_code = a.asx_code
-        LEFT JOIN market.companies c   ON c.asx_code = a.asx_code
+        LEFT JOIN market.companies_current c ON c.asx_code = a.asx_code
         LEFT JOIN users.notification_preferences np ON np.user_id = a.user_id
         WHERE a.is_active = TRUE
     """))

@@ -150,7 +150,7 @@ async def _pick(
                 u.roe,
                 u.piotroski_f_score
             FROM screener.universe u
-            JOIN market.companies c ON c.asx_code = u.asx_code
+            JOIN market.companies_current c ON c.asx_code = u.asx_code
             WHERE u.is_asx200    = TRUE
               AND u.status       = 'active'
               AND u.composite_score IS NOT NULL

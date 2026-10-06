@@ -193,7 +193,7 @@ async def latest_predictions(
             p.r2_score,
             p.data_points
         FROM market.price_predictions p
-        JOIN market.companies c ON c.asx_code = p.asx_code
+        JOIN market.companies_current c ON c.asx_code = p.asx_code
         LEFT JOIN LATERAL (
             SELECT sector FROM screener.universe
             WHERE asx_code = p.asx_code
@@ -210,7 +210,7 @@ async def latest_predictions(
     count_sql = f"""
         SELECT COUNT(*)
         FROM market.price_predictions p
-        JOIN market.companies c ON c.asx_code = p.asx_code
+        JOIN market.companies_current c ON c.asx_code = p.asx_code
         LEFT JOIN LATERAL (
             SELECT sector FROM screener.universe
             WHERE asx_code = p.asx_code
@@ -306,7 +306,7 @@ async def stock_prediction_history(
 
     # Company name
     name_r = await db.execute(
-        text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
+        text("SELECT company_name FROM market.companies_current WHERE asx_code = :c"),
         {"c": code},
     )
     name_row = name_r.fetchone()
@@ -386,7 +386,7 @@ async def stock_features(
 
     # Company info
     name_r = await db.execute(
-        text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
+        text("SELECT company_name FROM market.companies_current WHERE asx_code = :c"),
         {"c": code},
     )
     name_row = name_r.fetchone()
@@ -580,7 +580,7 @@ async def stock_predictions(
         }
 
     name_r = await db.execute(
-        text("SELECT company_name FROM market.companies WHERE asx_code = :c"), {"c": code}
+        text("SELECT company_name FROM market.companies_current WHERE asx_code = :c"), {"c": code}
     )
     name_row = name_r.fetchone()
 

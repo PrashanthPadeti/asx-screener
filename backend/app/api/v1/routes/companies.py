@@ -88,7 +88,7 @@ async def list_companies(
     sort_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
 
     # Count total
-    count_sql = f"SELECT COUNT(*) FROM market.companies WHERE {where}"
+    count_sql = f"SELECT COUNT(*) FROM market.companies_current WHERE {where}"
     result = await db.execute(text(count_sql), params)
     total = result.scalar()
 
@@ -101,7 +101,7 @@ async def list_companies(
         SELECT
             asx_code, company_name, gics_sector, gics_industry_group,
             is_reit, is_miner, is_asx200, status, listing_date
-        FROM market.companies
+        FROM market.companies_current
         WHERE {where}
         ORDER BY {sort_by} {sort_dir}
         LIMIT :limit OFFSET :offset
@@ -134,7 +134,7 @@ async def search_companies(
         SELECT asx_code, company_name, gics_sector, is_reit, is_miner
         FROM (
             SELECT DISTINCT ON (asx_code) asx_code, company_name, gics_sector, is_reit, is_miner
-            FROM market.companies
+            FROM market.companies_current
             WHERE status = 'active'
               AND (
                   asx_code ILIKE :code_query
@@ -168,7 +168,7 @@ async def get_company(
 ):
     sql = """
         SELECT *
-        FROM market.companies
+        FROM market.companies_current
         WHERE asx_code = :asx_code
     """
     result = await db.execute(text(sql), {"asx_code": asx_code.upper()})
@@ -504,7 +504,7 @@ async def get_company_peers(
     # Resolve GICS industry for this stock
     meta_sql = """
         SELECT gics_industry_group, gics_sector
-        FROM market.companies
+        FROM market.companies_current
         WHERE asx_code = :code
     """
     meta = (await db.execute(text(meta_sql), {"code": code})).mappings().first()
@@ -528,7 +528,7 @@ async def get_company_peers(
                 u.return_1y, u.return_ytd,
                 u.piotroski_f_score, u.debt_to_equity
             FROM screener.universe u
-            JOIN market.companies c ON c.asx_code = u.asx_code
+            JOIN market.companies_current c ON c.asx_code = u.asx_code
             WHERE u.asx_code != :code
               AND {filter_clause}
               AND u.status = 'active'
@@ -839,7 +839,7 @@ async def get_ai_summary(
                u.momentum_score, u.income_score,
                u.revenue_growth_hoh, u.net_income_growth_hoh
         FROM screener.universe u
-        JOIN market.companies c ON c.asx_code = u.asx_code
+        JOIN market.companies_current c ON c.asx_code = u.asx_code
         WHERE u.asx_code = :code
     """), {"code": code})
     d = result.mappings().first()

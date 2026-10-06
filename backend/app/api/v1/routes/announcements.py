@@ -166,7 +166,7 @@ async def get_announcements(
                 COALESCE(a.source_type, 'market_news')   AS source_type,
                 COALESCE(a.source_label, 'Finance News') AS source_label
             FROM market.asx_announcements a
-            LEFT JOIN market.companies c ON c.asx_code = a.asx_code
+            LEFT JOIN market.companies_current c ON c.asx_code = a.asx_code
             WHERE {where}
             ORDER BY a.asx_code, a.title, a.released_at, a.id
         ) deduped
@@ -179,7 +179,7 @@ async def get_announcements(
         SELECT COUNT(*) FROM (
             SELECT DISTINCT ON (a.asx_code, a.title, a.released_at) a.id
             FROM market.asx_announcements a
-            LEFT JOIN market.companies c ON c.asx_code = a.asx_code
+            LEFT JOIN market.companies_current c ON c.asx_code = a.asx_code
             WHERE {where}
             ORDER BY a.asx_code, a.title, a.released_at, a.id
         ) deduped
@@ -218,7 +218,7 @@ async def get_latest_announcements(
                 COALESCE(a.source_type, 'market_news')   AS source_type,
                 COALESCE(a.source_label, 'Finance News') AS source_label
             FROM market.asx_announcements a
-            LEFT JOIN market.companies c ON c.asx_code = a.asx_code
+            LEFT JOIN market.companies_current c ON c.asx_code = a.asx_code
             ORDER BY a.asx_code, a.title, a.released_at, a.id
         ) deduped
         ORDER BY released_at DESC NULLS LAST
@@ -251,7 +251,7 @@ async def get_company_announcements(
                 COALESCE(a.source_type, 'market_news')   AS source_type,
                 COALESCE(a.source_label, 'Finance News') AS source_label
             FROM market.asx_announcements a
-            LEFT JOIN market.companies c ON c.asx_code = a.asx_code
+            LEFT JOIN market.companies_current c ON c.asx_code = a.asx_code
             WHERE a.asx_code = :code
             ORDER BY a.title, a.released_at, a.id
         ) deduped

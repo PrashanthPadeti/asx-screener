@@ -88,7 +88,7 @@ async def _send_user_digest(db: AsyncSession, user_id: str, email: str, name: st
                c.company_name,
                anom.flag_type, anom.description AS anomaly_desc
         FROM screener.universe u
-        LEFT JOIN market.companies c ON c.asx_code = u.asx_code
+        LEFT JOIN market.companies_current c ON c.asx_code = u.asx_code
         LEFT JOIN LATERAL (
             SELECT flag_type, description
             FROM market.anomalies

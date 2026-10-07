@@ -34,6 +34,7 @@ async def purge_expired_sessions() -> None:
                 log.info("Session cleanup: removed %d expired/revoked session(s)", deleted)
     except Exception as exc:
         log.error("Session cleanup error: %s", exc, exc_info=True)
+        raise          # telemetry must observe the failure
 
 
 async def run_data_deletion() -> None:
@@ -66,6 +67,9 @@ async def run_data_deletion() -> None:
                     log.info("Data deletion: cleaned up user %s", user_id)
                 except Exception as user_exc:
                     log.error("Data deletion failed for user %s: %s", user_id, user_exc)
+                    # Deliberately NOT re-raised: one user's deletion failing
+                    # must not abort the batch. The outer handler re-raises
+                    # only when the job itself fails.
                     await db.rollback()
                     continue
 
@@ -74,3 +78,4 @@ async def run_data_deletion() -> None:
 
     except Exception as exc:
         log.error("Data deletion worker error: %s", exc, exc_info=True)
+        raise          # telemetry must observe the failure

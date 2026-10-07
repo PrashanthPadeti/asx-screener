@@ -55,6 +55,7 @@ async def check_alerts() -> None:
             await _run_checks(db)
         except Exception as e:
             log.error(f"Alert worker error: {e}", exc_info=True)
+            raise          # telemetry must observe the failure
         finally:
             # Always record execution time so Pipeline Monitor shows true last-run
             try:

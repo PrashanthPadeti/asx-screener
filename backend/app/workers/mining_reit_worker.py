@@ -19,3 +19,4 @@ async def sync_mining_reit_metrics() -> None:
         log.info("REIT metrics sync complete.")
     except Exception as exc:
         log.error("mining_reit_worker failed: %s", exc, exc_info=True)
+        raise          # telemetry must observe the failure

@@ -24,6 +24,7 @@ async def send_watchlist_digests() -> None:
             await _run_digests(db)
         except Exception as e:
             log.error(f"Watchlist digest error: {e}", exc_info=True)
+            raise          # telemetry must observe the failure
 
 
 async def _run_digests(db: AsyncSession) -> None:

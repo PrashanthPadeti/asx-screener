@@ -299,10 +299,17 @@ def test_the_check_can_actually_fail():
 def test_a_nested_sync_def_is_allowed():
     """Holding blocking work in a sync function is the REMEDY, not the bug.
 
-    fetch_fund_data still sleeps 30/60/90 on rate limits. That is fine: it is
-    synchronous and now reached through asyncio.to_thread, so the sleeping
-    happens on a worker thread rather than the loop. A guard that forbade it
-    would push people toward deleting the backoff instead of moving it.
+    This rule exists so that a guard cannot push people toward DELETING
+    blocking work instead of moving it off the loop — those are different
+    remedies and only one of them is correct.
+
+    Its original example was fetch_fund_data's 30/60/90 backoff, reached
+    through asyncio.to_thread. That backoff was removed on 7 Oct 2026 for an
+    unrelated reason: the source refused the first request of the day, so the
+    retries could never succeed and cost 2.5 hours daily for zero rows (see
+    producer_contract.py). The rule stands on its own and is tested here
+    against a synthetic case rather than a live one, so it does not depend on
+    any particular file continuing to sleep.
     """
     tree = ast.parse(
         "import time\n"

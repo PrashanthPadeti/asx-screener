@@ -208,7 +208,7 @@ async def _run(db) -> int:
     result = await db.execute(text("""
         SELECT u.asx_code, COALESCE(c.company_name, '') AS company_name
         FROM screener.universe u
-        LEFT JOIN market.companies c ON c.asx_code = u.asx_code
+        LEFT JOIN market.companies_current c ON c.asx_code = u.asx_code
         ORDER BY u.market_cap DESC NULLS LAST
         LIMIT 200
     """))
@@ -353,7 +353,7 @@ async def _notify_subscribers(db, announcements: list[dict]) -> None:
                 np.phone_number
             FROM users.users u
             JOIN users.notification_preferences np ON np.user_id = u.id
-            LEFT JOIN market.companies c ON c.asx_code = :code
+            LEFT JOIN market.companies_current c ON c.asx_code = :code
             WHERE u.subscription_status = 'active'
               AND (np.announcements_email = TRUE OR np.announcements_sms = TRUE)
               AND (

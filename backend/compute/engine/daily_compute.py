@@ -141,7 +141,7 @@ def fetch_financials(cur, asx_code: str) -> dict:
 def fetch_company(cur, asx_code: str) -> dict:
     cur.execute("""
         SELECT shares_outstanding, is_reit, is_miner
-        FROM market.companies WHERE asx_code = %s
+        FROM market.companies_current WHERE asx_code = %s
     """, (asx_code,))
     row = cur.fetchone()
     if not row:

@@ -84,7 +84,7 @@ def fetch_codes(cur, codes: list = None, limit: int = None) -> list:
     sql = """
         SELECT DISTINCT p.asx_code
         FROM market.daily_prices p
-        JOIN market.companies c ON c.asx_code = p.asx_code
+        JOIN market.companies_current c ON c.asx_code = p.asx_code
         WHERE c.status = 'active'
         ORDER BY p.asx_code
     """

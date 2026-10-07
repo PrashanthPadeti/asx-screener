@@ -190,7 +190,12 @@ async def run(dry_run: bool = False, source: str = "auto") -> None:
     async with AsyncSession(engine) as session:
         # ── Fetch existing codes in one query ────────────────────────────────
         existing_rows = (await session.execute(text(
-            "SELECT asx_code FROM market.companies"
+            # This module maintains the SCD history, so it addresses the base
+            # table rather than market.companies_current. The predicate is
+            # explicit because the set is identical either way -- every code
+            # has exactly one current row -- and without it the scan reads
+            # 4,459 rows to build a 2,579-member set.
+            "SELECT asx_code FROM market.companies WHERE is_current = TRUE"
         ))).scalars().all()
         existing_codes: set[str] = set(existing_rows)
         log.info("DB has %d existing companies", len(existing_codes))

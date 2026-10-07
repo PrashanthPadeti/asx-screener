@@ -111,7 +111,7 @@ async def backtest(
         try:
             # ── Company name ──────────────────────────────────────────
             name_r = await db.execute(
-                text("SELECT company_name FROM market.companies WHERE asx_code = :c"),
+                text("SELECT company_name FROM market.companies_current WHERE asx_code = :c"),
                 {"c": code},
             )
             name_row = name_r.fetchone()

@@ -13,3 +13,4 @@ async def sync_asx_companies() -> None:
         await run(dry_run=False, source="auto")
     except Exception as exc:
         log.error("asx_companies_worker failed: %s", exc, exc_info=True)
+        raise          # telemetry must observe the failure

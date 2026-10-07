@@ -20,3 +20,4 @@ async def compute_fund_prices() -> None:
         log.info(f"Cache invalidated: {deleted} asx:funds:* keys flushed")
     except Exception as exc:
         log.error(f"Fund prices worker error: {exc}", exc_info=True)
+        raise          # telemetry must observe the failure

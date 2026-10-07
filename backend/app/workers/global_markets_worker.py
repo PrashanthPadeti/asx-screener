@@ -23,6 +23,7 @@ async def compute_global_markets() -> None:
         log.info(f"Cache invalidated: {deleted} asx:global_markets:* keys flushed")
     except Exception as exc:
         log.error(f"Global markets worker error: {exc}", exc_info=True)
+        raise          # telemetry must observe the failure
     finally:
         try:
             async with AsyncSessionLocal() as db:

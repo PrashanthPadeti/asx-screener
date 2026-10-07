@@ -51,6 +51,7 @@ async def check_portfolio_thresholds() -> None:
             await _run_threshold_checks(db)
         except Exception as e:
             log.error(f"Portfolio threshold worker error: {e}", exc_info=True)
+            raise          # telemetry must observe the failure
 
 
 async def _run_threshold_checks(db) -> None:
@@ -144,6 +145,7 @@ async def send_weekly_portfolio_summaries() -> None:
             await _run_weekly_summaries(db)
         except Exception as e:
             log.error(f"Weekly portfolio summary worker error: {e}", exc_info=True)
+            raise          # telemetry must observe the failure
 
 
 async def _run_weekly_summaries(db) -> None:

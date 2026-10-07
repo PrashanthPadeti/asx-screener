@@ -23,6 +23,7 @@ async def compute_index_prices() -> None:
         log.info(f"Cache invalidated: {deleted} asx:indices:* keys flushed")
     except Exception as exc:
         log.error(f"Index prices worker error: {exc}", exc_info=True)
+        raise          # telemetry must observe the failure
     finally:
         try:
             async with AsyncSessionLocal() as db:

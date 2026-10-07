@@ -18,6 +18,7 @@ async def compute_commodities() -> None:
         log.info(f"Cache invalidated: {deleted} asx:commodities:* keys flushed")
     except Exception as exc:
         log.error(f"Commodities worker error: {exc}", exc_info=True)
+        raise          # telemetry must observe the failure
     finally:
         try:
             async with AsyncSessionLocal() as db:

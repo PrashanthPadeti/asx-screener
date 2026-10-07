@@ -55,6 +55,7 @@ async def send_anomaly_alerts() -> None:
             await _run(db)
         except Exception as e:
             log.error("Anomaly alert worker error: %s", e, exc_info=True)
+            raise          # telemetry must observe the failure
 
 
 async def _run(db: AsyncSession) -> None:

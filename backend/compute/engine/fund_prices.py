@@ -23,6 +23,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from compute.engine.producer_contract import ProducerTally, SourceRefused
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 log = logging.getLogger(__name__)
@@ -168,43 +170,50 @@ def compute_rows(df: pd.DataFrame) -> list[dict]:
 
 # ── Fetch from Yahoo Finance ──────────────────────────────────────────────────
 
-def fetch_fund_data(ticker: str, start_date: date, end_date: date, retries: int = 3) -> pd.DataFrame | None:
-    import time
+def fetch_fund_data(ticker: str, start_date: date,
+                    end_date: date) -> pd.DataFrame | None:
+    """Download OHLCV from Yahoo Finance.
+
+    Returns None when the source legitimately has nothing for this ticker;
+    raises SourceRefused when the source declines to serve us.
+
+    No retry on refusal. The previous implementation slept 30s, then 60s,
+    then 90s per ticker. With all 47 funds refused — which is what happened on
+    3, 4, 5 and 6 October 2026 — that is 8,900 seconds, two and a half hours,
+    for zero rows. Until v11.2.5 those sleeps were on the event loop and took
+    the site down with them; moving them to a worker thread stopped the outage
+    but left the waste. The request was refused before the first fund was
+    asked for, so no amount of waiting inside the run was ever going to help.
+    """
     try:
         import yfinance as yf
     except ImportError:
         log.error("yfinance not installed")
         return None
 
-    for attempt in range(retries):
-        try:
-            t = yf.Ticker(ticker)
-            hist = t.history(
-                start=(start_date - timedelta(days=400)).isoformat(),
-                end=(end_date + timedelta(days=1)).isoformat(),
-                auto_adjust=True,
-            )
-            if hist.empty:
-                log.warning(f"{ticker}: no data from Yahoo Finance")
-                return None
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(
+            start=(start_date - timedelta(days=400)).isoformat(),
+            end=(end_date + timedelta(days=1)).isoformat(),
+            auto_adjust=True,
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "Too Many Requests" in msg or "rate limit" in msg.lower():
+            log.warning(f"{ticker}: source refused the request — {msg[:120]}")
+            raise SourceRefused(ticker, msg[:120]) from exc
+        log.warning(f"{ticker}: fetch failed — {exc}")
+        return None
 
-            hist.index = hist.index.tz_localize(None)
-            df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
-            df.columns = ["open", "high", "low", "close", "volume"]
-            return df.sort_index()
+    if hist.empty:
+        log.warning(f"{ticker}: no data from Yahoo Finance")
+        return None
 
-        except Exception as exc:
-            msg = str(exc)
-            if "Too Many Requests" in msg or "rate limit" in msg.lower():
-                wait = 30 * (attempt + 1)
-                log.warning(f"{ticker}: rate limited — waiting {wait}s (attempt {attempt+1}/{retries})")
-                time.sleep(wait)
-            else:
-                log.warning(f"{ticker}: fetch failed — {exc}")
-                return None
-
-    log.warning(f"{ticker}: all {retries} attempts failed")
-    return None
+    hist.index = hist.index.tz_localize(None)
+    df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
+    df.columns = ["open", "high", "low", "close", "volume"]
+    return df.sort_index()
 
 
 # ── DB operations ─────────────────────────────────────────────────────────────
@@ -314,6 +323,7 @@ async def run(
         if seed_only:
             return
 
+        tally = ProducerTally("fund_prices", expected=len(FUNDS))
         total_rows = 0
         for i, fund in enumerate(FUNDS):
             code   = fund["asx_code"]
@@ -341,13 +351,18 @@ async def run(
             #
             # to_thread moves the whole blocking call, sleeps included, off
             # the loop. The job still takes as long; the API stays up.
-            df = await asyncio.to_thread(
-                fetch_fund_data, ticker, start_date, target_date)
-            if df is None:
+            try:
+                df = await asyncio.to_thread(
+                    fetch_fund_data, ticker, start_date, target_date)
+            except SourceRefused:
+                # Counted, not swallowed. 47 of these is why four days of runs
+                # wrote nothing while reporting success.
+                tally.refusal(ticker)
                 continue
 
-            if df.empty:
+            if df is None or df.empty:
                 log.info(f"  {code}: no data returned")
+                tally.nothing_available()
                 continue
 
             # Compute returns on the FULL fetched history (includes 400-day lookback
@@ -360,8 +375,12 @@ async def run(
             count = await upsert_price_rows(db, code, rows, dry_run)
             log.info(f"  {code}: {count} rows upserted")
             total_rows += count
+            tally.obtained(count)
 
-    log.info(f"Fund prices complete — {total_rows} total rows across {len(FUNDS)} funds")
+    # Partial results are kept; only a total failure raises. See
+    # producer_contract for why no completeness threshold is set here.
+    log.info(f"Fund prices complete — {tally.summary}")
+    tally.verify()
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

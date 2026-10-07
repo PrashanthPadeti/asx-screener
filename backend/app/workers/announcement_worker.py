@@ -182,6 +182,7 @@ async def fetch_announcements() -> None:
                 m.expected = await _run(db)
         except Exception as e:
             log.error(f"Announcement worker error: {e}", exc_info=True)
+            raise          # telemetry must observe the failure
         finally:
             try:
                 await db.execute(text("""

@@ -21,6 +21,7 @@ async def run_asx_indices() -> None:
         log.info("ASX index constituent flags updated")
     except Exception as exc:
         log.error("ASX indices worker error: %s", exc, exc_info=True)
+        raise          # telemetry must observe the failure
     finally:
         # Always record execution time so Pipeline Monitor shows true last-run
         try:

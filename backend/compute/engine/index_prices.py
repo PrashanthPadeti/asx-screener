@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from compute.engine.producer_contract import ProducerTally, SourceRefused
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 log = logging.getLogger(__name__)
@@ -122,45 +124,52 @@ def fetch_index_data(
     ticker: str,
     start_date: date,
     end_date: date,
-    retries: int = 3,
 ) -> pd.DataFrame | None:
-    """Download OHLCV from Yahoo Finance. Returns None on failure."""
-    import time
+    """Download OHLCV from Yahoo Finance.
+
+    Returns None when the source legitimately has nothing for this ticker.
+    Raises SourceRefused when the source declines to serve us — those are
+    different events and the caller must be able to tell them apart.
+
+    No retry on refusal, deliberately. The previous implementation tried three
+    times with 5s/10s/15s backoff. Measured on 4, 5 and 6 October 2026: the
+    very first request of the day was refused at 06:30:03-06:30:07, every
+    ticker then failed all three attempts, and the whole cascade bought
+    nothing at a cost of ~30s per ticker — 375s per run for a job whose work
+    takes under a second when the source is willing. Retrying inside a window
+    that is already closed cannot succeed; and if refusals count toward the
+    upstream's rolling quota, the retries feed the block they are retrying
+    against.
+    """
     try:
         import yfinance as yf
     except ImportError:
         log.error("yfinance not installed — run: pip install yfinance")
         return None
 
-    for attempt in range(retries):
-        try:
-            t = yf.Ticker(ticker)
-            hist = t.history(
-                start=(start_date - timedelta(days=400)).isoformat(),
-                end=(end_date + timedelta(days=1)).isoformat(),
-                auto_adjust=True,
-            )
-            if hist.empty:
-                log.warning(f"{ticker}: no data returned from Yahoo Finance")
-                return None
+    try:
+        t = yf.Ticker(ticker)
+        hist = t.history(
+            start=(start_date - timedelta(days=400)).isoformat(),
+            end=(end_date + timedelta(days=1)).isoformat(),
+            auto_adjust=True,
+        )
+    except Exception as exc:
+        msg = str(exc)
+        if "Too Many Requests" in msg or "rate limit" in msg.lower():
+            log.warning(f"{ticker}: source refused the request — {msg[:120]}")
+            raise SourceRefused(ticker, msg[:120]) from exc
+        log.warning(f"{ticker}: fetch failed — {exc}")
+        return None
 
-            hist.index = hist.index.tz_localize(None)
-            df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
-            df.columns = ["open", "high", "low", "close", "volume"]
-            return df.sort_index()
+    if hist.empty:
+        log.warning(f"{ticker}: no data returned from Yahoo Finance")
+        return None
 
-        except Exception as exc:
-            msg = str(exc)
-            if "Too Many Requests" in msg or "rate limit" in msg.lower():
-                wait = 5 * (attempt + 1)   # short wait — long sleeps block the event loop for many tickers
-                log.warning(f"{ticker}: rate limited — waiting {wait}s (attempt {attempt+1}/{retries})")
-                time.sleep(wait)
-            else:
-                log.warning(f"{ticker}: fetch failed — {exc}")
-                return None
-
-    log.warning(f"{ticker}: all {retries} attempts failed")
-    return None
+    hist.index = hist.index.tz_localize(None)
+    df = hist[["Open", "High", "Low", "Close", "Volume"]].copy()
+    df.columns = ["open", "high", "low", "close", "volume"]
+    return df.sort_index()
 
 
 # ── DB upsert ─────────────────────────────────────────────────────────────────
@@ -236,6 +245,8 @@ async def run(
 
     log.info(f"Index prices: fetching {start_date} → {target_date} (dry_run={dry_run})")
 
+    tally = ProducerTally("index_prices", expected=len(TICKER_MAP))
+
     async with AsyncSessionLocal() as db:
         total_rows = 0
         for index_code, ticker in TICKER_MAP.items():
@@ -244,13 +255,18 @@ async def run(
             # event loop; a blocking fetch here stops the API answering
             # anything. index_prices did exactly that for five minutes on
             # 6 Oct 2026, the morning after the fund_prices fix shipped.
-            df = await asyncio.to_thread(
-                fetch_index_data, ticker, start_date, target_date)
-            if df is None:
+            try:
+                df = await asyncio.to_thread(
+                    fetch_index_data, ticker, start_date, target_date)
+            except SourceRefused:
+                # Counted, not swallowed. A refusal is why this run has no
+                # data, and the run must be able to say so at the end.
+                tally.refusal(ticker)
                 continue
 
-            if df.empty:
+            if df is None or df.empty:
                 log.info(f"  {index_code}: no data returned")
+                tally.nothing_available()
                 continue
 
             # Compute returns on the FULL fetched history (includes 400-day lookback
@@ -263,8 +279,13 @@ async def run(
             count = await upsert_rows(db, index_code, rows, dry_run)
             log.info(f"  {index_code}: {count} rows upserted")
             total_rows += count
+            tally.obtained(count)
 
-    log.info(f"Index prices complete — {total_rows} total rows")
+    # Partial results are kept: each ticker committed as it went, and a run
+    # that obtained some of its population is reported as it is rather than
+    # discarded. Only a total failure raises.
+    log.info(f"Index prices complete — {tally.summary}")
+    tally.verify()
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

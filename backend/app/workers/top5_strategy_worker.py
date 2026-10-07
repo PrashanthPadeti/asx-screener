@@ -24,3 +24,4 @@ async def run_top5_strategy() -> None:
         log.info("AlphaFive picks computed for week of %s", pick_week)
     except Exception as exc:
         log.error("AlphaFive strategy worker error: %s", exc, exc_info=True)
+        raise          # telemetry must observe the failure

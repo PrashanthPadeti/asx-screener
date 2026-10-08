@@ -5,7 +5,7 @@ import {
   Newspaper, Search, X, RefreshCw, AlertTriangle, Filter,
   ExternalLink, Clock, ChevronLeft, ChevronRight, Bookmark,
   TrendingUp, DollarSign, Users, PauseCircle, BarChart2,
-  FileText, Lock, Zap, Calendar,
+  FileText, Calendar,
 } from 'lucide-react'
 import { HelpDrawer } from '@/components/HelpDrawer'
 import { NEWS_SECTIONS } from '@/lib/helpContent'
@@ -13,7 +13,6 @@ import {
   getAnnouncements, getLatestAnnouncements,
   AnnouncementFeedItem, AnnouncementFeed,
 } from '@/lib/api'
-import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -21,16 +20,23 @@ import { cn } from '@/lib/utils'
 const PAGE_SIZE = 30
 
 // Tabs definition
+// News is a free page and every tab on it is free, Watchlist News included.
+// The watchlist entitlement is a COUNT, not an access gate -- Free holds 1
+// watchlist of 50 stocks, Pro 10 of 200, Premium 20 of 500 -- so filtering
+// free announcements by the watchlist a user already owns adds no new
+// entitlement to gate. The `gate` field is gone rather than set to null
+// everywhere: a nullable field invites someone to set it again, and a Pro
+// value here contradicted the pricing table for as long as it existed.
 const TABS = [
-  { id: 'all',              label: 'All',               icon: Newspaper,     gate: null   as null | 'pro' | 'premium' },
-  { id: 'announcements',   label: 'ASX Announcements',  icon: FileText,      gate: null   as null | 'pro' | 'premium' },
-  { id: 'market_sensitive',label: 'Market Sensitive',   icon: AlertTriangle, gate: null   as null | 'pro' | 'premium' },
-  { id: 'trading_halts',   label: 'Trading Halts',      icon: PauseCircle,   gate: null   as null | 'pro' | 'premium' },
-  { id: 'results',         label: 'Results',             icon: BarChart2,     gate: null   as null | 'pro' | 'premium' },
-  { id: 'dividends',       label: 'Dividends',           icon: DollarSign,    gate: null   as null | 'pro' | 'premium' },
-  { id: 'capital_raisings',label: 'Capital Raisings',   icon: TrendingUp,    gate: null   as null | 'pro' | 'premium' },
-  { id: 'director_changes',label: 'Director Changes',   icon: Users,         gate: null   as null | 'pro' | 'premium' },
-  { id: 'watchlist',       label: 'Watchlist News',      icon: Bookmark,      gate: 'pro'  as null | 'pro' | 'premium' },
+  { id: 'all',              label: 'All',                icon: Newspaper     },
+  { id: 'announcements',   label: 'ASX Announcements',   icon: FileText      },
+  { id: 'market_sensitive',label: 'Market Sensitive',    icon: AlertTriangle },
+  { id: 'trading_halts',   label: 'Trading Halts',       icon: PauseCircle   },
+  { id: 'results',         label: 'Results',             icon: BarChart2     },
+  { id: 'dividends',       label: 'Dividends',           icon: DollarSign    },
+  { id: 'capital_raisings',label: 'Capital Raisings',    icon: TrendingUp    },
+  { id: 'director_changes',label: 'Director Changes',    icon: Users         },
+  { id: 'watchlist',       label: 'Watchlist News',      icon: Bookmark      },
 ] as const
 
 type TabId = typeof TABS[number]['id']
@@ -298,38 +304,14 @@ function LiveTicker({ items }: { items: AnnouncementFeedItem[] }) {
   )
 }
 
-// ── Subscription gate banner ──────────────────────────────────────────────────
-
-function UpgradeBanner({ tier, feature }: { tier: 'pro' | 'premium'; feature: string }) {
-  return (
-    <div className="flex items-center justify-between gap-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl">
-      <div className="flex items-center gap-3">
-        <Lock className="w-5 h-5 text-blue-600 shrink-0" />
-        <div>
-          <p className="text-sm font-semibold text-blue-900">{feature}</p>
-          <p className="text-xs text-blue-600 mt-0.5">
-            Available on {tier === 'pro' ? 'Pro and Premium' : 'Premium'} plans
-          </p>
-        </div>
-      </div>
-      <Link
-        href="/pricing"
-        className="shrink-0 px-4 py-2 bg-blue-600 text-white text-xs font-semibold rounded-lg hover:bg-blue-700 transition-colors"
-      >
-        Upgrade
-      </Link>
-    </div>
-  )
-}
-
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+// Nothing on this page depends on the viewer's plan, so it reads no plan at
+// all. The removed UpgradeBanner, isPro and isPremium each inlined their own
+// list of plan names -- the drift that frontend/lib/plans.ts exists to stop.
+// Anything gated here in future must import featureLevel() from there.
+
 export default function NewsPage() {
-  const { user } = useAuth()
-
-  const isPro     = user && ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(user.plan)
-  const isPremium = user && ['premium', 'enterprise_premium'].includes(user.plan)
-
   const [feed, setFeed]               = useState<AnnouncementFeed | null>(null)
   const [tickerItems, setTickerItems] = useState<AnnouncementFeedItem[]>([])
   const [loading, setLoading]         = useState(true)
@@ -414,8 +396,6 @@ export default function NewsPage() {
   }
 
   function handleTabChange(tab: TabId) {
-    // Gate watchlist tab for Pro+
-    if (tab === 'watchlist' && !isPro) return
     setActiveTab(tab)
     setPage(0)
   }
@@ -476,7 +456,6 @@ export default function NewsPage() {
             {TABS.map(tab => {
               const Icon = tab.icon
               const isActive = activeTab === tab.id
-              const isLocked = tab.gate === 'pro' && !isPro
 
               return (
                 <button
@@ -487,13 +466,10 @@ export default function NewsPage() {
                     isActive
                       ? 'border-blue-600 text-blue-700'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300',
-                    isLocked && 'opacity-60',
                   )}
-                  title={isLocked ? `Requires Pro plan` : undefined}
                 >
                   <Icon className="w-3.5 h-3.5" />
                   {tab.label}
-                  {isLocked && <Lock className="w-3 h-3 text-gray-400" />}
                 </button>
               )
             })}
@@ -502,11 +478,6 @@ export default function NewsPage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-5 space-y-4">
-
-        {/* Watchlist upgrade gate */}
-        {activeTab === 'watchlist' && !isPro && (
-          <UpgradeBanner tier="pro" feature="Watchlist News — see announcements only from your watchlisted stocks" />
-        )}
 
         {/* Filters */}
         <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
@@ -555,21 +526,16 @@ export default function NewsPage() {
               Market sensitive only
             </label>
 
-            {/* Watchlist only (Pro+) */}
-            <label className={cn(
-              'flex items-center gap-2 text-sm cursor-pointer select-none',
-              isPro ? 'text-gray-600' : 'text-gray-400 opacity-60',
-            )}>
+            {/* Watchlist only */}
+            <label className="flex items-center gap-2 text-sm cursor-pointer select-none text-gray-600">
               <input
                 type="checkbox"
                 checked={watchlistOnly}
-                onChange={e => isPro ? setWatchlistOnly(e.target.checked) : undefined}
-                disabled={!isPro}
-                className="w-4 h-4 rounded text-blue-500 focus:ring-blue-400 disabled:opacity-50"
+                onChange={e => setWatchlistOnly(e.target.checked)}
+                className="w-4 h-4 rounded text-blue-500 focus:ring-blue-400"
               />
               <Bookmark className="w-3.5 h-3.5 text-blue-500" />
               Watchlist only
-              {!isPro && <Lock className="w-3 h-3" />}
             </label>
 
             {/* Date range toggle */}
@@ -628,23 +594,12 @@ export default function NewsPage() {
           )}
         </div>
 
-        {/* Premium AI features banner */}
-        {!isPremium && (
-          <div className="flex items-center justify-between gap-4 p-3 bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl">
-            <div className="flex items-center gap-2.5">
-              <Zap className="w-4 h-4 text-purple-600 shrink-0" />
-              <p className="text-xs text-purple-800">
-                <span className="font-semibold">Premium:</span> Get AI summaries, impact analysis, and sentiment tags for every announcement.
-              </p>
-            </div>
-            <Link
-              href="/pricing"
-              className="shrink-0 px-3 py-1.5 bg-purple-600 text-white text-xs font-semibold rounded-lg hover:bg-purple-700 transition-colors"
-            >
-              Upgrade
-            </Link>
-          </div>
-        )}
+        {/* Removed 8 Oct 2026: a Premium banner offering "AI summaries, impact
+            analysis, and sentiment tags for every announcement". None of the
+            three exists. GET /api/v1/announcements returns no such field,
+            ai.py has no announcement route, and a Premium user saw the banner
+            disappear with nothing in its place. Do not restore the banner
+            before the feature; sell only what the API can serve. */}
 
         {/* Stats row */}
         {feed && (
@@ -754,10 +709,12 @@ export default function NewsPage() {
           </div>
         )}
 
-        {/* Free tier history gate */}
-        {!isPro && feed && feed.total > PAGE_SIZE && page >= 2 && (
-          <UpgradeBanner tier="pro" feature="Full announcement history — access months of filings with Pro" />
-        )}
+        {/* Removed 8 Oct 2026: a banner telling Free users past page 2 that
+            "Full announcement history" needed Pro. No such cap exists --
+            load() and changePage() take any offset, and the API clamps only
+            at limit<=200 per page. It advertised a restriction the system
+            does not implement, which is the Sector-screens defect inverted:
+            a claim is wrong whether it over- or under-states access. */}
       </div>
     </div>
   )

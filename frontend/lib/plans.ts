@@ -47,3 +47,39 @@ export function hasFeatureAccess(
 ): boolean {
   return featureLevel(plan) >= featureLevel(required)
 }
+
+/**
+ * Quota limits, mirroring PLAN_LIMITS in backend/app/core/plans.py.
+ *
+ * The backend is authoritative and enforces every one of these; this copy
+ * exists only so the pricing table and the alerts page can display them
+ * without a round trip. A mismatch shows the wrong number to a visitor — it
+ * cannot grant anything.
+ *
+ * `GET /api/v1/billing/plans` returns the real catalogue including these
+ * values, and the pricing page should eventually read from it rather than
+ * mirror it. Until then this is one copy instead of the three that existed
+ * (pricing/page.tsx, alerts/page.tsx, PlanGate.tsx).
+ */
+export interface PlanLimits {
+  portfolios:        number
+  watchlists:        number
+  stocksPerWl:       number
+  alerts:            number
+  nlScreener:        boolean
+  csvExport:         boolean
+  portfolioInsights: boolean
+  seatLimit:         number
+}
+
+export const PLAN_LIMITS: Record<string, PlanLimits> = {
+  free:               { portfolios: 1,  watchlists: 1,  stocksPerWl: 50,  alerts: 3,   nlScreener: false, csvExport: false, portfolioInsights: false, seatLimit: 1  },
+  pro:                { portfolios: 10, watchlists: 20, stocksPerWl: 500, alerts: 50,  nlScreener: false, csvExport: true,  portfolioInsights: false, seatLimit: 1  },
+  premium:            { portfolios: 50, watchlists: 50, stocksPerWl: 500, alerts: 100, nlScreener: true,  csvExport: true,  portfolioInsights: true,  seatLimit: 1  },
+  enterprise_pro:     { portfolios: 10, watchlists: 20, stocksPerWl: 500, alerts: 50,  nlScreener: false, csvExport: true,  portfolioInsights: false, seatLimit: 10 },
+  enterprise_premium: { portfolios: 50, watchlists: 50, stocksPerWl: 500, alerts: 100, nlScreener: true,  csvExport: true,  portfolioInsights: true,  seatLimit: 10 },
+}
+
+export function planLimits(plan: string | null | undefined): PlanLimits {
+  return PLAN_LIMITS[plan ?? 'free'] ?? PLAN_LIMITS.free
+}

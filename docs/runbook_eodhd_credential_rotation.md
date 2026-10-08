@@ -16,8 +16,10 @@ dead key. None of them is the proof.
 **Standing rules for every step below**
 
 - **Never** echo the key — not to the terminal, a log, shell history, or the
-  evidence record. Where two values must be compared, compare a truncated
-  SHA-256 fingerprint, never the value.
+  evidence record. Where two values must be compared, compare them
+  **in-process** and emit only booleans. Do not print or persist a
+  fingerprint either: a truncated hash is derived credential material, and it
+  is not needed to establish the property.
 - **Replace** the existing `.env` definition. Never append a second one: with
   duplicate keys the winner depends on the loader, and the two loaders here
   are different (see step 3).
@@ -28,18 +30,39 @@ dead key. None of them is the proof.
 
 ---
 
+## Ordering — install first, revoke after the proof
+
+**Default (preferred): issue → install → restart → prove → revoke.**
+
+Revoking before the new key is proven turns a typo in the replacement into an
+avoidable source outage: every EODHD producer fails, with no working
+credential to fall back to. Installing first keeps a known-good key live until
+the replacement has authenticated.
+
+    0  issue new key (do NOT revoke yet)
+    1  locate the .env file
+    2  replace the existing value
+    3  restart via ./deploy.sh --backend, prove the process is serving
+    4  prove both loaders agree AND the AXJO.INDX call returns real data
+    5  revoke the old key
+    6  record provider-side revocation evidence
+    7  confirm no fresh unredacted api_token= logging
+    8  sanitise historical logs
+
+**If EODHD's rotation necessarily invalidates the old key the moment a new one
+is issued**, this ordering is not available. Then revoke-on-issue at step 0,
+accept a short fail-closed window, and record that it was deliberate rather
+than an accident — a producer failing in that window is expected, not a
+defect, and should not be chased.
+
+Decide which applies **before** touching anything, and write it into the
+evidence record.
+
 ## Step 0 — provider side
 
 1. Issue a new key in the EODHD dashboard.
-2. **Revoke the old key** in the dashboard.
-3. Capture evidence: a screenshot or dashboard record showing the old key
-   revoked and the new one active, **with the key values masked**.
-
-> **Negative control.** The requirement is that the retired credential no
-> longer authenticates. Replaying it would mean handling the leaked secret
-> again, which is what this exercise exists to end — so provider-side
-> revocation evidence is the control. Record it as such rather than as an
-> untested assumption.
+2. **Do not revoke the old key yet** — that is step 5, after the proof.
+   (Unless the provider forces revoke-on-issue; see the ordering note above.)
 
 ---
 
@@ -137,26 +160,27 @@ Run it with the interpreter from step 1:
 
 ```bash
 cd /opt/asx-screener/backend && /opt/asx-screener/backend/venv/bin/python - <<'PY'
-import asyncio, hashlib, sys
+import asyncio, sys
 sys.path.insert(0, "/opt/asx-screener/backend")
 from compute.engine.asx_indices import _fetch_eodhd_constituents, EODHD_API_KEY
 from app.core.config import settings
 
-def fp(v):                      # fingerprint, never the value
-    return hashlib.sha256(v.encode()).hexdigest()[:12] if v else "EMPTY"
-
-env_fp, set_fp = fp(EODHD_API_KEY), fp(settings.EODHD_API_KEY)
-print(f"os.environ loader  : {env_fp}")
-print(f"settings loader    : {set_fp}")
-print(f"loaders agree      : {env_fp == set_fp}")
+# Compared in-process; only booleans leave this script. No fingerprint is
+# printed -- a truncated hash is still derived credential material, and the
+# property to establish is "both present and equal", not "which value".
+env_key, set_key = EODHD_API_KEY or "", settings.EODHD_API_KEY or ""
+print(f"asx_indices_loader_present={bool(env_key)}".lower())
+print(f"settings_loader_present={bool(set_key)}".lower())
+print(f"loader_values_match={env_key == set_key}".lower())
 
 codes = asyncio.run(_fetch_eodhd_constituents("AXJO.INDX"))
 have  = {c for c in ("BHP", "CBA", "CSL") if c in codes}
-print(f"constituents       : {len(codes)}")
-print(f"known members found: {sorted(have)}")
+print(f"constituents={len(codes)}")
+print(f"known_members_found={sorted(have)}")
 
-ok = (env_fp == set_fp != "EMPTY") and 150 <= len(codes) <= 250 and len(have) == 3
-print("BOUNDARY PROOF:", "PASS" if ok else "FAIL")
+ok = bool(env_key) and env_key == set_key and 150 <= len(codes) <= 250 \
+     and len(have) == 3
+print("BOUNDARY_PROOF=" + ("PASS" if ok else "FAIL"))
 sys.exit(0 if ok else 1)
 PY
 ```
@@ -165,13 +189,36 @@ PY
 
 | Assertion | What it rules out |
 |---|---|
-| `loaders agree` and not `EMPTY` | the two loaders read different files, or one resolved to nothing. `asx_indices` reads `backend/.env` via `load_dotenv` at import; `settings` reads a path relative to the process CWD. Proving one leaves the other unproven |
+| `loader_values_match` and both present | the two loaders read different files, or one resolved to nothing. `asx_indices` reads `backend/.env` via `load_dotenv` at import; `settings` reads a path relative to the process CWD. Proving one leaves the other unproven |
 | `150 <= len <= 250` | an empty or truncated payload. A refusal often returns valid JSON with no components — which `codes_from_components` turns into an empty set, not an error |
 | three known members present | a structurally valid response for the wrong instrument, or a cached placeholder |
 | exit status | makes the proof scriptable and keeps "it looked fine" out of the record |
 
-A `FAIL` on `loaders agree` means the restart did not pick up the file you
-edited. Do not proceed to step 6.
+A `FAIL` on `loader_values_match` means the restart did not pick up the file
+you edited. Do not proceed.
+
+### What this proof does and does not certify
+
+State this precisely, because it is easy to assert more than was tested:
+
+- **Tested over the network:** the `asx_indices` path — `os.environ` loading
+  at import, the production client, a real authenticated EODHD request, and
+  semantically valid current data.
+- **Tested in-process only:** that the `settings` path resolved *the same
+  credential*. It was not exercised against EODHD.
+- **Not tested at all:** the behaviour of each individual `settings`-based
+  consumer (`commodities`, and anything else reading
+  `settings.EODHD_API_KEY`).
+
+This is **sufficient for credential rotation**, because those consumers simply
+read `settings.EODHD_API_KEY` and pass it to the provider — if the value is
+identical to the one just proven to authenticate, the credential is not what
+would break them.
+
+It is **not a behavioural certification of every EODHD consumer.** If a
+`settings`-based consumer later fails, this runbook's PASS is not evidence
+that its credential is sound for that path; it is evidence that the value it
+reads is the same one `asx_indices` authenticated with.
 
 ---
 
@@ -188,6 +235,22 @@ cd /opt/asx-screener/logs && total=$(grep -c 'api_token=' backend.log); red=$(gr
 `total == red` is the pass. Any gap means an unredacted token is being written
 *now*, and the redaction work is incomplete — stop and fix that before step 6,
 or you will sanitise a log that immediately refills.
+
+---
+
+## Step 5 — revoke the old key, and record it
+
+Only now, with the replacement proven to authenticate and return real data.
+
+1. Revoke the old key in the EODHD dashboard.
+2. Capture evidence: a dashboard record showing the old key revoked and the
+   new one active, **with both values masked**.
+
+> **Negative control.** The requirement is that the retired credential no
+> longer authenticates. Replaying it would mean handling the leaked secret
+> again, which is what this exercise exists to end — so provider-side
+> revocation evidence *is* the control. Record it as the control, not as an
+> untested assumption.
 
 ---
 
@@ -208,17 +271,24 @@ has not removed the credential.
 
 | # | Evidence |
 |---|---|
-| 0 | Provider record: old key revoked, new key active, values masked |
+| — | Which ordering applied, and why (install-first, or forced revoke-on-issue) |
+| 0 | New key issued; old key still live at this point |
 | 1 | File inventory: exactly one definition, in one file |
 | 2 | Post-write check: one definition, non-empty, permissions unchanged |
 | 3 | `deploy.sh --backend` output and the live `openapi.json` version |
-| 4 | Boundary proof output: both fingerprints, agreement, constituent count, known members, `PASS` |
-| 5 | Redaction counts showing `total == redacted` |
-| 6 | List of files sanitised, including archives and off-box copies |
+| 4 | Boundary proof output: the three booleans, constituent count, known members, `BOUNDARY_PROOF=PASS` |
+| 5 | Provider record: old key revoked, new key active, both masked |
+| 7 | Redaction counts showing `total == redacted` |
+| 8 | List of files sanitised, including archives and off-box copies |
 
-Fingerprints are truncated SHA-256 and are recorded precisely so the record
-can show the two loaders resolved to the *same* credential without the record
-containing the credential.
+Every item is non-secret by construction. The boundary proof emits booleans
+rather than fingerprints, so the record can show that the two loaders resolved
+to the same credential without containing the credential **or anything derived
+from it**.
+
+Record alongside item 4 the scope limit stated in step 4: the network proof
+exercised the `asx_indices` path; the `settings` path was proven equal
+in-process, not exercised.
 
 ---
 

@@ -331,8 +331,16 @@ export default function PricingPage() {
                   <FeatureItem label={`${plan.features.portfolios} portfolio${plan.features.portfolios > 1 ? 's' : ''}`} ok />
                   <FeatureItem label={`${plan.features.watchlists} watchlist${plan.features.watchlists > 1 ? 's' : ''} (${plan.features.stocksPerWl} stocks)`} ok />
                   <FeatureItem label={`${plan.features.alerts} price alert${plan.features.alerts > 1 ? 's' : ''}`} ok />
-                  <FeatureItem label="Saved & community screens" ok />
-                  <FeatureItem label="AI-powered screener" ok={plan.features.nlScreener} />
+                  {/* Saved screens are available on every plan; COMMUNITY
+                      screens are not -- saved_screens.py returns 403 below
+                      Premium. They were listed together with an unconditional
+                      tick, so the Free and Pro cards both claimed a Premium
+                      feature. */}
+                  <FeatureItem label="Saved screens" ok />
+                  <FeatureItem label="Community screens"
+                               ok={plan.id === 'premium'} />
+                  <FeatureItem label="AI screener (natural language)"
+                               ok={plan.features.nlScreener} />
                   <FeatureItem label="CSV export" ok={plan.features.csvExport} />
                 </ul>
 

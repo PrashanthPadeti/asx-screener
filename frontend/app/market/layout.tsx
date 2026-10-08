@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   // inherited template, so pages under this segment received no site
   // suffix and had hardcoded their own. Only `template` propagates.
   title: {
-    default:  'ASX Market Overview | Top Movers, Sector Heatmap and Market Signals',
+    default:  'ASX Market Overview | Top Movers, Sector Heatmap, Highs and Lows',
     template: '%s | ASX Screener',
   },
   description: 'Track ASX market activity, sector performance, top gainers, top losers, volume activity, and market signals. Live ASX market overview for Australian investors.',

@@ -109,8 +109,10 @@ const FEATURE_ROWS: { label: string; free: Cell; pro: Cell; premium: Cell }[] = 
 
   // ── Market data ────────────────────────────────────────────────────────
   { label: 'ASX market overview',      free: true,  pro: true,  premium: true  },
+  { label: 'Highs, Lows & Volume',     free: true,  pro: true,  premium: true  },
+  { label: 'Volume activity',          free: true,  pro: true,  premium: true  },
+  { label: 'Market anomalies',         free: true,  pro: true,  premium: true  },
   { label: 'News',                     free: true,  pro: true,  premium: true  },
-  { label: 'Market signals',           free: true,  pro: true,  premium: true  },
   { label: 'Short interest data',      free: true,  pro: true,  premium: true  },
   { label: 'Metrics glossary',         free: false, pro: true,  premium: true  },
   { label: 'Broker compare',           free: false, pro: true,  premium: true  },

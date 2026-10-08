@@ -64,7 +64,7 @@ export const MARKET_SECTIONS: SectionDef[] = [
   {
     id: 'market-signals',
     icon: '⚡', iconBg: 'bg-amber-50', iconText: 'text-amber-600',
-    title: 'Market Signals',
+    title: 'Highs, Lows & Volume',
     summary: 'Stocks triggering notable technical price events — near multi-period highs/lows or showing unusual volume. A momentum and breakout scanner.',
     howToUse: '"↑ Highs" finds breakout candidates near new highs. "↓ Lows" spots oversold stocks. "⚡ Volume" detects unusual activity — often precedes big moves. 52W is the most widely watched period.',
     filters: [
@@ -101,7 +101,7 @@ export const MARKET_SECTIONS: SectionDef[] = [
     icon: '🟢', iconBg: 'bg-emerald-50', iconText: 'text-emerald-600',
     title: 'Heavy Buying',
     summary: 'Stocks with a simultaneous volume surge AND rising price — a sign of aggressive accumulation. Buyers are in control.',
-    howToUse: 'Combine with "↑ Highs" in Market Signals for confluence. Note: high volume + price up can also mean overbought short-term.',
+    howToUse: 'Combine with "↑ Highs" in Highs, Lows & Volume for confluence. Note: high volume + price up can also mean overbought short-term.',
     columns: [
       { name: 'Vol Ratio', desc: "Today's volume ÷ 20-day average. Higher = more unusual the buying activity." },
       { name: '1W',        desc: '1-week price return — confirms whether buying is sustained.' },
@@ -112,7 +112,7 @@ export const MARKET_SECTIONS: SectionDef[] = [
     icon: '🔴', iconBg: 'bg-red-50', iconText: 'text-red-600',
     title: 'Heavy Selling',
     summary: 'Stocks with a simultaneous volume surge AND falling price — distribution or panic selling. Sellers are in control.',
-    howToUse: 'Warning signal — stocks here may continue to fall. Can also be used as a contrarian oversold bounce screen when combined with "↓ Lows" in Market Signals.',
+    howToUse: 'Warning signal — stocks here may continue to fall. Can also be used as a contrarian oversold bounce screen when combined with "↓ Lows" in Highs, Lows & Volume.',
     columns: [
       { name: 'Vol Ratio', desc: "Today's volume ÷ 20-day average. Higher = more significant selling pressure." },
       { name: '1W',        desc: '1-week return — deeply negative confirms strong selling.' },

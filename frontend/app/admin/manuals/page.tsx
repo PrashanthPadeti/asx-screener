@@ -104,7 +104,7 @@ function MarketOverviewManual() {
       <P><strong>How to read it:</strong> heavy volume confirms conviction. A price rise on big volume is stronger than the same rise on thin volume; heavy selling volume can mark distribution or capitulation.</P>
       <P><strong>Why it matters / real use:</strong> volume often precedes or confirms a move. Institutional accumulation/distribution shows up here before it shows up in the price trend.</P>
 
-      <H3>Market Signals</H3>
+      <H3>Highs, Lows & Volume</H3>
       <P><strong>What it shows:</strong> rule-based technical events with a <strong>period selector</strong> — typically <strong>near period high</strong>, <strong>near period low</strong>, and <strong>volume surge</strong> (default window 52-week).</P>
       <P><strong>How to read it:</strong> “near high” = breakout/strength candidates; “near low” = potential value or falling-knife candidates; “volume surge” = something is happening, go find out why.</P>
       <P><strong>Why it matters / real use:</strong> a fast, objective filter for momentum and mean-reversion setups without manually charting hundreds of stocks.</P>
@@ -115,7 +115,7 @@ function MarketOverviewManual() {
       <P><strong>Why it matters / real use:</strong> a daily idea feed of “what’s out of the ordinary,” turning unusual behaviour into a research shortlist.</P>
 
       <Callout tone="amber" title="Access tiers">
-        Free users see the Sector Heatmap and Top Movers. <strong>Volume Activity, Market Signals and Market Anomalies are Pro/Premium</strong> — free users see an upgrade prompt in those panels.
+        Free users see the Sector Heatmap and Top Movers. <strong>Volume Activity, Highs/Lows/Volume and Market Anomalies are Pro/Premium</strong> — free users see an upgrade prompt in those panels.
       </Callout>
 
       {/* 4. DATA */}
@@ -156,7 +156,7 @@ function MarketOverviewManual() {
       <H2 id="features">6. Functional Features</H2>
       <UL items={[
         <><strong>Sector heatmap tiles</strong> — colour-coded, sized by weight; the full heatmap page adds a 5-day / 5-week toggle, sector + market-cap filters, and Excel export.</>,
-        <><strong>Time-period selectors</strong> — on Top Movers and Market Signals, switch the window (1D/1W/1M/3M, 52-week).</>,
+        <><strong>Time-period selectors</strong> — on Top Movers and Highs/Lows/Volume, switch the window (1D/1W/1M/3M, 52-week).</>,
         <><strong>Market-cap filters</strong> — on Top Movers and Volume Activity, restrict to all / large / mid / small caps.</>,
         <><strong>Anomaly type filter</strong> — narrow the anomalies list to one category.</>,
         <><strong>Ranked tables &amp; cards</strong> — gainers, losers, buying/selling pressure, signals, anomalies, each ranked.</>,
@@ -169,7 +169,7 @@ function MarketOverviewManual() {
         'Open /market. Scan the Sector Heatmap for the day’s red/green pattern.',
         'Switch Top Movers to the 1W window and filter to large caps to ignore micro-cap noise.',
         'Open Volume Activity → Buying Pressure to see where heavy money is flowing in.',
-        'Check Market Signals → “near period high” for breakout candidates.',
+        'Check Highs, Lows & Volume → “near period high” for breakout candidates.',
         'Scan Market Anomalies, filter to “high short interest”, and click “Open in Screener” to find peers.',
         'Click any interesting ticker to open its Company Detail page for the deep-dive.',
       ]} />

@@ -116,7 +116,7 @@ function ProGate({ children }: { children: React.ReactNode }) {
         <Lock className="w-6 h-6 text-blue-500" />
         <div className="text-center">
           <p className="text-sm font-semibold text-slate-800">Pro Feature</p>
-          <p className="text-xs text-slate-500 mt-0.5">Upgrade to access full volume activity, market signals, and anomalies.</p>
+          <p className="text-xs text-slate-500 mt-0.5">Upgrade to access full volume activity, highs and lows, and anomalies.</p>
         </div>
         <Link href="/pricing"
           className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-colors">
@@ -381,7 +381,17 @@ function apiCapTier(t: CapTier): 'mega' | 'large' | 'mid' | 'small' | 'micro' | 
 export default function MarketPage() {
   const { user } = useAuth()
   const userPlan  = user?.plan ?? 'free'
-  const isPro     = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+  // Market Overview is a free page, so everything on it is free. Highs, Lows
+  // & Volume, Volume Activity and Market Anomalies used to be Pro-gated while
+  // the page itself was advertised as free -- a free account reached the page
+  // and found three of its five panels blurred.
+  //
+  // Set here rather than by deleting the ProGate branches below, so restoring
+  // the gate is a one-line change. If it stays open, those branches and the
+  // blurred placeholder tables are dead code worth removing.
+  const isPro     = true
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _userIsPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
 
   const [data, setData]       = useState<MarketDashboard | null>(null)
   const [loading, setLoading] = useState(true)
@@ -604,12 +614,12 @@ export default function MarketPage() {
         )}
       </div>
 
-      {/* ── Market Signals ─────────────────────────────────────────────────── */}
+      {/* ── Highs, Lows & Volume ─────────────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
-            <h2 className="text-sm font-semibold text-slate-700">Market Signals</h2>
+            <h2 className="text-sm font-semibold text-slate-700">Highs, Lows & Volume</h2>
             {!isPro && (
               <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-semibold">Pro</span>
             )}

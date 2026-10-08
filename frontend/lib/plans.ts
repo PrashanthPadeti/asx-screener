@@ -74,10 +74,10 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS: Record<string, PlanLimits> = {
   free:               { portfolios: 1,  watchlists: 1,  stocksPerWl: 50,  alerts: 3,   nlScreener: false, csvExport: false, portfolioInsights: false, seatLimit: 1  },
-  pro:                { portfolios: 10, watchlists: 20, stocksPerWl: 500, alerts: 50,  nlScreener: false, csvExport: true,  portfolioInsights: false, seatLimit: 1  },
-  premium:            { portfolios: 50, watchlists: 50, stocksPerWl: 500, alerts: 100, nlScreener: true,  csvExport: true,  portfolioInsights: true,  seatLimit: 1  },
-  enterprise_pro:     { portfolios: 10, watchlists: 20, stocksPerWl: 500, alerts: 50,  nlScreener: false, csvExport: true,  portfolioInsights: false, seatLimit: 10 },
-  enterprise_premium: { portfolios: 50, watchlists: 50, stocksPerWl: 500, alerts: 100, nlScreener: true,  csvExport: true,  portfolioInsights: true,  seatLimit: 10 },
+  pro:                { portfolios: 10, watchlists: 10, stocksPerWl: 200, alerts: 50,  nlScreener: false, csvExport: false, portfolioInsights: false, seatLimit: 1  },
+  premium:            { portfolios: 20, watchlists: 20, stocksPerWl: 500, alerts: 100, nlScreener: true,  csvExport: true,  portfolioInsights: true,  seatLimit: 1  },
+  enterprise_pro:     { portfolios: 10, watchlists: 10, stocksPerWl: 200, alerts: 50,  nlScreener: false, csvExport: false, portfolioInsights: false, seatLimit: 10 },
+  enterprise_premium: { portfolios: 20, watchlists: 20, stocksPerWl: 500, alerts: 100, nlScreener: true,  csvExport: true,  portfolioInsights: true,  seatLimit: 10 },
 }
 
 export function planLimits(plan: string | null | undefined): PlanLimits {

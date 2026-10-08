@@ -83,13 +83,26 @@ async def community_screens(
     """
     user_rank = _level(current_user["plan"])
 
-    if not _is_admin(current_user["email"]) and user_rank < _level("premium"):
+    # Community screens are tiered rather than all-or-nothing. A Pro viewer
+    # sees screens created by Pro and Free users -- all of which they can
+    # actually run -- but not Premium-created ones, which may use filters
+    # their plan cannot execute. Premium and admin see everything.
+    #
+    # This endpoint previously returned 403 to anyone below Premium, so Pro
+    # saw nothing at all. The CASE below and the rank_filter parameter were
+    # already here; only the gate was wrong.
+    if _is_admin(current_user["email"]):
+        rank_filter = 999
+    elif user_rank < _level("pro"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Shared screens are available on the Premium plan.",
+            detail="Community screens are available on the Pro plan.",
         )
-
-    rank_filter = 999  # premium and admin see every public screen
+    elif user_rank >= _level("premium"):
+        rank_filter = 999
+    else:
+        # Pro and Enterprise Pro: creators at or below their own level.
+        rank_filter = user_rank
 
     result = await db.execute(text("""
         SELECT s.id, s.user_id, u.name AS user_name, s.name, s.description,

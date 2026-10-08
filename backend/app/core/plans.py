@@ -87,19 +87,19 @@ PLAN_LIMITS: dict[str, PlanLimits] = {
     },
     "pro": {
         "portfolios":         10,
-        "watchlists":         20,
-        "stocks_per_wl":      500,
+        "watchlists":         10,
+        "stocks_per_wl":      200,
         "alerts":             50,
         # AI natural-language screening is Premium. Pro keeps Query Mode,
         # which is the structured query builder, not the AI path.
         "nl_screener":        False,
-        "csv_export":         True,
+        "csv_export":         False,     # CSV export is Premium
         "portfolio_insights": False,
         "seat_limit":         1,
     },
     "premium": {
-        "portfolios":         50,
-        "watchlists":         50,
+        "portfolios":         20,
+        "watchlists":         20,
         "stocks_per_wl":      500,
         "alerts":             100,
         "nl_screener":        True,
@@ -109,17 +109,17 @@ PLAN_LIMITS: dict[str, PlanLimits] = {
     },
     "enterprise_pro": {
         "portfolios":         10,
-        "watchlists":         20,
-        "stocks_per_wl":      500,
+        "watchlists":         10,
+        "stocks_per_wl":      200,
         "alerts":             50,
         "nl_screener":        False,      # Pro's feature set, 5 or 10 seats
-        "csv_export":         True,
+        "csv_export":         False,
         "portfolio_insights": False,
         "seat_limit":         10,
     },
     "enterprise_premium": {
-        "portfolios":         50,
-        "watchlists":         50,
+        "portfolios":         20,
+        "watchlists":         20,
         "stocks_per_wl":      500,
         "alerts":             100,
         "nl_screener":        True,

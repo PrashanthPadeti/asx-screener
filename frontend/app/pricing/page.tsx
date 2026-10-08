@@ -104,7 +104,7 @@ const FEATURE_ROWS: { label: string; free: Cell; pro: Cell; premium: Cell }[] = 
   { label: 'Sector screens',           free: false, pro: true,  premium: true  },
   { label: 'Pro screens',              free: false, pro: true,  premium: true  },
   { label: 'Premium screens',          free: false, pro: false, premium: true  },
-  { label: 'Community screens',        free: false, pro: false, premium: true  },
+  { label: 'Community screens',        free: false, pro: 'Pro tier', premium: true },
   { label: 'Saved screens',            free: true,  pro: true,  premium: true  },
 
   // ── Market data ────────────────────────────────────────────────────────
@@ -338,7 +338,7 @@ export default function PricingPage() {
                       feature. */}
                   <FeatureItem label="Saved screens" ok />
                   <FeatureItem label="Community screens"
-                               ok={plan.id === 'premium'} />
+                               ok={plan.id !== 'free'} />
                   <FeatureItem label="AI screener (natural language)"
                                ok={plan.features.nlScreener} />
                   <FeatureItem label="CSV export" ok={plan.features.csvExport} />
@@ -441,8 +441,10 @@ export default function PricingPage() {
             </table>
           </div>
           <p className="mt-3 text-xs text-gray-500">
-            Enterprise Pro and Enterprise Premium include everything in Pro and
-            Premium respectively, for 5 or 10 team members.
+            Community screens on Pro show those created by Pro members;
+            Premium sees every shared screen. Enterprise Pro and Enterprise
+            Premium include everything in Pro and Premium respectively, for
+            5 or 10 team members.
           </p>
         </div>
 

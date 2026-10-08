@@ -167,6 +167,67 @@ def test_require_plan_lets_admins_through():
         "below the minimum is refused by the gate they administer")
 
 
+def test_the_limits_match_the_published_matrix():
+    """The pricing page is a contract shown to a buyer, so the numbers are
+    asserted against the agreed sheet rather than against themselves.
+
+    Hardcoded on purpose: deriving the expectation from PLAN_LIMITS would make
+    this test agree with whatever the code says, which is the opposite of what
+    a published-price check is for.
+    """
+    expected = {
+        #                 portf  watch  stocks  alerts
+        "free":           (1,    1,     50,     3),
+        "pro":            (10,   10,    200,    50),
+        "premium":        (20,   20,    500,    100),
+        "enterprise_pro": (10,   10,    200,    50),
+        "enterprise_premium": (20, 20,  500,    100),
+    }
+    for plan, (pf, wl, spw, al) in expected.items():
+        got = PLAN_LIMITS[plan]
+        assert (got["portfolios"], got["watchlists"],
+                got["stocks_per_wl"], got["alerts"]) == (pf, wl, spw, al), (
+            f"{plan} limits differ from the published pricing table: "
+            f"got {got['portfolios']}/{got['watchlists']}/"
+            f"{got['stocks_per_wl']}/{got['alerts']}, expected "
+            f"{pf}/{wl}/{spw}/{al}")
+
+
+def test_csv_export_is_premium():
+    """Changed 8 Oct 2026. Pro had it; the published matrix makes it Premium.
+
+    Asserted on both Pro and Enterprise Pro, because the sheet originally
+    showed it crossed for Pro and ticked for Enterprise Pro -- which would
+    have made Enterprise more than a seat difference.
+    """
+    assert PLAN_LIMITS["pro"]["csv_export"] is False
+    assert PLAN_LIMITS["enterprise_pro"]["csv_export"] is False
+    assert PLAN_LIMITS["premium"]["csv_export"] is True
+    assert PLAN_LIMITS["enterprise_premium"]["csv_export"] is True
+
+
+def test_community_screens_are_tiered_not_all_or_nothing():
+    """Free is refused; Pro sees creators at or below its own level; Premium
+    and admin see everything.
+
+    The endpoint previously returned 403 to anyone below Premium, so Pro saw
+    nothing. The CASE mapping creator_plan to a rank and the rank_filter
+    parameter were already present -- only the gate was wrong.
+    """
+    src = (ROUTES / "saved_screens.py").read_text(encoding="utf-8")
+    body = "\n".join(l for l in src.splitlines()
+                     if not l.strip().startswith("#"))
+    assert 'detail="Community screens are available on the Pro plan."' in body \
+        or "_level(\"pro\")" in body, (
+        "the community-screens gate no longer refuses below Pro")
+    assert "rank_filter = user_rank" in body, (
+        "Pro viewers no longer get a filtered view; they are either refused "
+        "or shown everything")
+    assert 'user_rank < _level("premium")' not in body, (
+        "the old Premium-or-403 gate is back, so Pro sees no community "
+        "screens at all")
+
+
 def test_admin_is_not_a_plan():
     """Free > Pro > Premium > Admin -- but admin is an identity.
 

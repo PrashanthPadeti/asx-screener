@@ -17,13 +17,11 @@ import { usePathname } from 'next/navigation'
 import { Lock, Zap, LogIn } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 
-const PLAN_RANK: Record<string, number> = {
-  free:                0,
-  pro:                 1,
-  premium:             2,
-  enterprise_pro:      3,
-  enterprise_premium:  4,
-}
+// Entitlement, so FEATURE_LEVEL rather than PLAN_RANK. This file previously
+// carried its own copy with the commercial ranks (enterprise_pro: 3), which
+// put Enterprise Pro above Premium and admitted it to every Premium-gated
+// page despite its Pro-level feature set.
+import { featureLevel } from '@/lib/plans'
 
 const PLAN_PRICE: Record<string, { monthly: string; yearly: string }> = {
   pro:     { monthly: '$19.99', yearly: '$199.90' },
@@ -91,10 +89,13 @@ export function PlanGate({ required, feature, children }: Props) {
     </div>
   )
 
-  const userRank = PLAN_RANK[user.plan] ?? 0
-  const reqRank  = PLAN_RANK[required]  ?? 0
+  // Admin sits above every plan: Free > Pro > Premium > Admin. It is an
+  // identity, not a tier, so it is checked separately rather than given a
+  // level in the ladder. Previously absent here, which left an admin on a
+  // free plan looking at an upgrade prompt.
+  if (user.is_admin) return <>{children}</>
 
-  if (userRank >= reqRank) return <>{children}</>
+  if (featureLevel(user.plan) >= featureLevel(required)) return <>{children}</>
 
   const planLabel = required === 'premium' ? 'Premium' : 'Pro'
   const price     = PLAN_PRICE[required]

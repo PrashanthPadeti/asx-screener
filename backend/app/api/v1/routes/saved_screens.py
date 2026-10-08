@@ -17,7 +17,7 @@ from typing import Optional
 
 from app.core.deps import get_current_user
 from app.core.config import settings
-from app.core.plans import PLAN_RANK as _PLAN_RANK
+from app.core.plans import feature_level as _level
 from app.db.session import get_db
 
 router = APIRouter()
@@ -81,9 +81,9 @@ async def community_screens(
     screen is a premium benefit, so Free and Pro get 403 rather than a partial
     list. Everyone who is allowed in sees the same set.
     """
-    user_rank = _PLAN_RANK.get(current_user["plan"], 0)
+    user_rank = _level(current_user["plan"])
 
-    if not _is_admin(current_user["email"]) and user_rank < 2:
+    if not _is_admin(current_user["email"]) and user_rank < _level("premium"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Shared screens are available on the Premium plan.",

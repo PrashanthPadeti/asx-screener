@@ -15,7 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
-from app.core.plans import get_limits, PLAN_RANK
+from app.core.plans import get_limits, feature_level
 from app.db.session import get_db
 from app.schemas.alert import (
     AlertCreate, AlertUpdate, AlertOut, AlertsResponse,
@@ -187,7 +187,7 @@ async def create_alert(
 
     # Enforce alert-type plan gating
     required = ALERT_TYPE_MIN_PLAN.get(body.alert_type, "free")
-    if PLAN_RANK.get(plan, 0) < PLAN_RANK.get(required, 0):
+    if feature_level(plan) < feature_level(required):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"This alert type requires a {required.title()} plan or higher.",
@@ -266,7 +266,7 @@ async def update_alert(
     if body.alert_type is not None:
         plan     = current_user.get("plan", "free")
         required = ALERT_TYPE_MIN_PLAN.get(body.alert_type, "free")
-        if PLAN_RANK.get(plan, 0) < PLAN_RANK.get(required, 0):
+        if feature_level(plan) < feature_level(required):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This alert type requires a {required.title()} plan or higher.",

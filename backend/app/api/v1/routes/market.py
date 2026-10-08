@@ -13,6 +13,7 @@ from sqlalchemy import text
 log = logging.getLogger(__name__)
 
 from app.db.session import get_db
+from app.core.deps import require_plan
 from app.core.cache import cache_get, cache_set, make_key, MARKET_TTL, STATIC_TTL
 from app.schemas.market import (
     MarketSummary,
@@ -770,7 +771,10 @@ def _fmt_week_label(week_start) -> str:
     return friday.strftime("W/E %-d %b") if hasattr(friday, "strftime") else str(friday)
 
 
-@router.get("/heatmap", response_model=HeatmapResponse)
+# Performance Heatmap is Premium; the rest of this file (summary,
+# movers, sectors, dashboard) is free and deliberately ungated.
+@router.get("/heatmap", response_model=HeatmapResponse,
+            dependencies=[Depends(require_plan("premium"))])
 async def market_heatmap(
     mode:    str           = Query("days",  pattern="^(days|weeks)$"),
     sector:  str | None    = Query(None),
@@ -949,7 +953,8 @@ async def market_heatmap(
 
 # ── Heatmap Excel Export ──────────────────────────────────────────────────────
 
-@router.get("/heatmap/export")
+@router.get("/heatmap/export",
+            dependencies=[Depends(require_plan("premium"))])
 async def market_heatmap_export(
     mode:    str        = Query("days",  pattern="^(days|weeks)$"),
     sector:  str | None = Query(None),

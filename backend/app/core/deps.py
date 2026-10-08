@@ -14,7 +14,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
-from app.core.plans import PLAN_RANK as _PLAN_RANK
+# Entitlement checks compare FEATURE_LEVEL, never PLAN_RANK. Enterprise Pro
+# outranks Premium commercially while holding Pro's feature set, so a rank
+# comparison admitted it to every Premium surface.
+from app.core.plans import feature_level as _level
 from app.core.config import settings
 from app.db.session import get_db
 
@@ -99,9 +102,7 @@ async def require_query_access(
     admin_list = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
     if user["email"].lower() in admin_list:
         return user
-    user_rank = _PLAN_RANK.get(user["plan"], 0)
-    pro_rank  = _PLAN_RANK.get("pro", 0)
-    if user_rank < pro_rank:
+    if _level(user["plan"]) < _level("pro"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Query Mode requires a Pro or Premium plan.",
@@ -131,10 +132,17 @@ def require_plan(minimum: str):
             ...
     """
     async def _check(user: dict = Depends(get_current_user)) -> dict:
-        user_rank = _PLAN_RANK.get(user["plan"], 0)
-        min_rank  = _PLAN_RANK.get(minimum, 0)
+        # Free > Pro > Premium > Admin. Admin is an identity rather than a
+        # tier, so it is checked against ADMIN_EMAILS rather than given a
+        # level. require_pro_or_admin and saved_screens already did this;
+        # require_plan did not, so an admin whose own plan was below the
+        # minimum was refused by the gate they administer.
+        _admins = [e.strip().lower() for e in settings.ADMIN_EMAILS.split(",")
+                   if e.strip()]
+        if user["email"].lower() in _admins:
+            return user
 
-        if user_rank < min_rank:
+        if _level(user["plan"]) < _level(minimum):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This feature requires the '{minimum}' plan or higher.",

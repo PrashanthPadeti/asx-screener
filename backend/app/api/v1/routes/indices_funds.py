@@ -4,6 +4,8 @@ Reads from market.indices, market.index_prices, market.funds, market.fund_prices
 """
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.core.deps import require_plan
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -15,7 +17,14 @@ from app.schemas.indices_funds import (
     IndexConstituentRow, IndexSectorBreakdown, IndexPrimaryETF, IndexDetailResponse,
 )
 
-router = APIRouter()
+# Premium data. These routes carried no authentication at all -- not a plan
+# check, not even a login -- so ASX Indices, ETFs & Funds, Commodities and
+# Global Markets were served to anyone who knew the URL. PlanGate hid the
+# pages; it never protected the API behind them.
+#
+# Declared on the router rather than per-route so a future endpoint added to
+# this file is covered by default. Every route here is premium.
+router = APIRouter(dependencies=[Depends(require_plan("premium"))])
 
 # ── Index hardcoded metadata ──────────────────────────────────────────────────
 

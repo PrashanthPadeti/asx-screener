@@ -40,7 +40,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from app.core.log_redaction import (                          # noqa: E402
-    REDACTED, SecretRedactingFilter, install_secret_redaction, redact)
+    REDACTED, RedactingFormatter, SecretRedactingFilter,
+    install_secret_redaction, protect_handler, redact)
 
 #: Shaped like a real EODHD key, but not one. Never use a live value here.
 FAKE_KEY = "68f3c1aa9b7e42.13579246"
@@ -124,6 +125,98 @@ def test_the_secret_in_args_is_redacted():
     assert FAKE_KEY not in sink.text, (
         "a secret passed via record.args survived; redacting record.msg "
         "alone catches nothing from httpx")
+
+
+def test_an_exception_traceback_is_redacted():
+    """The authentication-failure path, which is the one that matters.
+
+    A filter alone never sees a traceback: `record.exc_text` is produced by
+    the FORMATTER, after filters have run. And `httpx.HTTPStatusError` puts
+    the full request URL in its message, while `_fetch_eodhd_constituents`
+    calls `raise_for_status()` -- so an unredacted traceback publishes the
+    credential exactly when the credential is bad.
+
+    Measured leaking 9 Oct 2026 against the filter-only implementation.
+    """
+    url = f"https://eodhd.com/api/fundamentals/AXJO.INDX?api_token={FAKE_KEY}"
+    with _Sink() as sink:
+        try:
+            raise ValueError(f"Client error '401 Unauthorized' for url '{url}'")
+        except ValueError:
+            logging.getLogger("httpx").exception("request failed")
+    assert FAKE_KEY not in sink.text, (
+        "the key reached the sink inside a traceback -- a filter cannot see "
+        f"exc_text, only a formatter can:\n      {sink.text.strip()[:400]}")
+    assert "401 Unauthorized" in sink.text, (
+        "redaction destroyed the diagnostic; the traceback must stay useful")
+
+
+def test_handle_error_output_cannot_leak():
+    """logging's own error path writes record.msg and record.args to stderr.
+
+    When a record cannot be formatted, `Handler.emit` calls `handleError`,
+    which prints the raw msg and args. `asx-backend.service` appends stderr
+    to logs/backend.log, so that is a real sink.
+
+    Measured leaking 9 Oct 2026: the filter returned the record untouched
+    when `getMessage()` raised, leaving the secret sitting in `args`.
+    """
+    captured = io.StringIO()
+    saved_stderr, sys.stderr = sys.stderr, captured
+    try:
+        with _Sink():
+            logging.getLogger("x").info("bad %s %s", f"?api_token={FAKE_KEY}")
+    finally:
+        sys.stderr = saved_stderr
+    assert FAKE_KEY not in captured.getvalue(), (
+        "logging's handleError printed the credential to stderr:\n      "
+        + captured.getvalue().strip()[:300])
+
+
+def test_every_handler_is_protected_not_only_the_first():
+    """A process with two sinks must not leak into the second."""
+    root = logging.getLogger()
+    saved, level = root.handlers[:], root.level
+    a, b = io.StringIO(), io.StringIO()
+    root.handlers = [logging.StreamHandler(a), logging.StreamHandler(b)]
+    root.setLevel(logging.INFO)
+    try:
+        install_secret_redaction()
+        logging.getLogger("httpx").info("x %s", f"?api_token={FAKE_KEY}")
+        leaks = [n for n, buf in (("first", a), ("second", b))
+                 if FAKE_KEY in buf.getvalue()]
+    finally:
+        root.handlers, root.level = saved, level
+    assert not leaks, f"credential reached handler(s): {leaks}"
+
+
+def test_a_handler_added_later_can_be_protected():
+    """`protect_handler` is the entry point for a sink added after startup."""
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    protect_handler(handler)
+    protect_handler(handler)                      # idempotent
+    assert isinstance(handler.formatter, RedactingFormatter)
+    assert sum(1 for f in handler.filters
+               if isinstance(f, SecretRedactingFilter)) == 1
+    log = logging.getLogger("late"); log.handlers = [handler]
+    log.propagate = False; log.setLevel(logging.INFO)
+    log.info("x %s", f"?api_token={FAKE_KEY}")
+    assert FAKE_KEY not in buf.getvalue()
+
+
+def test_wrapping_preserves_the_original_format():
+    """Redaction must not silently discard the configured log format."""
+    buf = io.StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(logging.Formatter("PREFIX %(levelname)s %(message)s"))
+    protect_handler(handler)
+    log = logging.getLogger("fmt"); log.handlers = [handler]
+    log.propagate = False; log.setLevel(logging.INFO)
+    log.info("hello")
+    assert "PREFIX INFO hello" in buf.getvalue(), (
+        f"the wrapped formatter lost its format: {buf.getvalue()!r}")
 
 
 # ── Coverage of the patterns ────────────────────────────────────────────────

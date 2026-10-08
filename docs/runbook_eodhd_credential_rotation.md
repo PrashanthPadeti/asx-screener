@@ -240,17 +240,40 @@ reads is the same one `asx_indices` authenticated with.
 
 ## Step 5 — confirm the proof did not re-leak the key
 
-The proof writes to stdout, not `backend.log`, but the restart re-runs the
-code path that leaked in the first place. Check by **counting**, so no secret
-is handled:
+**Only lines written after the restart count.** `backend.log` contains years
+of pre-fix lines, so a whole-file `grep` can only ever report the historical
+leak and says nothing about whether redaction is live. Counting the whole file
+would show a huge unredacted total and look like a failure even on a perfectly
+patched system — and, worse, a *clean* whole-file count could be produced by
+sanitising first, which is the wrong order.
+
+Capture the offset **before** the restart in step 3:
 
 ```bash
-cd /opt/asx-screener/logs && total=$(grep -c 'api_token=' backend.log); red=$(grep -cE 'api_token=(\*{3,}|REDACTED|\[REDACTED\])' backend.log); echo "api_token occurrences: $total   redacted: $red"
+OFFSET=$(wc -c < /opt/asx-screener/logs/backend.log); echo "offset=$OFFSET"
 ```
 
-`total == red` is the pass. Any gap means an unredacted token is being written
-*now*, and the redaction work is incomplete — stop and fix that before step 6,
-or you will sanitise a log that immediately refills.
+Then, after the restart and the boundary proof, examine only what was appended:
+
+```bash
+cd /opt/asx-screener/logs && tail -c +$((OFFSET+1)) backend.log > /tmp/since-restart.log && total=$(grep -c 'api_token=' /tmp/since-restart.log); red=$(grep -c 'api_token=\[REDACTED\]' /tmp/since-restart.log); echo "new lines with api_token: $total   redacted: $red"; rm -f /tmp/since-restart.log
+```
+
+Pass is `total == red`. `total == 0` is **not** a pass — it means no EODHD
+call has been logged since the restart, so nothing was tested. Wait for a
+scheduled producer to run, or re-run the step 4 proof, and look again.
+
+Direct evidence from step 4 itself: the httpx request line printed by the
+proof must now read `api_token=[REDACTED]`. If it shows a key, redaction is
+not live in the engine process family and **everything below is premature.**
+
+Both process families must be checked, because they install redaction by
+different routes:
+
+| Family | Installs via | Evidence |
+|---|---|---|
+| backend (uvicorn) | `app/main.py` | the appended-region count above |
+| engines (standalone) | `compute/engine/__init__.py` | the step 4 proof's own request line |
 
 ---
 
@@ -276,10 +299,30 @@ Only now, with the replacement proven to authenticate and return real data.
 the evidence of what leaked; destroy it earlier and you lose the record while
 possibly still depending on the old credential.
 
-Rotate or purge every file holding the retired key, including rotated and
-compressed copies (`backend.log.1`, `backend.log.*.gz`), and any off-box
-backup or log shipper that received them. A purge that misses the archives
-has not removed the credential.
+Sanitisation covers **every surface the credential reached**, not one file:
+
+- `logs/backend.log` and every rotated or compressed sibling
+  (`backend.log.1`, `backend.log.*.gz`)
+- `journalctl` for `asx-backend`, which captured service stdout independently
+  of the file sink
+- PM2 logs, if any EODHD-bearing output ever reached the frontend process
+- off-box copies: backups, snapshots, and anything a log shipper forwarded
+- **terminal scrollback and session captures** — a key printed to a console
+  lives in scrollback, in `tmux`/`screen` buffers, and in any screenshot or
+  recording of that session
+
+### What sanitisation cannot do
+
+Deleting logs does not undo exposure that has already left the host. A
+credential printed into a terminal, a screenshot, a ticket or a chat
+transcript is outside your control the moment it is rendered, and no amount
+of file cleanup retracts it.
+
+**Revocation is what closes that exposure.** Sanitisation only reduces the
+number of places a *still-valid* credential is sitting, and limits what a
+future reader of the archives finds. Treat the two as answering different
+questions, and never let a completed sanitisation stand in for a revocation
+that has not happened.
 
 ---
 

@@ -66,6 +66,10 @@ def redact(text: str) -> str:
     return text
 
 
+def _redact_arg(value):
+    return redact(value) if isinstance(value, str) else value
+
+
 class SecretRedactingFilter(logging.Filter):
     """Rewrites a record's message in place. Never drops a record.
 
@@ -74,12 +78,26 @@ class SecretRedactingFilter(logging.Filter):
     `'HTTP Request: %s %s "%s"'` with the URL as an argument, so redacting
     `record.msg` alone would miss it entirely. Once merged, `args` is cleared
     so the handler does not re-interpolate.
+
+    When the message CANNOT be formatted, `msg` and each `args` member are
+    redacted individually and the arity is left wrong on purpose. A record
+    with mismatched args fails in `Handler.emit`, and `handleError` then
+    prints `record.msg` and `record.args` to stderr -- which
+    `asx-backend.service` appends straight into `logs/backend.log`. Measured
+    9 Oct 2026: a secret in `args` leaked by exactly that route.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             message = record.getMessage()
         except Exception:                                      # noqa: BLE001
+            # Unformattable: redact the parts, preserve the breakage.
+            record.msg = _redact_arg(record.msg)
+            if isinstance(record.args, tuple):
+                record.args = tuple(_redact_arg(a) for a in record.args)
+            elif isinstance(record.args, dict):
+                record.args = {k: _redact_arg(v)
+                               for k, v in record.args.items()}
             return True        # never let redaction suppress a log record
         cleaned = redact(message)
         if cleaned != message:
@@ -88,15 +106,52 @@ class SecretRedactingFilter(logging.Filter):
         return True
 
 
+class RedactingFormatter(logging.Formatter):
+    """Wraps a handler's formatter and redacts the fully rendered string.
+
+    The filter alone is not enough, because a traceback never passes through
+    it. `record.exc_text` is produced by the formatter, *after* filters have
+    run, so an exception is rendered straight to the sink unredacted.
+
+    That is not hypothetical: `httpx.HTTPStatusError` puts the full request
+    URL in its message, and `_fetch_eodhd_constituents` calls
+    `raise_for_status()`. So the credential leaks on exactly the
+    authentication-failure path -- the one that executes when the key is bad.
+
+    Redacting the final string is the only place that catches the message,
+    the arguments, the traceback and any `stack_info` together.
+    """
+
+    def __init__(self, inner: logging.Formatter):
+        super().__init__()
+        self.inner = inner
+
+    def format(self, record: logging.LogRecord) -> str:
+        return redact(self.inner.format(record))
+
+
+def protect_handler(handler: logging.Handler) -> None:
+    """Give one handler both defences. Idempotent."""
+    if not any(isinstance(f, SecretRedactingFilter) for f in handler.filters):
+        handler.addFilter(SecretRedactingFilter())
+    if not isinstance(handler.formatter, RedactingFormatter):
+        handler.setFormatter(RedactingFormatter(
+            handler.formatter or logging.Formatter()))
+
+
 def install_secret_redaction(**basic_config_kwargs) -> None:
-    """Attach the filter to every root handler. Idempotent.
+    """Protect every handler on the root logger. Idempotent.
 
     Ensures a root handler exists first, so that later `basicConfig` calls in
-    other modules are no-ops and cannot replace the sink this filter guards.
+    other modules are no-ops and cannot replace the sink this guards.
+
+    Every handler, not just the first: a process with a stream handler and a
+    file handler would otherwise write the credential to one of them. Call
+    this again after adding a handler -- `protect_handler` is the single-
+    handler entry point for that.
     """
     root = logging.getLogger()
     if not root.handlers:
         logging.basicConfig(**basic_config_kwargs)
     for handler in root.handlers:
-        if not any(isinstance(f, SecretRedactingFilter) for f in handler.filters):
-            handler.addFilter(SecretRedactingFilter())
+        protect_handler(handler)

@@ -119,7 +119,7 @@ const FEATURE_ROWS: { label: string; free: Cell; pro: Cell; premium: Cell }[] = 
   { label: 'Commodities',              free: false, pro: false, premium: true  },
   { label: 'Global markets',           free: false, pro: false, premium: true  },
   { label: 'Performance heatmap',      free: false, pro: false, premium: true  },
-  { label: 'Alpha 5 weekly picks',     free: false, pro: false, premium: true  },
+  { label: 'AlphaFive weekly picks',     free: false, pro: false, premium: true  },
   { label: 'Education hub',            free: true,  pro: true,  premium: true  },
 ]
 

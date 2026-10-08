@@ -6,7 +6,24 @@ Import PLAN_LIMITS in any route that enforces quotas.
 """
 from typing import TypedDict
 
-# ── Plan rank (higher = more features) ────────────────────────────────────────
+# ── Two orderings, deliberately ───────────────────────────────────────────────
+#
+# A plan has a COMMERCIAL position (what it costs, what counts as an upgrade)
+# and a FEATURE LEVEL (what it can reach). For the individual tiers these agree,
+# which is why one ladder served for both. For the enterprise tiers they do not:
+# Enterprise Pro costs more than Premium and is an upgrade from Pro, but its
+# feature set is Pro's -- the difference is seats.
+#
+# Conflating them had a measurable consequence. `require_plan("premium")` and
+# `PlanGate required="premium"` both compare ranks, and Enterprise Pro ranked 3
+# against Premium's 2, so every Premium-gated surface admitted it: Indices,
+# ETFs & Funds, Commodities, Global Markets, the Heatmap and Top 5 -- none of
+# which its PLAN_LIMITS entitle it to. Meanwhile `portfolio_insights: False`
+# correctly withheld AI insights, so the same plan was Pro-level under one
+# mechanism and above-Premium under another.
+
+#: COMMERCIAL ordering. Upgrade/downgrade arithmetic only. Never use this to
+#: decide access -- that is what produced the defect above.
 PLAN_RANK: dict[str, int] = {
     "free":               0,
     "pro":                1,
@@ -14,6 +31,26 @@ PLAN_RANK: dict[str, int] = {
     "enterprise_pro":     3,
     "enterprise_premium": 4,
 }
+
+#: FEATURE level. Every entitlement check compares these. Ties are intended:
+#: Enterprise Pro reaches exactly what Pro reaches, and Enterprise Premium
+#: exactly what Premium reaches. Seats are expressed in `seat_limit`, not here.
+FEATURE_LEVEL: dict[str, int] = {
+    "free":               0,
+    "pro":                1,
+    "enterprise_pro":     1,
+    "premium":            2,
+    "enterprise_premium": 2,
+}
+
+
+def feature_level(plan: str) -> int:
+    """Access level for `plan`; unknown plans get free's level.
+
+    Unknown falls to 0 rather than raising: an unrecognised plan string must
+    narrow access, never widen it.
+    """
+    return FEATURE_LEVEL.get(plan, 0)
 
 
 class PlanLimits(TypedDict):
@@ -43,7 +80,9 @@ PLAN_LIMITS: dict[str, PlanLimits] = {
         "watchlists":         20,
         "stocks_per_wl":      500,
         "alerts":             50,
-        "nl_screener":        True,
+        # AI natural-language screening is Premium. Pro keeps Query Mode,
+        # which is the structured query builder, not the AI path.
+        "nl_screener":        False,
         "csv_export":         True,
         "portfolio_insights": False,
         "seat_limit":         1,
@@ -63,7 +102,7 @@ PLAN_LIMITS: dict[str, PlanLimits] = {
         "watchlists":         20,
         "stocks_per_wl":      500,
         "alerts":             50,
-        "nl_screener":        True,
+        "nl_screener":        False,      # Pro's feature set, 5 or 10 seats
         "csv_export":         True,
         "portfolio_insights": False,
         "seat_limit":         10,

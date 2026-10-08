@@ -5,13 +5,22 @@ Reads from market.commodity_prices — latest price per commodity, grouped by ca
 from collections import defaultdict
 from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.core.deps import require_plan
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 
-router = APIRouter()
+# Premium data. These routes carried no authentication at all -- not a plan
+# check, not even a login -- so ASX Indices, ETFs & Funds, Commodities and
+# Global Markets were served to anyone who knew the URL. PlanGate hid the
+# pages; it never protected the API behind them.
+#
+# Declared on the router rather than per-route so a future endpoint added to
+# this file is covered by default. Every route here is premium.
+router = APIRouter(dependencies=[Depends(require_plan("premium"))])
 
 _CATEGORY_ORDER = ["Precious Metals", "Base Metals", "Energy", "Bulk"]
 

@@ -381,7 +381,17 @@ function apiCapTier(t: CapTier): 'mega' | 'large' | 'mid' | 'small' | 'micro' | 
 export default function MarketPage() {
   const { user } = useAuth()
   const userPlan  = user?.plan ?? 'free'
-  const isPro     = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
+  // Market Overview is a free page, so everything on it is free. Highs, Lows
+  // & Volume, Volume Activity and Market Anomalies used to be Pro-gated while
+  // the page itself was advertised as free -- a free account reached the page
+  // and found three of its five panels blurred.
+  //
+  // Set here rather than by deleting the ProGate branches below, so restoring
+  // the gate is a one-line change. If it stays open, those branches and the
+  // blurred placeholder tables are dead code worth removing.
+  const isPro     = true
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _userIsPro = ['pro', 'premium', 'enterprise_pro', 'enterprise_premium'].includes(userPlan)
 
   const [data, setData]       = useState<MarketDashboard | null>(null)
   const [loading, setLoading] = useState(true)

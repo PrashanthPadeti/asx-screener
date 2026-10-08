@@ -108,7 +108,10 @@ const FEATURE_ROWS: { label: string; free: Cell; pro: Cell; premium: Cell }[] = 
   { label: 'Saved screens',            free: true,  pro: true,  premium: true  },
 
   // ── Market data ────────────────────────────────────────────────────────
-  { label: 'ASX market overview',      free: 'Basic', pro: true, premium: true },
+  { label: 'ASX market overview',      free: true,  pro: true,  premium: true  },
+  { label: 'Highs, Lows & Volume',     free: true,  pro: true,  premium: true  },
+  { label: 'Volume activity',          free: true,  pro: true,  premium: true  },
+  { label: 'Market anomalies',         free: true,  pro: true,  premium: true  },
   { label: 'News',                     free: true,  pro: true,  premium: true  },
   { label: 'Short interest data',      free: true,  pro: true,  premium: true  },
   { label: 'Metrics glossary',         free: false, pro: true,  premium: true  },
@@ -440,9 +443,7 @@ export default function PricingPage() {
             </table>
           </div>
           <p className="mt-3 text-xs text-gray-500">
-            Free accounts see the sector heatmap and top movers; volume,
-            highs/lows and anomalies need Pro. Community screens on Pro show
-            those created by Pro members;
+            Community screens on Pro show those created by Pro members;
             Premium sees every shared screen. Enterprise Pro and Enterprise
             Premium include everything in Pro and Premium respectively, for
             5 or 10 team members.

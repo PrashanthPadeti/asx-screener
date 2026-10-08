@@ -4,7 +4,10 @@ ASX Screener — Plan definitions & feature limits
 Single source of truth for all plan tiers, limits, and pricing.
 Import PLAN_LIMITS in any route that enforces quotas.
 """
+import logging
 from typing import TypedDict
+
+_log = logging.getLogger(__name__)
 
 # ── Two orderings, deliberately ───────────────────────────────────────────────
 #
@@ -48,8 +51,15 @@ def feature_level(plan: str) -> int:
     """Access level for `plan`; unknown plans get free's level.
 
     Unknown falls to 0 rather than raising: an unrecognised plan string must
-    narrow access, never widen it.
+    narrow access, never widen it. But it is LOGGED, because falling back
+    silently is how a paying customer stayed on free entitlements unnoticed --
+    `pro_monthly` was found in production on 8 Oct 2026, an active Pro
+    subscriber resolving to free limits with nothing reporting it.
     """
+    if plan not in FEATURE_LEVEL:
+        _log.warning(
+            "unknown plan %r resolved to free access. A paying subscriber "
+            "may be on free entitlements; check users.users.plan.", plan)
     return FEATURE_LEVEL.get(plan, 0)
 
 
@@ -121,7 +131,14 @@ PLAN_LIMITS: dict[str, PlanLimits] = {
 
 
 def get_limits(plan: str) -> PlanLimits:
-    """Return limits for the given plan, falling back to free if unknown."""
+    """Return limits for the given plan, falling back to free if unknown.
+
+    The fallback is deliberate -- an unrecognised plan must not widen access --
+    but it is logged for the same reason as `feature_level`: a silent
+    downgrade of a paying customer is indistinguishable from a free user.
+    """
+    if plan not in PLAN_LIMITS:
+        _log.warning("unknown plan %r resolved to free limits", plan)
     return PLAN_LIMITS.get(plan, PLAN_LIMITS["free"])
 
 

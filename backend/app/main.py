@@ -43,6 +43,16 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
+# Redact credentials before they reach the sink. httpx logs every request URL
+# at INFO with the query string intact, so every EODHD call was writing
+# api_token=<key> into logs/backend.log -- which is how the original key
+# leaked, and how its first replacement leaked on its very first use.
+# Attached to the HANDLER, not the logger: a logger filter never sees records
+# that propagate from httpx. See app/core/log_redaction.py.
+from app.core.log_redaction import install_secret_redaction   # noqa: E402
+
+install_secret_redaction()
+
 # Global rate limiter — keyed by client IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 

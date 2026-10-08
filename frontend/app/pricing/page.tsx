@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth'
 import { createCheckoutSession, api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import FAQSchema from '@/components/FAQSchema'
+import { PLAN_LIMITS as L } from '@/lib/plans'
 
 const PRICING_FAQ = [
   {
@@ -40,14 +41,7 @@ const PLANS = [
     highlight:   false,
     badge:       null,
     description: 'Everything you need to get started with ASX investing.',
-    features: {
-      portfolios:   1,
-      watchlists:   1,
-      stocksPerWl:  50,
-      alerts:       3,
-      nlScreener:   false,
-      csvExport:    false,
-    },
+    features: L.free,
   },
   {
     id:          'pro',
@@ -59,14 +53,7 @@ const PLANS = [
     highlight:   true,
     badge:       'Most Popular',
     description: 'For active investors who want deeper data and automation.',
-    features: {
-      portfolios:   10,
-      watchlists:   20,
-      stocksPerWl:  500,
-      alerts:       50,
-      nlScreener:   true,
-      csvExport:    true,
-    },
+    features: L.pro,
   },
   {
     id:          'premium',
@@ -78,28 +65,62 @@ const PLANS = [
     highlight:   false,
     badge:       null,
     description: 'Unlimited data, priority access, and full feature set.',
-    features: {
-      portfolios:   50,
-      watchlists:   50,
-      stocksPerWl:  500,
-      alerts:       100,
-      nlScreener:   true,
-      csvExport:    true,
-    },
+    features: L.premium,
   },
 ]
 
-const FEATURE_ROWS: { label: string; key: keyof typeof PLANS[0]['features'] | null; free: string; pro: string; premium: string }[] = [
-  { label: 'Portfolios',         key: null, free: '1',    pro: '10',   premium: '50'  },
-  { label: 'Watchlists',         key: null, free: '1',    pro: '20',   premium: '50'  },
-  { label: 'Stocks per watchlist',key: null,free: '50',   pro: '500',  premium: '500' },
-  { label: 'Price alerts',       key: null, free: '3',    pro: '50',   premium: '100' },
-  { label: 'AI Screener',        key: 'nlScreener',  free: '', pro: '', premium: '' },
-  { label: 'CSV export',         key: 'csvExport',   free: '', pro: '', premium: '' },
-  { label: 'Saved screens',      key: null, free: '✓',   pro: '✓',    premium: '✓'   },
-  { label: 'Community screens',  key: null, free: '✓',   pro: '✓',    premium: '✓'   },
-  { label: 'Market signals',     key: null, free: '✓',   pro: '✓',    premium: '✓'   },
-  { label: 'Short interest data',key: null, free: '✓',   pro: '✓',    premium: '✓'   },
+/**
+ * The comparison table.
+ *
+ * Quota rows read PLAN_LIMITS, which mirrors the backend. Access rows are
+ * declared here because "which pages a plan can open" has no representation
+ * in PLAN_LIMITS — it lives in PlanGate and require_plan — so the honest
+ * thing is to state it rather than derive it from something that does not
+ * know.
+ *
+ * Two rows were wrong before v11.2.13 and are corrected here. AI Screener
+ * showed a tick for Pro; it is Premium (`nl_screener`), and Pro keeps Query
+ * Mode. Community screens showed a tick for Free; `saved_screens.py` returns
+ * 403 below Premium, so both Free and Pro see nothing.
+ */
+type Cell = string | boolean
+
+const FEATURE_ROWS: { label: string; free: Cell; pro: Cell; premium: Cell }[] = [
+  // ── Limits (from PLAN_LIMITS) ──────────────────────────────────────────
+  { label: 'Portfolios',               free: `${L.free.portfolios}`,  pro: `${L.pro.portfolios}`,  premium: `${L.premium.portfolios}`  },
+  { label: 'Watchlists',               free: `${L.free.watchlists}`,  pro: `${L.pro.watchlists}`,  premium: `${L.premium.watchlists}`  },
+  { label: 'Stocks per watchlist',     free: `${L.free.stocksPerWl}`, pro: `${L.pro.stocksPerWl}`, premium: `${L.premium.stocksPerWl}` },
+  { label: 'Price alerts',             free: `${L.free.alerts}`,      pro: `${L.pro.alerts}`,      premium: `${L.premium.alerts}`      },
+
+  // ── Screener ───────────────────────────────────────────────────────────
+  { label: 'Screener — filters',       free: true,  pro: true,  premium: true  },
+  { label: 'Screener — Query Mode',    free: false, pro: true,  premium: true  },
+  { label: 'Screener — AI natural language', free: false, pro: L.pro.nlScreener, premium: L.premium.nlScreener },
+  { label: 'CSV export',               free: L.free.csvExport, pro: L.pro.csvExport, premium: L.premium.csvExport },
+  { label: 'AI portfolio insights',    free: L.free.portfolioInsights, pro: L.pro.portfolioInsights, premium: L.premium.portfolioInsights },
+
+  // ── Screens ────────────────────────────────────────────────────────────
+  { label: 'Quick screens',            free: true,  pro: true,  premium: true  },
+  { label: 'Sector screens',           free: false, pro: true,  premium: true  },
+  { label: 'Pro screens',              free: false, pro: true,  premium: true  },
+  { label: 'Premium screens',          free: false, pro: false, premium: true  },
+  { label: 'Community screens',        free: false, pro: 'Pro tier', premium: true },
+  { label: 'Saved screens',            free: true,  pro: true,  premium: true  },
+
+  // ── Market data ────────────────────────────────────────────────────────
+  { label: 'ASX market overview',      free: true,  pro: true,  premium: true  },
+  { label: 'News',                     free: true,  pro: true,  premium: true  },
+  { label: 'Market signals',           free: true,  pro: true,  premium: true  },
+  { label: 'Short interest data',      free: true,  pro: true,  premium: true  },
+  { label: 'Metrics glossary',         free: false, pro: true,  premium: true  },
+  { label: 'Broker compare',           free: false, pro: true,  premium: true  },
+  { label: 'ASX indices',              free: false, pro: false, premium: true  },
+  { label: 'ETFs & funds',             free: false, pro: false, premium: true  },
+  { label: 'Commodities',              free: false, pro: false, premium: true  },
+  { label: 'Global markets',           free: false, pro: false, premium: true  },
+  { label: 'Performance heatmap',      free: false, pro: false, premium: true  },
+  { label: 'AlphaFive weekly picks',     free: false, pro: false, premium: true  },
+  { label: 'Education hub',            free: true,  pro: true,  premium: true  },
 ]
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -310,8 +331,16 @@ export default function PricingPage() {
                   <FeatureItem label={`${plan.features.portfolios} portfolio${plan.features.portfolios > 1 ? 's' : ''}`} ok />
                   <FeatureItem label={`${plan.features.watchlists} watchlist${plan.features.watchlists > 1 ? 's' : ''} (${plan.features.stocksPerWl} stocks)`} ok />
                   <FeatureItem label={`${plan.features.alerts} price alert${plan.features.alerts > 1 ? 's' : ''}`} ok />
-                  <FeatureItem label="Saved & community screens" ok />
-                  <FeatureItem label="AI-powered screener" ok={plan.features.nlScreener} />
+                  {/* Saved screens are available on every plan; COMMUNITY
+                      screens are not -- saved_screens.py returns 403 below
+                      Premium. They were listed together with an unconditional
+                      tick, so the Free and Pro cards both claimed a Premium
+                      feature. */}
+                  <FeatureItem label="Saved screens" ok />
+                  <FeatureItem label="Community screens"
+                               ok={plan.id !== 'free'} />
+                  <FeatureItem label="AI screener (natural language)"
+                               ok={plan.features.nlScreener} />
                   <FeatureItem label="CSV export" ok={plan.features.csvExport} />
                 </ul>
 
@@ -403,14 +432,20 @@ export default function PricingPage() {
                 {FEATURE_ROWS.map((row, i) => (
                   <tr key={row.label} className={cn('border-t border-gray-100', i % 2 === 0 ? '' : 'bg-gray-50/50')}>
                     <td className="py-3 px-4 text-gray-700">{row.label}</td>
-                    <ComparisonCell value={row.key ? PLANS[0].features[row.key as keyof typeof PLANS[0]['features']] : row.free} />
-                    <ComparisonCell value={row.key ? PLANS[1].features[row.key as keyof typeof PLANS[1]['features']] : row.pro} highlight />
-                    <ComparisonCell value={row.key ? PLANS[2].features[row.key as keyof typeof PLANS[2]['features']] : row.premium} />
+                    <ComparisonCell value={row.free} />
+                    <ComparisonCell value={row.pro} highlight />
+                    <ComparisonCell value={row.premium} />
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <p className="mt-3 text-xs text-gray-500">
+            Community screens on Pro show those created by Pro members;
+            Premium sees every shared screen. Enterprise Pro and Enterprise
+            Premium include everything in Pro and Premium respectively, for
+            5 or 10 team members.
+          </p>
         </div>
 
         {/* FAQ */}

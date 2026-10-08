@@ -43,24 +43,6 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-# ── Credentials must not reach the log ────────────────────────────────────────
-# httpx logs the full request URL at INFO, and EODHD takes its token as a query
-# parameter, so every outbound call wrote the API key into logs/backend.log.
-# Found 7 Oct 2026 while verifying the index-membership fix.
-#
-# Two layers, because either alone fails predictably. Suppressing httpx stops
-# the routine case but is brittle -- log levels get raised during an incident,
-# which is exactly when those URLs would print again, and it covers only the
-# library someone thought of. The filter makes the class impossible regardless
-# of level or library.
-#
-# Neither cleans the existing file. A key already written still needs rotating.
-from app.core.log_redaction import install as _install_redaction  # noqa: E402
-
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
-_install_redaction()
-
 # Global rate limiter — keyed by client IP
 limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 

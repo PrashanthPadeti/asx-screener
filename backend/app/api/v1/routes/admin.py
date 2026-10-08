@@ -18,11 +18,8 @@ Endpoints:
 """
 import logging
 import math
-import os
-import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Optional, List
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, HTTPException,
@@ -831,94 +828,6 @@ async def trigger_job(
     background_tasks.add_task(_run_job, job_id)
     log.info(f"Admin triggered job: '{job_id}' (by {admin.get('email', 'unknown')})")
     return {"status": "started", "job_id": job_id, "message": f"Job '{job_id}' is running in the background. Refresh pipeline status in ~30 seconds."}
-
-
-# ── Application log ───────────────────────────────────────────────────────────
-
-#: The single readable file. A fixed constant, not a parameter: a `path` or
-#: `file` argument on an endpoint that returns file contents is a traversal
-#: waiting to happen, and there is exactly one log an operator wants.
-LOG_PATH = Path("/opt/asx-screener/logs/backend.log")
-
-_LOG_LINE = re.compile(
-    r"^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+"
-    r"(?P<level>[A-Z]+)\s+(?P<logger>\S+)\s+(?P<message>.*)$")
-
-
-@router.get("/logs")
-async def read_log(
-    lines: int = Query(200, ge=1, le=2000),
-    level: Optional[str] = Query(None, description="ERROR | WARNING | INFO"),
-    q: Optional[str] = Query(None, max_length=200),
-    admin: dict = Depends(require_admin),
-):
-    """Tail of the application log, redacted.
-
-    Redaction is applied here as well as on the log handler. The handler stops
-    secrets entering the file from now on; this stops lines written BEFORE
-    that shipped from reaching a browser. A log viewer turns a root-readable
-    file on one host into something that appears in an admin session, in
-    browser history and in screenshots, so the second pass is the one that
-    matters for anything already on disk.
-
-    Reads the tail only. The file is append-only and grows unbounded, and
-    loading it whole to show the last 200 lines would pull megabytes into
-    memory on a 4 GB host.
-    """
-    from app.core.log_redaction import redact
-
-    if not LOG_PATH.exists():
-        raise HTTPException(status_code=404,
-                            detail=f"log not found at {LOG_PATH}")
-
-    # Read backwards in blocks rather than seeking a fixed offset: line length
-    # varies by orders of magnitude (a heartbeat vs a traceback), so a byte
-    # estimate either truncates or over-reads.
-    want = min(lines * 4, 20_000)          # headroom for filtering
-    collected: list[str] = []
-    try:
-        with LOG_PATH.open("rb") as fh:
-            fh.seek(0, os.SEEK_END)
-            end = fh.tell()
-            block = 64 * 1024
-            buf = b""
-            while end > 0 and buf.count(b"\n") <= want:
-                step = min(block, end)
-                end -= step
-                fh.seek(end)
-                buf = fh.read(step) + buf
-        collected = buf.decode("utf-8", errors="replace").splitlines()
-    except OSError as exc:
-        raise HTTPException(status_code=500,
-                            detail=f"could not read log: {exc}") from exc
-
-    wanted_level = (level or "").upper().strip() or None
-    needle = (q or "").lower().strip() or None
-
-    out: list[dict] = []
-    for raw in reversed(collected):             # newest first
-        if not raw.strip():
-            continue
-        safe = redact(raw)
-        m = _LOG_LINE.match(safe)
-        if m:
-            rec = {"ts": m.group("ts"), "level": m.group("level"),
-                   "logger": m.group("logger"), "message": m.group("message")}
-        else:
-            # Continuation lines -- tracebacks, SQL -- carry no prefix. Kept
-            # rather than dropped: the traceback is usually the thing being
-            # looked for, and it is still redacted.
-            rec = {"ts": None, "level": None, "logger": None, "message": safe}
-
-        if wanted_level and rec["level"] != wanted_level:
-            continue
-        if needle and needle not in safe.lower():
-            continue
-        out.append(rec)
-        if len(out) >= lines:
-            break
-
-    return {"path": str(LOG_PATH), "lines": len(out), "entries": out}
 
 
 # ── Pipeline Run History ──────────────────────────────────────────────────────

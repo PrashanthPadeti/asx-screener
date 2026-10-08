@@ -91,9 +91,26 @@ def plan_gate(page: str, expect: str) -> str:
     return expect
 
 
+def _reject_stub(page: str, src: str) -> None:
+    """A file with no content to gate cannot evidence that nothing is gated.
+
+    `app/education/page.tsx` is a five-line `redirect('/learn')`. Asserting
+    "no PlanGate, no locks" against it is vacuously true, so the Education row
+    was green while watching nothing -- found by the 8 Oct browser sweep, not
+    by any assertion here. Any mechanism that cannot fail is not evidence.
+    """
+    if re.search(r"\bredirect\(\s*['\"]([^'\"]+)", src) and len(src.splitlines()) < 20:
+        target = re.search(r"\bredirect\(\s*['\"]([^'\"]+)", src).group(1)
+        raise AssertionError(
+            f"app/{page}/page.tsx is a redirect stub to {target!r} with "
+            f"nothing to gate, so this row proves nothing. Point it at the "
+            f"page that actually renders (app{target}/page.tsx)")
+
+
 def open_page(page: str) -> str:
     """No PlanGate and no plan lock anywhere. Free reaches all of it."""
     src = _page(page)
+    _reject_stub(page, src)
     if "PlanGate" in src:
         raise AssertionError(f"app/{page}/page.tsx has a PlanGate; the table "
                              f"says it is free")
@@ -242,7 +259,8 @@ ROWS: dict[str, callable] = {
 
     "Short interest data":            lambda: backend_contains(
         "app/api/v1/routes/screener.py", '"short_pct"', "free"),
-    "Education hub":                  lambda: open_page("education"),
+    # "learn", not "education": /education is a redirect stub.
+    "Education hub":                  lambda: open_page("learn"),
 
     "Metrics glossary":               lambda: plan_gate("glossary", "pro"),
     "Broker compare":                 lambda: plan_gate("brokers", "pro"),
@@ -306,6 +324,86 @@ def _cell(label: str, tier: str, raw: str) -> str:
 
 def _expected(minimum: str) -> tuple:
     return tuple("true" if RANK[t] >= RANK[minimum] else "false" for t in TIERS)
+
+
+# ── Entitlement claims outside the pricing table ────────────────────────────
+# The pricing table is not the only place a tier is promised to a buyer. The
+# in-app help drawer carries its own badges, and two of them were wrong:
+# "AI Natural Language Query — Pro" (Premium since v11.2.13) and
+# "CSV Export — Pro" (Premium since v11.2.14). Both survived every check
+# above, because this file's population was FEATURE_ROWS and nothing else.
+#
+# That is the page-vs-feature mistake one level up: the population of
+# entitlement CLAIMS is larger than the pricing table. A guard is only as
+# honest as its population.
+
+HELP = FRONTEND / "lib" / "helpContent.ts"
+
+#: help-drawer title -> the same kind of resolver the pricing rows use. Not
+#: every badge maps to a PLAN_LIMITS flag: Query Mode is a source gate, so it
+#: is verified against the gate itself rather than invented here.
+BADGE_FLAGS = {
+    "AI Natural Language Query": lambda: backend_flag("nl_screener"),
+    "CSV Export":                lambda: backend_flag("csv_export"),
+    "AI Portfolio Insights":     lambda: backend_flag("portfolio_insights"),
+    "Query Mode":                lambda: frontend_contains(
+        "app/screener/page.tsx", "!isAdmin && !isPro", "pro"),
+}
+
+#: Badges that are not tier claims at all ("ASX 200 · ASX 300", "Quick-start").
+#: A badge whose text names a plan but has no flag above fails, rather than
+#: being skipped as decorative.
+PLAN_WORDS = ("free", "pro", "premium")
+
+
+def _help_badges() -> dict[str, str]:
+    """title -> badge text, for every entry that declares a badge."""
+    src = HELP.read_text(encoding="utf-8")
+    out = {}
+    for m in re.finditer(
+            r"title:\s*'([^']+)',(?:\s*//[^\n]*\n)*\s*badge:\s*'([^']+)'", src):
+        out[m.group(1)] = m.group(2)
+    return out
+
+
+def test_help_drawer_badges_match_plan_limits():
+    """Every tier badge in the help drawer must name the real minimum tier."""
+    badges = _help_badges()
+    assert badges, "could not parse any badge out of helpContent.ts"
+    problems = []
+    for title, resolve in BADGE_FLAGS.items():
+        if title not in badges:
+            problems.append(f"{title!r} no longer carries a badge in "
+                            f"helpContent.ts; its tier claim is unverified")
+            continue
+        try:
+            want = resolve().capitalize()
+        except AssertionError as exc:
+            problems.append(f"{title!r}: {exc}")
+            continue
+        got = badges[title]
+        # 'Pro · Premium' states a minimum of Pro and is accepted as such.
+        got_min = got.split("·")[0].strip()
+        if got_min != want:
+            problems.append(
+                f"{title!r} badge says {got!r}, but the enforced minimum tier "
+                f"is {want.lower()!r}")
+    assert not problems, "\n  ".join([""] + problems)
+
+
+def test_no_badge_names_a_plan_without_being_checked():
+    """Fail-closed: a new badge saying 'Pro' must be added to BADGE_FLAGS.
+
+    Without this, the next feature to get a tier badge is unverified by
+    default -- which is exactly how these two sat wrong through six releases.
+    """
+    unchecked = [f"{t!r} -> {b!r}" for t, b in _help_badges().items()
+                 if t not in BADGE_FLAGS
+                 and any(w in b.lower() for w in PLAN_WORDS)]
+    assert not unchecked, (
+        "help badges naming a plan with nothing verifying them; add each to "
+        "BADGE_FLAGS with the PLAN_LIMITS flag that decides it: "
+        + ", ".join(unchecked))
 
 
 # ── Tests ───────────────────────────────────────────────────────────────────
@@ -424,6 +522,62 @@ def test_an_undeclared_lock_on_a_shared_page_is_caught():
     raise AssertionError(
         "shared_page accepts a lock no pricing row declares, which is how "
         "the Watchlist News gate stayed invisible to a buyer")
+
+
+def test_the_wrong_badge_tier_would_be_caught():
+    """Control 6 — the two help badges, reconstructed.
+
+    `helpContent.ts` was corrected before this check existed, so the check was
+    never watched failing on the real defect. This restores the defect against
+    a temporary file: 'AI Natural Language Query' badged Pro while
+    PLAN_LIMITS.nl_screener is first True on premium.
+    """
+    import tempfile
+    d = Path(tempfile.mkdtemp()) / "lib"
+    d.mkdir(parents=True)
+    (d / "helpContent.ts").write_text(
+        "export const X = [\n"
+        "  { title: 'AI Natural Language Query',\n"
+        "    badge: 'Pro' },\n"
+        "  { title: 'CSV Export',\n"
+        "    badge: 'Pro' },\n"
+        "]\n", encoding="utf-8")
+    global HELP
+    real, HELP = HELP, d / "helpContent.ts"
+    try:
+        badges = _help_badges()
+        assert badges == {"AI Natural Language Query": "Pro",
+                          "CSV Export": "Pro"}, (
+            f"the badge parser does not read this shape: {badges}")
+        try:
+            test_help_drawer_badges_match_plan_limits()
+        except AssertionError as exc:
+            assert "AI Natural Language Query" in str(exc), (
+                "the failure does not name the wrongly-badged feature")
+            return
+    finally:
+        HELP = real
+    raise AssertionError(
+        "a help badge claiming Pro for a Premium-only feature passed, so the "
+        "two defects found by the 8 Oct browser sweep would still be invisible")
+
+
+def test_a_redirect_stub_cannot_pass_as_an_open_page():
+    """Control 7 — the Education row.
+
+    A page whose file only redirects has nothing to gate, so "no locks here"
+    is vacuously true. The row was green for as long as it existed and was
+    caught by opening the page, not by this file.
+    """
+    try:
+        open_page("education")            # the five-line redirect to /learn
+    except AssertionError as exc:
+        assert "redirect stub" in str(exc), (
+            f"failed for the wrong reason: {exc}")
+        return
+    raise AssertionError(
+        "open_page accepts a redirect stub, so any row pointed at one is "
+        "green while watching nothing")
 
 
 def test_a_truthy_cell_cannot_launder_a_false_flag():

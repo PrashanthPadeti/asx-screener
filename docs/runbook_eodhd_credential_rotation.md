@@ -85,7 +85,23 @@ systemctl show asx-backend -p ExecStart -p WorkingDirectory
 
 `WorkingDirectory` is what pydantic's relative `env_file = ".env"` resolves
 against. If it is not the directory holding the file found above, the two
-loaders are reading different files and step 3 will catch it.
+loaders are reading different files — stop and resolve that before rotating.
+
+**Measured 9 Oct 2026 on the production host:**
+
+    backend/.env                1 definition
+    .env (repo root)            exists, 0 definitions
+    WorkingDirectory            /opt/asx-screener/backend
+    ExecStart                   /opt/asx-screener/asx-venv/bin/uvicorn
+
+Both loaders therefore resolve to `/opt/asx-screener/backend/.env`, and the
+interpreter is `/opt/asx-screener/asx-venv/bin/python` — **not** `backend/venv`,
+which an earlier draft of this runbook assumed.
+
+This does not make the step 4 equality check redundant. It proves the paths
+agree on disk; step 4 proves the **restarted process** actually loaded the
+edited value. Those are different claims, and only the second one fails when a
+restart silently serves stale config.
 
 ---
 
@@ -159,7 +175,7 @@ because it is the smallest existing EODHD path that is:
 Run it with the interpreter from step 1:
 
 ```bash
-cd /opt/asx-screener/backend && /opt/asx-screener/backend/venv/bin/python - <<'PY'
+cd /opt/asx-screener/backend && /opt/asx-screener/asx-venv/bin/python - <<'PY'
 import asyncio, sys
 sys.path.insert(0, "/opt/asx-screener/backend")
 from compute.engine.asx_indices import _fetch_eodhd_constituents, EODHD_API_KEY

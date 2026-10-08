@@ -220,7 +220,10 @@ export const SCREENER_SECTIONS: SectionDef[] = [
     id: 'ai-query',
     icon: '🤖', iconBg: 'bg-indigo-50', iconText: 'text-indigo-600',
     title: 'AI Natural Language Query',
-    badge: 'Pro',
+    // Premium, not Pro: PLAN_LIMITS.nl_screener is False on pro and
+    // enterprise_pro since v11.2.13, and the screener itself gates this mode
+    // on isPremium. Only this badge still said Pro.
+    badge: 'Premium',
     summary: 'Type a plain-English question and Claude AI converts it to structured screener filters and runs it instantly against the ASX database.',
     howToUse: 'Be descriptive — "profitable small cap miners with low debt" works better than "small miners". You can see exactly how Claude interpreted your query in the "Interpreted as:" banner. Click any example chip to try a pre-built query.',
     filters: [
@@ -270,9 +273,10 @@ export const SCREENER_SECTIONS: SectionDef[] = [
     id: 'csv-export',
     icon: '📥', iconBg: 'bg-slate-50', iconText: 'text-slate-600',
     title: 'CSV Export',
-    badge: 'Pro',
+    // Premium, not Pro: csv_export moved to Premium in v11.2.14.
+    badge: 'Premium',
     summary: 'Download up to 5,000 rows of screener results as a CSV file for use in Excel or Google Sheets.',
-    howToUse: 'Run a screen first, then click the download icon next to the result count. The CSV includes all visible columns. Pro plan required.',
+    howToUse: 'Run a screen first, then click the download icon next to the result count. The CSV includes all visible columns. Premium plan required.',
     columns: [],
   },
 ]

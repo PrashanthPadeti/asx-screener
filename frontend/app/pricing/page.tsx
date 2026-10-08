@@ -101,7 +101,10 @@ const FEATURE_ROWS: { label: string; free: Cell; pro: Cell; premium: Cell }[] = 
 
   // ── Screens ────────────────────────────────────────────────────────────
   { label: 'Quick screens',            free: true,  pro: true,  premium: true  },
-  { label: 'Sector screens',           free: false, pro: true,  premium: true  },
+  // Sector screens render as plain links in scans/page.tsx with no lock
+  // check -- unlike presets, which go through ScanCard's
+  // `locked = preset.premium && !isPro`. They are free to everyone.
+  { label: 'Sector screens',           free: true,  pro: true,  premium: true  },
   { label: 'Pro screens',              free: false, pro: true,  premium: true  },
   { label: 'Premium screens',          free: false, pro: false, premium: true  },
   { label: 'Community screens',        free: false, pro: 'Pro tier', premium: true },

@@ -93,7 +93,7 @@ async def get_announcements(
     tab:            Optional[str]       = Query(None),          # tab-based filtering
     date_from:      Optional[DateType]  = Query(None),          # YYYY-MM-DD
     date_to:        Optional[DateType]  = Query(None),          # YYYY-MM-DD
-    watchlist_only: bool                = Query(False),         # Pro+ feature
+    watchlist_only: bool                = Query(False),         # free; see below
     limit:          int                 = Query(50, ge=1, le=200),
     offset:         int                 = Query(0, ge=0),
     current_user:   dict                = Depends(get_current_user),
@@ -106,7 +106,16 @@ async def get_announcements(
     if tab and tab in TAB_FILTERS:
         filters.append(TAB_FILTERS[tab])
 
-    # ── Watchlist filter (Pro+) ───────────────────────────────────────────────
+    # ── Watchlist filter ──────────────────────────────────────────────────────
+    # Free, and deliberately so. This carried a "Pro+ feature" comment and no
+    # plan check for as long as it existed, while the frontend hid the control
+    # from Free users -- so the comment described a gate that was never here
+    # and the UI enforced one the pricing table contradicted.
+    #
+    # It needs no gate: the entitlement is the watchlist COUNT (free 1 of 50
+    # stocks, pro 10 of 200, premium 20 of 500), enforced in watchlist.py.
+    # Filtering free announcements by a watchlist the caller already owns
+    # grants nothing extra, and the join below is scoped to :user_id.
     if watchlist_only and current_user:
         wl_result = await db.execute(text("""
             SELECT DISTINCT wi.asx_code

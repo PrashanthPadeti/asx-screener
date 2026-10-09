@@ -357,12 +357,15 @@ async def run(
             except SourceRefused:
                 # Counted, not swallowed. 47 of these is why four days of runs
                 # wrote nothing while reporting success.
-                tally.refusal(ticker)
+                # Keyed by the ASX code, not the provider ticker: the outcome
+                # has to line up with the eligible population to be reconciled
+                # against it.
+                tally.refusal(code, f"provider refused {ticker}")
                 continue
 
             if df is None or df.empty:
                 log.info(f"  {code}: no data returned")
-                tally.nothing_available()
+                tally.nothing_available(code)
                 continue
 
             # Compute returns on the FULL fetched history (includes 400-day lookback
@@ -375,7 +378,7 @@ async def run(
             count = await upsert_price_rows(db, code, rows, dry_run)
             log.info(f"  {code}: {count} rows upserted")
             total_rows += count
-            tally.obtained(count)
+            tally.obtained(code, count)
 
     # Partial results are kept; only a total failure raises. See
     # producer_contract for why no completeness threshold is set here.

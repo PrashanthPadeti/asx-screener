@@ -1321,6 +1321,13 @@ export interface IndexPrice {
   return_ytd: number | null
   high_52w: number | null
   low_52w: number | null
+  /**
+   * Null when the series is sound. Otherwise names why every numeric field
+   * above is null — the figures are withheld, not missing. Render an explicit
+   * unavailable state: a bare em-dash reads as "no data yet", which invites a
+   * refresh and misrepresents a deliberate suppression.
+   */
+  data_status?: string | null
 }
 
 export interface IndicesResponse {

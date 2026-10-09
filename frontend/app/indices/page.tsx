@@ -117,6 +117,18 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
           <span className={`text-xs font-bold px-2 py-0.5 rounded ${retBg(idx.return_1d)} text-white`}>
             {idx.index_code}
           </span>
+          {/* Withheld, not missing. Every numeric field is null by decision
+              because the series' provenance is unverified, and an em-dash
+              alone reads as "no data yet" — which invites a refresh and
+              misrepresents it. */}
+          {idx.data_status && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/60"
+              title="Figures withheld: this series' source could not be verified. Stored values are not valid for this index and are not shown."
+            >
+              UNAVAILABLE
+            </span>
+          )}
         </div>
         <span className="text-xs text-slate-400 mt-1 leading-tight block">{idx.display_name}</span>
         {screenerHref && (

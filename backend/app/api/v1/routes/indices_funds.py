@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.series_provenance import (
-    UNVERIFIED_SERIES, suppress_if_unverified)
+    UNVERIFIED_SERIES, containment_version, suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
     IndicesResponse, IndexPrice,
@@ -298,7 +298,9 @@ INDEX_NAME_TO_SECTOR: dict[str, str] = {
 @router.get("/indices", response_model=IndicesResponse)
 async def get_indices(db: AsyncSession = Depends(get_db)):
     """Latest daily performance for all active ASX indices."""
-    _key = make_key("indices", "list")
+    # Keyed by the containment digest: a cached pre-containment response
+    # would otherwise keep serving withheld figures for the full hour TTL.
+    _key = make_key("indices", "list", containment_version())
     cached = await cache_get(_key)
     if cached:
         return cached

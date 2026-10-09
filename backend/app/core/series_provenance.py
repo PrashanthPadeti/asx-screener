@@ -48,6 +48,24 @@ SUPPRESSED_FIELDS = (
 )
 
 
+def containment_version() -> str:
+    """A short digest of the suppression rules, for cache keys.
+
+    `asx:indices:list` is cached for an hour on a static key, so deploying
+    containment would otherwise keep serving pre-containment figures for up
+    to an hour — the suppression would appear not to work, and the obvious
+    conclusion ("the code is wrong") would be false.
+
+    Derived rather than hand-bumped: changing UNVERIFIED_SERIES or
+    SUPPRESSED_FIELDS changes the key automatically. A version constant
+    someone has to remember to increment is a version constant that
+    eventually is not incremented.
+    """
+    import hashlib                                              # noqa: PLC0415
+    material = repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
+    return hashlib.sha256(material.encode()).hexdigest()[:8]
+
+
 def is_unverified(code: str) -> bool:
     return code.upper() in UNVERIFIED_SERIES
 

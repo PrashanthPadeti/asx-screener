@@ -8,7 +8,11 @@ import Breadcrumb from '@/components/Breadcrumb'
 
 // ── Screener link mapping ─────────────────────────────────────────────────────
 
-// AXJO (All Ordinaries, ~500 stocks) has no dedicated screener field — excluded intentionally.
+// AXJO: series provenance unverified — the backend withholds its figures.
+// Previously commented here as "All Ordinaries, ~500 stocks" while the API
+// described it as S&P/ASX 200 Accumulation; that contradiction is part of the
+// finding. No dedicated screener field either way.
+// See docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
 const SCREENER_HREF: Record<string, string> = {
   ASX20:  '/screener?index=ASX20',
   ASX50:  '/screener?index=ASX50',

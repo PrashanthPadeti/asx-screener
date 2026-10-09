@@ -996,7 +996,11 @@ export default function ScreenerPage() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Map ASX index codes to screener boolean field names.
-  // AXJO (All Ordinaries, ~500 stocks) has no dedicated screener field — omitted intentionally.
+  // AXJO: series provenance unverified — the backend withholds its figures.
+  // Previously commented here as "All Ordinaries, ~500 stocks" while the API
+  // described it as S&P/ASX 200 Accumulation; that contradiction is part of the
+  // finding. No dedicated screener field either way.
+  // See docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
   const INDEX_FIELD_MAP: Record<string, string> = {
     ASX20:  'is_asx20',
     ASX50:  'is_asx50',

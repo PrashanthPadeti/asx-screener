@@ -29,6 +29,11 @@ class IndexPrice(BaseModel):
     return_ytd: Optional[float] = None
     high_52w: Optional[float] = None
     low_52w: Optional[float] = None
+    #: None when the series is sound. Otherwise names why every numeric field
+    #: above has been withheld, so a consumer can distinguish "we have no
+    #: figure" from "we have a figure we cannot stand behind". Absent this,
+    #: suppression is indistinguishable from an outage.
+    data_status: Optional[str] = None
 
 
 class IndicesResponse(BaseModel):

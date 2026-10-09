@@ -44,29 +44,30 @@ def _rule(title: str) -> None:
 
 
 async def _enforce_read_only(db) -> None:
-    """Put the transaction in READ ONLY mode and PROVE a write is refused.
+    """Set READ ONLY, then CONFIRM the setting. Never by attempting a write.
 
-    A regex over the source can show no write statement was authored. It
-    cannot show that none executes — a write reachable through a helper, an
-    ORM flush, or a statement added later would all pass the scan. The
-    database is the only thing that can actually refuse one, so this asks it
-    to, and then checks that it does.
+    An earlier draft proved containment by issuing a write and requiring it
+    to fail. That is the wrong shape against production: it tests for
+    mutability *by mutating*, so the one case it is meant to catch — the
+    guard not being in force — is the case where it performs the write. A
+    scratch temp table makes a particular instance harmless; it does not make
+    the pattern safe, and the next person to copy it will not pick a temp
+    table.
 
-    The probe targets a scratch temp table, so if the guard is NOT in force
-    the attempted write still touches nothing real.
+    Here the setting is read back instead. The write-rejection test belongs
+    in an isolated database, where a write that unexpectedly succeeds costs
+    nothing — see tests/test_fund_population_and_freshness.py.
     """
     from sqlalchemy import text                                  # noqa: PLC0415
 
     await db.execute(text("SET TRANSACTION READ ONLY"))
-    try:
-        await db.execute(text("CREATE TEMP TABLE _dry_run_write_probe (x int)"))
-    except Exception:                                            # noqa: BLE001
-        await db.rollback()
-        await db.execute(text("SET TRANSACTION READ ONLY"))
-        return
-    raise RuntimeError(
-        "the database accepted a write inside the dry run: READ ONLY is not "
-        "in force and this script cannot claim to be read-only")
+    state = (await db.execute(
+        text("SELECT current_setting('transaction_read_only')"))).scalar()
+    if state != "on":
+        raise RuntimeError(
+            f"transaction_read_only is {state!r}, not 'on' — this script "
+            f"cannot claim to be read-only, and nothing below should be "
+            f"trusted to have left the database unchanged")
 
 
 async def main() -> int:

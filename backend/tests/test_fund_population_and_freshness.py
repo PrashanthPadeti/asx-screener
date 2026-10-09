@@ -179,12 +179,20 @@ def test_the_dry_run_enforces_read_only_at_the_database():
         "the dry run does not put the transaction in read-only mode")
     probe = src[src.index("async def _enforce_read_only"):]
     probe = probe[:probe.index("async def main")]
-    assert "CREATE TEMP TABLE" in probe, (
-        "read-only is set but never tested, so a silently ineffective guard "
-        "would read as containment")
+    assert "current_setting('transaction_read_only')" in probe, (
+        "read-only is set but never confirmed, so a silently ineffective "
+        "guard would read as containment")
     assert "raise RuntimeError" in probe, (
-        "an accepted write does not abort the run, so the script could "
+        "a failed confirmation does not abort the run, so the script could "
         "report itself read-only while writes were possible")
+    # Against production the guard must CONFIRM the setting, never test it by
+    # attempting a write: that tests for mutability by mutating, so the one
+    # case it exists to catch is the case where it performs the write. The
+    # write-rejection test belongs in an isolated database.
+    for mutation in ("CREATE TEMP TABLE", "INSERT INTO", "UPDATE "):
+        assert mutation not in probe, (
+            f"the production guard attempts {mutation!r} to prove "
+            f"read-only; if the guard is not in force, that write executes")
     assert src.index("_enforce_read_only(db)") < src.index("await reconcile("), (
         "containment is established after the first query rather than before")
 
@@ -203,6 +211,92 @@ def test_the_dry_run_installs_redaction_before_anything_else():
     assert src.index("install_secret_redaction(") < src.index(
         "from compute.engine.fund_population"), (
         "redaction is installed after the modules that may log are imported")
+
+
+# ── The migration is additive and decides nothing ───────────────────────────
+
+MIGRATION = BACKEND / "migrations" / "add_fund_lifecycle_columns.sql"
+
+
+def _migration() -> str:
+    return MIGRATION.read_text(encoding="utf-8")
+
+
+def test_the_migration_records_no_lifecycle_decision():
+    """Adding the vocabulary must not retire anything.
+
+    A migration that both adds a column and populates it conflates "we can
+    now record this" with "we have decided this", and the decisions here rest
+    on evidence that is still outstanding -- DIV's official delisting date,
+    and whether PMC and GLS are the same security at all.
+    """
+    body = "\n".join(l for l in _migration().splitlines()
+                     if not l.strip().startswith("--"))
+    for forbidden in ("UPDATE ", "INSERT ", "DELETE "):
+        assert forbidden not in body.upper(), (
+            f"the migration contains {forbidden.strip()}, so it writes a "
+            f"lifecycle decision rather than only enabling one")
+
+
+def test_every_added_column_is_nullable_with_no_default():
+    body = _migration()
+    for col in LIFECYCLE_COLUMNS:
+        m = re.search(rf"ADD COLUMN IF NOT EXISTS {col} (\w+)", body)
+        assert m, f"{col} is not added by the migration"
+        after = body[m.end():body.index(";", m.end())]
+        assert "NOT NULL" not in after.upper(), f"{col} is NOT NULL"
+        assert "DEFAULT" not in after.upper(), f"{col} carries a default"
+
+
+def test_the_migration_is_idempotent():
+    """Re-running must not fail, and must not overwrite a decision recorded
+    between runs -- which is guaranteed by it writing nothing at all."""
+    body = _migration()
+    adds = re.findall(r"ADD COLUMN(?! IF NOT EXISTS)", body)
+    assert not adds, f"{len(adds)} ADD COLUMN without IF NOT EXISTS"
+    assert body.count("CREATE INDEX IF NOT EXISTS") == 1
+    assert "DROP CONSTRAINT IF EXISTS" in body, (
+        "re-adding the CHECK would fail on a second run")
+
+
+def test_is_active_is_not_touched():
+    """Existing state is preserved; the migration only adds vocabulary.
+
+    The partial index references is_active in its WHERE clause, which reads
+    the column without altering it — so only statements that could change it
+    are examined.
+    """
+    mutating = [l for l in _migration().splitlines()
+                if l.strip().upper().startswith(("ALTER TABLE", "UPDATE"))
+                and "is_active" in l]
+    assert not mutating, (
+        f"the migration alters is_active, changing existing state: {mutating}")
+
+
+def test_a_half_recorded_retirement_is_rejected():
+    """A reason without a date reads as retired to one query and active to
+    another. The CHECK makes that unrepresentable."""
+    body = _migration()
+    assert "funds_retirement_is_complete" in body
+    block = body[body.index("funds_retirement_is_complete"):]
+    assert "retired_at IS NOT NULL AND retired_reason IS NOT NULL" in block
+
+
+def test_pmc_is_not_linked_to_gls_by_any_statement():
+    """Different ISINs (AU000000PMC2 vs AU0000440166), so continuity is
+    unproven and history must not be consolidated on vendor data.
+
+    Executable statements only. The comments explain *why* the link is
+    withheld, which is the record of the decision and must stay — an earlier
+    version of this test scanned comments too and failed on the explanation
+    for not doing the thing it was checking nobody had done.
+    """
+    statements = [l for l in _migration().splitlines()
+                  if l.strip() and not l.strip().startswith("--")]
+    offenders = [l for l in statements if "GLS" in l.upper()]
+    assert not offenders, (
+        f"a migration statement references GLS, encoding an identity claim "
+        f"the ISINs do not support: {offenders}")
 
 
 if __name__ == "__main__":

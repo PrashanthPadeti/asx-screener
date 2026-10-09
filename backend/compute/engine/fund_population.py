@@ -45,13 +45,26 @@ from compute.engine.producer_contract import PopulationReconciliation
 #: cannot drift apart silently.
 LIFECYCLE_COLUMNS = ("retired_at", "retired_reason", "successor_code")
 
+_HAS_LIFECYCLE = """
+    SELECT count(*) FROM information_schema.columns
+     WHERE table_schema = 'market' AND table_name = 'funds'
+       AND column_name IN ('retired_at', 'retired_reason', 'successor_code')
+"""
+
+#: Eligibility with the lifecycle present. `{lifecycle}` is filled with the
+#: retirement predicate, or emptied when the columns do not exist yet.
 _ELIGIBLE = """
     SELECT asx_code
       FROM market.funds
      WHERE is_active = TRUE
-       AND retired_at IS NULL
+       {lifecycle}
      ORDER BY asx_code
 """
+
+LIFECYCLE_PREDICATE = "AND retired_at IS NULL"
+
+#: What a caller is told when the migration has not been applied.
+LIFECYCLE_UNAVAILABLE = "lifecycle metadata unavailable"
 
 _RETIRED = """
     SELECT asx_code, retired_at, retired_reason, successor_code
@@ -68,11 +81,10 @@ _RETIRED = """
 _FRESHNESS = """
     SELECT f.asx_code,
            f.is_active,
-           f.retired_at,
            max(p.price_date) AS last_price_date
       FROM market.funds f
       LEFT JOIN market.fund_prices p ON p.asx_code = f.asx_code
-     GROUP BY f.asx_code, f.is_active, f.retired_at
+     GROUP BY f.asx_code, f.is_active
      ORDER BY max(p.price_date) NULLS FIRST, f.asx_code
 """
 
@@ -116,13 +128,43 @@ def _sql(statement: str):
     return text(statement)
 
 
+async def lifecycle_available(db) -> bool:
+    """Whether the retirement columns exist yet.
+
+    Reconciliation must run on the current schema. A pending migration is a
+    reason to qualify the answer, never a reason to withhold it -- the eight
+    omitted ETFs are visible today and were visible for four months, and
+    blocking the report on a schema change nobody has applied would hide
+    them for longer.
+    """
+    n = (await db.execute(_sql(_HAS_LIFECYCLE))).scalar() or 0
+    return int(n) == len(LIFECYCLE_COLUMNS)
+
+
 async def eligible_codes(db) -> frozenset[str]:
-    """Funds the system undertakes to keep current. From the source."""
-    rows = (await db.execute(_sql(_ELIGIBLE))).scalars().all()
+    """Funds the system undertakes to keep current. From the source.
+
+    Without the lifecycle columns this falls back to `is_active` alone, which
+    -- as established -- has never excluded anything, because the seed writes
+    TRUE and its ON CONFLICT omits the column. The fallback therefore
+    measures the CURRENT state honestly rather than the post-migration one,
+    and callers are told which they are looking at.
+    """
+    lifecycle = LIFECYCLE_PREDICATE if await lifecycle_available(db) else ""
+    rows = (await db.execute(
+        _sql(_ELIGIBLE.format(lifecycle=lifecycle)))).scalars().all()
     return frozenset(rows)
 
 
-async def retired_rows(db) -> list[dict]:
+async def retired_rows(db) -> list[dict] | None:
+    """Recorded retirements, or None when the lifecycle columns are absent.
+
+    None is not an empty list. "No retirement has been recorded" and "this
+    schema cannot record one" are different facts, and collapsing them is the
+    same conflation that let a missing fund look like a retired one.
+    """
+    if not await lifecycle_available(db):
+        return None
     return [dict(r) for r in (await db.execute(_sql(_RETIRED))).mappings().all()]
 
 
@@ -131,7 +173,7 @@ async def freshness(db) -> list[FundFreshness]:
         FundFreshness(asx_code=r["asx_code"],
                       last_price_date=r["last_price_date"],
                       is_active=bool(r["is_active"]),
-                      retired_at=r["retired_at"])
+                      retired_at=r["retired_at"] if "retired_at" in r else None)
         for r in (await db.execute(_sql(_FRESHNESS))).mappings().all()
     ]
 

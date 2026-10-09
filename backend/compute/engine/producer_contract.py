@@ -174,31 +174,74 @@ class ProducerTally:
     # unanswered on for the producer's entire life, at 45 of 47 passing.
 
     def refusal(self, code: str, detail: str | None = None) -> None:
+        # Record FIRST: _record raises on a duplicate, and a rejected
+        # verdict must leave the counters untouched. Incrementing first meant
+        # a refused duplicate still moved the totals it was refused for.
+        self._record(EntityOutcome(code, PROVIDER_ERROR,
+                                   reason=detail or "source refused"))
         self.refused += 1
         if len(self.refusals) < 5:
             self.refusals.append(code)
-        self.outcomes.append(EntityOutcome(code, PROVIDER_ERROR,
-                                           reason=detail or "source refused"))
 
     def nothing_available(self, code: str) -> None:
+        self._record(EntityOutcome(code, EMPTY,
+                                   reason="provider returned no data"))
         self.empty += 1
-        self.outcomes.append(EntityOutcome(code, EMPTY,
-                                           reason="provider returned no data"))
 
     def obtained(self, code: str, rows: int) -> None:
+        self._record(EntityOutcome(code, USABLE, rows=rows))
         self.usable += 1
         self.rows += rows
-        self.outcomes.append(EntityOutcome(code, USABLE, rows=rows))
 
     def excluded(self, code: str, reason: str) -> None:
         """Deliberately skipped. The reason is required, not optional.
 
         An exclusion without a recorded reason is indistinguishable from an
         omission, which is the defect this whole change exists to end.
+
+        An exclusion also does NOT settle the population. A code excluded here
+        that is eligible-but-unconfigured still appears in the reconciliation
+        findings, so "we meant to skip it" cannot be used to quiet a mismatch
+        nobody has resolved. See `unaccounted`.
         """
         if not reason:
             raise ValueError(f"{code}: an exclusion must carry a reason")
-        self.outcomes.append(EntityOutcome(code, EXCLUDED, reason=reason))
+        self._record(EntityOutcome(code, EXCLUDED, reason=reason))
+
+    # ── One terminal outcome per entity ─────────────────────────────────────
+
+    def _record(self, outcome: EntityOutcome) -> None:
+        """Append, refusing a second verdict for the same entity.
+
+        Exactly one terminal outcome per attempted entity. Two verdicts mean
+        the loop double-counted or retried without resetting, and whichever
+        the reader believes is a coin toss -- `usable` and `empty` for the
+        same code cannot both be true of one run.
+        """
+        prior = next((o for o in self.outcomes if o.code == outcome.code), None)
+        if prior is not None:
+            raise ValueError(
+                f"{outcome.code}: already recorded as {prior.outcome!r}, "
+                f"cannot also be {outcome.outcome!r} — one terminal outcome "
+                f"per entity")
+        self.outcomes.append(outcome)
+
+    @property
+    def recorded(self) -> frozenset[str]:
+        return frozenset(o.code for o in self.outcomes)
+
+    @property
+    def unaccounted(self) -> frozenset[str]:
+        """Eligible entities with no outcome at all.
+
+        Not "failed" and not "excluded" — simply never reached a verdict. A
+        loop that breaks early, a continue that skips the recording, an
+        entity filtered out upstream: each leaves a silent hole, and a hole
+        is what every defect in this file began as.
+        """
+        if self.population is None:
+            return frozenset()
+        return frozenset(self.population.eligible - self.recorded)
 
     # ── Run state ───────────────────────────────────────────────────────────
 
@@ -217,7 +260,7 @@ class ProducerTally:
         """
         if self.usable == 0:
             return False            # that is failure, not degradation
-        if self.failures:
+        if self.failures or self.unaccounted:
             return True
         return bool(self.population and not self.population.reconciled)
 
@@ -235,6 +278,9 @@ class ProducerTally:
         """Human-readable findings. Empty when the run was clean."""
         out = list(self.population.findings()) if self.population else []
         out += [str(o) for o in self.failures]
+        if self.unaccounted:
+            out.append("eligible but never reached a verdict: "
+                       + ", ".join(sorted(self.unaccounted)))
         return out
 
     def verify(self) -> None:

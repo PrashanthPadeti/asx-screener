@@ -202,6 +202,70 @@ def test_excluded_entities_do_not_degrade_the_run():
         "retirement look like a fault and train operators to ignore it")
 
 
+# ── Exactly one terminal outcome per attempted entity ───────────────────────
+
+def test_a_second_verdict_for_the_same_entity_is_rejected():
+    """`usable` and `empty` cannot both be true of one entity in one run.
+
+    Two verdicts mean the loop double-counted or retried without resetting,
+    and which one a reader believes becomes a coin toss.
+    """
+    t = ProducerTally("fund_prices", expected=1)
+    t.obtained("VAS", 5)
+    try:
+        t.nothing_available("VAS")
+    except ValueError as exc:
+        assert "already recorded" in str(exc)
+        return
+    raise AssertionError("an entity received two terminal outcomes")
+
+
+def test_a_repeated_identical_outcome_is_also_rejected():
+    """Even the same verdict twice is a double count, not a no-op."""
+    t = ProducerTally("fund_prices", expected=1)
+    t.obtained("VAS", 5)
+    try:
+        t.obtained("VAS", 5)
+    except ValueError:
+        assert t.rows == 5, "the duplicate was counted before being refused"
+        return
+    raise AssertionError("an entity was recorded as usable twice")
+
+
+def test_an_eligible_entity_with_no_outcome_is_flagged():
+    """Not failed, not excluded — simply never reached a verdict.
+
+    A loop that breaks early, or a `continue` that skips the recording, leaves
+    a silent hole. Every defect in this file began as a hole.
+    """
+    t = ProducerTally("fund_prices", expected=3)
+    t.obtained("VAS", 5)
+    t.obtained("STW", 5)
+    t.population = _recon(eligible={"VAS", "STW", "IOZ"},
+                          configured={"VAS", "STW", "IOZ"})
+    assert t.unaccounted == frozenset({"IOZ"})
+    assert t.degraded, "an entity with no verdict left the run reading clean"
+    assert any("never reached a verdict" in line for line in t.report())
+
+
+def test_an_exclusion_cannot_conceal_a_population_mismatch():
+    """"We meant to skip it" must not quiet an unresolved omission.
+
+    Excluding a code records a decision about FETCHING it. It says nothing
+    about whether the population is reconciled, so an eligible-but-
+    unconfigured entity stays a finding even when excluded.
+    """
+    t = ProducerTally("fund_prices", expected=1)
+    t.obtained("VAS", 5)
+    t.excluded("ETHI", "skipped this run")
+    t.population = _recon(eligible={"VAS", "ETHI"}, configured={"VAS"})
+    assert "ETHI" in t.population.omitted
+    assert t.degraded, (
+        "an exclusion silenced an unresolved population mismatch, which is "
+        "how a deliberate-looking label hides an accidental omission")
+    assert any("never refreshed" in line for line in t.report())
+
+
 # ── The contract that already existed still holds ───────────────────────────
 
 def test_an_empty_population_is_vacuous_not_failed():

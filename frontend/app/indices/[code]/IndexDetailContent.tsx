@@ -151,7 +151,7 @@ const DARK_TOOLTIP = {
 
 // ── Performance Chart ─────────────────────────────────────────────────────────
 
-function PerformanceChart({ code, unavailable }: { code: string; unavailable?: boolean }) {
+function PerformanceChart({ code, unavailable, stale }: { code: string; unavailable?: boolean; stale?: boolean }) {
   const [period, setPeriod] = useState('1Y')
   const [history, setHistory] = useState<{ date: string; close: number | null }[]>([])
   const [loading, setLoading] = useState(true)
@@ -186,6 +186,12 @@ function PerformanceChart({ code, unavailable }: { code: string; unavailable?: b
           </button>
         ))}
       </div>
+      {stale && (
+        <p className="text-[11px] text-orange-300/90 mb-2">
+          This series has stopped updating. The chart shows real history up to
+          its last published close; it is not current.
+        </p>
+      )}
       {loading ? (
         <div className="h-64 flex items-center justify-center">
           <RefreshCw className="w-5 h-5 text-slate-500 animate-spin" />
@@ -648,13 +654,27 @@ export default function IndexDetailContent({
                   suppression, which reads as a loading failure rather than a
                   deliberate withholding. Visible text, no tooltip: a title=
                   attribute is unreachable by keyboard and absent on touch. */}
-              {p?.data_status && (
+              {p?.data_status === 'series_provenance_unverified' && (
                 <div className="mt-3 rounded-lg border border-amber-700/60 bg-amber-900/25 px-4 py-3">
                   <p className="text-sm font-semibold text-amber-300">Figures unavailable</p>
                   <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
                     This series&apos; source could not be verified, so its price and
                     return figures are withheld. Stored values are not valid for
                     this index and are not shown.
+                  </p>
+                </div>
+              )}
+
+              {p?.data_status === 'stale' && (
+                <div className="mt-3 rounded-lg border border-orange-700/60 bg-orange-900/25 px-4 py-3">
+                  <p className="text-sm font-semibold text-orange-300">
+                    Not updating{p.sessions_behind ? ` — ${p.sessions_behind} trading sessions behind` : ''}
+                  </p>
+                  <p className="text-xs text-orange-200/90 mt-1 leading-relaxed">
+                    The last published close was {p.price_date}. That value is shown
+                    as history. Returns and 52-week range are withheld, because they
+                    describe a period ending today and were last computed on that
+                    date.
                   </p>
                 </div>
               )}
@@ -799,7 +819,8 @@ export default function IndexDetailContent({
         </div>
 
         {/* Historical chart */}
-        <PerformanceChart code={code} unavailable={!!p?.data_status} />
+        <PerformanceChart code={code} unavailable={p?.data_status === 'series_provenance_unverified'}
+          stale={p?.data_status === 'stale'} />
 
         {/* Compare */}
         <CompareChart currentCode={code} />

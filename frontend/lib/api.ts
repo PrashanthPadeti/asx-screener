@@ -1328,6 +1328,8 @@ export interface IndexPrice {
    * refresh and misrepresents a deliberate suppression.
    */
   data_status?: string | null
+  /** Trading sessions behind the last expected close. Set when stale. */
+  sessions_behind?: number | null
 }
 
 export interface IndicesResponse {

@@ -8,7 +8,11 @@ import Breadcrumb from '@/components/Breadcrumb'
 
 // ── Screener link mapping ─────────────────────────────────────────────────────
 
-// AXJO (All Ordinaries, ~500 stocks) has no dedicated screener field — excluded intentionally.
+// AXJO: series provenance unverified — the backend withholds its figures.
+// Previously commented here as "All Ordinaries, ~500 stocks" while the API
+// described it as S&P/ASX 200 Accumulation; that contradiction is part of the
+// finding. No dedicated screener field either way.
+// See docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
 const SCREENER_HREF: Record<string, string> = {
   ASX20:  '/screener?index=ASX20',
   ASX50:  '/screener?index=ASX50',
@@ -113,8 +117,27 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
           <span className={`text-xs font-bold px-2 py-0.5 rounded ${retBg(idx.return_1d)} text-white`}>
             {idx.index_code}
           </span>
+          {/* Withheld, not missing. Every numeric field is null by decision
+              because the series' provenance is unverified, and an em-dash
+              alone reads as "no data yet" — which invites a refresh and
+              misrepresents it. */}
+          {idx.data_status && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/60">
+              UNAVAILABLE
+            </span>
+          )}
         </div>
         <span className="text-xs text-slate-400 mt-1 leading-tight block">{idx.display_name}</span>
+        {/* The reason is rendered as visible text, not a title= tooltip. A
+            tooltip is unreachable by keyboard and never appears on touch, so
+            on a phone the badge would say UNAVAILABLE with no way to find out
+            why. Visible text needs no interaction at all. */}
+        {idx.data_status && (
+          <span className="text-[10px] text-amber-400/90 mt-1 leading-tight block relative z-[2]">
+            Figures withheld — this series&apos; source could not be verified.
+            Stored values are not valid for this index.
+          </span>
+        )}
         {screenerHref && (
           <Link
             href={screenerHref}

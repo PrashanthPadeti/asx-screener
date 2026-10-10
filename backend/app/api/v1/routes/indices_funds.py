@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.db.session import get_db
+from app.core.series_provenance import (
+    UNVERIFIED_SERIES, containment_version, suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
     IndicesResponse, IndexPrice,
@@ -135,12 +137,13 @@ INDEX_META: dict[str, dict] = {
         "market_coverage": "~300 companies — approximately 85% of ASX total market capitalisation",
     },
     "AXJO": {
-        "display_name": "S&P/ASX 200 Accumulation",
+        "display_name": "S&P/ASX 200 Accumulation (unavailable)",
         "description": (
-            "The total return version of the S&P/ASX 200 index, incorporating reinvestment "
-            "of dividends. Provides a more accurate measure of total investor return than "
-            "the price-only ASX 200. This is the standard benchmark used by Australian "
-            "superannuation funds and managed equity funds."
+            "This series is currently unavailable. It was previously populated from the "
+            "price-only S&P/ASX 200 series while being presented as a total return index, "
+            "so its stored figures do not reflect dividend reinvestment and must not be "
+            "used as an accumulation benchmark. Figures are withheld until a source is "
+            "verified for return type, currency, dividend treatment and date coverage."
         ),
         "eligibility": "Identical constituents to the S&P/ASX 200 index.",
         "methodology": (
@@ -295,7 +298,9 @@ INDEX_NAME_TO_SECTOR: dict[str, str] = {
 @router.get("/indices", response_model=IndicesResponse)
 async def get_indices(db: AsyncSession = Depends(get_db)):
     """Latest daily performance for all active ASX indices."""
-    _key = make_key("indices", "list")
+    # Keyed by the containment digest: a cached pre-containment response
+    # would otherwise keep serving withheld figures for the full hour TTL.
+    _key = make_key("indices", "list", containment_version())
     cached = await cache_get(_key)
     if cached:
         return cached
@@ -346,7 +351,7 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
 
     result = IndicesResponse(
         indices=[
-            IndexPrice(
+            IndexPrice(**suppress_if_unverified(r["index_code"], dict(
                 index_code=r["index_code"], display_name=r["display_name"],
                 price_date=r["price_date"], close_price=_f(r["close_price"]),
                 return_1d=_f(r["return_1d"]), return_1w=_f(r["return_1w"]),
@@ -354,7 +359,7 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
                 return_6m=_f(r["return_6m"]), return_1y=_f(r["return_1y"]),
                 return_ytd=_f(r["return_ytd"]), high_52w=_f(r["high_52w"]),
                 low_52w=_f(r["low_52w"]),
-            )
+            )))
             for r in rows
         ],
         as_of=as_of.isoformat() if as_of else None,
@@ -370,6 +375,16 @@ async def get_index_history(
     db: AsyncSession = Depends(get_db),
 ):
     """Historical daily close prices for a specific index (up to 5 years)."""
+    code_u = index_code.upper()
+    if code_u in UNVERIFIED_SERIES:
+        # An empty history, not the stored rows. The series' provenance is
+        # unestablished, so returning its points would let a chart render
+        # exactly the figures the list and detail endpoints withhold -- and a
+        # chart is harder to caveat than a number. The rows remain in
+        # market.index_prices for investigation.
+        return {"index_code": code_u, "history": [],
+                "data_status": UNVERIFIED_SERIES[code_u]}
+
     rows = (await db.execute(text("""
         SELECT price_date::text AS price_date, close_price, return_1d
         FROM market.index_prices
@@ -477,7 +492,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
     # Price snapshot
     price_obj = None
     if price_row and price_row["close_price"]:
-        price_obj = IndexPrice(
+        price_obj = IndexPrice(**suppress_if_unverified(code, dict(
             index_code=code, display_name=meta["display_name"],
             price_date=price_row["price_date"],
             close_price=_f(price_row["close_price"]),
@@ -486,7 +501,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
             return_6m=_f(price_row["return_6m"]), return_1y=_f(price_row["return_1y"]),
             return_ytd=_f(price_row["return_ytd"]),
             high_52w=_f(price_row["high_52w"]), low_52w=_f(price_row["low_52w"]),
-        )
+        )))
 
     etf_code = meta.get("primary_etf")
     etf_obj = IndexPrimaryETF(

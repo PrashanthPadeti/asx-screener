@@ -42,7 +42,23 @@ TICKER_MAP: dict[str, str] = {
     "ASX100": "^AXTO",
     "ASX200": "^AXJO",
     "ASX300": "^AXKO",
-    "AXJO":   "^AXJO",   # accumulation — same price series as ASX200 on Yahoo
+    # AXJO is DELIBERATELY ABSENT. See
+    # docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
+    #
+    # It was mapped to "^AXJO" with the comment "accumulation — same price
+    # series as ASX200 on Yahoo", while the API presented it as "S&P/ASX 200
+    # Accumulation ... the total return version ... incorporating
+    # reinvestment of dividends". ^AXJO is the price-only series, so the
+    # surface advertised as a total-return benchmark was served price data.
+    #
+    # The codebase does not agree on what AXJO even is: index_prices called
+    # it the ASX200 accumulation series, indices_funds describes it as the
+    # ASX 200 total return with ~200 constituents, and three frontend
+    # comments call it "All Ordinaries, ~500 stocks". Until the intended
+    # index is settled AND a provider series is verified for return type,
+    # currency, dividend treatment and date coverage, there is nothing
+    # correct to fetch. Existing rows are preserved for investigation; this
+    # only stops new ones being written under a provenance we cannot support.
     "AXFJ":   "^AXFJ",
     "AXMJ":   "^AXMJ",
     "AXEJ":   "^AXEJ",

@@ -151,7 +151,7 @@ const DARK_TOOLTIP = {
 
 // ── Performance Chart ─────────────────────────────────────────────────────────
 
-function PerformanceChart({ code }: { code: string }) {
+function PerformanceChart({ code, unavailable }: { code: string; unavailable?: boolean }) {
   const [period, setPeriod] = useState('1Y')
   const [history, setHistory] = useState<{ date: string; close: number | null }[]>([])
   const [loading, setLoading] = useState(true)
@@ -191,8 +191,20 @@ function PerformanceChart({ code }: { code: string }) {
           <RefreshCw className="w-5 h-5 text-slate-500 animate-spin" />
         </div>
       ) : formatted.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
-          No price history available yet
+        <div className="h-64 flex items-center justify-center text-center px-6">
+          {/* "not available YET" implies the data is coming. For a withheld
+              series it is not coming, and the distinction is the point of the
+              containment. */}
+          {unavailable ? (
+            <p className="text-amber-400/90 text-sm max-w-md">
+              <span className="font-semibold">Chart unavailable.</span>{' '}
+              This series&apos; source could not be verified, so its figures are
+              withheld. Stored values are not valid for this index and are not
+              charted.
+            </p>
+          ) : (
+            <span className="text-slate-500 text-sm">No price history available yet</span>
+          )}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
@@ -593,7 +605,11 @@ export default function IndexDetailContent({
 
   const p = data.price
 
-  // AXJO (All Ordinaries, ~500 stocks) has no dedicated screener field — no link shown.
+  // AXJO: series provenance unverified — the backend withholds its figures.
+  // Previously commented here as "All Ordinaries, ~500 stocks" while the API
+  // described it as S&P/ASX 200 Accumulation; that contradiction is part of the
+  // finding. No dedicated screener field either way.
+  // See docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
   const screenerHref: Record<string, string> = {
     ASX20:  '/screener?index=ASX20',
     ASX50:  '/screener?index=ASX50',
@@ -627,6 +643,21 @@ export default function IndexDetailContent({
                   </span>
                 )}
               </div>
+
+              {/* Without this the price header simply vanishes under
+                  suppression, which reads as a loading failure rather than a
+                  deliberate withholding. Visible text, no tooltip: a title=
+                  attribute is unreachable by keyboard and absent on touch. */}
+              {p?.data_status && (
+                <div className="mt-3 rounded-lg border border-amber-700/60 bg-amber-900/25 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-300">Figures unavailable</p>
+                  <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
+                    This series&apos; source could not be verified, so its price and
+                    return figures are withheld. Stored values are not valid for
+                    this index and are not shown.
+                  </p>
+                </div>
+              )}
 
               {p?.close_price && (
                 <div className="flex items-center gap-4 mt-2 flex-wrap">
@@ -768,7 +799,7 @@ export default function IndexDetailContent({
         </div>
 
         {/* Historical chart */}
-        <PerformanceChart code={code} />
+        <PerformanceChart code={code} unavailable={!!p?.data_status} />
 
         {/* Compare */}
         <CompareChart currentCode={code} />

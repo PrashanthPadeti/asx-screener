@@ -671,10 +671,9 @@ export default function IndexDetailContent({
                     Not updating{p.sessions_behind ? ` — ${p.sessions_behind} trading sessions behind` : ''}
                   </p>
                   <p className="text-xs text-orange-200/90 mt-1 leading-relaxed">
-                    The last published close was {p.price_date}. That value is shown
-                    as history. Returns and 52-week range are withheld, because they
-                    describe a period ending today and were last computed on that
-                    date.
+                    The last recorded close was {p.price_date} and is shown as history.
+                    Returns and the 52-week range are withheld, because they describe
+                    a period ending today and were last computed on that date.
                   </p>
                 </div>
               )}

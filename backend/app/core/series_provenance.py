@@ -61,38 +61,72 @@ SUPPRESSED_FIELDS = (
 
 STALE = "stale"
 
+#: What a stale label does NOT say.
+#:
+#: Marking a series stale asserts exactly one thing: it has stopped updating.
+#: It is NOT a statement that the stored values are correct, and it closes no
+#: question about the series' source or identity. ASX100's retained close and
+#: chart are shown because they are what was recorded, not because anything
+#: here has verified what they measure -- that question is open and tracked
+#: separately. Retention is not endorsement.
+
 #: Withheld for a stale series. `close_price` and `price_date` are retained.
 STALE_SUPPRESSED_FIELDS = (
     "return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
     "return_1y", "return_ytd", "high_52w", "low_52w",
 )
 
+#: The market whose sessions define freshness, and when its close is
+#: expected to have been published.
+#:
+#: The ASX closes at 16:00 Sydney; vendor files settle afterwards. 18:00 is
+#: the documented cutoff: BEFORE it, today's close is not yet expected;
+#: AFTER it, it is. Without a cutoff the rule has to either expect today's
+#: close from midnight -- marking every index stale each morning -- or never
+#: expect it, which leaves a permanent one-session lag: on Monday evening,
+#: hours after Monday's close was published, the system would still consider
+#: Friday's data current.
+MARKET_TZ = "Australia/Sydney"
+PUBLICATION_CUTOFF_HOUR = 18
+
 #: Trading sessions of silence before a series is stale.
 #:
-#: Public holidays are not modelled, and the ASX has single-day closures plus
-#: Easter's four-day gap. Three sessions absorbs those without masking a real
-#: outage -- the defect this exists to catch ran to roughly 94 sessions.
+#: This is a DELAY on alerting, not a substitute for a holiday calendar.
+#: Public holidays are not modelled, so a closure simply consumes part of the
+#: tolerance; three sessions covers the ASX's single-day closures and the
+#: four-day Easter gap. It is not a judgement that three sessions of silence
+#: is acceptable -- the defect it exists to catch ran to roughly 94.
 STALE_AFTER_SESSIONS = 3
 
 
-def last_expected_session(today):
-    """The most recent weekday whose close should already be published.
+def market_now():
+    """Current time in the market's timezone."""
+    from datetime import datetime                               # noqa: PLC0415
+    from zoneinfo import ZoneInfo                               # noqa: PLC0415
+    return datetime.now(ZoneInfo(MARKET_TZ))
 
-    Never `today`: a session's data lands after the close, so expecting it on
-    the day would mark every index stale each morning. Walks back over
-    weekends, so a Saturday expects Friday and a Monday expects Friday.
 
-    Weekday-based, not calendar-based. A calendar threshold either fires every
-    weekend or has to be loosened until it stops catching anything.
+def last_expected_session(now):
+    """The most recent session whose close should already be published.
+
+    `now` is a datetime in MARKET_TZ. Taking a datetime rather than a date is
+    the point: whether today's close is expected depends on the hour, and a
+    date cannot answer that.
+
+    Weekday-based, not calendar-based -- a calendar threshold either fires
+    every weekend or gets loosened until it catches nothing.
     """
     from datetime import timedelta                              # noqa: PLC0415
+    today = now.date()
+    if today.weekday() < 5 and now.hour >= PUBLICATION_CUTOFF_HOUR:
+        return today
     day = today - timedelta(days=1)
     while day.weekday() >= 5:            # 5 = Saturday, 6 = Sunday
         day -= timedelta(days=1)
     return day
 
 
-def sessions_behind(price_date, today) -> int:
+def sessions_behind(price_date, now) -> int:
     """Weekdays between a price date and the last expected session.
 
     Holidays count as sessions here, which is why the threshold allows a few.
@@ -101,7 +135,7 @@ def sessions_behind(price_date, today) -> int:
     from datetime import timedelta                              # noqa: PLC0415
     if price_date is None:
         return 10 ** 6
-    target = last_expected_session(today)
+    target = last_expected_session(now)
     if price_date >= target:
         return 0
     n, day = 0, price_date
@@ -112,11 +146,11 @@ def sessions_behind(price_date, today) -> int:
     return n
 
 
-def is_stale(price_date, today) -> bool:
-    return sessions_behind(price_date, today) > STALE_AFTER_SESSIONS
+def is_stale(price_date, now) -> bool:
+    return sessions_behind(price_date, now) > STALE_AFTER_SESSIONS
 
 
-def suppress_if_stale(values: dict, today) -> dict:
+def suppress_if_stale(values: dict, now) -> dict:
     """Withhold whatever a stale series would present as current.
 
     Returns the input unchanged when the series is fresh, so it is applied to
@@ -137,14 +171,14 @@ def suppress_if_stale(values: dict, today) -> dict:
             raw = _dt.date.fromisoformat(raw[:10])
         except ValueError:
             return values
-    if raw is None or not is_stale(raw, today):
+    if raw is None or not is_stale(raw, now):
         return values
     out = dict(values)
     for field in STALE_SUPPRESSED_FIELDS:
         if field in out:
             out[field] = None
     out["data_status"] = STALE
-    out["sessions_behind"] = sessions_behind(raw, today)
+    out["sessions_behind"] = sessions_behind(raw, now)
     return out
 
 
@@ -163,7 +197,8 @@ def containment_version() -> str:
     """
     import hashlib                                              # noqa: PLC0415
     material = (repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
-                + repr(STALE_SUPPRESSED_FIELDS) + repr(STALE_AFTER_SESSIONS))
+                + repr(STALE_SUPPRESSED_FIELDS) + repr(STALE_AFTER_SESSIONS)
+                + repr(PUBLICATION_CUTOFF_HOUR) + repr(MARKET_TZ))
     return hashlib.sha256(material.encode()).hexdigest()[:8]
 
 

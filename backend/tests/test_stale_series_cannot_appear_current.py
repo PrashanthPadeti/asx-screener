@@ -28,20 +28,25 @@ Run:  python tests/test_stale_series_cannot_appear_current.py
 """
 
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from app.core.series_provenance import (                        # noqa: E402
-    STALE, STALE_AFTER_SESSIONS, STALE_SUPPRESSED_FIELDS, containment_version,
-    is_stale, last_expected_session, sessions_behind, suppress_if_stale,
+    PUBLICATION_CUTOFF_HOUR, STALE, STALE_AFTER_SESSIONS,
+    STALE_SUPPRESSED_FIELDS, containment_version, is_stale,
+    last_expected_session, sessions_behind, suppress_if_stale,
     suppress_if_unverified)
 
-SAT = date(2026, 10, 10)
-MON = date(2026, 10, 12)
-TUE = date(2026, 10, 13)
+#: Market-local datetimes. Freshness depends on the HOUR, not just the day:
+#: before the publication cutoff today's close is not yet expected, after it
+#: it is. A date alone cannot express that.
+SAT = datetime(2026, 10, 10, 12, 0)          # Saturday midday
+MON_AM = datetime(2026, 10, 12, 9, 0)        # Monday, before the close
+MON_PM = datetime(2026, 10, 12, 20, 0)       # Monday evening, after cutoff
+TUE_AM = datetime(2026, 10, 13, 9, 0)
 
 
 def _row(code, price_date, **over):
@@ -61,19 +66,48 @@ def test_a_friday_close_is_current_on_the_weekend():
     assert not is_stale(date(2026, 10, 9), SAT)
 
 
-def test_a_friday_close_is_still_current_on_monday():
-    assert last_expected_session(MON) == date(2026, 10, 9)
-    assert not is_stale(date(2026, 10, 9), MON)
-    assert sessions_behind(date(2026, 10, 9), MON) == 0
+def test_a_friday_close_is_still_current_on_monday_morning():
+    """Before the cutoff, Monday's close is not yet published."""
+    assert last_expected_session(MON_AM) == date(2026, 10, 9)
+    assert sessions_behind(date(2026, 10, 9), MON_AM) == 0
 
 
-def test_today_is_never_expected():
-    """A session's data lands after the close.
+def test_monday_evening_expects_mondays_close():
+    """The bug in the first version of this rule.
 
-    Expecting today's close would mark every index stale each morning, and an
-    alarm that fires daily is one nobody reads.
+    It never returned today, so on Monday evening -- hours after Monday's
+    close was published -- it still expected Friday. Every index would read
+    current while a full session behind, permanently.
     """
-    assert last_expected_session(TUE) < TUE
+    assert last_expected_session(MON_PM) == date(2026, 10, 12), (
+        "after the publication cutoff, today's close must be expected")
+    assert sessions_behind(date(2026, 10, 9), MON_PM) == 1, (
+        "Friday's data on Monday evening is one session behind, not current")
+
+
+def test_the_cutoff_is_the_hinge():
+    """Same calendar day, different expectation, decided only by the hour."""
+    before = datetime(2026, 10, 12, PUBLICATION_CUTOFF_HOUR - 1, 59)
+    after = datetime(2026, 10, 12, PUBLICATION_CUTOFF_HOUR, 0)
+    assert last_expected_session(before) == date(2026, 10, 9)
+    assert last_expected_session(after) == date(2026, 10, 12)
+
+
+def test_todays_close_is_not_expected_before_the_cutoff():
+    """Otherwise every index reads stale each morning, and an alarm that
+    fires daily is one nobody reads."""
+    assert last_expected_session(TUE_AM) == date(2026, 10, 12)
+
+
+def test_the_tolerance_delays_alerting_and_is_not_a_holiday_calendar():
+    """Holidays are not modelled; a closure consumes part of the tolerance.
+
+    Recorded so nobody reads three sessions as "three sessions of silence is
+    fine". The defect this catches ran to roughly 94.
+    """
+    assert STALE_AFTER_SESSIONS == 3
+    assert sessions_behind(date(2026, 10, 7), SAT) == 2
+    assert not is_stale(date(2026, 10, 7), SAT)
 
 
 def test_the_boundary_is_in_sessions_not_days():

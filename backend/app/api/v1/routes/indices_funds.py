@@ -12,8 +12,8 @@ from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.series_provenance import (
-    UNVERIFIED_SERIES, containment_version, is_stale, suppress_if_stale,
-    suppress_if_unverified)
+    UNVERIFIED_SERIES, containment_version, is_stale, market_now,
+    suppress_if_stale, suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
     IndicesResponse, IndexPrice,
@@ -44,7 +44,7 @@ def present_index(code: str, values: dict) -> "IndexPrice":
     parentheses were wrong on the first attempt and unreadable on the second.
     """
     return IndexPrice(**suppress_if_stale(
-        suppress_if_unverified(code, values), date.today()))
+        suppress_if_unverified(code, values), market_now()))
 
 
 INDEX_META: dict[str, dict] = {
@@ -419,7 +419,7 @@ async def get_index_history(
     # say so; emptying the chart would destroy legitimate history.
     last_date = rows[-1]["price_date"] if rows else None
     stale = bool(last_date) and is_stale(date.fromisoformat(last_date[:10]),
-                                         date.today())
+                                         market_now())
 
     return {
         "index_code": index_code.upper(),

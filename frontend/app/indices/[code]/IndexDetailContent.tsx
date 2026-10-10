@@ -151,7 +151,7 @@ const DARK_TOOLTIP = {
 
 // ── Performance Chart ─────────────────────────────────────────────────────────
 
-function PerformanceChart({ code }: { code: string }) {
+function PerformanceChart({ code, unavailable }: { code: string; unavailable?: boolean }) {
   const [period, setPeriod] = useState('1Y')
   const [history, setHistory] = useState<{ date: string; close: number | null }[]>([])
   const [loading, setLoading] = useState(true)
@@ -191,8 +191,20 @@ function PerformanceChart({ code }: { code: string }) {
           <RefreshCw className="w-5 h-5 text-slate-500 animate-spin" />
         </div>
       ) : formatted.length === 0 ? (
-        <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
-          No price history available yet
+        <div className="h-64 flex items-center justify-center text-center px-6">
+          {/* "not available YET" implies the data is coming. For a withheld
+              series it is not coming, and the distinction is the point of the
+              containment. */}
+          {unavailable ? (
+            <p className="text-amber-400/90 text-sm max-w-md">
+              <span className="font-semibold">Chart unavailable.</span>{' '}
+              This series&apos; source could not be verified, so its figures are
+              withheld. Stored values are not valid for this index and are not
+              charted.
+            </p>
+          ) : (
+            <span className="text-slate-500 text-sm">No price history available yet</span>
+          )}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={280}>
@@ -632,6 +644,21 @@ export default function IndexDetailContent({
                 )}
               </div>
 
+              {/* Without this the price header simply vanishes under
+                  suppression, which reads as a loading failure rather than a
+                  deliberate withholding. Visible text, no tooltip: a title=
+                  attribute is unreachable by keyboard and absent on touch. */}
+              {p?.data_status && (
+                <div className="mt-3 rounded-lg border border-amber-700/60 bg-amber-900/25 px-4 py-3">
+                  <p className="text-sm font-semibold text-amber-300">Figures unavailable</p>
+                  <p className="text-xs text-amber-200/90 mt-1 leading-relaxed">
+                    This series&apos; source could not be verified, so its price and
+                    return figures are withheld. Stored values are not valid for
+                    this index and are not shown.
+                  </p>
+                </div>
+              )}
+
               {p?.close_price && (
                 <div className="flex items-center gap-4 mt-2 flex-wrap">
                   <span className="text-3xl font-bold text-white">{fmtNum(p.close_price, 2)}</span>
@@ -772,7 +799,7 @@ export default function IndexDetailContent({
         </div>
 
         {/* Historical chart */}
-        <PerformanceChart code={code} />
+        <PerformanceChart code={code} unavailable={!!p?.data_status} />
 
         {/* Compare */}
         <CompareChart currentCode={code} />

@@ -122,15 +122,22 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
               alone reads as "no data yet" — which invites a refresh and
               misrepresents it. */}
           {idx.data_status && (
-            <span
-              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/60"
-              title="Figures withheld: this series' source could not be verified. Stored values are not valid for this index and are not shown."
-            >
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/60">
               UNAVAILABLE
             </span>
           )}
         </div>
         <span className="text-xs text-slate-400 mt-1 leading-tight block">{idx.display_name}</span>
+        {/* The reason is rendered as visible text, not a title= tooltip. A
+            tooltip is unreachable by keyboard and never appears on touch, so
+            on a phone the badge would say UNAVAILABLE with no way to find out
+            why. Visible text needs no interaction at all. */}
+        {idx.data_status && (
+          <span className="text-[10px] text-amber-400/90 mt-1 leading-tight block relative z-[2]">
+            Figures withheld — this series&apos; source could not be verified.
+            Stored values are not valid for this index.
+          </span>
+        )}
         {screenerHref && (
           <Link
             href={screenerHref}

@@ -130,7 +130,8 @@ The same code review confirmed that `index_prices` derives its expected
 population from `TICKER_MAP` — the same defect as `fund_prices` with `FUNDS`.
 That is **confirmed from code**; its connection to the index charts being
 stale since 1 Oct is a **hypothesis** until runtime evidence establishes it.
-See `design_fund_population_and_lifecycle.md`.
+It is tracked separately and is **not** addressed by this containment, which
+withholds figures and changes no population logic.
 
 Accounting and correctness are separate properties, and this finding is the
 illustration: keying outcomes by entity code stops `ASX200` and `AXJO`

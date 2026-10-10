@@ -143,6 +143,89 @@ def test_the_finding_is_recorded():
     assert doc.exists(), "the containment has no written finding behind it"
 
 
+# ── The reason reaches every user, not just a mouse ─────────────────────────
+
+FRONTEND = BACKEND.parent / "frontend"
+LIST_PAGE = FRONTEND / "app" / "indices" / "page.tsx"
+DETAIL_PAGE = FRONTEND / "app" / "indices" / "[code]" / "IndexDetailContent.tsx"
+
+
+def code_only(src: str) -> str:
+    """Strip comments before scanning.
+
+    Twice now a check has failed on the comment explaining the very decision
+    it was verifying -- here, a `title=` inside the note saying why there is
+    no title tooltip. A scanner that reads prose tests the documentation, not
+    the code. See [[engineering-rule-structural-not-textual]].
+    """
+    src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
+    return re.sub(r"^\s*//.*$", "", src, flags=re.M)
+
+
+def test_the_list_states_the_reason_in_visible_text():
+    """Not a title= tooltip.
+
+    A tooltip is unreachable by keyboard and never appears on touch, so on a
+    phone the badge would read UNAVAILABLE with no way to discover why. The
+    first version of this badge did exactly that.
+    """
+    src = code_only(LIST_PAGE.read_text(encoding="utf-8"))
+    block = src[src.index("idx.data_status"):]
+    block = block[:block.index("screenerHref")]
+    assert "could not be verified" in block, (
+        "the list does not state the reason in rendered text")
+    assert "title=" not in block, (
+        "the reason is carried on a title attribute, which keyboard and "
+        "touch users never see")
+
+
+def test_the_detail_page_states_it_too():
+    """Under suppression the price header is skipped entirely, so without an
+    explicit block the page reads as a loading failure."""
+    src = DETAIL_PAGE.read_text(encoding="utf-8")
+    assert "p?.data_status" in src, (
+        "the detail page never checks data_status, so a withheld series is "
+        "indistinguishable from a page that failed to load")
+    assert "Figures unavailable" in src
+
+
+def test_the_chart_does_not_say_the_data_is_coming():
+    """"No price history available YET" implies it is on its way. For a
+    withheld series it is not, and that distinction is the containment."""
+    src = DETAIL_PAGE.read_text(encoding="utf-8")
+    assert "unavailable?: boolean" in src, (
+        "the chart cannot tell a withheld series from an empty one")
+    assert "Chart unavailable." in src
+    assert "unavailable={!!p?.data_status}" in src, (
+        "the chart is never told the series is withheld")
+
+
+def test_verified_indices_are_untouched_in_the_ui():
+    """Containment must be conditional, not global.
+
+    Every unavailable affordance has to sit behind a data_status check, or
+    ASX200 and the other verified indices would render the same warning.
+    """
+    for page in (LIST_PAGE, DETAIL_PAGE):
+        src = code_only(page.read_text(encoding="utf-8"))
+        for marker in ("UNAVAILABLE", "Figures unavailable", "Chart unavailable."):
+            idx = src.find(marker)
+            if idx == -1:
+                continue
+            preceding = src[max(0, idx - 700):idx]
+            # `unavailable` counts: PerformanceChart receives the flag as a
+            # prop rather than reading data_status itself, which is the right
+            # shape -- the component should not know about provenance, only
+            # that this series is withheld. The call site is checked below.
+            assert "data_status" in preceding or "unavailable" in preceding, (
+                f"{page.name}: {marker!r} is rendered unguarded, so verified "
+                f"indices would show it too")
+    detail = code_only(DETAIL_PAGE.read_text(encoding="utf-8"))
+    assert "unavailable={!!p?.data_status}" in detail, (
+        "the chart's unavailable prop is not derived from data_status, so it "
+        "could be set for a verified index")
+
+
 def test_the_suppression_set_is_not_silently_emptied():
     """Mutation control.
 

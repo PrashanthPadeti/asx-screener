@@ -99,11 +99,14 @@ def test_todays_close_is_not_expected_before_the_cutoff():
     assert last_expected_session(TUE_AM) == date(2026, 10, 12)
 
 
-def test_the_tolerance_delays_alerting_and_is_not_a_holiday_calendar():
-    """Holidays are not modelled; a closure consumes part of the tolerance.
+def test_the_tolerance_governs_withholding_and_is_not_a_holiday_calendar():
+    """What the threshold actually does, stated without overclaiming.
 
-    Recorded so nobody reads three sessions as "three sessions of silence is
-    fine". The defect this catches ran to roughly 94.
+    It decides when figures are WITHHELD. There is no operational alerting
+    on freshness in this system, so nothing here should be described as an
+    alert delay. Holidays are not modelled, so a closure consumes part of the
+    tolerance, and three sessions is not a judgement that three sessions of
+    silence is fine -- the defect this catches ran to roughly 94.
     """
     assert STALE_AFTER_SESSIONS == 3
     assert sessions_behind(date(2026, 10, 7), SAT) == 2

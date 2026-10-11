@@ -102,11 +102,15 @@ PUBLICATION_CUTOFF_HOUR = 18
 #: tolerate it before withholding figures* is an operational choice. Only the
 #: second is a judgement call, and it must not silently redefine the first.
 #:
-#: The tolerance is a DELAY ON WITHHOLDING AND ALERTING, not a substitute for
-#: a holiday calendar. Holidays are not modelled, so a closure consumes part
-#: of it; three sessions covers the ASX's single-day closures and the
-#: four-day Easter gap. It is not a judgement that three sessions of silence
-#: is acceptable -- the defect it exists to catch ran to roughly 94.
+#: The tolerance governs WITHHOLDING, and nothing else. There is no
+#: operational alerting on freshness in this system; if one is added it may
+#: well want a different threshold, and should not assume this one.
+#:
+#: It is not a substitute for a holiday calendar either. Holidays are not
+#: modelled, so a closure consumes part of the tolerance; three sessions
+#: covers the ASX's single-day closures and the four-day Easter gap. Nor is
+#: it a judgement that three sessions of silence is acceptable -- the defect
+#: it exists to catch ran to roughly 94.
 STALE_AFTER_SESSIONS = 3
 
 DELAYED = "delayed"

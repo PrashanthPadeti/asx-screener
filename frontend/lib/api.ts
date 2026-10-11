@@ -1322,10 +1322,14 @@ export interface IndexPrice {
   high_52w: number | null
   low_52w: number | null
   /**
-   * Null when the series is sound. Otherwise names why every numeric field
-   * above is null — the figures are withheld, not missing. Render an explicit
-   * unavailable state: a bare em-dash reads as "no data yet", which invites a
-   * refresh and misrepresents a deliberate suppression.
+   * Null only when the series is level with the last expected session.
+   * Otherwise one of:
+   *   "delayed"                      — behind, figures still shown
+   *   "stale"                        — well behind, current-figures withheld
+   *   "no_data"                      — no price ever recorded
+   *   "series_provenance_unverified" — source unverified, all figures withheld
+   * Render an explicit state for each: a bare em-dash reads as "no data yet",
+   * which invites a refresh and misrepresents a deliberate suppression.
    */
   data_status?: string | null
   /** Trading sessions behind the last expected close. Set when stale. */

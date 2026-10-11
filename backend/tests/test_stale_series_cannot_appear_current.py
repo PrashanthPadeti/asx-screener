@@ -357,6 +357,28 @@ def test_the_history_endpoint_reports_the_same_three_states():
     assert '"data_status": status' in hist
 
 
+def test_history_status_does_not_depend_on_the_window():
+    """Found by the v11.2.19 post-deploy check, and it was my bug.
+
+    The status was derived from the WINDOWED rows, so a series stale enough
+    to fall entirely outside the requested window produced no rows and
+    therefore no status: ASX100, 95 sessions behind, reported "current" on
+    history while the list said "stale".
+
+    Absence of rows in a window is not absence of a freshness problem. It is
+    the strongest evidence of one.
+    """
+    src = ROUTE.read_text(encoding="utf-8")
+    hist = src[src.index("async def get_index_history"):]
+    hist = hist[:hist.index("# ── ETF")] if "# ── ETF" in hist else hist
+    assert "max(price_date)" in hist, (
+        "history freshness is not taken from the series' latest price")
+    assert "rows[-1]" not in hist, (
+        "history freshness is still derived from the windowed rows, so a "
+        "sufficiently stale series reports no status at all")
+    assert "freshness_status(latest" in hist
+
+
 if __name__ == "__main__":
     failures = []
     for name, fn in sorted(globals().items()):

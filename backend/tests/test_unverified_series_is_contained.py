@@ -116,8 +116,18 @@ def test_all_three_endpoints_apply_containment():
     other two withhold.
     """
     src = ROUTE.read_text(encoding="utf-8")
-    assert src.count("suppress_if_unverified(") >= 2, (
-        "the list and detail endpoints do not both suppress")
+    # Both endpoints go through present_index(), which applies provenance
+    # suppression then staleness. Asserting on the helper rather than on two
+    # inlined calls: the inline form was a four-deep nest whose parentheses
+    # were wrong once already.
+    assert "def present_index" in src, "the presentation helper is gone"
+    helper = src[src.index("def present_index"):]
+    helper = helper[:helper.index("INDEX_META")]
+    assert "suppress_if_unverified" in helper, (
+        "present_index no longer applies provenance suppression")
+    assert src.count("present_index(") >= 3, (
+        "the helper is defined but not used at both the list and detail "
+        "endpoints")
     assert "if code_u in UNVERIFIED_SERIES:" in src, (
         "the history endpoint does not check, so a chart would render the "
         "points that the list and detail endpoints withhold -- and a chart "
@@ -196,8 +206,10 @@ def test_the_chart_does_not_say_the_data_is_coming():
     assert "unavailable?: boolean" in src, (
         "the chart cannot tell a withheld series from an empty one")
     assert "Chart unavailable." in src
-    assert "unavailable={!!p?.data_status}" in src, (
-        "the chart is never told the series is withheld")
+    assert "unavailable={p?.data_status === 'series_provenance_unverified'}" in src, (
+        "the chart is not told specifically about an UNVERIFIED series; a "
+        "catch-all data_status would also empty a stale chart, destroying "
+        "its genuine history")
 
 
 def test_verified_indices_are_untouched_in_the_ui():
@@ -221,7 +233,7 @@ def test_verified_indices_are_untouched_in_the_ui():
                 f"{page.name}: {marker!r} is rendered unguarded, so verified "
                 f"indices would show it too")
     detail = code_only(DETAIL_PAGE.read_text(encoding="utf-8"))
-    assert "unavailable={!!p?.data_status}" in detail, (
+    assert "unavailable={p?.data_status === 'series_provenance_unverified'}" in detail, (
         "the chart's unavailable prop is not derived from data_status, so it "
         "could be set for a verified index")
 

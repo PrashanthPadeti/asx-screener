@@ -121,7 +121,20 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
               because the series' provenance is unverified, and an em-dash
               alone reads as "no data yet" — which invites a refresh and
               misrepresents it. */}
-          {idx.data_status && (
+          {/* Delayed is marked but not alarmed: its figures are still shown,
+              because blanking a page over a public holiday would make the
+              surface useless and teach people to ignore the marking. */}
+          {idx.data_status === 'delayed' && (
+            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-700/70 text-slate-300 border border-slate-600/60">
+              DELAYED
+            </span>
+          )}
+          {idx.data_status === 'stale' && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-900/60 text-orange-300 border border-orange-700/60">
+              STALE
+            </span>
+          )}
+          {idx.data_status === 'series_provenance_unverified' && (
             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-300 border border-amber-700/60">
               UNAVAILABLE
             </span>
@@ -132,7 +145,24 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
             tooltip is unreachable by keyboard and never appears on touch, so
             on a phone the badge would say UNAVAILABLE with no way to find out
             why. Visible text needs no interaction at all. */}
-        {idx.data_status && (
+        {/* Two different defects, two different sentences. A stale series was
+            right when published and has stopped updating; an unverified one
+            was never measuring what it claimed. One shared message would
+            understate the second. */}
+        {idx.data_status === 'delayed' && (
+          <span className="text-[10px] text-slate-400 mt-1 leading-tight block relative z-[2]">
+            Last close {idx.price_date}
+            {idx.sessions_behind ? ` — ${idx.sessions_behind} trading session${idx.sessions_behind > 1 ? 's' : ''} behind` : ''}.
+          </span>
+        )}
+        {idx.data_status === 'stale' && (
+          <span className="text-[10px] text-orange-400/90 mt-1 leading-tight block relative z-[2]">
+            Not updating — last close {idx.price_date}
+            {idx.sessions_behind ? `, ${idx.sessions_behind} trading sessions ago` : ''}.
+            Returns are withheld because they would read as current.
+          </span>
+        )}
+        {idx.data_status === 'series_provenance_unverified' && (
           <span className="text-[10px] text-amber-400/90 mt-1 leading-tight block relative z-[2]">
             Figures withheld — this series&apos; source could not be verified.
             Stored values are not valid for this index.

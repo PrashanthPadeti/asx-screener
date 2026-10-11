@@ -34,6 +34,11 @@ class IndexPrice(BaseModel):
     #: figure" from "we have a figure we cannot stand behind". Absent this,
     #: suppression is indistinguishable from an outage.
     data_status: Optional[str] = None
+    #: How many expected trading sessions behind this series is. Present only
+    #: when data_status is "stale"; lets a consumer say "95 sessions behind"
+    #: rather than leaving the reader to subtract dates and guess at
+    #: weekends and holidays.
+    sessions_behind: Optional[int] = None
 
 
 class IndicesResponse(BaseModel):

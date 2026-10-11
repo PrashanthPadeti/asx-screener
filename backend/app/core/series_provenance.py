@@ -48,6 +48,176 @@ SUPPRESSED_FIELDS = (
 )
 
 
+# ── Staleness ───────────────────────────────────────────────────────────────
+# A different defect from unverified provenance, needing a different remedy.
+# AXJO's figures are wrong about WHAT they measure, so everything is withheld.
+# ASX100's figures are sound observations that are simply OLD: its last price
+# is 2026-05-29 while every other index is current to 2026-10-09.
+#
+# So the last close and its date are KEPT and labelled historical -- that is
+# true and useful -- while anything presented as current is withheld: the
+# returns, and the 52-week extremes, which mean "52 weeks to today" by
+# implication and were last computed in May.
+
+STALE = "stale"
+
+#: What a stale label does NOT say.
+#:
+#: Marking a series stale asserts exactly one thing: it has stopped updating.
+#: It is NOT a statement that the stored values are correct, and it closes no
+#: question about the series' source or identity. ASX100's retained close and
+#: chart are shown because they are what was recorded, not because anything
+#: here has verified what they measure -- that question is open and tracked
+#: separately. Retention is not endorsement.
+
+#: Withheld for a stale series. `close_price` and `price_date` are retained.
+STALE_SUPPRESSED_FIELDS = (
+    "return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
+    "return_1y", "return_ytd", "high_52w", "low_52w",
+)
+
+#: The market whose sessions define freshness, and when its close is
+#: expected to have been published.
+#:
+#: The ASX closes at 16:00 Sydney; vendor files settle afterwards. 18:00 is
+#: the documented cutoff: BEFORE it, today's close is not yet expected;
+#: AFTER it, it is. Without a cutoff the rule has to either expect today's
+#: close from midnight -- marking every index stale each morning -- or never
+#: expect it, which leaves a permanent one-session lag: on Monday evening,
+#: hours after Monday's close was published, the system would still consider
+#: Friday's data current.
+MARKET_TZ = "Australia/Sydney"
+PUBLICATION_CUTOFF_HOUR = 18
+
+#: FRESHNESS AND ALERT TOLERANCE ARE SEPARATE, and conflating them is how a
+#: series that has missed a session keeps reporting itself current.
+#:
+#:   0 sessions behind          current      no marking
+#:   1..STALE_AFTER_SESSIONS    delayed      marked, figures still shown
+#:   > STALE_AFTER_SESSIONS     stale        marked, current-figures withheld
+#:
+#: An earlier version used one threshold for both, so Monday's missing close
+#: read as "current" until Thursday. The clock was right and the label was
+#: still wrong: *whether a session is missing* is a fact, while *how long to
+#: tolerate it before withholding figures* is an operational choice. Only the
+#: second is a judgement call, and it must not silently redefine the first.
+#:
+#: The tolerance governs WITHHOLDING, and nothing else. There is no
+#: operational alerting on freshness in this system; if one is added it may
+#: well want a different threshold, and should not assume this one.
+#:
+#: It is not a substitute for a holiday calendar either. Holidays are not
+#: modelled, so a closure consumes part of the tolerance; three sessions
+#: covers the ASX's single-day closures and the four-day Easter gap. Nor is
+#: it a judgement that three sessions of silence is acceptable -- the defect
+#: it exists to catch ran to roughly 94.
+STALE_AFTER_SESSIONS = 3
+
+DELAYED = "delayed"
+
+
+def market_now():
+    """Current time in the market's timezone."""
+    from datetime import datetime                               # noqa: PLC0415
+    from zoneinfo import ZoneInfo                               # noqa: PLC0415
+    return datetime.now(ZoneInfo(MARKET_TZ))
+
+
+def last_expected_session(now):
+    """The most recent session whose close should already be published.
+
+    `now` is a datetime in MARKET_TZ. Taking a datetime rather than a date is
+    the point: whether today's close is expected depends on the hour, and a
+    date cannot answer that.
+
+    Weekday-based, not calendar-based -- a calendar threshold either fires
+    every weekend or gets loosened until it catches nothing.
+    """
+    from datetime import timedelta                              # noqa: PLC0415
+    today = now.date()
+    if today.weekday() < 5 and now.hour >= PUBLICATION_CUTOFF_HOUR:
+        return today
+    day = today - timedelta(days=1)
+    while day.weekday() >= 5:            # 5 = Saturday, 6 = Sunday
+        day -= timedelta(days=1)
+    return day
+
+
+def sessions_behind(price_date, now) -> int:
+    """Weekdays between a price date and the last expected session.
+
+    Holidays count as sessions here, which is why the threshold allows a few.
+    Over-counting slightly is safe; under-counting hides staleness.
+    """
+    from datetime import timedelta                              # noqa: PLC0415
+    if price_date is None:
+        return 10 ** 6
+    target = last_expected_session(now)
+    if price_date >= target:
+        return 0
+    n, day = 0, price_date
+    while day < target:
+        day += timedelta(days=1)
+        if day.weekday() < 5:
+            n += 1
+    return n
+
+
+def freshness_status(price_date, now):
+    """None (current) | "delayed" | "stale". Never silently "current".
+
+    A series that has missed even one expected session is marked. Whether its
+    figures are also withheld is the separate tolerance question.
+    """
+    n = sessions_behind(price_date, now)
+    if n == 0:
+        return None
+    return DELAYED if n <= STALE_AFTER_SESSIONS else STALE
+
+
+def is_stale(price_date, now) -> bool:
+    """Stale enough to withhold figures. NOT the same as "not current"."""
+    return freshness_status(price_date, now) == STALE
+
+
+def suppress_if_stale(values: dict, now) -> dict:
+    """Withhold whatever a stale series would present as current.
+
+    Returns the input unchanged when the series is fresh, so it is applied to
+    every index rather than to a hand-maintained list. Staleness is MEASURED,
+    not declared -- which is what makes it catch the next series to go quiet,
+    rather than only the one already known about.
+    """
+    import datetime as _dt                                      # noqa: PLC0415
+    if values.get("data_status"):
+        # Provenance outranks staleness. An unverified series has already had
+        # everything withheld, and relabelling it "stale" would understate
+        # the problem -- stale means "these figures are old", which implies
+        # they were right when fresh.
+        return values
+    raw = values.get("price_date")
+    if isinstance(raw, str):
+        try:
+            raw = _dt.date.fromisoformat(raw[:10])
+        except ValueError:
+            return values
+    status = None if raw is None else freshness_status(raw, now)
+    if status is None:
+        return values
+    out = dict(values)
+    if status == STALE:
+        # Only a stale series has its current-figures withheld. A delayed one
+        # is marked and still shown: blanking a page because of a public
+        # holiday would make the surface useless and teach people to ignore
+        # the marking.
+        for field in STALE_SUPPRESSED_FIELDS:
+            if field in out:
+                out[field] = None
+    out["data_status"] = status
+    out["sessions_behind"] = sessions_behind(raw, now)
+    return out
+
+
 def containment_version() -> str:
     """A short digest of the suppression rules, for cache keys.
 
@@ -62,7 +232,9 @@ def containment_version() -> str:
     eventually is not incremented.
     """
     import hashlib                                              # noqa: PLC0415
-    material = repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
+    material = (repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
+                + repr(STALE_SUPPRESSED_FIELDS) + repr(STALE_AFTER_SESSIONS)
+                + repr(PUBLICATION_CUTOFF_HOUR) + repr(MARKET_TZ))
     return hashlib.sha256(material.encode()).hexdigest()[:8]
 
 

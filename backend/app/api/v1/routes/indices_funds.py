@@ -3,6 +3,7 @@ Indices and ETF/Managed Funds endpoints.
 Reads from market.indices, market.index_prices, market.funds, market.fund_prices.
 """
 from collections import defaultdict
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import require_plan
@@ -11,7 +12,9 @@ from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.series_provenance import (
-    UNVERIFIED_SERIES, containment_version, suppress_if_unverified)
+    UNVERIFIED_SERIES, containment_version, freshness_status,
+    last_expected_session, market_now, suppress_if_stale,
+    suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
     IndicesResponse, IndexPrice,
@@ -29,6 +32,21 @@ from app.schemas.indices_funds import (
 router = APIRouter(dependencies=[Depends(require_plan("premium"))])
 
 # ── Index hardcoded metadata ──────────────────────────────────────────────────
+
+
+def present_index(code: str, values: dict) -> "IndexPrice":
+    """Apply both containments, in order, then build the response object.
+
+    Provenance first, staleness second: an unverified series has already had
+    everything withheld and must not be relabelled "stale", which would
+    understate it -- stale implies the figures were right when fresh.
+
+    Extracted because inlining both calls produced a four-deep nest whose
+    parentheses were wrong on the first attempt and unreadable on the second.
+    """
+    return IndexPrice(**suppress_if_stale(
+        suppress_if_unverified(code, values), market_now()))
+
 
 INDEX_META: dict[str, dict] = {
     "ASX20": {
@@ -300,7 +318,17 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
     """Latest daily performance for all active ASX indices."""
     # Keyed by the containment digest: a cached pre-containment response
     # would otherwise keep serving withheld figures for the full hour TTL.
-    _key = make_key("indices", "list", containment_version())
+    # Keyed by the containment digest AND the expected session.
+    #
+    # The digest stops a cached pre-containment response serving withheld
+    # figures for the full hour TTL. The session stops something subtler: a
+    # response built at 17:30 is evaluated against yesterday's expected
+    # session, and with a one-hour TTL it would keep asserting "current"
+    # until 18:30 -- carrying a freshness verdict across the 18:00 cutoff
+    # that re-decides it. Including the expected session means the cutoff
+    # itself invalidates the key and forces re-evaluation.
+    _key = make_key("indices", "list", containment_version(),
+                    last_expected_session(market_now()).isoformat())
     cached = await cache_get(_key)
     if cached:
         return cached
@@ -351,7 +379,7 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
 
     result = IndicesResponse(
         indices=[
-            IndexPrice(**suppress_if_unverified(r["index_code"], dict(
+            present_index(r["index_code"], dict(
                 index_code=r["index_code"], display_name=r["display_name"],
                 price_date=r["price_date"], close_price=_f(r["close_price"]),
                 return_1d=_f(r["return_1d"]), return_1w=_f(r["return_1w"]),
@@ -359,7 +387,7 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
                 return_6m=_f(r["return_6m"]), return_1y=_f(r["return_1y"]),
                 return_ytd=_f(r["return_ytd"]), high_52w=_f(r["high_52w"]),
                 low_52w=_f(r["low_52w"]),
-            )))
+            ))
             for r in rows
         ],
         as_of=as_of.isoformat() if as_of else None,
@@ -395,8 +423,18 @@ async def get_index_history(
 
     def _f(v): return float(v) if v is not None else None
 
+    # A stale series' history is REAL historical data, so it is returned, not
+    # withheld -- unlike an unverified series, whose points are withheld
+    # above because they measure something other than what they claim. What
+    # must not happen is a chart that looks current. The status lets the UI
+    # say so; emptying the chart would destroy legitimate history.
+    last_date = rows[-1]["price_date"] if rows else None
+    status = (freshness_status(date.fromisoformat(last_date[:10]), market_now())
+              if last_date else None)
+
     return {
         "index_code": index_code.upper(),
+        "data_status": status,
         "history": [
             {"date": r["price_date"], "close": _f(r["close_price"]), "return_1d": _f(r["return_1d"])}
             for r in rows
@@ -492,7 +530,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
     # Price snapshot
     price_obj = None
     if price_row and price_row["close_price"]:
-        price_obj = IndexPrice(**suppress_if_unverified(code, dict(
+        price_obj = present_index(code, dict(
             index_code=code, display_name=meta["display_name"],
             price_date=price_row["price_date"],
             close_price=_f(price_row["close_price"]),
@@ -501,7 +539,7 @@ async def get_index_detail(index_code: str, db: AsyncSession = Depends(get_db)):
             return_6m=_f(price_row["return_6m"]), return_1y=_f(price_row["return_1y"]),
             return_ytd=_f(price_row["return_ytd"]),
             high_52w=_f(price_row["high_52w"]), low_52w=_f(price_row["low_52w"]),
-        )))
+        ))
 
     etf_code = meta.get("primary_etf")
     etf_obj = IndexPrimaryETF(

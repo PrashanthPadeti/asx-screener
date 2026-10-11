@@ -428,9 +428,17 @@ async def get_index_history(
     # above because they measure something other than what they claim. What
     # must not happen is a chart that looks current. The status lets the UI
     # say so; emptying the chart would destroy legitimate history.
-    last_date = rows[-1]["price_date"] if rows else None
-    status = (freshness_status(date.fromisoformat(last_date[:10]), market_now())
-              if last_date else None)
+    # Freshness comes from the series' LATEST price, not from the windowed
+    # rows. Deriving it from `rows` meant that a series stale enough to fall
+    # entirely outside the window reported no status at all -- so ASX100,
+    # 95 sessions behind, read "current" on history while the list said
+    # "stale". Absence of rows in a window is not absence of a freshness
+    # problem; it is the strongest evidence of one.
+    latest = (await db.execute(text("""
+        SELECT max(price_date) AS d FROM market.index_prices
+         WHERE index_code = :code
+    """), {"code": code_u})).scalar()
+    status = freshness_status(latest, market_now()) if latest else None
 
     return {
         "index_code": index_code.upper(),

@@ -35,7 +35,8 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from app.core.series_provenance import (                        # noqa: E402
-    DELAYED, PUBLICATION_CUTOFF_HOUR, STALE, STALE_AFTER_SESSIONS,
+    DELAYED, NO_DATA, PUBLICATION_CUTOFF_HOUR, STALE,
+    STALE_AFTER_SESSIONS,
     STALE_SUPPRESSED_FIELDS, containment_version, freshness_status,
     is_stale, last_expected_session, sessions_behind, suppress_if_stale,
     suppress_if_unverified)
@@ -163,11 +164,24 @@ def test_staleness_is_measured_not_declared():
         "only known-bad codes are checked, so a new stale series is invisible")
 
 
-def test_a_missing_date_is_not_treated_as_fresh():
-    row = _row("X", None)
-    assert suppress_if_stale(row, SAT) == row, (
-        "a null date must pass through untouched rather than being scored")
-    assert sessions_behind(None, SAT) > 1000
+def test_a_series_with_no_prices_reports_no_data():
+    """This test previously asserted the opposite of its own name.
+
+    It was called "a missing date is not treated as fresh" and asserted the
+    row passed through UNTOUCHED -- which leaves data_status unset, i.e.
+    exactly "fresh". The name described the property; the assertion verified
+    its negation.
+
+    Never-published and stopped-publishing are different facts with
+    different causes -- a dead identifier versus a source gone quiet -- so
+    they get different statuses.
+    """
+    out = suppress_if_stale(_row("X", None), SAT)
+    assert out["data_status"] == NO_DATA
+    assert out.get("sessions_behind") is None, (
+        "there is no date to count back from, and 0 would read as up to date")
+    assert freshness_status(None, SAT) == NO_DATA
+    assert NO_DATA != STALE, "never-published collapsed into stopped"
 
 
 # ── Provenance outranks staleness ───────────────────────────────────────────
@@ -355,6 +369,62 @@ def test_the_history_endpoint_reports_the_same_three_states():
         "history still uses a two-state stale check, so a delayed series "
         "reports as current there while the list says delayed")
     assert '"data_status": status' in hist
+
+
+def test_history_status_does_not_depend_on_the_window():
+    """Found by the v11.2.19 post-deploy check, and it was my bug.
+
+    The status was derived from the WINDOWED rows, so a series stale enough
+    to fall entirely outside the requested window produced no rows and
+    therefore no status: ASX100, 95 sessions behind, reported "current" on
+    history while the list said "stale".
+
+    Absence of rows in a window is not absence of a freshness problem. It is
+    the strongest evidence of one.
+    """
+    src = ROUTE.read_text(encoding="utf-8")
+    hist = src[src.index("async def get_index_history"):]
+    hist = hist[:hist.index("# ── ETF")] if "# ── ETF" in hist else hist
+    assert "max(price_date)" in hist, (
+        "history freshness is not taken from the series' latest price")
+    assert "rows[-1]" not in hist, (
+        "history freshness is still derived from the windowed rows, so a "
+        "sufficiently stale series reports no status at all")
+    assert "freshness_status(latest" in hist
+
+
+def test_an_empty_window_with_an_older_latest_price_still_reports_stale():
+    """The v11.2.19 defect, asserted behaviourally rather than structurally.
+
+    Checking that `rows[-1]` is absent from the source proves only that the
+    old spelling is gone. The property is: when the requested window
+    contains no rows AND the series' latest price is old, the answer is
+    still "stale".
+
+    The second assertion reconstructs the old derivation to show it really
+    did produce None, so this is a contrast rather than a lone claim.
+    """
+    windowed_rows = []                      # a 30-day window, ASX100
+    latest = date(2026, 5, 29)              # its actual last price
+
+    assert freshness_status(latest, SAT) == STALE, (
+        "the series-latest derivation does not report stale")
+
+    old_derivation = (freshness_status(windowed_rows[-1], SAT)
+                      if windowed_rows else None)
+    assert old_derivation is None, (
+        "the control does not reproduce the defect, so this test proves "
+        "nothing about the fix")
+
+
+def test_an_empty_window_on_a_current_series_is_not_stale():
+    """A narrow window over a holiday break has no rows either.
+
+    Without this, the fix could have been "no rows means stale", which would
+    mislabel a perfectly current series whenever someone asked for a short
+    window.
+    """
+    assert freshness_status(date(2026, 10, 9), SAT) is None
 
 
 if __name__ == "__main__":

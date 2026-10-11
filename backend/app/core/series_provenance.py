@@ -115,6 +115,16 @@ STALE_AFTER_SESSIONS = 3
 
 DELAYED = "delayed"
 
+#: No price has ever been recorded for this series.
+#:
+#: Distinct from stale, which means "it stopped". Never-published and
+#: stopped-publishing have different causes -- a dead identifier versus a
+#: source that went quiet -- and collapsing them loses the distinction that
+#: tells an operator where to look. Before this existed, a series with no
+#: prices returned no status at all, i.e. "current": the same defect as
+#: deriving freshness from a window that excluded everything.
+NO_DATA = "no_data"
+
 
 def market_now():
     """Current time in the market's timezone."""
@@ -164,11 +174,16 @@ def sessions_behind(price_date, now) -> int:
 
 
 def freshness_status(price_date, now):
-    """None (current) | "delayed" | "stale". Never silently "current".
+    """None (current) | "delayed" | "stale" | "no_data".
+
+    Never silently "current": the only way to get None is to be level with
+    the last expected session.
 
     A series that has missed even one expected session is marked. Whether its
     figures are also withheld is the separate tolerance question.
     """
+    if price_date is None:
+        return NO_DATA
     n = sessions_behind(price_date, now)
     if n == 0:
         return None
@@ -201,7 +216,7 @@ def suppress_if_stale(values: dict, now) -> dict:
             raw = _dt.date.fromisoformat(raw[:10])
         except ValueError:
             return values
-    status = None if raw is None else freshness_status(raw, now)
+    status = freshness_status(raw, now)
     if status is None:
         return values
     out = dict(values)
@@ -214,7 +229,10 @@ def suppress_if_stale(values: dict, now) -> dict:
             if field in out:
                 out[field] = None
     out["data_status"] = status
-    out["sessions_behind"] = sessions_behind(raw, now)
+    if raw is not None:
+        # Meaningless for a series that never published: there is no date to
+        # count back from, and 0 would read as "up to date".
+        out["sessions_behind"] = sessions_behind(raw, now)
     return out
 
 

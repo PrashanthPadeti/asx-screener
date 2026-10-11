@@ -124,6 +124,11 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
           {/* Delayed is marked but not alarmed: its figures are still shown,
               because blanking a page over a public holiday would make the
               surface useless and teach people to ignore the marking. */}
+          {idx.data_status === 'no_data' && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-600/60">
+              NO DATA
+            </span>
+          )}
           {idx.data_status === 'delayed' && (
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-700/70 text-slate-300 border border-slate-600/60">
               DELAYED
@@ -149,6 +154,11 @@ function IndexRow({ idx, isHighlighted }: { idx: IndexPrice; isHighlighted: bool
             right when published and has stopped updating; an unverified one
             was never measuring what it claimed. One shared message would
             understate the second. */}
+        {idx.data_status === 'no_data' && (
+          <span className="text-[10px] text-slate-400 mt-1 leading-tight block relative z-[2]">
+            No price has been recorded for this series.
+          </span>
+        )}
         {idx.data_status === 'delayed' && (
           <span className="text-[10px] text-slate-400 mt-1 leading-tight block relative z-[2]">
             Last close {idx.price_date}

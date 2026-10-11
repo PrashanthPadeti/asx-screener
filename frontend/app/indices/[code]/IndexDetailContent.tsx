@@ -665,6 +665,16 @@ export default function IndexDetailContent({
                 </div>
               )}
 
+              {p?.data_status === 'delayed' && (
+                <div className="mt-3 rounded-lg border border-slate-600/60 bg-slate-800/50 px-4 py-2.5">
+                  <p className="text-xs text-slate-300">
+                    Last close {p.price_date}
+                    {p.sessions_behind ? ` — ${p.sessions_behind} trading session${p.sessions_behind > 1 ? 's' : ''} behind the expected session.` : '.'}
+                    {' '}Figures are shown as published.
+                  </p>
+                </div>
+              )}
+
               {p?.data_status === 'stale' && (
                 <div className="mt-3 rounded-lg border border-orange-700/60 bg-orange-900/25 px-4 py-3">
                   <p className="text-sm font-semibold text-orange-300">

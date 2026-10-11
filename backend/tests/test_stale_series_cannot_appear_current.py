@@ -35,9 +35,9 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from app.core.series_provenance import (                        # noqa: E402
-    PUBLICATION_CUTOFF_HOUR, STALE, STALE_AFTER_SESSIONS,
-    STALE_SUPPRESSED_FIELDS, containment_version, is_stale,
-    last_expected_session, sessions_behind, suppress_if_stale,
+    DELAYED, PUBLICATION_CUTOFF_HOUR, STALE, STALE_AFTER_SESSIONS,
+    STALE_SUPPRESSED_FIELDS, containment_version, freshness_status,
+    is_stale, last_expected_session, sessions_behind, suppress_if_stale,
     suppress_if_unverified)
 
 #: Market-local datetimes. Freshness depends on the HOUR, not just the day:
@@ -211,8 +211,9 @@ def test_history_is_labelled_not_emptied():
     """
     src = ROUTE.read_text(encoding="utf-8")
     hist = src[src.index("async def get_index_history"):]
-    assert 'is_stale(' in hist, "the history endpoint never evaluates staleness"
-    assert '"data_status": "stale" if stale else None' in hist
+    assert "freshness_status(" in hist, (
+        "the history endpoint never evaluates freshness")
+    assert '"data_status": status' in hist
     assert '"history": [' in hist, "the history payload was removed entirely"
 
 
@@ -273,6 +274,84 @@ def test_the_stale_chart_keeps_its_history():
     assert "stale={p?.data_status === 'stale'}" in src
     assert "it is not current" in src, (
         "the stale chart renders with no notice, so it reads as current")
+
+
+# ── Freshness and alert tolerance are separate ──────────────────────────────
+
+def test_zero_sessions_behind_is_the_only_current():
+    """Anything that has missed an expected session is marked.
+
+    An earlier version used one threshold for both jobs, so a series 1-3
+    sessions behind reported data_status None -- i.e. "current". The clock
+    was right and the label was still wrong.
+    """
+    assert freshness_status(date(2026, 10, 9), SAT) is None
+    for behind, d in ((1, date(2026, 10, 8)), (2, date(2026, 10, 7)),
+                      (3, date(2026, 10, 6))):
+        assert sessions_behind(d, SAT) == behind
+        assert freshness_status(d, SAT) == DELAYED, (
+            f"{behind} session(s) behind still reports as current")
+
+
+def test_mondays_missing_close_shows_delayed_after_the_cutoff():
+    """The case that prompted this split."""
+    assert freshness_status(date(2026, 10, 9), MON_PM) == DELAYED
+    out = suppress_if_stale(_row("ASX200", "2026-10-09"), MON_PM)
+    assert out["data_status"] == DELAYED
+    assert out["sessions_behind"] == 1
+
+
+def test_the_tolerance_governs_withholding_only():
+    """Delayed is marked and still shown; stale is marked and withheld.
+
+    Blanking a page because of a public holiday would make the surface
+    useless, and a surface people stop reading is the failure mode this
+    whole effort is about.
+    """
+    delayed = suppress_if_stale(_row("X", "2026-10-07"), SAT)
+    assert delayed["data_status"] == DELAYED
+    assert delayed["return_1y"] == 0.0336, "a delayed series had figures withheld"
+    assert delayed["high_52w"] == 7800.0
+
+    stale = suppress_if_stale(_row("X", "2026-10-05"), SAT)
+    assert stale["data_status"] == STALE
+    assert stale["return_1y"] is None and stale["high_52w"] is None
+    assert stale["close_price"] == 7304.8, "the last close must survive"
+
+
+def test_the_boundary_between_delayed_and_stale_is_the_tolerance():
+    assert freshness_status(date(2026, 10, 6), SAT) == DELAYED   # 3 behind
+    assert freshness_status(date(2026, 10, 5), SAT) == STALE     # 4 behind
+    assert not is_stale(date(2026, 10, 6), SAT)
+    assert is_stale(date(2026, 10, 5), SAT)
+
+
+def test_the_cache_key_changes_at_the_cutoff():
+    """A response cached at 17:30 must not assert "current" at 18:30.
+
+    The list key embeds the expected session, so crossing the cutoff changes
+    the key and forces re-evaluation rather than serving a stale verdict for
+    the remainder of the hour TTL.
+    """
+    src = ROUTE.read_text(encoding="utf-8")
+    block = src[src.index('_key = make_key("indices"'):]
+    block = block[:block.index("cached = await cache_get")]
+    assert "last_expected_session(market_now())" in block, (
+        "the indices cache key does not include the expected session, so a "
+        "freshness verdict can outlive the cutoff that re-decides it")
+    before = datetime(2026, 10, 12, PUBLICATION_CUTOFF_HOUR - 1, 30)
+    after = datetime(2026, 10, 12, PUBLICATION_CUTOFF_HOUR, 30)
+    assert last_expected_session(before) != last_expected_session(after), (
+        "the key component does not change across the cutoff")
+
+
+def test_the_history_endpoint_reports_the_same_three_states():
+    src = ROUTE.read_text(encoding="utf-8")
+    hist = src[src.index("async def get_index_history"):]
+    assert "freshness_status(" in hist, (
+        "history still uses a two-state stale check, so a delayed series "
+        "reports as current there while the list says delayed")
+    assert '"data_status": status' in hist
 
 
 if __name__ == "__main__":

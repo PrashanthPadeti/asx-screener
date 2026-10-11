@@ -89,14 +89,27 @@ STALE_SUPPRESSED_FIELDS = (
 MARKET_TZ = "Australia/Sydney"
 PUBLICATION_CUTOFF_HOUR = 18
 
-#: Trading sessions of silence before a series is stale.
+#: FRESHNESS AND ALERT TOLERANCE ARE SEPARATE, and conflating them is how a
+#: series that has missed a session keeps reporting itself current.
 #:
-#: This is a DELAY on alerting, not a substitute for a holiday calendar.
-#: Public holidays are not modelled, so a closure simply consumes part of the
-#: tolerance; three sessions covers the ASX's single-day closures and the
+#:   0 sessions behind          current      no marking
+#:   1..STALE_AFTER_SESSIONS    delayed      marked, figures still shown
+#:   > STALE_AFTER_SESSIONS     stale        marked, current-figures withheld
+#:
+#: An earlier version used one threshold for both, so Monday's missing close
+#: read as "current" until Thursday. The clock was right and the label was
+#: still wrong: *whether a session is missing* is a fact, while *how long to
+#: tolerate it before withholding figures* is an operational choice. Only the
+#: second is a judgement call, and it must not silently redefine the first.
+#:
+#: The tolerance is a DELAY ON WITHHOLDING AND ALERTING, not a substitute for
+#: a holiday calendar. Holidays are not modelled, so a closure consumes part
+#: of it; three sessions covers the ASX's single-day closures and the
 #: four-day Easter gap. It is not a judgement that three sessions of silence
 #: is acceptable -- the defect it exists to catch ran to roughly 94.
 STALE_AFTER_SESSIONS = 3
+
+DELAYED = "delayed"
 
 
 def market_now():
@@ -146,8 +159,21 @@ def sessions_behind(price_date, now) -> int:
     return n
 
 
+def freshness_status(price_date, now):
+    """None (current) | "delayed" | "stale". Never silently "current".
+
+    A series that has missed even one expected session is marked. Whether its
+    figures are also withheld is the separate tolerance question.
+    """
+    n = sessions_behind(price_date, now)
+    if n == 0:
+        return None
+    return DELAYED if n <= STALE_AFTER_SESSIONS else STALE
+
+
 def is_stale(price_date, now) -> bool:
-    return sessions_behind(price_date, now) > STALE_AFTER_SESSIONS
+    """Stale enough to withhold figures. NOT the same as "not current"."""
+    return freshness_status(price_date, now) == STALE
 
 
 def suppress_if_stale(values: dict, now) -> dict:
@@ -171,13 +197,19 @@ def suppress_if_stale(values: dict, now) -> dict:
             raw = _dt.date.fromisoformat(raw[:10])
         except ValueError:
             return values
-    if raw is None or not is_stale(raw, now):
+    status = None if raw is None else freshness_status(raw, now)
+    if status is None:
         return values
     out = dict(values)
-    for field in STALE_SUPPRESSED_FIELDS:
-        if field in out:
-            out[field] = None
-    out["data_status"] = STALE
+    if status == STALE:
+        # Only a stale series has its current-figures withheld. A delayed one
+        # is marked and still shown: blanking a page because of a public
+        # holiday would make the surface useless and teach people to ignore
+        # the marking.
+        for field in STALE_SUPPRESSED_FIELDS:
+            if field in out:
+                out[field] = None
+    out["data_status"] = status
     out["sessions_behind"] = sessions_behind(raw, now)
     return out
 

@@ -12,8 +12,9 @@ from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.series_provenance import (
-    UNVERIFIED_SERIES, containment_version, is_stale, market_now,
-    suppress_if_stale, suppress_if_unverified)
+    UNVERIFIED_SERIES, containment_version, freshness_status,
+    last_expected_session, market_now, suppress_if_stale,
+    suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
     IndicesResponse, IndexPrice,
@@ -317,7 +318,17 @@ async def get_indices(db: AsyncSession = Depends(get_db)):
     """Latest daily performance for all active ASX indices."""
     # Keyed by the containment digest: a cached pre-containment response
     # would otherwise keep serving withheld figures for the full hour TTL.
-    _key = make_key("indices", "list", containment_version())
+    # Keyed by the containment digest AND the expected session.
+    #
+    # The digest stops a cached pre-containment response serving withheld
+    # figures for the full hour TTL. The session stops something subtler: a
+    # response built at 17:30 is evaluated against yesterday's expected
+    # session, and with a one-hour TTL it would keep asserting "current"
+    # until 18:30 -- carrying a freshness verdict across the 18:00 cutoff
+    # that re-decides it. Including the expected session means the cutoff
+    # itself invalidates the key and forces re-evaluation.
+    _key = make_key("indices", "list", containment_version(),
+                    last_expected_session(market_now()).isoformat())
     cached = await cache_get(_key)
     if cached:
         return cached
@@ -418,12 +429,12 @@ async def get_index_history(
     # must not happen is a chart that looks current. The status lets the UI
     # say so; emptying the chart would destroy legitimate history.
     last_date = rows[-1]["price_date"] if rows else None
-    stale = bool(last_date) and is_stale(date.fromisoformat(last_date[:10]),
-                                         market_now())
+    status = (freshness_status(date.fromisoformat(last_date[:10]), market_now())
+              if last_date else None)
 
     return {
         "index_code": index_code.upper(),
-        "data_status": "stale" if stale else None,
+        "data_status": status,
         "history": [
             {"date": r["price_date"], "close": _f(r["close_price"]), "return_1d": _f(r["return_1d"])}
             for r in rows

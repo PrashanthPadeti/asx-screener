@@ -75,10 +75,15 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 #
 #   7,328.88 AUD    PRICE RETURN    0.66% 1 Day    As of Oct 09, 2026
 #
-# and EODHD's ATOI.INDX close for that date is 7328.8999 -- agreement to
-# 0.02 points, 0.0003%. Not bit-identical: EODHD stores float32 (7328.8999
-# is the float32 of 7328.90), so part is representation and part may be
-# vendor rounding. At that magnitude it settles the mapping.
+# and EODHD's ATOI.INDX close for that date is 7328.8999 -- a difference of
+# 0.0199 points, 0.0003%.
+#
+# The cause of that difference is NOT established. EODHD's storage
+# representation has not been verified, so attributing it to float precision
+# would be a guess; vendor rounding, a different snapshot time, or a revision
+# are equally consistent with what was observed. Recorded as an unexplained
+# 0.0199-point difference. At that magnitude it does not disturb the mapping,
+# which is what this evidence is for.
 #
 # So price-return and AUD rest on the vendor of record, not on inference.
 # EODHD's own metadata does NOT state return type -- Type is "INDEX" and

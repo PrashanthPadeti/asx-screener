@@ -101,12 +101,19 @@ def test_the_producer_no_longer_fetches_it():
     """New rows must not accrue under a provenance we cannot support."""
     src = (BACKEND / "compute" / "engine" / "index_prices.py").read_text(
         encoding="utf-8")
-    block = src[src.index("TICKER_MAP"):src.index("# ── Return computation")]
-    live = re.findall(r'^\s{4}"(\w+)":\s*"\^', block, re.M)
+    # SOURCES is the population the producer iterates; TICKER_MAP is derived
+    # from it. Parsing the derived view would miss an index added with a
+    # non-Yahoo provider -- exactly what ASX100 became.
+    block = src[src.index("SOURCES: dict[str, IndexSource]"):]
+    block = block[:block.index("}")]
+    live = re.findall(r'^\s{4}"(\w+)":', block, re.M)
+    assert live, "could not parse SOURCES"
     assert "AXJO" not in live, (
         "index_prices still fetches AXJO, so rows keep accruing under an "
         "unverified provenance")
     assert "ASX200" in live, "the control index was removed too"
+    assert "ASX100" in live, (
+        "ASX100 vanished from the population rather than changing provider")
 
 
 def test_all_three_endpoints_apply_containment():

@@ -12,8 +12,8 @@ from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.series_provenance import (
-    UNVERIFIED_SERIES, containment_version, freshness_status,
-    last_expected_session, market_now, suppress_if_stale,
+    SOURCE_CHANGES, UNVERIFIED_SERIES, containment_version,
+    freshness_status, last_expected_session, market_now, suppress_if_stale,
     suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
 from app.schemas.indices_funds import (
@@ -443,6 +443,10 @@ async def get_index_history(
     return {
         "index_code": index_code.upper(),
         "data_status": status,
+        # Named so the chart can break the line and say why, rather than
+        # drawing an unbroken series across sessions that were never
+        # recorded.
+        "source_change": SOURCE_CHANGES.get(code_u),
         "history": [
             {"date": r["price_date"], "close": _f(r["close_price"]), "return_1d": _f(r["return_1d"])}
             for r in rows

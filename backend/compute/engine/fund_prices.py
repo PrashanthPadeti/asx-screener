@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from compute.engine.fund_population import reconcile
 from compute.engine.producer_contract import ProducerTally, SourceRefused
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -90,6 +91,34 @@ FUNDS: list[dict] = [
     dict(asx_code="WAX",  fund_name="WAM Research",                                fund_type="LIC", asset_class="Australian Equities", index_tracked=None, fund_manager="Wilson Asset Management", mer_pct=0.0100, funds_under_mgmt_bn=0.4, distribution_freq="semi-annual", is_hedged=False),
     dict(asx_code="MFF",  fund_name="MFF Capital Investments",                     fund_type="LIC", asset_class="Global Equities",     index_tracked=None, fund_manager="Magellan Financial Group", mer_pct=0.0110, funds_under_mgmt_bn=2.3, distribution_freq="annual",      is_hedged=False),
     dict(asx_code="PMC",  fund_name="Platinum Capital",                            fund_type="LIC", asset_class="Global Equities",     index_tracked=None, fund_manager="Platinum",   mer_pct=0.0115, funds_under_mgmt_bn=0.6, distribution_freq="semi-annual", is_hedged=False),
+    # ── Restored 12 Oct 2026 ──────────────────────────────────────────────
+    #
+    # These eight were NEVER in this list -- `git log -S` finds no commit that
+    # added or removed any of them, and the only removal in the file's history
+    # is MLT on 2026-05-07. They nonetheless exist in market.funds with price
+    # rows to June 2026, so something wrote them and THE WRITER IS
+    # UNIDENTIFIED: manual loads, older deployed code absent from this repo,
+    # incomplete history and database-side jobs all remain possible.
+    #
+    # All eight were verified currently trading on 8 Oct 2026.
+    #
+    # Every field below is copied VERBATIM from market.funds, so the seed's
+    # ON CONFLICT UPDATE is a no-op on metadata and this change alters only
+    # what gets fetched. Inventing an MER or a FUM figure would overwrite
+    # correct data with a guess.
+    #
+    # Two metadata questions are deliberately left open rather than resolved
+    # here: DZZF is "Diversified All Growth" in the database but "Ethical
+    # Diversified High Growth" at EODHD and Morningstar; and ETPMAG carries
+    # the pre-rebrand "ETF Securities" name where the issuer is now Global X.
+    dict(asx_code="DZZF",   fund_name="BetaShares Diversified All Growth ETF",              fund_type="ETF", asset_class="Multi-Asset",         index_tracked=None,                                 fund_manager="BetaShares",      mer_pct=0.0019, funds_under_mgmt_bn=0.11, distribution_freq="quarterly",   is_hedged=False),
+    dict(asx_code="ETHI",   fund_name="BetaShares Global Sustainability Leaders ETF",       fund_type="ETF", asset_class="Global Equities",     index_tracked=None,                                 fund_manager="BetaShares",      mer_pct=0.0059, funds_under_mgmt_bn=3.54, distribution_freq="semi-annual", is_hedged=False),
+    dict(asx_code="ETPMAG", fund_name="ETF Securities Physical Silver",                     fund_type="ETF", asset_class="Commodities",         index_tracked="Silver spot price",                  fund_manager="ETF Securities",  mer_pct=0.0049, funds_under_mgmt_bn=None, distribution_freq=None,          is_hedged=False),
+    dict(asx_code="EX20",   fund_name="BetaShares Ex-20 Australian Equities ETF",           fund_type="ETF", asset_class="Australian Equities", index_tracked="Solactive Ex-20 Index",              fund_manager="BetaShares",      mer_pct=0.0025, funds_under_mgmt_bn=0.63, distribution_freq="quarterly",   is_hedged=False),
+    dict(asx_code="HNDQ",   fund_name="BetaShares NASDAQ 100 (Hedged) ETF",                 fund_type="ETF", asset_class="Global Equities",     index_tracked="NASDAQ-100 Index",                   fund_manager="BetaShares",      mer_pct=0.0051, funds_under_mgmt_bn=8.90, distribution_freq="quarterly",   is_hedged=True),
+    dict(asx_code="SLF",    fund_name="SPDR S&P/ASX 200 Listed Property Fund",              fund_type="ETF", asset_class="Property",            index_tracked="S&P/ASX 200 A-REIT Index",           fund_manager="State Street",    mer_pct=0.0040, funds_under_mgmt_bn=0.49, distribution_freq="quarterly",   is_hedged=False),
+    dict(asx_code="VBND",   fund_name="Vanguard Global Aggregate Bond Index (Hedged) ETF",  fund_type="ETF", asset_class="Fixed Income",        index_tracked="Bloomberg Global Aggregate Index",   fund_manager="Vanguard",        mer_pct=0.0020, funds_under_mgmt_bn=4.08, distribution_freq="monthly",     is_hedged=True),
+    dict(asx_code="VESG",   fund_name="Vanguard Ethically Conscious International Shares ETF", fund_type="ETF", asset_class="Global Equities",  index_tracked="FTSE Developed ex-Australia Index",  fund_manager="Vanguard",        mer_pct=0.0018, funds_under_mgmt_bn=1.37, distribution_freq="quarterly",   is_hedged=False),
 ]
 
 # ── Yahoo Finance ticker map (ASX code → YF ticker) ──────────────────────────
@@ -323,7 +352,21 @@ async def run(
         if seed_only:
             return
 
-        tally = ProducerTally("fund_prices", expected=len(FUNDS))
+        tally = ProducerTally("fund_prices")
+        # Expected comes from market.funds, NOT from FUNDS.
+        #
+        # Taking it from the fetch list is the original defect: remove an
+        # entity and `expected` falls with it, so eight ETFs served June
+        # prices for four months inside a job that reported success. The
+        # population and the fetch set are now compared, and divergence in
+        # either direction is a finding.
+        configured = {f["asx_code"] for f in FUNDS}
+        recon = await reconcile(db, configured)
+        tally.population = recon
+        tally.expected = len(recon.eligible)
+        log.info("  %s", recon.summary)
+        for finding in recon.findings():
+            log.warning("  FINDING: %s", finding)
         total_rows = 0
         for i, fund in enumerate(FUNDS):
             code   = fund["asx_code"]

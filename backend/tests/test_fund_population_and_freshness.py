@@ -213,90 +213,30 @@ def test_the_dry_run_installs_redaction_before_anything_else():
         "redaction is installed after the modules that may log are imported")
 
 
-# ── The migration is additive and decides nothing ───────────────────────────
+# ── Lifecycle columns are OUT OF SCOPE here ────────────────────────────────
+#
+# The additive migration, DIV's retirement and the PMC/GLS link are
+# deliberately absent from this change. fund_population degrades gracefully
+# without the columns -- lifecycle_available() inspects information_schema
+# and falls back to is_active alone -- so reconciliation runs on the current
+# schema and reports "lifecycle metadata unavailable".
 
-MIGRATION = BACKEND / "migrations" / "add_fund_lifecycle_columns.sql"
 
+def test_reconciliation_works_without_the_lifecycle_columns():
+    """A pending migration must not block visibility into today's omissions.
 
-def _migration() -> str:
-    return MIGRATION.read_text(encoding="utf-8")
-
-
-def test_the_migration_records_no_lifecycle_decision():
-    """Adding the vocabulary must not retire anything.
-
-    A migration that both adds a column and populates it conflates "we can
-    now record this" with "we have decided this", and the decisions here rest
-    on evidence that is still outstanding -- DIV's official delisting date,
-    and whether PMC and GLS are the same security at all.
+    The eight omitted funds are visible now and were visible for four months.
     """
-    body = "\n".join(l for l in _migration().splitlines()
-                     if not l.strip().startswith("--"))
-    for forbidden in ("UPDATE ", "INSERT ", "DELETE "):
-        assert forbidden not in body.upper(), (
-            f"the migration contains {forbidden.strip()}, so it writes a "
-            f"lifecycle decision rather than only enabling one")
+    src = _source()
+    assert "async def lifecycle_available(" in src
+    assert "LIFECYCLE_UNAVAILABLE" in src
+    assert 'LIFECYCLE_PREDICATE if await lifecycle_available(db) else ""' in src, (
+        "eligibility does not fall back when the columns are absent")
 
 
-def test_every_added_column_is_nullable_with_no_default():
-    body = _migration()
-    for col in LIFECYCLE_COLUMNS:
-        m = re.search(rf"ADD COLUMN IF NOT EXISTS {col} (\w+)", body)
-        assert m, f"{col} is not added by the migration"
-        after = body[m.end():body.index(";", m.end())]
-        assert "NOT NULL" not in after.upper(), f"{col} is NOT NULL"
-        assert "DEFAULT" not in after.upper(), f"{col} carries a default"
-
-
-def test_the_migration_is_idempotent():
-    """Re-running must not fail, and must not overwrite a decision recorded
-    between runs -- which is guaranteed by it writing nothing at all."""
-    body = _migration()
-    adds = re.findall(r"ADD COLUMN(?! IF NOT EXISTS)", body)
-    assert not adds, f"{len(adds)} ADD COLUMN without IF NOT EXISTS"
-    assert body.count("CREATE INDEX IF NOT EXISTS") == 1
-    assert "DROP CONSTRAINT IF EXISTS" in body, (
-        "re-adding the CHECK would fail on a second run")
-
-
-def test_is_active_is_not_touched():
-    """Existing state is preserved; the migration only adds vocabulary.
-
-    The partial index references is_active in its WHERE clause, which reads
-    the column without altering it — so only statements that could change it
-    are examined.
-    """
-    mutating = [l for l in _migration().splitlines()
-                if l.strip().upper().startswith(("ALTER TABLE", "UPDATE"))
-                and "is_active" in l]
-    assert not mutating, (
-        f"the migration alters is_active, changing existing state: {mutating}")
-
-
-def test_a_half_recorded_retirement_is_rejected():
-    """A reason without a date reads as retired to one query and active to
-    another. The CHECK makes that unrepresentable."""
-    body = _migration()
-    assert "funds_retirement_is_complete" in body
-    block = body[body.index("funds_retirement_is_complete"):]
-    assert "retired_at IS NOT NULL AND retired_reason IS NOT NULL" in block
-
-
-def test_pmc_is_not_linked_to_gls_by_any_statement():
-    """Different ISINs (AU000000PMC2 vs AU0000440166), so continuity is
-    unproven and history must not be consolidated on vendor data.
-
-    Executable statements only. The comments explain *why* the link is
-    withheld, which is the record of the decision and must stay — an earlier
-    version of this test scanned comments too and failed on the explanation
-    for not doing the thing it was checking nobody had done.
-    """
-    statements = [l for l in _migration().splitlines()
-                  if l.strip() and not l.strip().startswith("--")]
-    offenders = [l for l in statements if "GLS" in l.upper()]
-    assert not offenders, (
-        f"a migration statement references GLS, encoding an identity claim "
-        f"the ISINs do not support: {offenders}")
+def test_no_migration_ships_in_this_change():
+    assert not (BACKEND / "migrations" / "add_fund_lifecycle_columns.sql").exists(), (
+        "the lifecycle migration is in scope for a later change, not this one")
 
 
 if __name__ == "__main__":

@@ -38,9 +38,26 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # ── Per-index source, provider and effective date ────────────────────────────
 #
 # ASX100 stopped publishing on 2026-05-29 while every other index stayed
-# current. Why Yahoo stopped serving ^AXTO is UNKNOWN and is not answered by
-# this change -- EODHD's coverage establishes that a replacement exists, not
-# why the original failed.
+# current. CAUSE ESTABLISHED 12 Oct 2026: Yahoo has retired ^AXTO. Probed
+# with ^AXJO as a control:
+#
+#   ^AXJO  21 rows, current          <- control, Yahoo is answering
+#   ^AXTO   0 rows, "possibly delisted; no price data found"
+#   ^ATOI  21 rows, current          <- Yahoo's live ASX 100 symbol
+#
+# So the failure was a retired SYMBOL, not a failed provider, and the
+# producer could not tell: fetch_index_data returns None for an empty frame,
+# the tally counts it as nothing_available, and nine of ten succeeding keeps
+# the run green. A dead symbol is indistinguishable from "no data today"
+# under an all-or-nothing contract.
+#
+# ^ATOI would therefore be a smaller repair -- same provider, one line. It is
+# NOT taken, for two reasons. First, its values could not be verified:
+# yfinance refused this host on three consecutive attempts, including the
+# comparison needed to choose it. Second, the failure mode being repaired is
+# a Yahoo symbol retiring silently, and moving to another Yahoo symbol leaves
+# that intact. EODHD is authenticated, answered every request, and its series
+# identity IS verified below.
 #
 # Identity evidence (12 Oct 2026), recorded so the switch is auditable:
 #

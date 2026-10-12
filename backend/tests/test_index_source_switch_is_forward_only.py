@@ -200,6 +200,90 @@ def test_the_eodhd_fetcher_does_not_log_the_url():
         "an exception is interpolated into a log line")
 
 
+# ── Late publication must not lose the first session ────────────────────────
+#
+# The job fires ~06:30 UTC, about 17:30 Sydney, and the ASX closes at 16:00.
+# If the provider has not published that day's close yet, the run writes
+# nothing for it. The session must then be picked up by a later run rather
+# than silently skipped -- and still without admitting pre-switch rows.
+
+BACKFILL_DAYS_DEFAULT = 1
+
+
+def _window(target, backfill_days=BACKFILL_DAYS_DEFAULT):
+    """Reproduces run(): start_date = target_date - backfill_days."""
+    return target - timedelta(days=backfill_days), target
+
+
+def _writable_dates(target, backfill_days=BACKFILL_DAYS_DEFAULT):
+    start, end = _window(target, backfill_days)
+    wf = SOURCES["ASX100"].first_writable(start)
+    out, day = [], wf
+    while day <= end:
+        out.append(day)
+        day += timedelta(days=1)
+    return out
+
+
+def test_a_late_first_session_is_ingested_on_the_following_run():
+    """Publication misses the switch-date run; the next run still gets it."""
+    missed = SWITCH
+    next_run = SWITCH + timedelta(days=1)
+    assert missed in _writable_dates(next_run), (
+        "a session unpublished at its own run becomes unwritable on the next "
+        "one, so it is lost rather than delayed")
+
+
+def test_a_late_session_never_admits_pre_switch_rows():
+    """Recovery must not widen the window backwards past the boundary."""
+    for days_late in range(0, 6):
+        dates = _writable_dates(SWITCH + timedelta(days=days_late))
+        assert all(d >= SWITCH for d in dates), (
+            f"a run {days_late} day(s) after the switch would write rows "
+            f"before {SWITCH}")
+
+
+def test_recovery_is_bounded_by_backfill_days():
+    """A known limit, asserted so it is a decision rather than a surprise.
+
+    With backfill_days=1 the window is [target-1, target], so a session is
+    recoverable for exactly one extra run. Two runs late and it falls out of
+    the window -- a pre-existing property of every index here, not something
+    the source switch introduces. Raising backfill_days widens recovery for
+    all of them.
+    """
+    assert SWITCH not in _writable_dates(SWITCH + timedelta(days=2)), (
+        "the recovery horizon has changed; update this test and say so")
+    assert SWITCH in _writable_dates(SWITCH + timedelta(days=5),
+                                     backfill_days=5), (
+        "a wider backfill window does not extend recovery as expected")
+
+
+# ── Where returns come from ─────────────────────────────────────────────────
+
+def test_returns_are_computed_from_the_fetched_frame_only():
+    """Single-source per row, which is why the gap rows must be fetched.
+
+    Computing a 1-year return from stored history would span the 95-session
+    hole. Computing it from the fetched EODHD frame does not.
+    """
+    body = SRC[SRC.index("def compute_rows("):]
+    body = body[:body.index("\ndef ", 1)]
+    assert 'closes = df["close"]' in body
+    assert "SELECT" not in body.upper(), (
+        "compute_rows reads the database, so returns could mix stored and "
+        "fetched sources within one figure")
+    assert "_pct_return(closes" in body
+
+
+def test_the_lookback_is_wide_enough_for_a_one_year_return():
+    """252 trading days needs ~365 calendar days; the fetch asks for 400."""
+    fn = SRC[SRC.index("def fetch_eodhd_index("):]
+    fn = fn[:fn.index("def fetch_for(")]
+    assert "timedelta(days=400)" in fn, (
+        "the EODHD lookback no longer covers a 252-session return window")
+
+
 if __name__ == "__main__":
     failures = []
     for name, fn in sorted(globals().items()):

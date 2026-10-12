@@ -38,20 +38,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 # ── Per-index source, provider and effective date ────────────────────────────
 #
 # ASX100 stopped publishing on 2026-05-29 while every other index stayed
-# current. CAUSE ESTABLISHED 12 Oct 2026: Yahoo has retired ^AXTO. Probed
-# with ^AXJO as a control:
+# current. MEASURED 12 Oct 2026, with ^AXJO as a control:
 #
 #   ^AXJO  21 rows, current          <- control, Yahoo is answering
-#   ^AXTO   0 rows, "possibly delisted; no price data found"
-#   ^ATOI  21 rows, current          <- Yahoo's live ASX 100 symbol
+#   ^AXTO   0 rows, no data returned
+#   ^ATOI  21 rows, current          <- a live Yahoo ASX 100 symbol
 #
-# So the failure was a retired SYMBOL, not a failed provider, and the
+# What that establishes: the CONFIGURED SYMBOL returns no data while the
+# provider is reachable and an alternative symbol responds. yfinance prints
+# "possibly delisted" for any empty result, so it is the library guessing,
+# not Yahoo stating a retirement. The provider's reason is UNCONFIRMED.
+#
+# The failure is therefore an unavailable configured symbol, and the
 # producer could not tell: fetch_index_data returns None for an empty frame,
 # the tally counts it as nothing_available, and nine of ten succeeding keeps
 # the run green. A dead symbol is indistinguishable from "no data today"
 # under an all-or-nothing contract.
 #
-# ^ATOI would therefore be a smaller repair -- same provider, one line. It is
+# ^ATOI would be a smaller repair -- same provider, one line. It is
 # NOT taken, for two reasons. First, its values could not be verified:
 # yfinance refused this host on three consecutive attempts, including the
 # comparison needed to choose it. Second, the failure mode being repaired is
@@ -64,6 +68,29 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 #   every stored ASX100 date since 2026-01-01 exists in EODHD ATOI.INDX  (103/103)
 #   96 of those 103 closes agree to within 0.01
 #   control: AXJO.INDX differs from the stored ASX100 by ~1,427 points
+#
+# RETURN TYPE. EODHD's metadata does not state it: Type is "INDEX" and
+# Category is null, neither of which distinguishes price from accumulation.
+# Supporting evidence, recorded at its actual strength:
+#
+#   Morningstar names the index "S&P/ASX 100 PR" under code XTO -- PR being
+#   price return -- and Market Index reports since-inception 4.09% p.a.
+#   excluding dividends against 8.50% including, which is the price/
+#   accumulation gap itself.
+#
+# Both are third-party data vendors. S&P DJI's own page was not retrieved, so
+# this is strong corroboration rather than vendor-of-record confirmation.
+#
+# WHERE RETURNS COME FROM. compute_rows() reads `df["close"]` and nothing
+# else: every return_1d..return_1y, return_ytd and the 52-week range is
+# computed from the FETCHED frame. Stored history is never an input. So a
+# post-switch row's returns are single-source EODHD over a continuous ~400
+# days -- correct precisely BECAUSE the gap rows are fetched; computing them
+# from stored history would span a 95-session hole.
+#
+# What is mixed is the DISPLAYED SERIES, not any individual figure: the chart
+# shows Yahoo-derived rows to 2026-05-29, then a gap, then EODHD-derived rows
+# from the switch date. Each row's returns stay within one source.
 #
 # UNRESOLVED: seven of the 103 dates differ by up to 38.2 points (~0.5%),
 # scattered across January-March, signs in both directions. Cause unknown.

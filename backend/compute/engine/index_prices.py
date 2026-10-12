@@ -22,6 +22,7 @@ import asyncio
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -34,35 +35,88 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+# ── Per-index source, provider and effective date ────────────────────────────
+#
+# ASX100 stopped publishing on 2026-05-29 while every other index stayed
+# current. Why Yahoo stopped serving ^AXTO is UNKNOWN and is not answered by
+# this change -- EODHD's coverage establishes that a replacement exists, not
+# why the original failed.
+#
+# Identity evidence (12 Oct 2026), recorded so the switch is auditable:
+#
+#   every stored ASX100 date since 2026-01-01 exists in EODHD ATOI.INDX  (103/103)
+#   96 of those 103 closes agree to within 0.01
+#   control: AXJO.INDX differs from the stored ASX100 by ~1,427 points
+#
+# UNRESOLVED: seven of the 103 dates differ by up to 38.2 points (~0.5%),
+# scattered across January-March, signs in both directions. Cause unknown.
+# The overlap supports identity FOR THE TESTED PERIOD. It does not validate
+# all 778 stored rows, 675 of which predate 2026 and were never compared.
+
+@dataclass(frozen=True)
+class IndexSource:
+    """Where an index's prices come from, and from when.
+
+    `effective_from` is the FORWARD-ONLY boundary. Rows dated before it are
+    never written, so a source switch cannot rewrite history that a different
+    provider produced. Fetching still reaches further back, because a 1-year
+    return needs a year of context -- but that context is used for
+    COMPUTATION only, never persisted.
+
+    Leaving it None means "this source has always been the source", which is
+    true of every Yahoo index here.
+    """
+    provider: str                    # "yahoo" | "eodhd"
+    symbol: str
+    effective_from: date | None = None
+
+    def first_writable(self, start_date: date) -> date:
+        return max(start_date, self.effective_from) if self.effective_from else start_date
+
+
+#: The switch date for ASX100. Declared as a constant so the boundary is one
+#: reviewable value rather than a literal buried in a map.
+ASX100_SWITCH_DATE = date(2026, 10, 13)
+
+SOURCES: dict[str, IndexSource] = {
+    "ASX20":  IndexSource("yahoo", "^ATLI"),
+    "ASX50":  IndexSource("yahoo", "^AFLI"),
+    "ASX100": IndexSource("eodhd", "ATOI.INDX", effective_from=ASX100_SWITCH_DATE),
+    "ASX200": IndexSource("yahoo", "^AXJO"),
+    "ASX300": IndexSource("yahoo", "^AXKO"),
+    "AXFJ":   IndexSource("yahoo", "^AXFJ"),
+    "AXMJ":   IndexSource("yahoo", "^AXMJ"),
+    "AXEJ":   IndexSource("yahoo", "^AXEJ"),
+    "AXHJ":   IndexSource("yahoo", "^AXHJ"),
+}
+
+
 # ── Ticker mapping ────────────────────────────────────────────────────────────
+#
+# Derived from SOURCES so there is one population, not two that can drift.
+# SOURCES is authoritative: it carries the provider and the effective date,
+# which a bare ticker map cannot express.
+#
+# AXJO is DELIBERATELY ABSENT. See
+# docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
+#
+# It was mapped to "^AXJO" with the comment "accumulation — same price
+# series as ASX200 on Yahoo", while the API presented it as "S&P/ASX 200
+# Accumulation ... the total return version ... incorporating
+# reinvestment of dividends". ^AXJO is the price-only series, so the
+# surface advertised as a total-return benchmark was served price data.
+#
+# The codebase does not agree on what AXJO even is: index_prices called
+# it the ASX200 accumulation series, indices_funds describes it as the
+# ASX 200 total return with ~200 constituents, and three frontend
+# comments call it "All Ordinaries, ~500 stocks". Until the intended
+# index is settled AND a provider series is verified for return type,
+# currency, dividend treatment and date coverage, there is nothing
+# correct to fetch. Existing rows are preserved for investigation; this
+# only stops new ones being written under a provenance we cannot support.
 
 TICKER_MAP: dict[str, str] = {
-    "ASX20":  "^ATLI",
-    "ASX50":  "^AFLI",
-    "ASX100": "^AXTO",
-    "ASX200": "^AXJO",
-    "ASX300": "^AXKO",
-    # AXJO is DELIBERATELY ABSENT. See
-    # docs/finding_2026-10-09_axjo_accumulation_is_price_series.md
-    #
-    # It was mapped to "^AXJO" with the comment "accumulation — same price
-    # series as ASX200 on Yahoo", while the API presented it as "S&P/ASX 200
-    # Accumulation ... the total return version ... incorporating
-    # reinvestment of dividends". ^AXJO is the price-only series, so the
-    # surface advertised as a total-return benchmark was served price data.
-    #
-    # The codebase does not agree on what AXJO even is: index_prices called
-    # it the ASX200 accumulation series, indices_funds describes it as the
-    # ASX 200 total return with ~200 constituents, and three frontend
-    # comments call it "All Ordinaries, ~500 stocks". Until the intended
-    # index is settled AND a provider series is verified for return type,
-    # currency, dividend treatment and date coverage, there is nothing
-    # correct to fetch. Existing rows are preserved for investigation; this
-    # only stops new ones being written under a provenance we cannot support.
-    "AXFJ":   "^AXFJ",
-    "AXMJ":   "^AXMJ",
-    "AXEJ":   "^AXEJ",
-    "AXHJ":   "^AXHJ",
+    code: src.symbol for code, src in SOURCES.items() if src.provider == "yahoo"
 }
 
 # ── Return computation ────────────────────────────────────────────────────────
@@ -188,6 +242,77 @@ def fetch_index_data(
     return df.sort_index()
 
 
+def fetch_eodhd_index(
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> pd.DataFrame | None:
+    """Download daily OHLCV from EODHD.
+
+    Same contract as `fetch_index_data`: returns None when the source
+    legitimately has nothing, raises SourceRefused when it declines to serve
+    us. The caller must be able to tell those apart -- conflating them is the
+    defect `producer_contract` exists to prevent.
+
+    Returns the same frame shape as the Yahoo path (lowercase OHLCV columns,
+    DatetimeIndex) so `compute_rows` is untouched by the provider change.
+
+    The 400-day lookback matches the Yahoo path and exists for computation
+    only: a 1-year return needs a year of context. Rows outside the writable
+    window are discarded by the caller, so reaching back here does NOT
+    backfill history.
+    """
+    import httpx                                               # noqa: PLC0415
+
+    from app.core.config import settings                       # noqa: PLC0415
+    key = settings.EODHD_API_KEY
+    if not key:
+        log.error("EODHD_API_KEY not set — cannot fetch %s", symbol)
+        return None
+
+    try:
+        r = httpx.get(
+            f"https://eodhd.com/api/eod/{symbol}",
+            params={"api_token": key, "fmt": "json", "order": "a",
+                    "from": (start_date - timedelta(days=400)).isoformat(),
+                    "to": end_date.isoformat()},
+            timeout=30,
+        )
+    except Exception as exc:                                   # noqa: BLE001
+        # Type only. An exception's text can carry the request URL, and the
+        # URL carries the api_token.
+        log.warning("%s: fetch failed — %s", symbol, type(exc).__name__)
+        return None
+
+    if r.status_code in (429, 402, 403):
+        log.warning("%s: source refused the request — HTTP %s", symbol, r.status_code)
+        raise SourceRefused(symbol, f"HTTP {r.status_code}")
+    if r.status_code != 200:
+        log.warning("%s: HTTP %s", symbol, r.status_code)
+        return None
+
+    payload = r.json() or []
+    if not payload:
+        log.warning("%s: no data returned from EODHD", symbol)
+        return None
+
+    df = pd.DataFrame(payload)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date").sort_index()
+    for col in ("open", "high", "low", "close", "volume"):
+        if col not in df.columns:
+            log.warning("%s: response has no %s column", symbol, col)
+            return None
+    return df[["open", "high", "low", "close", "volume"]].copy()
+
+
+def fetch_for(source: "IndexSource", start_date: date, end_date: date):
+    """Dispatch to the provider named by the source."""
+    if source.provider == "eodhd":
+        return fetch_eodhd_index(source.symbol, start_date, end_date)
+    return fetch_index_data(source.symbol, start_date, end_date)
+
+
 # ── DB upsert ─────────────────────────────────────────────────────────────────
 
 async def upsert_rows(db, index_code: str, rows: list[dict], dry_run: bool) -> int:
@@ -261,19 +386,26 @@ async def run(
 
     log.info(f"Index prices: fetching {start_date} → {target_date} (dry_run={dry_run})")
 
-    tally = ProducerTally("index_prices", expected=len(TICKER_MAP))
+    tally = ProducerTally("index_prices", expected=len(SOURCES))
 
     async with AsyncSessionLocal() as db:
         total_rows = 0
-        for index_code, ticker in TICKER_MAP.items():
-            log.info(f"  {index_code} ({ticker}) …")
+        for index_code, source in SOURCES.items():
+            ticker = source.symbol
+            # Provenance on every run: provider, symbol and -- where a switch
+            # happened -- the date from which this provider's rows are
+            # authoritative. A source change should be visible in the log of
+            # the run that first used it, not only in a commit message.
+            since = (f" since {source.effective_from}"
+                     if source.effective_from else "")
+            log.info(f"  {index_code} ({source.provider}:{ticker}{since}) …")
             # Off the loop. AsyncIOScheduler runs this coroutine ON the
             # event loop; a blocking fetch here stops the API answering
             # anything. index_prices did exactly that for five minutes on
             # 6 Oct 2026, the morning after the fund_prices fix shipped.
             try:
                 df = await asyncio.to_thread(
-                    fetch_index_data, ticker, start_date, target_date)
+                    fetch_for, source, start_date, target_date)
             except SourceRefused:
                 # Counted, not swallowed. A refusal is why this run has no
                 # data, and the run must be able to say so at the end.
@@ -288,10 +420,23 @@ async def run(
             # Compute returns on the FULL fetched history (includes 400-day lookback
             # context needed for 1Y returns), then filter rows to the target window.
             all_rows = compute_rows(df)
+            # FORWARD-ONLY. `first_writable` is the effective date of this
+            # index's source; nothing before it is ever written, so switching
+            # provider cannot rewrite rows another provider produced. The
+            # fetch above deliberately reached 400 days further back, but
+            # that context is for computing returns, not for persisting --
+            # writing it would be the gap backfill, which is a separate
+            # decision and not this change.
+            writable_from = source.first_writable(start_date)
             rows = [
                 r for r in all_rows
-                if start_date <= r["price_date"] <= target_date
+                if writable_from <= r["price_date"] <= target_date
             ]
+            withheld = sum(1 for r in all_rows
+                           if start_date <= r["price_date"] < writable_from)
+            if withheld:
+                log.info(f"  {index_code}: {withheld} row(s) before "
+                         f"{writable_from} withheld (forward-only)")
             count = await upsert_rows(db, index_code, rows, dry_run)
             log.info(f"  {index_code}: {count} rows upserted")
             total_rows += count

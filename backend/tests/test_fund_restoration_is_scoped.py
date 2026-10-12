@@ -146,6 +146,48 @@ def test_this_change_restores_recent_prices_only():
         "history rather than restore current prices")
 
 
+# ── The gap must not be drawn as a line ─────────────────────────────────────
+
+FRONTEND = BACKEND.parent / "frontend"
+FUND_CHART = FRONTEND / "app" / "funds" / "[code]" / "FundDetailContent.tsx"
+INDEX_CHART = FRONTEND / "app" / "indices" / "[code]" / "IndexDetailContent.tsx"
+HELPER = FRONTEND / "lib" / "chartGaps.ts"
+
+
+def test_the_fund_chart_breaks_at_a_gap():
+    """Restoration CREATES this risk.
+
+    Once the eight funds receive current prices, their series runs June ->
+    October with ~95 sessions absent. Without a break the chart draws one
+    unbroken line across them, so this change would introduce a misleading
+    view while fixing a staleness one.
+    """
+    src = FUND_CHART.read_text(encoding="utf-8")
+    assert "insertGaps(" in src, "the fund chart does not break at gaps"
+    assert "describeGaps(" in src, "the gap is not captioned"
+
+
+def test_both_charts_share_one_implementation():
+    """The same defect was fixed for indices, then found again in funds.
+
+    A second copy is a third copy waiting to happen.
+    """
+    assert HELPER.exists(), "the shared gap helper is missing"
+    for chart in (FUND_CHART, INDEX_CHART):
+        src = chart.read_text(encoding="utf-8")
+        assert "from '@/lib/chartGaps'" in src, (
+            f"{chart.name} does not use the shared helper")
+        assert "const MAX_GAP_DAYS" not in src, (
+            f"{chart.name} re-declares the threshold locally")
+
+
+def test_the_helper_inserts_a_null_break():
+    src = HELPER.read_text(encoding="utf-8")
+    assert "connectNulls" in src, (
+        "the reason a null breaks the line is not recorded")
+    assert "gaps.push(" in src
+
+
 if __name__ == "__main__":
     failures = []
     for name, fn in sorted(globals().items()):

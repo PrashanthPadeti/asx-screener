@@ -12,6 +12,7 @@ import {
 } from 'recharts'
 import { FundDetail, FundRow, FundConstituent, getFundDetail, getSimilarFunds, getFundConstituents } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { insertGaps, describeGaps } from '@/lib/chartGaps'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -105,7 +106,7 @@ function MetricCard({ icon, label, value, sub }: { icon: React.ReactNode; label:
 // ── Price Chart ───────────────────────────────────────────────────────────────
 
 function PriceChart({ history, days }: { history: FundDetail['history']; days: number }) {
-  const sliced = useMemo(() => {
+  const real = useMemo(() => {
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - days)
     return history
@@ -113,10 +114,15 @@ function PriceChart({ history, days }: { history: FundDetail['history']; days: n
       .map(h => ({ date: h.date, close: h.close as number, nav_discount: h.nav_discount_pct }))
   }, [history, days])
 
-  const minY = sliced.length ? Math.min(...sliced.map(h => h.close)) * 0.98 : 0
-  const maxY = sliced.length ? Math.max(...sliced.map(h => h.close)) * 1.02 : 100
+  // Break the line where sessions are missing. Eight funds stopped publishing
+  // in June 2026 and resume on restoration; without this the chart joins June
+  // straight to October across ~95 sessions that were never recorded.
+  const { points: sliced, gaps } = useMemo(() => insertGaps(real), [real])
 
-  if (sliced.length === 0) {
+  const minY = real.length ? Math.min(...real.map(h => h.close)) * 0.98 : 0
+  const maxY = real.length ? Math.max(...real.map(h => h.close)) * 1.02 : 100
+
+  if (real.length === 0) {
     return (
       <div className="h-64 flex items-center justify-center text-slate-500 text-sm">
         No price history available for this period
@@ -125,6 +131,7 @@ function PriceChart({ history, days }: { history: FundDetail['history']; days: n
   }
 
   return (
+    <>
     <ResponsiveContainer width="100%" height={280}>
       <ComposedChart data={sliced} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
@@ -170,6 +177,13 @@ function PriceChart({ history, days }: { history: FundDetail['history']; days: n
         />
       </ComposedChart>
     </ResponsiveContainer>
+    {/* A break in the line reads as a rendering artefact unless it is named. */}
+    {gaps.length > 0 && (
+      <p className="text-[11px] text-slate-400 mt-2">
+        {gaps.length === 1 ? 'Gap: ' : 'Gaps: '}{describeGaps(gaps)}
+      </p>
+    )}
+    </>
   )
 }
 

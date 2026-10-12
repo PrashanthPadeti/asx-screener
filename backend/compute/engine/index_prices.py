@@ -69,17 +69,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 #   96 of those 103 closes agree to within 0.01
 #   control: AXJO.INDX differs from the stored ASX100 by ~1,427 points
 #
-# RETURN TYPE. EODHD's metadata does not state it: Type is "INDEX" and
-# Category is null, neither of which distinguishes price from accumulation.
-# Supporting evidence, recorded at its actual strength:
+# RETURN TYPE -- CONFIRMED BY THE INDEX OWNER, 12 Oct 2026.
 #
-#   Morningstar names the index "S&P/ASX 100 PR" under code XTO -- PR being
-#   price return -- and Market Index reports since-inception 4.09% p.a.
-#   excluding dividends against 8.50% including, which is the price/
-#   accumulation gap itself.
+# S&P Dow Jones Indices' own page for the S&P/ASX 100 states:
 #
-# Both are third-party data vendors. S&P DJI's own page was not retrieved, so
-# this is strong corroboration rather than vendor-of-record confirmation.
+#   7,328.88 AUD    PRICE RETURN    0.66% 1 Day    As of Oct 09, 2026
+#
+# and EODHD's ATOI.INDX close for that date is 7328.8999 -- agreement to
+# 0.02 points, 0.0003%. Not bit-identical: EODHD stores float32 (7328.8999
+# is the float32 of 7328.90), so part is representation and part may be
+# vendor rounding. At that magnitude it settles the mapping.
+#
+# So price-return and AUD rest on the vendor of record, not on inference.
+# EODHD's own metadata does NOT state return type -- Type is "INDEX" and
+# Category is null -- which is exactly why the index owner was consulted.
+# Corroborating: Morningstar names it "S&P/ASX 100 PR" under code XTO, and
+# Market Index reports 4.09% p.a. ex-dividend against 8.50% including.
 #
 # WHERE RETURNS COME FROM. compute_rows() reads `df["close"]` and nothing
 # else: every return_1d..return_1y, return_ytd and the 52-week range is

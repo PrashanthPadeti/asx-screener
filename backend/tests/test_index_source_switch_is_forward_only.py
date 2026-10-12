@@ -284,6 +284,58 @@ def test_the_lookback_is_wide_enough_for_a_one_year_return():
         "the EODHD lookback no longer covers a 252-session return window")
 
 
+# ── The chart must not imply continuity across missing sessions ─────────────
+
+FRONTEND = BACKEND.parent / "frontend"
+CHART = FRONTEND / "app" / "indices" / "[code]" / "IndexDetailContent.tsx"
+ROUTE = BACKEND / "app" / "api" / "v1" / "routes" / "indices_funds.py"
+
+
+def test_the_chart_breaks_the_line_at_a_gap():
+    """Missing sessions are absent from the data, not null in it.
+
+    Without an inserted null, Recharts plots 2026-05-29 adjacent to the next
+    available date and joins them -- an unbroken line across 95 sessions that
+    were never recorded. A gap in the data should look like a gap.
+    """
+    src = CHART.read_text(encoding="utf-8")
+    assert "MAX_GAP_DAYS" in src, "no gap detection in the chart"
+    assert "close: null" in src, (
+        "no null point is inserted, so the line is drawn straight across")
+    assert "gaps.push(" in src
+
+
+def test_the_gap_is_described_in_words():
+    """A break in a line reads as a rendering artefact unless it is labelled."""
+    src = CHART.read_text(encoding="utf-8")
+    assert "no data recorded" in src
+
+
+def test_the_source_change_is_exposed():
+    """A series spanning a provider change must say so."""
+    prov = (BACKEND / "app" / "core" / "series_provenance.py").read_text(
+        encoding="utf-8")
+    assert "SOURCE_CHANGES" in prov
+    assert '"ASX100"' in prov[prov.index("SOURCE_CHANGES"):]
+    route = ROUTE.read_text(encoding="utf-8")
+    assert '"source_change": SOURCE_CHANGES.get(code_u)' in route, (
+        "the history endpoint does not surface the recorded source change")
+    assert "sourceChange" in CHART.read_text(encoding="utf-8"), (
+        "the chart never renders the source change")
+
+
+def test_the_recorded_change_matches_the_switch_date():
+    """The note and the producer must not drift apart."""
+    prov = (BACKEND / "app" / "core" / "series_provenance.py").read_text(
+        encoding="utf-8")
+    block = prov[prov.index("SOURCE_CHANGES"):]
+    block = block[:block.index("\n}\n")]
+    assert str(SWITCH) in block, (
+        f"SOURCE_CHANGES does not name the switch date {SWITCH}")
+    assert "ATOI.INDX" in block and "AXTO" in block, (
+        "the note does not name both the old and new symbols")
+
+
 if __name__ == "__main__":
     failures = []
     for name, fn in sorted(globals().items()):

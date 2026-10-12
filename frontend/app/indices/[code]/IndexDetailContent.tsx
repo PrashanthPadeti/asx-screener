@@ -154,21 +154,45 @@ const DARK_TOOLTIP = {
 function PerformanceChart({ code, unavailable, stale }: { code: string; unavailable?: boolean; stale?: boolean }) {
   const [period, setPeriod] = useState('1Y')
   const [history, setHistory] = useState<{ date: string; close: number | null }[]>([])
+  const [sourceChange, setSourceChange] = useState<{ note?: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
     getIndexHistory(code, PERIOD_DAYS[period])
-      .then(r => setHistory(r.history))
+      .then(r => { setHistory(r.history); setSourceChange((r as any).source_change ?? null) })
       .finally(() => setLoading(false))
   }, [code, period])
 
-  const formatted = history
+  // Break the line where sessions are missing.
+  //
+  // Absent days are not in `history` at all, so without this the chart plots
+  // 2026-05-29 adjacent to the next available date and joins them -- an
+  // unbroken line across 95 sessions that were never recorded. Inserting an
+  // explicit null makes Recharts (connectNulls defaults to false) leave the
+  // gap visible. A gap in the data should look like a gap.
+  const points = history
     .filter(h => h.close != null)
     .map(h => ({ date: h.date, close: h.close as number }))
 
-  const minY = formatted.length ? Math.min(...formatted.map(h => h.close)) * 0.98 : 0
-  const maxY = formatted.length ? Math.max(...formatted.map(h => h.close)) * 1.02 : 100
+  const MAX_GAP_DAYS = 5          // a long weekend plus a holiday
+  const formatted: { date: string; close: number | null }[] = []
+  const gaps: { from: string; to: string; days: number }[] = []
+  points.forEach((pt, i) => {
+    if (i > 0) {
+      const prev = points[i - 1]
+      const days = Math.round(
+        (new Date(pt.date).getTime() - new Date(prev.date).getTime()) / 86400000)
+      if (days > MAX_GAP_DAYS) {
+        formatted.push({ date: `${prev.date}..${pt.date}`, close: null })
+        gaps.push({ from: prev.date, to: pt.date, days })
+      }
+    }
+    formatted.push(pt)
+  })
+
+  const minY = points.length ? Math.min(...points.map(h => h.close)) * 0.98 : 0
+  const maxY = points.length ? Math.max(...points.map(h => h.close)) * 1.02 : 100
 
   return (
     <SectionCard title="Historical Performance">
@@ -196,7 +220,7 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
         <div className="h-64 flex items-center justify-center">
           <RefreshCw className="w-5 h-5 text-slate-500 animate-spin" />
         </div>
-      ) : formatted.length === 0 ? (
+      ) : points.length === 0 ? (
         <div className="h-64 flex items-center justify-center text-center px-6">
           {/* "not available YET" implies the data is coming. For a withheld
               series it is not coming, and the distinction is the point of the
@@ -236,6 +260,18 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
             <Line type="monotone" dataKey="close" stroke="#3b82f6" strokeWidth={2} dot={false} />
           </LineChart>
         </ResponsiveContainer>
+      )}
+
+      {/* A break in the line needs a sentence, or it reads as a rendering
+          artefact rather than missing data. */}
+      {gaps.length > 0 && (
+        <p className="text-[11px] text-slate-400 mt-2">
+          {gaps.length === 1 ? 'Gap: ' : 'Gaps: '}
+          {gaps.map(g => `${g.from} to ${g.to} (${g.days} days, no data recorded)`).join('; ')}
+        </p>
+      )}
+      {sourceChange?.note && (
+        <p className="text-[11px] text-slate-400 mt-1">{sourceChange.note}</p>
       )}
     </SectionCard>
   )

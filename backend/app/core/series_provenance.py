@@ -125,6 +125,24 @@ DELAYED = "delayed"
 #: deriving freshness from a window that excluded everything.
 NO_DATA = "no_data"
 
+#: Recorded source changes, surfaced so a chart can say where a series stops
+#: being one provider's data and starts being another's.
+#:
+#: A series spanning a provider change is not a lie, but a chart that renders
+#: it as one unbroken line implies a continuity that does not exist. ASX100's
+#: configured Yahoo symbol stopped returning data on 2026-05-29; EODHD takes
+#: over from the switch date, and the sessions between are absent entirely.
+SOURCE_CHANGES: dict[str, dict] = {
+    "ASX100": {
+        "changed_on": "2026-10-13",
+        "from_source": "yahoo:^AXTO",
+        "to_source": "eodhd:ATOI.INDX",
+        "note": ("Data to 2026-05-29 came from Yahoo (^AXTO, which stopped "
+                 "returning data); data from 2026-10-13 comes from EODHD "
+                 "(ATOI.INDX). Sessions between were never recorded."),
+    },
+}
+
 
 def market_now():
     """Current time in the market's timezone."""

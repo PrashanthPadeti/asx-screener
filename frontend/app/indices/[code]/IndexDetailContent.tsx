@@ -16,6 +16,7 @@ import {
   getIndexHistory, getIndexDetail,
 } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { insertGaps, describeGaps } from '@/lib/chartGaps'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -175,21 +176,7 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
     .filter(h => h.close != null)
     .map(h => ({ date: h.date, close: h.close as number }))
 
-  const MAX_GAP_DAYS = 5          // a long weekend plus a holiday
-  const formatted: { date: string; close: number | null }[] = []
-  const gaps: { from: string; to: string; days: number }[] = []
-  points.forEach((pt, i) => {
-    if (i > 0) {
-      const prev = points[i - 1]
-      const days = Math.round(
-        (new Date(pt.date).getTime() - new Date(prev.date).getTime()) / 86400000)
-      if (days > MAX_GAP_DAYS) {
-        formatted.push({ date: `${prev.date}..${pt.date}`, close: null })
-        gaps.push({ from: prev.date, to: pt.date, days })
-      }
-    }
-    formatted.push(pt)
-  })
+  const { points: formatted, gaps } = insertGaps(points)
 
   const minY = points.length ? Math.min(...points.map(h => h.close)) * 0.98 : 0
   const maxY = points.length ? Math.max(...points.map(h => h.close)) * 1.02 : 100
@@ -267,7 +254,7 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
       {gaps.length > 0 && (
         <p className="text-[11px] text-slate-400 mt-2">
           {gaps.length === 1 ? 'Gap: ' : 'Gaps: '}
-          {gaps.map(g => `${g.from} to ${g.to} (${g.days} days, no data recorded)`).join('; ')}
+          {describeGaps(gaps)}
         </p>
       )}
       {sourceChange?.note && (

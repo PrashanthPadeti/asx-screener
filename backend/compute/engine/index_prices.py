@@ -463,12 +463,12 @@ async def run(
             except SourceRefused:
                 # Counted, not swallowed. A refusal is why this run has no
                 # data, and the run must be able to say so at the end.
-                tally.refusal(ticker)
+                tally.refusal(index_code, f"provider refused {ticker}")
                 continue
 
             if df is None or df.empty:
                 log.info(f"  {index_code}: no data returned")
-                tally.nothing_available()
+                tally.nothing_available(index_code)
                 continue
 
             # Compute returns on the FULL fetched history (includes 400-day lookback
@@ -494,7 +494,7 @@ async def run(
             count = await upsert_rows(db, index_code, rows, dry_run)
             log.info(f"  {index_code}: {count} rows upserted")
             total_rows += count
-            tally.obtained(count)
+            tally.obtained(index_code, count)
 
     # Partial results are kept: each ticker committed as it went, and a run
     # that obtained some of its population is reported as it is rather than

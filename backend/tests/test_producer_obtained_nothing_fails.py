@@ -49,9 +49,13 @@ def _raises(fn) -> ProducerFailure | None:
 def test_the_october_index_run_is_a_failure():
     """10 indices, every one refused, 0 rows. Reported success for four days."""
     t = ProducerTally("index_prices", expected=10)
-    for ticker in ("^ATLI", "^AFLI", "^AXTO", "^AXJO", "^AXKO",
-                   "^AXFJ", "^AXMJ", "^AXEJ", "^AXHJ", "^AXJO"):
-        t.refusal(ticker)
+    # Keyed by INDEX CODE, not provider ticker, exactly as index_prices now
+    # records. TICKER_MAP maps ten distinct codes onto nine tickers --
+    # ASX200 and AXJO both resolve to ^AXJO -- so keying outcomes by ticker
+    # would collide two real entities on every single run.
+    for code in ("ASX20", "ASX50", "ASX100", "ASX200", "ASX300",
+                 "AXJO", "AXFJ", "AXMJ", "AXEJ", "AXHJ"):
+        t.refusal(code)
     exc = _raises(t.verify)
     assert exc is not None, (
         "the exact production run that reported success for four days still "
@@ -82,8 +86,8 @@ def test_the_cause_distinguishes_refusal_from_absence():
     assert "source_refused" in str(_raises(refused.verify))
 
     nothing = ProducerTally("p", expected=3)
-    for _ in range(3):
-        nothing.nothing_available()
+    for i in range(3):
+        nothing.nothing_available(f"T{i}")
     assert "no_observations" in str(_raises(nothing.verify))
 
 
@@ -95,7 +99,7 @@ def test_a_partial_run_is_not_a_failure():
     """
     t = ProducerTally("index_prices", expected=10)
     for i in range(9):
-        t.obtained(rows=4)
+        t.obtained(f"OK{i}", rows=4)
     t.refusal("^AXHJ")
     assert _raises(t.verify) is None
     assert t.rows == 36
@@ -106,7 +110,7 @@ def test_one_success_among_total_refusal_still_passes():
     t = ProducerTally("fund_prices", expected=47)
     for i in range(46):
         t.refusal(f"F{i}.AX")
-    t.obtained(rows=1)
+    t.obtained("OK", rows=1)
     assert _raises(t.verify) is None
 
 

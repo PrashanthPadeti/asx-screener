@@ -299,16 +299,23 @@ def test_the_chart_breaks_the_line_at_a_gap():
     were never recorded. A gap in the data should look like a gap.
     """
     src = CHART.read_text(encoding="utf-8")
-    assert "MAX_GAP_DAYS" in src, "no gap detection in the chart"
-    assert "close: null" in src, (
-        "no null point is inserted, so the line is drawn straight across")
-    assert "gaps.push(" in src
+    # The logic lives in lib/chartGaps.ts, shared with the fund chart --
+    # the same defect was fixed here first and then found unfixed there.
+    assert "insertGaps(" in src, "the chart does not break at gaps"
+    helper = (BACKEND.parent / "frontend" / "lib" / "chartGaps.ts").read_text(
+        encoding="utf-8")
+    assert "MAX_GAP_DAYS" in helper
+    assert "gaps.push(" in helper, (
+        "the helper does not record the gaps it finds")
 
 
 def test_the_gap_is_described_in_words():
     """A break in a line reads as a rendering artefact unless it is labelled."""
     src = CHART.read_text(encoding="utf-8")
-    assert "no data recorded" in src
+    assert "describeGaps(" in src, "the chart does not caption its gaps"
+    helper = (BACKEND.parent / "frontend" / "lib" / "chartGaps.ts").read_text(
+        encoding="utf-8")
+    assert "no data recorded" in helper
 
 
 def test_the_source_change_is_exposed():

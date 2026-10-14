@@ -34,7 +34,8 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Optional
 
-from sqlalchemy import text
+from sqlalchemy import Text, bindparam, text
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from compute.engine.job_telemetry import FAILED, RUNNING, SUCCESS, bound_failure
 
@@ -48,16 +49,21 @@ _INSERT = text("""
     RETURNING run_id
 """)
 
+#: `findings` is TEXT[]; the bind is typed explicitly rather than inferred,
+#: because an untyped empty list has no element type for the driver to guess
+#: from and binds as the wrong thing exactly when there is nothing to show.
 _CLOSE = text("""
     UPDATE ops.job_executions
        SET finished_at     = :finished_at,
            duration_ms     = :duration_ms,
            status          = :status,
            failure_class   = :failure_class,
-           failure_message = :failure_message
+           failure_message = :failure_message,
+           degraded        = :degraded,
+           findings        = :findings
      WHERE run_id = :run_id
        AND status = 'running'
-""")
+""").bindparams(bindparam("findings", type_=ARRAY(Text)))
 
 
 async def _open_run(job_id: str) -> Optional[int]:
@@ -81,7 +87,9 @@ async def _open_run(job_id: str) -> Optional[int]:
 
 
 async def _close_run(run_id: Optional[int], *, status: str, duration_ms: int,
-                     failure: Optional[BaseException] = None) -> None:
+                     failure: Optional[BaseException] = None,
+                     degraded: bool = False,
+                     findings: Optional[list[str]] = None) -> None:
     """Record the terminal boundary. Never raises into the caller."""
     if run_id is None:
         return
@@ -95,11 +103,44 @@ async def _close_run(run_id: Optional[int], *, status: str, duration_ms: int,
                 "status": status,
                 "failure_class": type(failure).__name__ if failure else None,
                 "failure_message": bound_failure(str(failure)) if failure else None,
+                "degraded": degraded,
+                "findings": findings or None,
             })
             await session.commit()
     except Exception as exc:                                    # noqa: BLE001
         log.error("telemetry: could not close run %s for status %s: %s: %s",
                   run_id, status, type(exc).__name__, exc)
+
+
+def _degradation_of(job_id: str, result: Any) -> tuple[bool, Optional[list[str]]]:
+    """Read a degraded verdict off whatever the job returned.
+
+    Duck-typed on purpose. Most jobs return None and are unaffected; a
+    producer returns its `ProducerTally`, which already knows whether some
+    eligible entity failed to publish and can say which. Importing the
+    producer contract here to isinstance-check it would make every scheduled
+    job depend on the compute layer to be observed.
+
+    Read defensively, and never let the reading change the outcome. A job that
+    returns something unexpected -- or a property that raises -- must not be
+    converted into a failure by the instrument watching it. That rule has its
+    own module (`app/core/instrument.py`) and three incidents behind it.
+    """
+    try:
+        if not bool(getattr(result, "degraded", False)):
+            return False, None
+        report = getattr(result, "report", None)
+        lines = [str(x) for x in report()] if callable(report) else []
+        if not lines:
+            # The schema refuses a degraded row with no findings, and it is
+            # right to. Say that the verdict arrived without its evidence
+            # rather than dropping the verdict or inventing the evidence.
+            lines = ["degraded, but the producer recorded no findings"]
+        return True, lines
+    except Exception as exc:                                    # noqa: BLE001
+        log.error("telemetry: could not read degradation from %s: %s: %s",
+                  job_id, type(exc).__name__, exc)
+        return False, None
 
 
 def instrumented(job_id: str, func: Callable[..., Any]) -> Callable[..., Any]:
@@ -123,8 +164,15 @@ def instrumented(job_id: str, func: Callable[..., Any]) -> Callable[..., Any]:
                              duration_ms=round((time.monotonic() - started) * 1000),
                              failure=exc)
             raise
+        degraded, findings = _degradation_of(job_id, result)
+        if degraded:
+            # Logged here as well as recorded, because the log is where an
+            # operator is already looking when a run finishes "successfully"
+            # with less than it should have published.
+            log.warning("%s completed DEGRADED: %s", job_id, "; ".join(findings or []))
         await _close_run(run_id, status=SUCCESS,
-                         duration_ms=round((time.monotonic() - started) * 1000))
+                         duration_ms=round((time.monotonic() - started) * 1000),
+                         degraded=degraded, findings=findings)
         return result
 
     _run.__wrapped_job_id__ = job_id        # type: ignore[attr-defined]

@@ -144,6 +144,35 @@ SOURCES: dict[str, IndexSource] = {
     "AXHJ":   IndexSource("yahoo", "^AXHJ"),
 }
 
+#: Published indices that this producer deliberately does NOT fetch.
+#:
+#: An index served to customers but absent from SOURCES is invisible to this
+#: producer. `expected` is len(SOURCES) + len(this), so without the second
+#: term the population is defined by the fetch list and cannot count what the
+#: fetch list omits -- the exact defect v11.2.22 fixed in fund_prices, where
+#: eight ETFs served June prices for four months inside a job reporting
+#: success every day.
+#:
+#: AXJO has been standing in that blind spot since v11.2.18: correctly
+#: withheld, documented in the comment below, and recorded in no run. On
+#: 14 Oct 2026 the run logged "9/9 obtained" -- a perfect score over a
+#: population that had quietly excluded its tenth member.
+#:
+#: A comment explains a decision to whoever opens the file. An outcome
+#: reports it to whoever reads the run. Declared here, AXJO is counted in
+#: `expected` and recorded every run as EXCLUDED with its reason, so the log
+#: accounts for ten indices and says why one of them has no new rows.
+#:
+#: Removing an entry here without adding it to SOURCES puts that index back
+#: into the blind spot, which is why `excluded()` refuses a reason-less
+#: exclusion.
+EXCLUDED_SOURCES: dict[str, str] = {
+    "AXJO": "series provenance unverified — ^AXJO is the price-only series "
+            "while AXJO is published as a total-return index; nothing "
+            "correct to fetch until the intended index and a verified "
+            "provider series are settled",
+}
+
 
 # ── Ticker mapping ────────────────────────────────────────────────────────────
 #
@@ -422,7 +451,7 @@ async def run(
     target_date: date | None = None,
     backfill_days: int = 1,
     dry_run: bool = False,
-) -> None:
+) -> ProducerTally:
     """
     Fetch and store index prices.
 
@@ -440,7 +469,17 @@ async def run(
 
     log.info(f"Index prices: fetching {start_date} → {target_date} (dry_run={dry_run})")
 
-    tally = ProducerTally("index_prices", expected=len(SOURCES))
+    # Expected covers what is fetched AND what is deliberately not. Taking it
+    # from SOURCES alone makes the fetch list its own population, which is
+    # how a withheld index disappeared from the accounting entirely.
+    tally = ProducerTally("index_prices",
+                          expected=len(SOURCES) + len(EXCLUDED_SOURCES))
+
+    # Recorded first, so an exclusion is reported even by a run that goes on
+    # to fail before reaching any provider.
+    for excluded_code, reason in EXCLUDED_SOURCES.items():
+        tally.excluded(excluded_code, reason)
+        log.info(f"  {excluded_code}: excluded — {reason}")
 
     async with AsyncSessionLocal() as db:
         total_rows = 0
@@ -500,7 +539,18 @@ async def run(
     # that obtained some of its population is reported as it is rather than
     # discarded. Only a total failure raises.
     log.info(f"Index prices complete — {tally.summary}")
+
+    # Per-entity outcomes, named. See the matching note in fund_prices: the
+    # counters were being emitted and the outcomes behind them discarded.
+    for line in tally.report():
+        log.warning("  OUTCOME: %s", line)
+    if tally.degraded:
+        log.warning("Index prices DEGRADED — %d of %d eligible indices did "
+                    "not publish; the rest are written",
+                    len(tally.failures) + len(tally.unaccounted), tally.expected)
+
     tally.verify()
+    return tally
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

@@ -337,7 +337,12 @@ async def run(
     backfill_days: int = 3,
     seed_only: bool = False,
     dry_run: bool = False,
-) -> None:
+) -> ProducerTally | None:
+    """Returns the tally so the execution boundary can record a degraded run.
+
+    None on the `seed_only` path, which fetches no prices and so has no
+    population to be partially successful over.
+    """
     from app.db.session import AsyncSessionLocal
 
     if target_date is None:
@@ -426,7 +431,28 @@ async def run(
     # Partial results are kept; only a total failure raises. See
     # producer_contract for why no completeness threshold is set here.
     log.info(f"Fund prices complete — {tally.summary}")
+
+    # Per-entity outcomes, named.
+    #
+    # 14 Oct 2026: "53/55 obtained, 0 refused, 2 empty" followed by "executed
+    # successfully". Two eligible funds published nothing and the run said
+    # which ones nowhere at all -- the counters were emitted and the outcomes
+    # behind them discarded. `report()` has existed since the contract was
+    # written; nothing called it.
+    #
+    # Logged before verify(), so a run that goes on to fail entirely still
+    # says what happened to each entity rather than only how many.
+    for line in tally.report():
+        log.warning("  OUTCOME: %s", line)
+    if tally.degraded:
+        log.warning("Fund prices DEGRADED — %d of %d eligible funds did not "
+                    "publish; the rest are written",
+                    len(tally.failures) + len(tally.unaccounted), tally.expected)
+
     tally.verify()
+    # Returned so the execution boundary can record the degraded state. The
+    # wrapper reads it defensively and a failure still travels by exception.
+    return tally
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

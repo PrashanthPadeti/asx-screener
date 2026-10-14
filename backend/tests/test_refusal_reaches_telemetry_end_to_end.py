@@ -22,10 +22,30 @@ REAL: compute.engine.index_prices.fetch_index_data and run, the
       ProducerTally contract, app.workers.index_prices_worker, and
       app.core.job_instrumentation.instrumented.
 
-STUBBED: yfinance (made to refuse, which is the condition under test) and the
-      database session plus _open_run/_close_run (so telemetry is captured
-      rather than written). Stubbing the recorder is what lets the assertion
-      read the record; stubbing the subject would prove nothing.
+STUBBED: BOTH providers -- yfinance and EODHD's httpx -- made to refuse,
+      which is the condition under test; the database session; and
+      _open_run/_close_run, so telemetry is captured rather than written.
+      Stubbing the recorder is what lets the assertion read the record;
+      stubbing the subject would prove nothing.
+
+Why both providers, and what went wrong when it was only one
+------------------------------------------------------------
+Until 14 Oct 2026 this stubbed yfinance alone. v11.2.21 moved ASX100 to
+EODHD, which reaches the network through httpx, so from that release the
+test made a LIVE call to eodhd.com with the production key on every run --
+four calls per invocation -- and ASX100 really succeeded:
+
+    index_prices: 1/10 obtained, 8 refused, 0 empty, 2 rows
+
+A test named "total refusal" had stopped producing a total refusal. One
+obtained result is not nothing, `verify()` was right not to raise, and every
+assertion here about failure was being made about a partial success.
+
+The premise is now pinned by `test_every_configured_source_was_actually_
+refused`, so a source added or re-pointed in future cannot quietly escape
+the stubs and leave these tests asserting against a condition they no longer
+create. A test that reaches the real provider is also a test that spends
+quota and fails when the network does.
 
 Requires the real pandas and sqlalchemy, so it runs on the server or any
 environment with backend requirements installed.
@@ -66,6 +86,27 @@ def _install_stubs(*, refuse: bool):
     yf.__version__ = "stub"
     sys.modules["yfinance"] = yf
 
+    # EODHD serves ASX100 since v11.2.21 and goes out through httpx. Without
+    # this the request is REAL: live network, production key, real rows, and
+    # a "total refusal" test that quietly tests a partial success instead.
+    class _Resp:
+        #: 429 is what the yfinance side is made to raise; the EODHD fetcher
+        #: turns 429/402/403 into SourceRefused, so the two providers refuse
+        #: for the same reason and the run is uniformly refused.
+        status_code = 429 if refuse else 200
+
+        def json(self):
+            return []                       # served, but empty
+
+        def raise_for_status(self):
+            return None
+
+    httpx = types.ModuleType("httpx")
+    httpx.get = lambda *a, **k: _Resp()
+    httpx.HTTPError = Exception
+    httpx.TimeoutException = Exception
+    sys.modules["httpx"] = httpx
+
     class _Result:
         def fetchone(self): return None
         def fetchall(self): return []
@@ -100,8 +141,10 @@ def _install_stubs(*, refuse: bool):
     async def _open(job_id):
         TELEMETRY.append({"job_id": job_id, "status": "running"})
         return len(TELEMETRY) - 1
-    async def _close(run_id, *, status, duration_ms=None, failure=None):
+    async def _close(run_id, *, status, duration_ms=None, failure=None,
+                     degraded=False, findings=None):
         TELEMETRY[run_id]["status"] = status
+        TELEMETRY[run_id]["degraded"] = degraded
         if failure is not None:
             TELEMETRY[run_id]["failure_class"] = type(failure).__name__
             TELEMETRY[run_id]["failure_message"] = str(failure)
@@ -154,6 +197,32 @@ def test_the_cause_reaches_the_record():
     assert "source_refused" in rec.get("failure_message", ""), (
         "the record says a job failed without saying the source refused us")
     assert "0 usable" in rec.get("failure_message", "")
+
+
+def test_every_configured_source_was_actually_refused():
+    """The premise, asserted rather than assumed.
+
+    Every test in this file is about what happens when a run obtains
+    nothing. None of them establishes that the run obtained nothing -- they
+    inherit it from the stubs, and a stub only covers the providers it knows
+    about. When ASX100 moved to EODHD the condition silently became "eight
+    refused, one obtained", and four assertions went on being made about a
+    run that no longer matched their name.
+
+    So the condition is checked here, by count, against the configured
+    population. Add a source, or re-point one at a provider these stubs do
+    not cover, and this fails immediately and says so -- rather than every
+    other test in the file quietly changing meaning.
+    """
+    rec = _run_registered_job(refuse=True)
+    from compute.engine.index_prices import EXCLUDED_SOURCES, SOURCES
+    fetched = len(SOURCES)
+    expected = fetched + len(EXCLUDED_SOURCES)
+    msg = rec.get("failure_message", "")
+    assert f"{fetched} of {expected} requests declined" in msg, (
+        f"not every configured source was refused, so the 'total refusal' "
+        f"these tests assert about did not occur. Expected {fetched} of "
+        f"{expected} declined; the record says: {msg!r}")
 
 
 def test_cleanup_still_runs_on_the_failure_path():

@@ -206,14 +206,46 @@ fi
 
 introduced="$(comm -23 "$WORK/candidate.failures" "$WORK/baseline.failures")"
 preexisting="$(comm -12 "$WORK/candidate.failures" "$WORK/baseline.failures")"
-repaired="$(comm -13 "$WORK/candidate.failures" "$WORK/baseline.failures")"
+repaired_raw="$(comm -13 "$WORK/candidate.failures" "$WORK/baseline.failures")"
+
+# A suite that could not RUN at either commit never enters that commit's
+# failure set, so a test inconclusive at the candidate and failing at the
+# baseline falls out of `comm -13` looking REPAIRED. It was not repaired; it
+# was not executed. Credit for a fix requires the test to have run and
+# passed.
+#
+# Same reasoning in the other direction: inconclusive at the baseline and
+# failing at the candidate is not demonstrably INTRODUCED either, because
+# there is no baseline observation to have moved from.
+cat "$WORK/candidate.inconclusive" "$WORK/baseline.inconclusive" 2>/dev/null \
+    | sort -u > "$WORK/blocked.files"
+
+split_by_blocked() {        # stdin -> $1 (verified), $2 (unverifiable)
+    : > "$1"; : > "$2"
+    while read -r id; do
+        [ -z "$id" ] && continue
+        if grep -qxF "${id%%::*}" "$WORK/blocked.files"; then
+            echo "$id" >> "$2"
+        else
+            echo "$id" >> "$1"
+        fi
+    done
+}
+
+printf '%s\n' "$repaired_raw" | split_by_blocked "$WORK/repaired" "$WORK/unverif.r"
+printf '%s\n' "$introduced"  | split_by_blocked "$WORK/introduced" "$WORK/unverif.i"
+repaired="$(cat "$WORK/repaired")"
+introduced="$(cat "$WORK/introduced")"
+unverifiable="$(cat "$WORK/unverif.r" "$WORK/unverif.i" 2>/dev/null | sort -u)"
 
 show() { [ -n "$2" ] && echo "$2" | sed 's/^/    /' || echo "    none"; }
 echo "INTRODUCED by the candidate (gate blocks on these):"; show i "$introduced"
 echo "PRE-EXISTING at the baseline:";                       show p "$preexisting"
-echo "REPAIRED by the candidate:";                          show r "$repaired"
-echo "INCONCLUSIVE (could not run; neither pass nor failure):"
-show c "$(sort -u "$WORK/candidate.inconclusive" 2>/dev/null)"
+echo "REPAIRED by the candidate (ran and passed):";         show r "$repaired"
+echo "UNVERIFIABLE (blocked at one commit — claims nothing either way):"
+show u "$unverifiable"
+echo "INCONCLUSIVE suites (could not run; neither pass nor failure):"
+show c "$(sort -u "$WORK/candidate.inconclusive" "$WORK/baseline.inconclusive" 2>/dev/null)"
 
 if [ -n "$introduced" ]; then
     echo

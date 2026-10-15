@@ -88,7 +88,13 @@ esac
 
 # ── Run every suite at one commit ───────────────────────────────────────────
 run_at() {
-    local sha="$1" label="$2" dir="$WORK/$label"
+    # Declared separately, not `local a=$1 b=$a`: bash expands every word of
+    # the builtin's argument list before the builtin runs, so a later
+    # assignment referring to an earlier one reads the CALLER's scope -- and
+    # under `set -u` that is an unbound-variable error, not an empty string.
+    local sha="$1"
+    local label="$2"
+    local dir="$WORK/$label"
 
     git clone -q "$SRC" "$dir" 2>/dev/null || { echo "gate: clone failed"; return 2; }
     git -C "$dir" checkout -q "$sha" 2>/dev/null || {

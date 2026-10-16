@@ -99,6 +99,17 @@ asx-venv/
 # Local Claude settings — contains machine-specific paths and credentials
 .claude/settings.local.json
 
+# Dev-server launch config: absolute paths and ports from one machine.
+# Untracked but unignored, it made `git status --porcelain` non-empty, and a
+# release gate reported the tree clean by filtering this entry out before
+# looking. A gate that cannot say "clean" honestly is worse than a dirty tree.
+#
+# `**/` is required. A pattern containing a slash is anchored to the
+# directory of the .gitignore holding it, so `.claude/launch.json` would
+# match only at the repository root -- which is the one place this file does
+# not appear. The two entries above have the same limitation.
+**/.claude/launch.json
+
 # Local-only, never in this public repository.
 # TEAM_ONBOARDING.md carries operational and security architecture (server
 # specs, secret inventory, unfixed-issue list); the drafts are unpublished

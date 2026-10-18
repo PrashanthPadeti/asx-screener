@@ -255,11 +255,67 @@ class Agreement:
         self.ret_max = max(rets) if rets else float("inf")
 
 
+def monthly_report(ours, fetched, names) -> None:
+    """When did a stored series change what it contains?
+
+    ASX20 matches the All Ordinaries on most sessions and something near the
+    true S&P/ASX 20 on 73 of them. AXFJ and AXMJ agree with their namesake
+    symbol over 120 days and disagree by >60% over 400. A series that agrees
+    over one window and not a longer one is not one series, and a single
+    median over the whole window cannot say when it changed.
+
+    So: per calendar month, the median level difference against the best
+    recent candidate. A clean breakpoint appears as a column of large
+    numbers followed by a column of zeros.
+
+    This LOCATES a change. It does not say which side is correct -- that
+    needs the index's published level, not our own history.
+    """
+    from collections import defaultdict
+
+    print()
+    print("=" * 78)
+    print("MONTHLY AGREEMENT — locating when a stored series changed")
+    print("=" * 78)
+    for code in TARGETS:
+        mine = ours.get(code, {})
+        if not mine:
+            continue
+        recent = sorted(mine)[-60:]
+        best, best_med = None, float("inf")
+        for sym, theirs in fetched.items():
+            d = [abs(theirs[x] - mine[x]) / mine[x] * 100
+                 for x in recent if x in theirs and mine[x]]
+            if len(d) >= 20:
+                med = Agreement._median(d)
+                if med < best_med:
+                    best, best_med = sym, med
+        if best is None:
+            continue
+        print()
+        print(f"{code}  best over last 60 sessions: {best} "
+              f"({names.get(best,'')[:30]}) med={best_med:.5f}%")
+        buckets = defaultdict(list)
+        theirs = fetched[best]
+        for d in sorted(mine):
+            if d in theirs and mine[d]:
+                buckets[d.strftime("%Y-%m")].append(
+                    abs(theirs[d] - mine[d]) / mine[d] * 100)
+        for mon in sorted(buckets):
+            vals = buckets[mon]
+            med = Agreement._median(vals)
+            flag = "  <-- agrees" if med < 0.05 else ""
+            print(f"    {mon}  n={len(vals):3}  med={med:10.5f}%{flag}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=120)
     ap.add_argument("--symbol", default=None,
                     help="test one symbol against every code")
+    ap.add_argument("--monthly", action="store_true",
+                    help="per-month agreement, to locate WHEN a stored "
+                         "series changed what it contains")
     args = ap.parse_args()
 
     key = _key()

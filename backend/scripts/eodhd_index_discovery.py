@@ -81,9 +81,15 @@ AUSTRALIAN = re.compile(
     r"\b(asx|australia|australian|s&p/asx|all ordinaries)\b", re.I)
 
 #: The rule, fixed here in source rather than chosen once results are visible.
-MIN_SHARED = 20          # sessions; fewer cannot distinguish much
-LEVEL_MEAN_MAX = 0.05    # %  — same series on the same base
-RETURN_MEAN_MAX = 0.02   # pp — rules out an accumulation variant
+# REVISED after the first run's control FAILED. The revision is to the
+# STATISTIC, not to the thresholds: median replaces mean because one corrupt
+# stored row destroys a mean over 250 sessions, and our stored AXFJ/AXMJ
+# series demonstrably contain such rows. The numeric bars are unchanged, and
+# the control must now pass under the revised rule or this is abandoned.
+MIN_SHARED = 20            # sessions; fewer cannot distinguish much
+LEVEL_MED_MAX = 0.05       # %  — same series on the same base, typical day
+RETURN_MED_MAX = 0.02      # pp — rules out an accumulation variant
+MAX_OUTLIER_FRAC = 0.02    # at most 2% of sessions may disagree by >1%
 
 #: Provider calls made, reported so the cost is visible rather than assumed.
 REQUESTS = [0]
@@ -178,10 +184,40 @@ class Agreement:
     check alone would not reliably separate them over a short window.
 
     Agreement on both is a much stronger claim than agreement on either.
+
+    Why MEDIAN and not mean
+    -----------------------
+    The first version of this ranked on the mean, and a mean over 250
+    sessions is destroyed by one bad row. Our stored AXFJ and AXMJ series
+    contain values so extreme that every candidate -- the VIX, a currency
+    index, a small-cap index -- reported the SAME maximum daily-return
+    difference, 31,342pp and 140,348pp respectively. When every candidate
+    agrees on the outlier, the outlier is ours. The correct symbol for ASX20
+    matched at 0.0017% over 120 days and did not reach the top THREE over
+    400, because the contaminated rows dominated its mean.
+
+    The median answers "do these two series agree on a typical session",
+    which is the question. The outliers are then reported separately rather
+    than averaged away -- a series needs both: agreement on typical days AND
+    an accounted-for number of exceptional ones. A median alone would let a
+    series with 10% corrupt rows pass silently, which is the same mistake in
+    a different direction.
     """
 
-    __slots__ = ("n", "first", "last", "lvl_mean", "lvl_max",
-                 "ret_n", "ret_mean", "ret_max")
+    __slots__ = ("n", "first", "last", "lvl_med", "lvl_max", "worst",
+                 "ret_n", "ret_med", "ret_max", "outliers")
+
+    #: A session where the two series disagree by more than this is not a
+    #: rounding difference and is counted, listed and explained.
+    OUTLIER_PCT = 1.0
+
+    @staticmethod
+    def _median(xs: list[float]) -> float:
+        if not xs:
+            return float("inf")
+        s = sorted(xs)
+        mid = len(s) // 2
+        return s[mid] if len(s) % 2 else (s[mid - 1] + s[mid]) / 2
 
     def __init__(self, ours: dict[date, float], theirs: dict[date, float]):
         shared = sorted(set(ours) & set(theirs))
@@ -189,10 +225,21 @@ class Agreement:
         self.first = shared[0] if shared else None
         self.last = shared[-1] if shared else None
 
-        lvl = [abs(theirs[d] - ours[d]) / ours[d] * 100
-               for d in shared if ours[d]]
-        self.lvl_mean = sum(lvl) / len(lvl) if lvl else float("inf")
+        lvl: list[float] = []
+        per_date: list[tuple[float, date]] = []
+        for d in shared:
+            if not ours[d]:
+                continue
+            pct = abs(theirs[d] - ours[d]) / ours[d] * 100
+            lvl.append(pct)
+            per_date.append((pct, d))
+        self.lvl_med = self._median(lvl)
         self.lvl_max = max(lvl) if lvl else float("inf")
+        self.outliers = sum(1 for p in lvl if p > self.OUTLIER_PCT)
+        per_date.sort(reverse=True)
+        #: The worst sessions, with both values, so a disagreement can be
+        #: looked at rather than guessed about.
+        self.worst = [(d, ours[d], theirs[d], p) for p, d in per_date[:4]]
 
         # Daily returns, only across CONSECUTIVE shared sessions. A gap in
         # either series would otherwise produce a multi-day "daily" return
@@ -204,7 +251,7 @@ class Agreement:
                 their_r = theirs[cur] / theirs[prev] - 1
                 rets.append(abs(their_r - ours_r) * 100)   # percentage points
         self.ret_n = len(rets)
-        self.ret_mean = sum(rets) / len(rets) if rets else float("inf")
+        self.ret_med = self._median(rets)
         self.ret_max = max(rets) if rets else float("inf")
 
 
@@ -273,20 +320,30 @@ def main() -> int:
         for sym, theirs in fetched.items():
             a = Agreement(mine, theirs)
             if a.n >= MIN_SHARED:
-                ranked.append((a.lvl_mean, a, sym))
+                ranked.append((a.lvl_med, a, sym))
         ranked.sort(key=lambda t: t[0])
         if not ranked:
             print(f"    no candidate shared >= {MIN_SHARED} dates — CANNOT VERIFY")
             continue
         for _, a, sym in ranked[:3]:
-            ok = (a.lvl_mean < LEVEL_MEAN_MAX and a.ret_mean < RETURN_MEAN_MAX)
+            frac = a.outliers / a.n if a.n else 1.0
+            ok = (a.lvl_med < LEVEL_MED_MAX
+                  and a.ret_med < RETURN_MED_MAX
+                  and frac <= MAX_OUTLIER_FRAC)
             if ok:
                 passing.setdefault(code, []).append(sym)
             print(f"    {sym:18} {names.get(sym,'')[:36]}")
             print(f"        shared={a.n:3} [{a.first} .. {a.last}]")
-            print(f"        level  mean={a.lvl_mean:9.5f}%  max={a.lvl_max:9.5f}%")
-            print(f"        return mean={a.ret_mean:9.5f}pp max={a.ret_max:9.5f}pp"
-                  f"  (n={a.ret_n})   {'PASS' if ok else ''}")
+            print(f"        level  med={a.lvl_med:9.5f}%  max={a.lvl_max:11.3f}%")
+            print(f"        return med={a.ret_med:9.5f}pp max={a.ret_max:11.3f}pp"
+                  f" (n={a.ret_n})")
+            print(f"        outliers>{Agreement.OUTLIER_PCT}%: {a.outliers}/{a.n}"
+                  f" ({frac:.1%})   {'PASS' if ok else ''}")
+            if a.outliers and sym == ranked[0][2]:
+                print("        worst sessions (ours vs theirs):")
+                for d, mine_v, their_v, pct in a.worst:
+                    print(f"          {d}  ours={mine_v:12.3f}  "
+                          f"theirs={their_v:12.3f}  {pct:9.3f}%")
 
     print("\n" + "═" * 78)
     print("CONTROL")

@@ -430,6 +430,9 @@ def main() -> int:
                   f"(needs a documented reason, not a coin toss)")
         else:
             print(f"    {code:8} UNRESOLVED — stays on its current source")
+    if args.monthly:
+        monthly_report(ours, fetched, names)
+
     print("\nAXJO is excluded and is not a target. Note EODHD lists AXJOA")
     print("(S&P/ASX 200 Accumulated) — a lead for that provenance question,")
     print("deliberately NOT acted on here.")

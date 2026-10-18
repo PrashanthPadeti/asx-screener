@@ -56,7 +56,14 @@ import sys
 from datetime import date, timedelta
 from pathlib import Path
 
-BACKEND = Path(__file__).resolve().parents[1]
+# Resolved from the file's own location when it sits in the repository, but
+# this script is deliberately run by reading it out of a commit into /tmp so
+# the server checkout need not move -- and then `parents[1]` is `/`. Fall
+# back to the working directory, which the caller sets to backend/.
+_HERE = Path(__file__).resolve().parents[1]
+BACKEND = _HERE if (_HERE / "app" / "core" / "config.py").exists() else Path.cwd()
+if not (BACKEND / "app" / "core" / "config.py").exists():
+    sys.exit(f"run this from the backend directory (looked in {BACKEND})")
 sys.path.insert(0, str(BACKEND))
 
 #: The eight still on Yahoo, plus ASX100 as a CONTROL -- it is already on

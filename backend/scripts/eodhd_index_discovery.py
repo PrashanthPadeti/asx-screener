@@ -285,11 +285,15 @@ def main() -> int:
     print("═" * 78)
     print("MATCH RULE (fixed before results are read)")
     print("═" * 78)
-    print(f"  shared sessions   >= {MIN_SHARED}")
-    print(f"  level    mean|diff| <  {LEVEL_MEAN_MAX}%    (same series, same base)")
-    print(f"  return   mean|diff| <  {RETURN_MEAN_MAX} pp  (not an accumulation variant)")
+    print(f"  shared sessions     >= {MIN_SHARED}")
+    print(f"  level  MEDIAN |diff| <  {LEVEL_MED_MAX}%    (same series, same base)")
+    print(f"  return MEDIAN |diff| <  {RETURN_MED_MAX} pp  (not an accumulation variant)")
+    print(f"  outlier sessions     <= {MAX_OUTLIER_FRAC:.0%} of shared (|diff| > "
+          f"{Agreement.OUTLIER_PCT}%)")
     print("  name must name the intended index — numbers alone never decide")
-    print("  a target with two passing candidates is AMBIGUOUS, not matched\n")
+    print("  a target with two passing candidates is AMBIGUOUS, not matched")
+    print("  MEDIAN, not mean: one corrupt stored row destroys a mean over")
+    print("  250 sessions. Outliers are reported, never averaged away.\n")
 
     print("Fetching candidates …")
     fetched: dict[str, dict[date, float]] = {}

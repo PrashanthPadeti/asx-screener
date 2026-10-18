@@ -80,6 +80,14 @@ EXCLUDED = ("AXJO",)
 AUSTRALIAN = re.compile(
     r"\b(asx|australia|australian|s&p/asx|all ordinaries)\b", re.I)
 
+#: The rule, fixed here in source rather than chosen once results are visible.
+MIN_SHARED = 20          # sessions; fewer cannot distinguish much
+LEVEL_MEAN_MAX = 0.05    # %  — same series on the same base
+RETURN_MEAN_MAX = 0.02   # pp — rules out an accumulation variant
+
+#: Provider calls made, reported so the cost is visible rather than assumed.
+REQUESTS = [0]
+
 
 def _key() -> str:
     from app.core.config import settings
@@ -92,6 +100,7 @@ def _key() -> str:
 def list_candidates(key: str) -> list[dict]:
     """Every index EODHD lists, filtered to the Australian ones."""
     import httpx
+    REQUESTS[0] += 1
     r = httpx.get("https://eodhd.com/api/exchange-symbol-list/INDX",
                   params={"api_token": key, "fmt": "json"}, timeout=60)
     if r.status_code != 200:
@@ -109,6 +118,7 @@ def fetch_closes(key: str, symbol: str, days: int) -> dict[date, float]:
     """{price_date: close} for one symbol. Empty dict on any refusal."""
     import httpx
     start = date.today() - timedelta(days=days)
+    REQUESTS[0] += 1
     try:
         r = httpx.get(f"https://eodhd.com/api/eod/{symbol}",
                       params={"api_token": key, "fmt": "json", "order": "a",
@@ -150,17 +160,52 @@ async def stored_closes(days: int) -> dict[str, dict[date, float]]:
     return out
 
 
-def agreement(ours: dict[date, float],
-              theirs: dict[date, float]) -> tuple[int, float, float]:
-    """(shared dates, mean abs % diff, max abs % diff)."""
-    shared = sorted(set(ours) & set(theirs))
-    if not shared:
-        return 0, float("inf"), float("inf")
-    diffs = [abs(theirs[d] - ours[d]) / ours[d] * 100
-             for d in shared if ours[d]]
-    if not diffs:
-        return len(shared), float("inf"), float("inf")
-    return len(shared), sum(diffs) / len(diffs), max(diffs)
+class Agreement:
+    """How closely two series agree, on levels AND on daily returns.
+
+    Both, because they fail differently and catch different impostors.
+
+    A LEVEL comparison catches a different index. It does not catch the same
+    index republished on a different base: rebase S&P/ASX 200 to 1000 and
+    every close is wrong by a constant factor while every daily return is
+    identical.
+
+    A RETURN comparison catches the variant that matters most here. An
+    accumulation index reinvests dividends, so it tracks the price index in
+    shape but drifts upward: its daily returns exceed the price index's by
+    roughly the dividend yield. That is exactly the error already found in
+    AXJO, where a total-return surface was served price data, and a level
+    check alone would not reliably separate them over a short window.
+
+    Agreement on both is a much stronger claim than agreement on either.
+    """
+
+    __slots__ = ("n", "first", "last", "lvl_mean", "lvl_max",
+                 "ret_n", "ret_mean", "ret_max")
+
+    def __init__(self, ours: dict[date, float], theirs: dict[date, float]):
+        shared = sorted(set(ours) & set(theirs))
+        self.n = len(shared)
+        self.first = shared[0] if shared else None
+        self.last = shared[-1] if shared else None
+
+        lvl = [abs(theirs[d] - ours[d]) / ours[d] * 100
+               for d in shared if ours[d]]
+        self.lvl_mean = sum(lvl) / len(lvl) if lvl else float("inf")
+        self.lvl_max = max(lvl) if lvl else float("inf")
+
+        # Daily returns, only across CONSECUTIVE shared sessions. A gap in
+        # either series would otherwise produce a multi-day "daily" return
+        # and a difference that means nothing.
+        rets = []
+        for prev, cur in zip(shared, shared[1:]):
+            if ours.get(prev) and theirs.get(prev):
+                ours_r = ours[cur] / ours[prev] - 1
+                their_r = theirs[cur] / theirs[prev] - 1
+                rets.append(abs(their_r - ours_r) * 100)   # percentage points
+        self.ret_n = len(rets)
+        self.ret_mean = sum(rets) / len(rets) if rets else float("inf")
+        self.ret_max = max(rets) if rets else float("inf")
 
 
 def main() -> int:
@@ -189,6 +234,16 @@ def main() -> int:
             print(f"  {c.get('Code',''):16} {c.get('Name','')}")
         print()
 
+    # Stated BEFORE the results, so it cannot be fitted to them.
+    print("═" * 78)
+    print("MATCH RULE (fixed before results are read)")
+    print("═" * 78)
+    print(f"  shared sessions   >= {MIN_SHARED}")
+    print(f"  level    mean|diff| <  {LEVEL_MEAN_MAX}%    (same series, same base)")
+    print(f"  return   mean|diff| <  {RETURN_MEAN_MAX} pp  (not an accumulation variant)")
+    print("  name must name the intended index — numbers alone never decide")
+    print("  a target with two passing candidates is AMBIGUOUS, not matched\n")
+
     print("Fetching candidates …")
     fetched: dict[str, dict[date, float]] = {}
     names: dict[str, str] = {}
@@ -199,34 +254,68 @@ def main() -> int:
         if closes:
             fetched[sym] = closes
             print(f"    {sym:18} {len(closes):4} rows   last={max(closes)}")
-    print()
+    print(f"\n  EODHD requests made: {REQUESTS[0]}"
+          f"  (1 symbol list + {len(candidates)} candidates;"
+          f" each fetched once and compared against all {len(TARGETS)} targets)\n")
 
     print("═" * 78)
     print("AGREEMENT WITH WHAT WE ALREADY PUBLISH (lower is better)")
     print("═" * 78)
+    passing: dict[str, list[str]] = {}
     for code in TARGETS:
         mine = ours.get(code, {})
+        print(f"\n{code}  ({len(mine)} stored rows"
+              + (f", last {max(mine)}" if mine else "") + ")")
         if not mine:
-            print(f"\n{code}: no stored history in window — cannot verify")
+            print("    no stored history in window — CANNOT VERIFY")
             continue
         ranked = []
         for sym, theirs in fetched.items():
-            n, mean, mx = agreement(mine, theirs)
-            if n >= 5:
-                ranked.append((mean, mx, n, sym))
-        ranked.sort()
-        print(f"\n{code}  ({len(mine)} stored rows, last {max(mine)})")
+            a = Agreement(mine, theirs)
+            if a.n >= MIN_SHARED:
+                ranked.append((a.lvl_mean, a, sym))
+        ranked.sort(key=lambda t: t[0])
         if not ranked:
-            print("    no candidate shared enough dates to compare")
-        for mean, mx, n, sym in ranked[:3]:
-            verdict = "MATCH" if mean < 0.05 else ("close" if mean < 1 else "")
-            print(f"    {sym:18} shared={n:3}  mean={mean:8.4f}%  "
-                  f"max={mx:8.4f}%  {verdict}   {names.get(sym,'')[:34]}")
+            print(f"    no candidate shared >= {MIN_SHARED} dates — CANNOT VERIFY")
+            continue
+        for _, a, sym in ranked[:3]:
+            ok = (a.lvl_mean < LEVEL_MEAN_MAX and a.ret_mean < RETURN_MEAN_MAX)
+            if ok:
+                passing.setdefault(code, []).append(sym)
+            print(f"    {sym:18} {names.get(sym,'')[:36]}")
+            print(f"        shared={a.n:3} [{a.first} .. {a.last}]")
+            print(f"        level  mean={a.lvl_mean:9.5f}%  max={a.lvl_max:9.5f}%")
+            print(f"        return mean={a.ret_mean:9.5f}pp max={a.ret_max:9.5f}pp"
+                  f"  (n={a.ret_n})   {'PASS' if ok else ''}")
 
     print("\n" + "═" * 78)
-    print("ASX100 is the control: ATOI.INDX must rank first with mean ~0.00%.")
-    print("If it does not, the method is unsound and no result above counts.")
-    print("AXJO is excluded and is not a target.")
+    print("CONTROL")
+    print("═" * 78)
+    ctl = passing.get("ASX100", [])
+    if ctl == ["ATOI.INDX"]:
+        print("  PASS — ASX100 resolves to ATOI.INDX, its known-correct symbol.")
+        print("  The method reproduces a mapping established independently.")
+    elif not ours.get("ASX100"):
+        print("  NOT RUN — no stored ASX100 history in this window.")
+        print("  Re-run with a larger --days. Until the control produces a")
+        print("  verdict the method is UNVALIDATED and no result above counts.")
+    else:
+        print(f"  FAIL — ASX100 resolved to {ctl or 'nothing'}, not ATOI.INDX.")
+        print("  The method is unsound. No result above counts.")
+
+    print("\nPASSING BOTH CHECKS:")
+    for code in TARGETS:
+        syms = passing.get(code, [])
+        if len(syms) == 1:
+            print(f"    {code:8} {syms[0]}")
+        elif len(syms) > 1:
+            print(f"    {code:8} AMBIGUOUS — {', '.join(syms)} "
+                  f"(needs a documented reason, not a coin toss)")
+        else:
+            print(f"    {code:8} UNRESOLVED — stays on its current source")
+    print("\nAXJO is excluded and is not a target. Note EODHD lists AXJOA")
+    print("(S&P/ASX 200 Accumulated) — a lead for that provenance question,")
+    print("deliberately NOT acted on here.")
     return 0
 
 

@@ -120,7 +120,10 @@ def _install_stubs(*, refuse: set[str], empty: set[str]):
     yf.__version__ = "stub"
     sys.modules["yfinance"] = yf
 
-    # EODHD serves ASX100. Its fetcher imports httpx inside the function.
+    # EODHD serves six of the nine indices. Its fetcher imports httpx inside
+    # the function, so stubbing the module here reaches it. Without this the
+    # request is REAL: live network, production key, and a test whose result
+    # depends on the provider being up.
     class _Resp:
         status_code = 200
 
@@ -444,12 +447,33 @@ def test_the_index_population_counts_what_is_not_fetched():
 
 
 def test_a_refused_index_degrades_the_index_run():
-    rec = _run_indices(refuse={"AXHJ"})
+    """One entity fails, the rest publish, the run says so.
+
+    The refusal target is DERIVED from SOURCES, not named. This test used to
+    refuse AXHJ; AXHJ then moved to EODHD, so the yfinance stub stopped
+    reaching it, the httpx stub served it successfully, and the test went on
+    asserting that a clean run was degraded. It failed loudly, which was
+    luck -- a hardcoded symbol in a test is a premise that expires the
+    moment someone changes a mapping, and it expires silently as often as
+    not.
+    """
+    _reset_modules()
+    from compute.engine.index_prices import SOURCES
+    yahoo = sorted((c, s.symbol) for c, s in SOURCES.items()
+                   if s.provider == "yahoo")
+    assert yahoo, (
+        "every index is on EODHD, so the yfinance stub can no longer refuse "
+        "anything and this test proves nothing — refuse through httpx "
+        "instead")
+    code, symbol = yahoo[0]
+
+    rec = _run_indices(refuse={symbol.lstrip("^")})
     assert rec.get("status") == "success", (
-        "one refusal among nine should not discard the eight that published")
+        "one refusal among many should not discard the entities that "
+        "published")
     assert rec.get("degraded") is True
-    assert any("AXHJ" in f for f in rec.get("findings") or []), (
-        f"the refused index is not named: {rec.get('findings')}")
+    assert any(code in f for f in rec.get("findings") or []), (
+        f"the refused index {code} is not named: {rec.get('findings')}")
 
 
 def test_an_exclusion_alone_does_not_degrade_a_run():

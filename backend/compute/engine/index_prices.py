@@ -132,16 +132,71 @@ class IndexSource:
 #: reviewable value rather than a literal buried in a map.
 ASX100_SWITCH_DATE = date(2026, 10, 13)
 
+#: Five more indices move to EODHD, 19 Oct 2026.
+#:
+#: WHY THIS DATE: the last stored row for every index switched here is
+#: 2026-10-16 -- Yahoo has refused this host since the 17th. 2026-10-17 is
+#: therefore the first session with no existing row, so EODHD cannot
+#: overwrite anything Yahoo produced while still recovering the outage gap.
+#: Filling dates that hold no rows is not a historical overwrite; the
+#: forward-only rule exists to stop one provider silently restating
+#: another's values, and there are none here to restate.
+#:
+#: Had any of these carried a row on or after this date, the date would have
+#: to move forward. That is a property of the DATABASE, not of this file, so
+#: no unit test can establish it -- it is an acceptance check, run against
+#: production before release:
+#:
+#:   SELECT index_code, max(price_date) FROM market.index_prices
+#:    WHERE index_code IN ('ASX50','ASX200','ASX300','AXEJ','AXHJ')
+#:    GROUP BY index_code;        -- every row must be < 2026-10-17
+#:
+#: What the unit tests CAN establish, and do, is that nothing before the
+#: effective date is ever writable whatever that date is.
+INDEX_EODHD_SWITCH = date(2026, 10, 17)
+
+#: EVIDENCE for each mapping below, measured 19 Oct 2026 over 1,351 stored
+#: sessions (2021-05-10 .. 2026-10-16) by
+#: `backend/scripts/eodhd_index_discovery.py`:
+#:
+#:   code    symbol       level med   return med   outliers >1%
+#:   ASX50   AFLI.INDX    0.00000%    0.00000pp    0/1351
+#:   ASX200  AXJO.INDX    0.00000%    0.00000pp    0/1351
+#:   ASX300  AXKO.INDX    0.00000%    0.00000pp    0/1351
+#:   AXEJ    AXEJ.INDX    0.00000%    0.00000pp    0/1351
+#:   AXHJ    AXHJ.INDX    0.00000%    0.00000pp    0/1351
+#:
+#: The rule was fixed before the results were read: shared >= 20 sessions,
+#: median level < 0.05%, median daily-return < 0.02pp, outliers <= 2%, and
+#: the symbol's NAME must name the intended index. ASX100/ATOI.INDX was the
+#: control -- a mapping established independently -- and the method
+#: reproduced it, which is why the rest of its output is usable at all.
+#:
+#: ASX200 had TWO passing candidates, AXJO.INDX and XJO.INDX, identical on
+#: all 1,351 sessions. Tie broken on `asx_indices.py`, which already uses
+#: AXJO.INDX for ASX 200 constituents: one symbol per index across the
+#: codebase, rather than two names for one series in different modules.
+#: A documented reason, not a coin toss.
 SOURCES: dict[str, IndexSource] = {
+    # STAYS ON YAHOO -- not because Yahoo is working (it is refusing) but
+    # because the evidence to switch does not exist. Our own stored history
+    # for these three holds the wrong series from 2025-05 to 2026-05, so
+    # "does this symbol continue what we publish" cannot be answered: what we
+    # publish is not one series. ATLI.INDX, AXFJ.INDX and AXMJ.INDX each
+    # failed the outlier cap at ~19.6% against their OWN code's history.
+    # They become switchable when the repair makes them one series again.
+    # See docs/finding_2026-10-19_three_indices_wrong_for_13_months.md
     "ASX20":  IndexSource("yahoo", "^ATLI"),
-    "ASX50":  IndexSource("yahoo", "^AFLI"),
-    "ASX100": IndexSource("eodhd", "ATOI.INDX", effective_from=ASX100_SWITCH_DATE),
-    "ASX200": IndexSource("yahoo", "^AXJO"),
-    "ASX300": IndexSource("yahoo", "^AXKO"),
     "AXFJ":   IndexSource("yahoo", "^AXFJ"),
     "AXMJ":   IndexSource("yahoo", "^AXMJ"),
-    "AXEJ":   IndexSource("yahoo", "^AXEJ"),
-    "AXHJ":   IndexSource("yahoo", "^AXHJ"),
+
+    # SWITCHED -- exact agreement across the full stored history.
+    "ASX50":  IndexSource("eodhd", "AFLI.INDX", effective_from=INDEX_EODHD_SWITCH),
+    "ASX100": IndexSource("eodhd", "ATOI.INDX", effective_from=ASX100_SWITCH_DATE),
+    "ASX200": IndexSource("eodhd", "AXJO.INDX", effective_from=INDEX_EODHD_SWITCH),
+    "ASX300": IndexSource("eodhd", "AXKO.INDX", effective_from=INDEX_EODHD_SWITCH),
+    "AXEJ":   IndexSource("eodhd", "AXEJ.INDX", effective_from=INDEX_EODHD_SWITCH),
+    "AXHJ":   IndexSource("eodhd", "AXHJ.INDX", effective_from=INDEX_EODHD_SWITCH),
 }
 
 #: Published indices that this producer deliberately does NOT fetch.
@@ -166,6 +221,13 @@ SOURCES: dict[str, IndexSource] = {
 #: Removing an entry here without adding it to SOURCES puts that index back
 #: into the blind spot, which is why `excluded()` refuses a reason-less
 #: exclusion.
+#: NOTE the collision hazard: our internal code `AXJO` (excluded below) and
+#: EODHD's symbol `AXJO.INDX` (which SOURCES maps to our ASX200) are
+#: different things. EODHD's AXJO is the S&P/ASX 200 price index. Our AXJO
+#: is a code that was published as the ASX 200 ACCUMULATION index and served
+#: price data -- the defect v11.2.18 contained. EODHD lists that series
+#: separately as AXJOA.INDX, which is the lead for resolving it and is
+#: deliberately not acted on here.
 EXCLUDED_SOURCES: dict[str, str] = {
     "AXJO": "series provenance unverified — ^AXJO is the price-only series "
             "while AXJO is published as a total-return index; nothing "

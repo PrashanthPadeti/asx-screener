@@ -51,7 +51,7 @@ def _load():
             wanted.append(n)
         elif isinstance(n, (ast.Assign, ast.AnnAssign)):
             t = ast.unparse(n)
-            if t.startswith(("SOURCES", "ASX100_SWITCH_DATE", "TICKER_MAP")):
+            if t.startswith(("SOURCES", "ASX100_SWITCH_DATE", "INDEX_EODHD_SWITCH", "TICKER_MAP", "EXCLUDED_SOURCES")):
                 wanted.append(n)
     ns = {}
     exec("from dataclasses import dataclass\nfrom datetime import date\n", ns)
@@ -66,24 +66,56 @@ SWITCH = NS["ASX100_SWITCH_DATE"]
 
 # ── Only ASX100 moves ───────────────────────────────────────────────────────
 
-def test_only_asx100_changes_provider():
-    """An isolated switch. Every other index keeps Yahoo.
+#: The mappings evidence supports, and ONLY those. Each was measured at
+#: median level 0.00000%, median daily-return 0.00000pp and 0 outliers over
+#: 1,351 stored sessions, against the symbol whose name names the index.
+EVIDENCED = {
+    "ASX50":  "AFLI.INDX",
+    "ASX100": "ATOI.INDX",
+    "ASX200": "AXJO.INDX",
+    "ASX300": "AXKO.INDX",
+    "AXEJ":   "AXEJ.INDX",
+    "AXHJ":   "AXHJ.INDX",
+}
 
-    A general migration is the separate sourcing-track design and must not
-    arrive under a one-index repair.
+#: Deliberately NOT switched. Their own stored history holds the wrong
+#: series from 2025-05 to 2026-05, so each failed the outlier cap at ~19.6%
+#: against its OWN code. The question "does this symbol continue what we
+#: publish" has no answer while what we publish is not one series.
+AWAITING_REPAIR = {"ASX20": "^ATLI", "AXFJ": "^AXFJ", "AXMJ": "^AXMJ"}
+
+
+def test_only_evidenced_indices_changed_provider():
+    """Every EODHD source is one the discovery run actually supported.
+
+    Not "the ones that would be convenient". A symbol added here without a
+    measured match is the AXJO defect again -- a mapping that works and is
+    wrong.
     """
-    moved = [c for c, s in SOURCES.items() if s.provider != "yahoo"]
-    assert moved == ["ASX100"], f"unexpected providers changed: {moved}"
-    assert SOURCES["ASX100"].symbol == "ATOI.INDX"
-    assert SOURCES["ASX100"].provider == "eodhd"
+    moved = {c: s.symbol for c, s in SOURCES.items() if s.provider == "eodhd"}
+    assert moved == EVIDENCED, (
+        f"EODHD mappings are not exactly the evidenced set.\n"
+        f"  configured: {moved}\n  evidenced:  {EVIDENCED}")
 
 
-def test_every_other_index_keeps_its_yahoo_symbol():
-    expected = {"ASX20": "^ATLI", "ASX50": "^AFLI", "ASX200": "^AXJO",
-                "ASX300": "^AXKO", "AXFJ": "^AXFJ", "AXMJ": "^AXMJ",
-                "AXEJ": "^AXEJ", "AXHJ": "^AXHJ"}
+def test_the_three_contaminated_indices_are_not_switched():
+    """They fail the rule on their own history, and that is the right answer.
+
+    Switching them anyway would build on data known to be wrong -- the whole
+    reason the repair was sequenced first.
+    """
+    for code, symbol in AWAITING_REPAIR.items():
+        assert SOURCES[code].provider == "yahoo", (
+            f"{code} was switched while its stored history is still "
+            f"contaminated; see the 13-month finding")
+        assert SOURCES[code].symbol == symbol
+        assert SOURCES[code].effective_from is None
+
+
+def test_every_remaining_yahoo_symbol_is_accounted_for():
+    """No index drifts onto Yahoo unnoticed."""
     actual = {c: s.symbol for c, s in SOURCES.items() if s.provider == "yahoo"}
-    assert actual == expected, f"Yahoo mapping changed: {actual}"
+    assert actual == AWAITING_REPAIR, f"unexpected Yahoo mapping: {actual}"
 
 
 def test_axjo_is_still_absent():
@@ -124,9 +156,124 @@ def test_a_later_start_is_not_dragged_backwards():
 
 def test_an_unswitched_index_is_unconstrained():
     """Yahoo indices have always been the source, so nothing is withheld."""
-    for code in ("ASX200", "AXHJ"):
+    for code in AWAITING_REPAIR:
         assert SOURCES[code].effective_from is None
         assert SOURCES[code].first_writable(date(2023, 1, 1)) == date(2023, 1, 1)
+
+
+def test_every_switched_index_withholds_everything_before_its_date():
+    """The property, across all six, not just the one this release added.
+
+    A new source with effective_from=None would silently rewrite years of
+    another provider's rows on its first run.
+    """
+    for code in EVIDENCED:
+        s = SOURCES[code]
+        assert s.effective_from is not None, (
+            f"{code} switched provider with no effective date — its first "
+            f"run would write over the whole stored history")
+        for start in (date(2021, 5, 10), date(2024, 1, 1),
+                      s.effective_from - timedelta(days=1)):
+            assert s.first_writable(start) == s.effective_from, (
+                f"a run starting {start} would write {code} rows before "
+                f"{s.effective_from}")
+
+
+def test_every_switched_index_declares_its_source_change():
+    """A population check, not a spot check.
+
+    Derived from SOURCES, so adding a seventh switched index without
+    declaring it fails here rather than shipping an undeclared substitution.
+    The numbers are identical across both providers, which is precisely why
+    this is easy to forget: nothing on the page would look wrong.
+    """
+    from app.core.series_provenance import SOURCE_CHANGES
+    switched = {c for c, s in SOURCES.items() if s.effective_from is not None}
+    undeclared = switched - set(SOURCE_CHANGES)
+    assert not undeclared, (
+        f"these indices changed source and say so nowhere: "
+        f"{sorted(undeclared)}")
+
+    for code in switched:
+        rec = SOURCE_CHANGES[code]
+        assert rec["changed_on"] == SOURCES[code].effective_from.isoformat(), (
+            f"{code} declares {rec['changed_on']} but switches on "
+            f"{SOURCES[code].effective_from} — the declaration is wrong, "
+            f"which is worse than absent")
+        assert SOURCES[code].symbol in rec["to_source"], (
+            f"{code} declares {rec['to_source']} but fetches "
+            f"{SOURCES[code].symbol}")
+
+
+def test_the_contaminated_window_is_declared_for_exactly_those_three():
+    """Declared, and no wider.
+
+    A window on a clean index would tell customers not to trust data that is
+    fine; a missing one leaves a wrong line undisclosed.
+    """
+    from app.core.series_provenance import KNOWN_BAD_WINDOWS
+    assert set(KNOWN_BAD_WINDOWS) == set(AWAITING_REPAIR), (
+        f"declared windows {sorted(KNOWN_BAD_WINDOWS)} do not match the "
+        f"contaminated set {sorted(AWAITING_REPAIR)}")
+    for code, w in KNOWN_BAD_WINDOWS.items():
+        assert w["from"] == "2025-05-01" and w["to"] == "2026-05-31", (
+            f"{code} declares a window other than the measured one")
+        assert w["note"].strip(), f"{code} declares a window with no note"
+
+
+def test_the_window_reaches_the_api_and_the_chart():
+    """Declaring it in Python changes nothing a customer can see.
+
+    The backend must serve it and the chart must render it. This is the
+    paired-contract rule: a declaration and its consumer are one feature,
+    and either half alone is worth nothing.
+    """
+    route = (BACKEND / "app" / "api" / "v1" / "routes"
+             / "indices_funds.py").read_text(encoding="utf-8")
+    assert '"known_bad_window": KNOWN_BAD_WINDOWS.get(code_u)' in route, (
+        "the window is declared but never served")
+
+    chart = (BACKEND.parent / "frontend" / "app" / "indices" / "[code]"
+             / "IndexDetailContent.tsx").read_text(encoding="utf-8")
+    statements = [l for l in chart.splitlines()
+                  if l.strip() and not l.strip().startswith(("//", "*", "/*"))]
+    body = "\n".join(statements)
+    assert "known_bad_window" in body, "the chart never reads the field"
+    assert "badWindow?.note" in body, "the chart never renders the note"
+
+
+def test_a_declaration_changes_the_cache_key():
+    """Otherwise a response cached before the switch omits the declaration.
+
+    The digest exists so that changing what we publish about a series
+    changes the key. A source change is such a change.
+    """
+    import app.core.series_provenance as sp
+    before = sp.containment_version()
+    original = dict(sp.SOURCE_CHANGES)
+    try:
+        sp.SOURCE_CHANGES["ZZZZ"] = {"changed_on": "2026-01-01",
+                                     "from_source": "a", "to_source": "b",
+                                     "note": "x"}
+        assert sp.containment_version() != before, (
+            "declaring a source change does not change the containment "
+            "digest, so cached responses would omit it")
+    finally:
+        sp.SOURCE_CHANGES.clear()
+        sp.SOURCE_CHANGES.update(original)
+    assert sp.containment_version() == before, "the control did not restore"
+
+
+def test_the_new_switch_date_is_one_explicit_shared_value():
+    """Five indices, one reviewable date — not five dates to keep in step."""
+    new = NS["INDEX_EODHD_SWITCH"]
+    assert isinstance(new, date)
+    moved_now = {c for c in EVIDENCED if c != "ASX100"}
+    for code in moved_now:
+        assert SOURCES[code].effective_from == new, (
+            f"{code} has its own switch date; five dates drift, one does not")
+    assert SOURCES["ASX100"].effective_from == SWITCH, (
+        "the earlier ASX100 switch date moved — tags and dates never move")
 
 
 def test_the_gap_is_not_backfilled():

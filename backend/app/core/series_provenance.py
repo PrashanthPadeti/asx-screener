@@ -132,6 +132,43 @@ NO_DATA = "no_data"
 #: it as one unbroken line implies a continuity that does not exist. ASX100's
 #: configured Yahoo symbol stopped returning data on 2026-05-29; EODHD takes
 #: over from the switch date, and the sessions between are absent entirely.
+#: Date ranges where the stored series is KNOWN to hold the wrong data.
+#:
+#: Distinct from UNVERIFIED_SERIES, which says "we cannot substantiate this
+#: series at all" and withholds every figure. Here the series is sound
+#: outside a bounded window and wrong inside it, so withholding everything
+#: would discard four years of correct history to hide thirteen months of
+#: bad. The figures stay; the chart says which stretch not to trust.
+#:
+#: Measured 19 Oct 2026 over 1,351 sessions: each of these three agrees with
+#: its correctly-named EODHD symbol at 0.00000% before 2025-05 and after
+#: 2026-05, and diverges throughout the window -- ASX20 by ~46% (it holds
+#: the All Ordinaries), AXFJ by ~31,000%, AXMJ by ~138,000%.
+#:
+#: Served numbers are NOT affected: returns and 52-week extremes are derived
+#: from the freshly fetched frame, never from these rows. The chart is,
+#: because it plots stored history.
+#:
+#: This entry is removed when the repair lands, not before. Removing it
+#: while the rows are still wrong would be the quietest possible way to
+#: reintroduce the defect.
+#: See docs/finding_2026-10-19_three_indices_wrong_for_13_months.md
+KNOWN_BAD_WINDOWS: dict[str, dict] = {
+    code: {
+        "from": "2025-05-01",
+        "to": "2026-05-31",
+        "reason": reason,
+        "note": (f"Between May 2025 and May 2026 this chart shows {reason}, "
+                 f"not the index it is labelled with. Data before and after "
+                 f"that period is correct. A repair is pending."),
+    }
+    for code, reason in (
+        ("ASX20", "the All Ordinaries"),
+        ("AXFJ",  "values that are not index levels"),
+        ("AXMJ",  "values that are not index levels"),
+    )
+}
+
 SOURCE_CHANGES: dict[str, dict] = {
     "ASX100": {
         "changed_on": "2026-10-13",
@@ -140,6 +177,35 @@ SOURCE_CHANGES: dict[str, dict] = {
         "note": ("Data to 2026-05-29 came from Yahoo (^AXTO, which stopped "
                  "returning data); data from 2026-10-13 comes from EODHD "
                  "(ATOI.INDX). Sessions between were never recorded."),
+    },
+    # Five more, 2026-10-17. Yahoo refused this host from the 17th and the
+    # last stored row for each is 2026-10-16, so EODHD continues each series
+    # from the first session that had no row -- nothing Yahoo produced is
+    # restated.
+    #
+    # Each mapping was measured at median level 0.00000%, median daily-return
+    # 0.00000pp and zero outliers across 1,351 stored sessions back to
+    # 2021-05-10. These are continuations of the same series, not
+    # substitutions, and that is exactly why they must still be declared:
+    # "we changed where this number comes from" is a fact a reader is
+    # entitled to, whether or not the number moved.
+    **{
+        code: {
+            "changed_on": "2026-10-17",
+            "from_source": f"yahoo:{yahoo}",
+            "to_source": f"eodhd:{eodhd}",
+            "note": (f"Data to 2026-10-16 came from Yahoo ({yahoo}), which "
+                     f"stopped serving this host. Data from 2026-10-17 comes "
+                     f"from EODHD ({eodhd}). The two agree exactly across "
+                     f"1,351 prior sessions, so the series is continuous."),
+        }
+        for code, yahoo, eodhd in (
+            ("ASX50",  "^AFLI", "AFLI.INDX"),
+            ("ASX200", "^AXJO", "AXJO.INDX"),
+            ("ASX300", "^AXKO", "AXKO.INDX"),
+            ("AXEJ",   "^AXEJ", "AXEJ.INDX"),
+            ("AXHJ",   "^AXHJ", "AXHJ.INDX"),
+        )
     },
 }
 
@@ -268,7 +334,14 @@ def containment_version() -> str:
     eventually is not incremented.
     """
     import hashlib                                              # noqa: PLC0415
-    material = (repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
+    # SOURCE_CHANGES is in the material too. It is served on the index
+    # response, so adding a declaration changes what a reader is entitled to
+    # see -- and a response cached under the old key would omit it. The same
+    # argument the docstring makes for UNVERIFIED_SERIES applies: if it
+    # changes what we publish about a series, it changes the key.
+    material = (repr(sorted(SOURCE_CHANGES.items()))
+                + repr(sorted(KNOWN_BAD_WINDOWS.items()))
+                + repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
                 + repr(STALE_SUPPRESSED_FIELDS) + repr(STALE_AFTER_SESSIONS)
                 + repr(PUBLICATION_CUTOFF_HOUR) + repr(MARKET_TZ))
     return hashlib.sha256(material.encode()).hexdigest()[:8]

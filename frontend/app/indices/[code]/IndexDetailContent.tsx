@@ -4,7 +4,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, TrendingUp, TrendingDown, Minus,
   RefreshCw, ChevronUp, ChevronDown,
-  Search, ExternalLink, Download, Bell, Bookmark,
+  Search, ExternalLink, Download, Bell, Bookmark, AlertTriangle,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
@@ -156,12 +156,20 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
   const [period, setPeriod] = useState('1Y')
   const [history, setHistory] = useState<{ date: string; close: number | null }[]>([])
   const [sourceChange, setSourceChange] = useState<{ note?: string } | null>(null)
+  // A bounded stretch of stored history known to hold the wrong series.
+  // Declared by the backend, not listed here: a hardcoded index code in the
+  // UI would outlive the repair that removes it.
+  const [badWindow, setBadWindow] = useState<{ note?: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
     getIndexHistory(code, PERIOD_DAYS[period])
-      .then(r => { setHistory(r.history); setSourceChange((r as any).source_change ?? null) })
+      .then(r => {
+        setHistory(r.history)
+        setSourceChange((r as any).source_change ?? null)
+        setBadWindow((r as any).known_bad_window ?? null)
+      })
       .finally(() => setLoading(false))
   }, [code, period])
 
@@ -259,6 +267,16 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
       )}
       {sourceChange?.note && (
         <p className="text-[11px] text-slate-400 mt-1">{sourceChange.note}</p>
+      )}
+
+      {/* Louder than the notes above, deliberately. A gap and a source change
+          are facts about how the series was assembled; this one says part of
+          the line being drawn is wrong. Grey 11px would bury it. */}
+      {badWindow?.note && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+          <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[11px] leading-relaxed text-amber-800">{badWindow.note}</p>
+        </div>
       )}
     </SectionCard>
   )

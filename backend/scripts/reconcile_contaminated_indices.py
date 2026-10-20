@@ -213,12 +213,32 @@ def main() -> int:
         if outside:
             dates = [d for d, _ in outside]
             print(f"    Derived values are NOT contained by the window. "
-                  f"{len(outside)} rows outside it differ, "
-                  f"{min(dates)} .. {max(dates)}.")
-            print(f"    A repair limited to the window would leave these "
-                  f"behind.")
-            for d, bad in outside[:args.sample]:
-                print(f"      {d}  {', '.join(bad)}")
+                  f"{len(outside)} rows outside it differ.")
+            # Min and max of a set is not its shape. The counts per column
+            # track the lookback lengths (1, 5, 21, 63, 126, 252 sessions),
+            # which is what rows reaching INTO the window look like -- so
+            # where those rows actually sit decides the repair's bounds.
+            runs, idx = [], {d: i for i, d in enumerate(shared)}
+            start = prev = dates[0]
+            for d in dates[1:]:
+                if idx[d] - idx[prev] <= 3:       # same run across a weekend
+                    prev = d
+                    continue
+                runs.append((start, prev))
+                start = prev = d
+            runs.append((start, prev))
+            print(f"    In {len(runs)} contiguous run(s):")
+            for a, b in runs:
+                n = sum(1 for d in dates if a <= d <= b)
+                print(f"      {a} .. {b}   {n} rows")
+
+            close_out = [d for d, bad in outside if "close_price" in bad]
+            if close_out:
+                print(f"    close_price differs outside the window on "
+                      f"{len(close_out)} row(s):")
+                for d in close_out:
+                    print(f"      {d}  ours={mine[d]['close_price']}  "
+                          f"theirs={theirs[d].get('close_price')}")
         else:
             print(f"    Every difference falls inside the window. Repairing "
                   f"those {len(inside)} rows and their derived values is "

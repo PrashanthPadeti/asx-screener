@@ -97,14 +97,53 @@ been:
 - **Verification:** re-run the monthly agreement after the repair. Every
   month must read `0.00000%`, and the six clean series must be unchanged.
 
+## Row-level reconciliation, 20 Oct 2026
+
+Every stored column compared against what the producer's own
+`fetch_eodhd_index` + `compute_rows` would write today, at the scale each
+value is stored at. 1,353 stored rows per index, 0 unreconcilable — the
+provider covers the whole history, so every row can be checked and replaced.
+
+**Inside the window:** 265–266 rows differ, in all 13 columns.
+
+**Outside:** `close_price` differs on exactly **one** row. The remaining
+differences are derived values only, and they fall into shapes that are
+*not* this defect:
+
+| Run | Rows | What it is |
+|---|---|---|
+| 2021-05-10 .. 2022-05-06 | **252** | The series start. Exactly the 1-year lookback, and closes agree on all of them. `_pct_return` indexes POSITIONALLY, so with 304 sessions of extra leading history the recomputation's `i-252` lands on a different date than it did at write time. The known 252-row positional "1Y" defect, seen from a new angle. Separate item. |
+| 8 scattered 1–2 row runs | ~9 | 2023-09-04, 2024-09-12, 2026-06-10, 2026-06-29, 2026-08-11..12, 2026-08-18, 2026-09-09 — mostly the SAME dates on all three indices. On 2026-08-11 `close_price` differs on all three by 0.1–0.5%. Three independent series disagreeing on the same days is systemic; a provisional close later restated is the obvious guess and is NOT established. Separate item. |
+
+**The scope question is answered.** There is no trailing run after the
+window. Had rows written after May 2026 carried derived values computed
+across contaminated history, a solid block would run from 2026-06 to about
+2027-06, because `return_1y` and the 52-week extremes look back that far.
+There is none — only isolated days. Those rows were computed from corrected
+provider history and are already right.
+
+So: **repair the window's rows and their derived values. Nothing outside
+the window belongs to this defect.**
+
+One consequence to state rather than discover later: recomputing the
+window's derived values needs up to 252 sessions of prior history, reaching
+back to roughly 2024-05. Those closes are correct, so the recomputation is
+sound — but it will be computed on a full-history frame while the
+neighbouring pre-window rows were computed on whatever frame existed at
+their write time. The repaired rows will be internally consistent and
+consistent with the provider; they will not necessarily tie exactly to
+their immediate predecessors' basis. That is a property of the positional
+lookback, not of the repair.
+
 ## Open
 
-1. Derived values stored on rows INSIDE the window are frozen too, and were
-   computed from contaminated frames. Repairing `close_price` does not
-   repair them. Recompute, or withhold.
-2. Whether any other series has a bounded window like this. Only these nine
+1. Whether any other series has a bounded window like this. Only these nine
    index codes were examined.
-3. The same freezing applies to `market.fund_prices`. Unmeasured.
+2. The same freezing applies to `market.fund_prices`. Unmeasured; a
+   read-only assessment is prepared at
+   `backend/scripts/fund_history_assessment.py` and not yet run.
+3. The 252 leading rows and the 8 scattered sessions, above. Both real,
+   both separate.
 
 ## Related
 

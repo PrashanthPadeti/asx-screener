@@ -85,33 +85,56 @@ COLUMNS = ("close_price", "open_price", "high_price", "low_price",
            "return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
            "return_1y", "return_ytd", "high_52w", "low_52w")
 
-#: Below this two values are the same number differently rounded.
-TOL_PCT = 0.01
-
-
 def _differs(ours, theirs) -> bool:
-    if ours is None and theirs is None:
-        return False
+    """Would the producer, writing today, store this same value?
+
+    NOT a relative tolerance. The first version of this used 0.01% and
+    reported that derived values were wrong on ~1,000 of 1,078 rows outside
+    the contaminated window -- which was its own measurement, not a defect.
+    Stored returns are NUMERIC with a fixed scale, so a computed 0.012345 is
+    stored as 0.0123; comparing those two relatively gives 0.36% and flags
+    every rounded return in the table. Near zero, relative comparison is
+    meaningless.
+
+    So the recomputed value is quantised to the EXACT scale the stored value
+    already has -- which the Decimal that came back from the database tells
+    us -- and compared exactly. No tolerance is invented.
+    """
+    from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
     if ours is None or theirs is None:
+        return (ours is None) != (theirs is None)
+    try:
+        d_ours = Decimal(str(ours))
+        d_theirs = Decimal(str(float(theirs)))
+        exponent = d_ours.as_tuple().exponent
+        if isinstance(exponent, int) and exponent < 0:
+            d_theirs = d_theirs.quantize(Decimal(1).scaleb(exponent),
+                                         rounding=ROUND_HALF_UP)
+    except (InvalidOperation, ValueError, TypeError):
         return True
-    ours, theirs = float(ours), float(theirs)
-    if ours == theirs:
-        return False
-    denom = max(abs(ours), abs(theirs))
-    return (abs(ours - theirs) / denom * 100) > TOL_PCT if denom else False
+    return d_ours != d_theirs
 
 
-async def stored_rows(code: str) -> dict:
+async def stored_rows(codes: list[str]) -> dict:
+    """All codes in ONE event loop.
+
+    One asyncio.run() per code created a fresh loop each time while the
+    SQLAlchemy pool still held connections bound to the first -- "got Future
+    attached to a different loop" on the second index.
+    """
     from sqlalchemy import text
     from app.db.session import AsyncSessionLocal
     cols = ", ".join(COLUMNS)
+    out: dict[str, dict] = {}
     async with AsyncSessionLocal() as db:
         await db.execute(text("SET TRANSACTION READ ONLY"))
-        rows = (await db.execute(text(
-            f"SELECT price_date, {cols} FROM market.index_prices "
-            f"WHERE index_code = :c ORDER BY price_date"), {"c": code}
-        )).mappings().all()
-    return {r["price_date"]: dict(r) for r in rows}
+        for code in codes:
+            rows = (await db.execute(text(
+                f"SELECT price_date, {cols} FROM market.index_prices "
+                f"WHERE index_code = :c ORDER BY price_date"), {"c": code}
+            )).mappings().all()
+            out[code] = {r["price_date"]: dict(r) for r in rows}
+    return out
 
 
 def expected_rows(symbol: str, first: date, last: date) -> dict:
@@ -132,12 +155,15 @@ def main() -> int:
     targets = ({args.code.upper(): TARGETS[args.code.upper()]}
                if args.code else dict(TARGETS))
 
+    # One loop for every code. See stored_rows().
+    all_stored = asyncio.run(stored_rows(list(targets)))
+
     for code, symbol in targets.items():
         print("=" * 78)
         print(f"{code}  vs  {symbol}")
         print("=" * 78)
 
-        mine = asyncio.run(stored_rows(code))
+        mine = all_stored.get(code, {})
         if not mine:
             print("  no stored rows\n")
             continue

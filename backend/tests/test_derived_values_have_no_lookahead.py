@@ -37,25 +37,40 @@ import sys
 from datetime import date
 from pathlib import Path
 
-BACKEND = Path(__file__).resolve().parents[1]
+# Resolved from the file's location when it sits in the repository, but this
+# is run by reading it out of a commit into /tmp so the server checkout need
+# not move -- and then parents[1] is "/". Fall back to the working
+# directory, which the caller sets to backend/.
+_HERE = Path(__file__).resolve().parents[1]
+BACKEND = _HERE if (_HERE / "compute" / "engine" / "index_prices.py").exists() \
+    else Path.cwd()
+if not (BACKEND / "compute" / "engine" / "index_prices.py").exists():
+    sys.exit(f"run this from the backend directory (looked in {BACKEND})")
 sys.path.insert(0, str(BACKEND))
 
 DERIVED = ("return_1d", "return_1w", "return_1m", "return_3m", "return_6m",
            "return_1y", "return_ytd", "high_52w", "low_52w")
 
 
-def _frame(n: int = 420):
-    """Deterministic, and deliberately not monotonic.
+def _frame(n: int = 700):
+    """Deterministic, not monotonic, and long enough to place its peak late.
 
     A rising series would hide a forward-looking 52-week HIGH, because the
-    high is always the latest point. The reversal partway means the maximum
-    sits in the middle, so a window that reaches forward reports a different
-    number than one that does not. It also crosses a year boundary, which
+    high is always the latest point and both window choices agree.
+
+    The first version of this had 420 rows and its global maximum near row
+    290 -- inside the backward window at every probe, so a whole-series
+    max() would have produced identical values and the truncation test
+    would have passed while proving nothing. The mutation control caught
+    that, which is the only reason it is not still true.
+
+    700 rows puts a later peak beyond the probe, so the two window choices
+    genuinely disagree. It also crosses two year boundaries, which
     `_ytd_return` depends on.
     """
     import numpy as np
     import pandas as pd
-    idx = pd.bdate_range("2024-06-03", periods=n)
+    idx = pd.bdate_range("2023-06-01", periods=n)
     t = np.arange(n)
     close = 100 + 30 * np.sin(t / 37.0) + t * 0.02      # rises, falls, rises
     return pd.DataFrame(
@@ -63,6 +78,17 @@ def _frame(n: int = 420):
          "low": close - 1.0, "close": close,
          "volume": np.full(n, 1000)},
         index=idx)
+
+
+def _probe_before_the_peak(df) -> int:
+    """A row whose 252-session backward window excludes the global maximum.
+
+    Derived from the data rather than hand-picked, so the control cannot go
+    stale if the fixture changes shape again.
+    """
+    import numpy as np
+    peak = int(np.argmax(df["close"].values))
+    return peak - 60
 
 
 def _rows_by_date(df):
@@ -109,14 +135,17 @@ def test_the_detector_catches_a_forward_looking_window():
     """
     df = _frame()
     closes = df["close"]
-    dates = df.index
-    i = 300
-    backward = float(closes.iloc[max(0, i - 251): i + 1].max())
+    i = _probe_before_the_peak(df)
+    assert i >= 252, (
+        f"probe row {i} has an incomplete 252-session window, so the "
+        f"comparison below is not between two full windows")
+    backward = float(closes.iloc[i - 251: i + 1].max())
     forward = float(closes.max())
-    assert backward != forward, (
-        "the fixture's maximum sits inside every backward window, so a "
-        "whole-series max would be indistinguishable from a correct one "
-        "and the test above proves nothing")
+    assert backward < forward, (
+        f"the fixture's maximum sits inside the backward window at row {i} "
+        f"(backward={backward}, whole-series={forward}), so a whole-series "
+        f"max() would be indistinguishable from a correct one and the "
+        f"truncation test proves nothing about the 52-week high")
 
 
 def test_a_row_recomputed_on_longer_history_keeps_its_own_close():

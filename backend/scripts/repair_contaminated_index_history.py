@@ -145,13 +145,17 @@ def expected(symbol: str):
     return {r["price_date"]: r for r in compute_rows(df)}
 
 
-async def apply_repair(code: str, staged: dict) -> int:
-    """UPDATE only. Never INSERT: a date absent from the window is not a row
-    this repair is entitled to create.
+async def apply_repair(all_staged: dict[str, dict]) -> dict[str, int]:
+    """All three indices, ONE transaction. UPDATE only, never INSERT.
 
-    Bounded in the SQL by the window AND the code, so a staging bug cannot
-    reach a row outside the measured scope. Counts are checked before the
-    transaction commits.
+    One transaction because a partial repair is a worse state than no
+    repair: two indices corrected and one not looks, to every downstream
+    reader, exactly like a defect that was always only in one index.
+    Either all 796 rows land or none do.
+
+    Bounded in the SQL by the window AND the code, so a bug in what gets
+    staged still cannot reach a row outside the measured scope. Counts are
+    checked per index and in total before anything commits.
     """
     from sqlalchemy import text
     from app.db.session import AsyncSessionLocal
@@ -162,40 +166,30 @@ async def apply_repair(code: str, staged: dict) -> int:
         f"WHERE index_code = :code AND price_date = :price_date "
         f"  AND price_date BETWEEN :win_a AND :win_b")
 
-    touched = 0
+    touched: dict[str, int] = {}
     async with AsyncSessionLocal() as db:
-        for d, row in staged.items():
-            params = {c: row.get(c) for c in COLUMNS}
-            params.update({"code": code, "price_date": d,
-                           "win_a": WINDOW_FROM, "win_b": WINDOW_TO})
-            result = await db.execute(stmt, params)
-            touched += result.rowcount or 0
-        if touched != len(staged):
-            await db.rollback()
-            raise SystemExit(
-                f"{code}: staged {len(staged)} rows but {touched} were "
-                f"updated — rolled back, nothing written")
+        for code, staged in all_staged.items():
+            n = 0
+            for d, row in staged.items():
+                params = {c: row.get(c) for c in COLUMNS}
+                params.update({"code": code, "price_date": d,
+                               "win_a": WINDOW_FROM, "win_b": WINDOW_TO})
+                result = await db.execute(stmt, params)
+                n += result.rowcount or 0
+            touched[code] = n
+            if n != len(staged):
+                await db.rollback()
+                raise SystemExit(
+                    f"{code}: staged {len(staged)} rows but {n} were "
+                    f"updated — rolled back, NOTHING written for any index")
         await db.commit()
     return touched
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--code", default=None)
-    ap.add_argument("--sample", type=int, default=8)
-    ap.add_argument("--apply", action="store_true")
-    ap.add_argument("--i-have-reviewed-the-dry-run", action="store_true",
-                    dest="reviewed")
-    args = ap.parse_args()
-
-    if args.apply and not args.reviewed:
-        sys.exit("--apply also requires --i-have-reviewed-the-dry-run. "
-                 "This overwrites production history; it should not be one "
-                 "flag away from a dry run.")
-
+async def _run(args) -> int:
     targets = ({args.code.upper(): TARGETS[args.code.upper()]}
                if args.code else dict(TARGETS))
-    stored = asyncio.run(load_stored(list(targets)))
+    stored = await load_stored(list(targets))
 
     mode = "APPLY — WILL WRITE" if args.apply else "DRY RUN — writes nothing"
     print(f"{mode}")
@@ -271,14 +265,37 @@ def main() -> int:
               "--i-have-reviewed-the-dry-run to write.")
         return 0
 
-    print(f"APPLYING to {total} rows …")
-    for code, staged in all_staged.items():
-        n = asyncio.run(apply_repair(code, staged))
+    print(f"APPLYING to {total} rows in ONE transaction …")
+    touched = await apply_repair(all_staged)
+    for code, n in touched.items():
         print(f"  {code}: {n} rows updated")
     print("\nNow re-run reconcile_contaminated_indices.py. Inside the window "
           "must be 0; the 252 leading rows and the scattered sessions must "
           "be UNCHANGED — a repair that moved those overreached.")
     return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--code", default=None)
+    ap.add_argument("--sample", type=int, default=8)
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--i-have-reviewed-the-dry-run", action="store_true",
+                    dest="reviewed")
+    args = ap.parse_args()
+
+    if args.apply and not args.reviewed:
+        sys.exit("--apply also requires --i-have-reviewed-the-dry-run. "
+                 "This overwrites production history; it should not be one "
+                 "flag away from a dry run.")
+
+    # ONE event loop for the whole program. Reading under one loop and
+    # writing under another leaves the connection pool holding connections
+    # bound to a loop that has closed -- "got Future attached to a
+    # different loop". This was fixed in the reconciliation script and not
+    # carried here, which is the difference between fixing an instance and
+    # fixing the class.
+    return asyncio.run(_run(args))
 
 
 if __name__ == "__main__":

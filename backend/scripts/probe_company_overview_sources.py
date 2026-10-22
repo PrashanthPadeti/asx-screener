@@ -161,25 +161,33 @@ def main() -> int:
     print("PER SECTION — which fields are present, per company")
     print("=" * 78)
     coverage = {}
-    for section, fields in SECTIONS.items():
+    for section, (fields, caveat) in SECTIONS.items():
         print(f"\n{section}")
+        if caveat:
+            print(f"    does NOT establish: {caveat}")
         if not fields:
             print("    no candidate provider field — annual reports or nothing")
-            coverage[section] = 0
+            coverage[section] = 0.0
             continue
-        present = 0
+        # A section is only as served as its WEAKEST field. Summing presence
+        # across fields let one field present for everyone carry a section
+        # whose other fields were absent for most -- an aggregate hiding its
+        # members, which is the defect this codebase keeps finding.
+        per_field = []
         for field in fields:
-            cells = []
+            cells, n = [], 0
             for code in codes:
                 p = payloads.get(code)
                 val = _dig(p, field) if isinstance(p, dict) else None
-                cells.append(f"{code}={_describe(val)}")
-                if val not in (None, "") and _describe(val) not in ("ABSENT", "EMPTY"):
-                    present += 1
-            print(f"    {field}")
+                shown = _describe(val)
+                cells.append(f"{code}={shown}")
+                if shown not in ("ABSENT", "EMPTY"):
+                    n += 1
+            per_field.append(n / len(codes))
+            print(f"    {field}   [{n}/{len(codes)} companies]")
             for c in cells:
                 print(f"        {c}")
-        coverage[section] = present
+        coverage[section] = min(per_field)
 
     print("\n" + "=" * 78)
     print("WHAT THIS CHANGES")

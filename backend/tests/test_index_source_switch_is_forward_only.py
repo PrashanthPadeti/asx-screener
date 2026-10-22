@@ -205,20 +205,44 @@ def test_every_switched_index_declares_its_source_change():
             f"{SOURCES[code].symbol}")
 
 
-def test_the_contaminated_window_is_declared_for_exactly_those_three():
-    """Declared, and no wider.
+def test_no_bad_window_is_declared_now_the_rows_are_repaired():
+    """The notice comes off because the data was fixed, not to tidy up.
 
-    A window on a clean index would tell customers not to trust data that is
-    fine; a missing one leaves a wrong line undisclosed.
+    796 rows were repaired on 21 Oct 2026 and the reconciliation confirms 0
+    of 275 rows differ inside the window on all three indices. Leaving the
+    warning up would train readers to ignore it; taking it down while the
+    rows were still wrong would have been worse. Order matters, and it was:
+    repair, verify, then remove.
     """
     from app.core.series_provenance import KNOWN_BAD_WINDOWS
-    assert set(KNOWN_BAD_WINDOWS) == set(AWAITING_REPAIR), (
-        f"declared windows {sorted(KNOWN_BAD_WINDOWS)} do not match the "
-        f"contaminated set {sorted(AWAITING_REPAIR)}")
-    for code, w in KNOWN_BAD_WINDOWS.items():
-        assert w["from"] == "2025-05-01" and w["to"] == "2026-05-31", (
-            f"{code} declares a window other than the measured one")
-        assert w["note"].strip(), f"{code} declares a window with no note"
+    assert KNOWN_BAD_WINDOWS == {}, (
+        f"a bad-window warning is still declared for "
+        f"{sorted(KNOWN_BAD_WINDOWS)} — either the repair did not cover it "
+        f"or the notice outlived the defect")
+
+
+def test_the_repair_is_declared_for_exactly_those_three():
+    """A correction nobody is told about looks like instability.
+
+    Someone who read one of these charts last week saw different numbers.
+    Removing the warning and saying nothing leaves them with a series that
+    silently changed. The declaration is the other half of the repair.
+    """
+    from app.core.series_provenance import HISTORY_REPAIRS
+    assert set(HISTORY_REPAIRS) == set(AWAITING_REPAIR), (
+        f"declared repairs {sorted(HISTORY_REPAIRS)} do not match the three "
+        f"indices that were repaired {sorted(AWAITING_REPAIR)}")
+    total = 0
+    for code, r in HISTORY_REPAIRS.items():
+        assert r["from"] == "2025-05-01" and r["to"] == "2026-05-31", (
+            f"{code} declares a window other than the one repaired")
+        assert r["repaired_on"] == "2026-10-21", (
+            f"{code} declares the wrong repair date")
+        assert r["note"].strip(), f"{code} declares a repair with no note"
+        total += r["rows"]
+    assert total == 796, (
+        f"the declared row counts total {total}; the repair updated 796 "
+        f"(266 + 265 + 265) in one transaction")
 
 
 def test_the_window_reaches_the_api_and_the_chart():
@@ -240,6 +264,31 @@ def test_the_window_reaches_the_api_and_the_chart():
     body = "\n".join(statements)
     assert "known_bad_window" in body, "the chart never reads the field"
     assert "badWindow?.note" in body, "the chart never renders the note"
+
+
+def test_the_repair_note_reaches_the_api_and_the_chart():
+    """Same paired-contract rule as the warning it replaces.
+
+    Declaring the repair in Python changes nothing a reader can see unless
+    the route serves it and the chart renders it.
+    """
+    route = (BACKEND / "app" / "api" / "v1" / "routes"
+             / "indices_funds.py").read_text(encoding="utf-8")
+    assert '"history_repair": HISTORY_REPAIRS.get(code_u)' in route, (
+        "the repair is declared but never served")
+
+    chart = (BACKEND.parent / "frontend" / "app" / "indices" / "[code]"
+             / "IndexDetailContent.tsx").read_text(encoding="utf-8")
+    statements = [l for l in chart.splitlines()
+                  if l.strip() and not l.strip().startswith(("//", "*", "/*"))]
+    body = "\n".join(statements)
+    assert "history_repair" in body, "the chart never reads the field"
+    assert "repair?.note" in body, "the chart never renders the note"
+    # Amber means "do not trust this line". A completed correction is not
+    # that, and dressing it as one teaches readers to ignore the warnings.
+    repair_block = body[body.index("repair?.note"):][:400]
+    assert "amber" not in repair_block, (
+        "the repair note renders as a warning; it is an explanation")
 
 
 def test_a_declaration_changes_the_cache_key():

@@ -12,7 +12,8 @@ from sqlalchemy import text
 
 from app.db.session import get_db
 from app.core.series_provenance import (
-    KNOWN_BAD_WINDOWS, SOURCE_CHANGES, UNVERIFIED_SERIES, containment_version,
+    HISTORY_REPAIRS, KNOWN_BAD_WINDOWS, SOURCE_CHANGES, UNVERIFIED_SERIES,
+    containment_version,
     freshness_status, last_expected_session, market_now, suppress_if_stale,
     suppress_if_unverified)
 from app.core.cache import cache_get, cache_set, make_key, STATIC_TTL
@@ -451,6 +452,10 @@ async def get_index_history(
         # Served figures are unaffected -- they are computed from the fetched
         # frame -- but the chart plots these rows, so it must say so.
         "known_bad_window": KNOWN_BAD_WINDOWS.get(code_u),
+        # History that was restated, and when. A corrected series that says
+        # nothing about having been corrected is indistinguishable from an
+        # unstable one to anyone who saw the earlier numbers.
+        "history_repair": HISTORY_REPAIRS.get(code_u),
         "history": [
             {"date": r["price_date"], "close": _f(r["close_price"]), "return_1d": _f(r["return_1d"])}
             for r in rows

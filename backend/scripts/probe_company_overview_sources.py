@@ -60,25 +60,43 @@ DEFAULT_CODES = ["PLS", "BHP", "CBA", "CSL", "BRN"]
 #: The thirteen requested sections, and the provider fields that could
 #: serve each. Mapping stated up front so the output is read against the
 #: request rather than against whatever happens to come back.
-SECTIONS = {
-    "1 profile":        ["General.Name", "General.Code", "General.Exchange",
-                         "General.Industry", "General.Sector",
-                         "General.Description"],
-    "2 history/listing": ["General.IPODate", "General.Incorporation",
-                          "General.FiscalYearEnd"],
-    "3 core business":  ["General.Description", "General.GicSubIndustry"],
-    "4 business model": ["Financials.Income_Statement", "SplitsDividends",
-                         "General.Description"],
-    "5 locations":      ["General.Address", "General.AddressData",
-                         "General.CountryName", "General.Phone"],
-    "6 customers":      [],
-    "7 order book":     [],
-    "8 investments":    [],
-    "9 employees":      ["General.FullTimeEmployees"],
-    "10 competitors":   ["General.Industry", "General.Sector"],
-    "11 management":    ["General.Officers"],
-    "12 vision":        [],
-    "13 outlook":       [],
+#: section -> (fields, what those fields do NOT establish)
+#:
+#: The second element matters. The first version of this mapped section 4
+#: to the income statement and section 10 to the industry classification,
+#: then reported both as served. An income statement gives totals, not
+#: which activities earn the money; an industry label is not a list of
+#: competitors; a head-office address is not the countries a company
+#: operates in. A field that is adjacent to a question does not answer it.
+SECTIONS: dict[str, tuple[list[str], str]] = {
+    "1 profile":         (["General.Name", "General.Code", "General.Exchange",
+                           "General.Industry", "General.Sector",
+                           "General.Description"], ""),
+    "2 history/listing": (["General.IPODate", "General.FiscalYearEnd"],
+                          "no founding/incorporation date; IPODate is the "
+                          "listing date and is not served for every company"),
+    "3 core business":   (["General.Description", "General.GicSubIndustry"],
+                          "one paragraph and a classification; no products, "
+                          "no specialisation detail"),
+    "4 business model":  (["General.Description"],
+                          "NO SEGMENT REVENUE. The income statement gives "
+                          "totals, not which activities contribute most"),
+    "5 locations":       (["General.Address", "General.CountryName"],
+                          "HEAD OFFICE ONLY. Not operating locations, not "
+                          "the countries or regions served"),
+    "6 customers":       ([], "nothing"),
+    "7 order book":      ([], "nothing"),
+    "8 investments":     ([], "nothing"),
+    "9 employees":       (["General.FullTimeEmployees"],
+                          "a count; no workforce detail"),
+    "10 competitors":    (["General.Industry", "General.Sector"],
+                          "A CLASSIFICATION, NOT COMPETITORS. No market "
+                          "position, no named rivals"),
+    "11 management":     (["General.Officers"],
+                          "officers as the provider holds them; currency "
+                          "unverified"),
+    "12 vision":         ([], "nothing"),
+    "13 outlook":        ([], "nothing"),
 }
 
 
@@ -166,8 +184,8 @@ def main() -> int:
     print("\n" + "=" * 78)
     print("WHAT THIS CHANGES")
     print("=" * 78)
-    covered = [s for s, n in coverage.items() if n >= len(codes)]
-    partial = [s for s, n in coverage.items() if 0 < n < len(codes)]
+    covered = [s for s, n in coverage.items() if n == 1.0]
+    partial = [s for s, n in coverage.items() if 0 < n < 1.0]
     none_ = [s for s, n in coverage.items() if n == 0]
     print(f"  served for every company probed: {covered or 'none'}")
     print(f"  served for SOME only:            {partial or 'none'}")

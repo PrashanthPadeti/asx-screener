@@ -120,7 +120,6 @@ async def list_companies(
 
 # ── Search / Autocomplete ─────────────────────────────────────
 
-@router.get("/search", response_model=list[CompanySearchResult])
 def _bool_nulls_to_false(model, row) -> dict:
     """NULL in a column the schema declares `bool`, rendered as False.
 
@@ -154,6 +153,7 @@ def _bool_nulls_to_false(model, row) -> dict:
     return out
 
 
+@router.get("/search", response_model=list[CompanySearchResult])
 async def search_companies(
     q:    str = Query(..., min_length=1, description="ASX code or company name"),
     limit: int = Query(10, ge=1, le=30),

@@ -127,6 +127,46 @@ def test_the_fields_come_from_the_model_not_a_hardcoded_list():
         "break the endpoint exactly as these two did")
 
 
+def test_the_search_route_is_bound_to_the_search_function():
+    """v11.2.27 shipped with the helper defined BETWEEN the decorator and
+    the function it was meant to decorate:
+
+        @router.get("/search", response_model=list[CompanySearchResult])
+        def _bool_nulls_to_false(model, row) -> dict:
+
+    FastAPI registered the HELPER as the endpoint, read its two
+    no-default parameters as required query params, and returned 422 to
+    every search. `search_companies` was not registered at all. The fix
+    for a 500 affecting 598 companies became a 422 affecting all of them.
+
+    The source-text check below passed throughout, because the call string
+    really was present — in a function nothing reached. This asserts the
+    ROUTING TABLE instead of the file.
+    """
+    from app.api.v1.routes.companies import router, search_companies
+    routes = [r for r in router.routes if getattr(r, "path", None) == "/search"]
+    assert routes, "no /search route is registered at all"
+    assert len(routes) == 1, f"{len(routes)} routes claim /search"
+    bound = routes[0].endpoint
+    assert bound is search_companies, (
+        f"/search is bound to {bound.__name__!r}, not search_companies — "
+        f"a decorator landed on the wrong function")
+
+
+def test_no_private_helper_is_registered_as_an_endpoint():
+    """The general form, so the next misplaced decorator fails here.
+
+    A name beginning with an underscore is internal by convention; if one
+    is serving HTTP, a decorator has slipped onto the wrong definition.
+    """
+    from app.api.v1.routes.companies import router
+    exposed = [(r.path, r.endpoint.__name__) for r in router.routes
+               if getattr(r, "endpoint", None)
+               and r.endpoint.__name__.startswith("_")]
+    assert not exposed, (
+        f"private helpers are serving HTTP routes: {exposed}")
+
+
 def test_both_endpoints_use_it():
     """Declaring the helper changes nothing a customer can see unless the
     endpoints call it. The search bug and the company-detail bug are one

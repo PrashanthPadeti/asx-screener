@@ -180,7 +180,7 @@ async def _notify_user(
                  status, metadata, attempt_count, sent_at)
             VALUES
                 (CAST(:uid AS uuid), 'email', 'anomaly_alert', :subject, :email,
-                 :status, :meta::jsonb, 1,
+                 :status, CAST(:meta AS jsonb), 1,
                  CASE WHEN :status = 'sent' THEN NOW() ELSE NULL END)
         """), {
             "uid":    user_id,

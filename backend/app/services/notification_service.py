@@ -41,7 +41,7 @@ async def _log_notification(
              status, error_message, metadata, attempt_count, sent_at)
         VALUES
             (:uid, :channel, :type, :subject, :recipient,
-             :status, :error, :meta::jsonb, :attempts,
+             :status, :error, CAST(:meta AS jsonb), :attempts,
              CASE WHEN :status = 'sent' THEN NOW() ELSE NULL END)
     """), {
         "uid":      user_id,

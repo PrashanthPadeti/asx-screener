@@ -268,7 +268,7 @@ async def process_unsubscribe(
     # Audit log
     await db.execute(text("""
         INSERT INTO users.audit_log (user_id, action, entity_type, metadata)
-        VALUES (:uid, 'prefs.unsubscribed', 'user', :meta::jsonb)
+        VALUES (:uid, 'prefs.unsubscribed', 'user', CAST(:meta AS jsonb))
     """), {
         "uid":  str(row.user_id),
         "meta": f'{{"type": "{body.type}", "channel": "email_link"}}',

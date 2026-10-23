@@ -397,6 +397,15 @@ CRITICAL = [
     # arrive is as fatal as a source that did not.
     "market.asx_announcements", "market.monthly_metrics",
     "market.period_metrics",
+    # universe_build's third source, read at build_screener_universe.py:1462
+    # (`FROM staging_au.fundamentals`). Missing from this list since the
+    # stage was written: a clone that lost it would have been ACCEPTED, and
+    # the run would have died inside universe_build with UndefinedTable --
+    # after the freeze window was already open. Identical in shape to the
+    # staging_au.eod_prices entry twelve lines up, which is the whole reason
+    # test_every_table_the_plan_stages_touch_is_proven_by_verify exists. The
+    # guard did its job; its verdict just sat unactioned for eight releases.
+    "staging_au.fundamentals",
     # The lifecycle tables. Absent from this list until now, which is why a
     # scratch database with an empty screener.compute_runs read as acceptable
     # and took a manual query to notice. They happened to be faithful --

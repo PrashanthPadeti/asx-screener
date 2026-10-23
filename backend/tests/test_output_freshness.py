@@ -384,7 +384,11 @@ def test_coverage_does_not_claim_completeness_when_it_knows_nothing():
 #: Measured 3 Oct 2026, the day prices were first anchored. This is a DEBT,
 #: not a target. Lower it whenever a table is anchored or named; never raise
 #: it to make a build pass.
-MAX_UNWATCHED = 38
+#:
+#: 24 Oct 2026: 38 -> 37. Coverage improved and the ratchet said so, which is
+#: it working; the failure was then filed as pre-existing for eight releases
+#: and the gain sat unclaimed. A ratchet nobody tightens is a counter.
+MAX_UNWATCHED = 37
 
 
 def test_the_unwatched_set_does_not_grow():

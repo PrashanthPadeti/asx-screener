@@ -32,6 +32,7 @@ Run under pytest, or standalone:
     cd /opt/asx-screener/backend && ../asx-venv/bin/python tests/test_alert_isolation.py
 """
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -72,22 +73,57 @@ def test_the_flag_exists_and_defaults_to_off():
 
 def test_the_job_is_not_registered_unless_the_flag_is_on():
     """The registration boundary. Without this the job comes back with every
-    other scheduler on any restart."""
-    src = _code(MAIN)
+    other scheduler on any restart.
 
-    m = re.search(r"scheduler\.add_job\(\s*send_anomaly_alerts", src)
-    assert m, "send_anomaly_alerts registration not found in app/main.py"
+    Structural, not textual, and deliberately so. The original version of
+    this test matched the literal `scheduler.add_job(send_anomaly_alerts`.
+    When the observability work wrapped every job as
+    `add_job(instrumented("anomaly_alerts", send_anomaly_alerts), ...)` the
+    regex stopped matching, and from that release until v11.2.30 this test
+    failed for a reason that had nothing to do with the control it watches.
+    The control itself was never broken -- but a guard that cannot find its
+    subject protects nothing, and this one spent eight releases in that
+    state while its failure was filed as pre-existing.
 
-    # The guard must be the nearest preceding `if`, not merely somewhere in
-    # the file: a flag checked in an unrelated branch would pass a naive
-    # substring test while registering the job unconditionally.
-    before = src[:m.start()]
-    last_if = before.rfind("\n    if ")
-    assert last_if != -1, "registration is not inside any guard"
-    guard = before[last_if:last_if + 200]
-    assert FLAG in guard, (
-        f"the nearest enclosing guard does not test {FLAG}; the job would be "
-        f"registered on any restart")
+    So: find the registration by what it IS -- an `add_job` call that
+    mentions `send_anomaly_alerts` anywhere in its arguments -- and find the
+    guard by walking the tree, not by counting back to the nearest newline.
+    Any further wrapping leaves both intact.
+    """
+    tree = ast.parse(MAIN.read_text(encoding="utf-8"))
+
+    def mentions_worker(node) -> bool:
+        return any(isinstance(n, ast.Name) and n.id == "send_anomaly_alerts"
+                   for n in ast.walk(node))
+
+    def is_add_job(node) -> bool:
+        return (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "add_job")
+
+    # Every `if` that tests the flag, with the line span it governs.
+    guarded_spans = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.If) and FLAG in {
+                n.attr for n in ast.walk(node.test)
+                if isinstance(n, ast.Attribute)}:
+            for stmt in node.body:
+                guarded_spans.append((stmt.lineno, stmt.end_lineno))
+
+    registrations = [n for n in ast.walk(tree)
+                     if is_add_job(n) and mentions_worker(n)]
+    assert registrations, (
+        "no add_job call mentioning send_anomaly_alerts found in app/main.py "
+        "-- the registration has moved or been renamed, and this guard is "
+        "watching nothing")
+
+    for call in registrations:
+        inside = any(start <= call.lineno <= end
+                     for start, end in guarded_spans)
+        assert inside, (
+            f"app/main.py:{call.lineno} registers send_anomaly_alerts "
+            f"outside any `if ...{FLAG}` block; the job would be registered "
+            f"on any restart")
 
 
 def test_the_worker_refuses_when_the_flag_is_off():

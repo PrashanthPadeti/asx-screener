@@ -30,12 +30,21 @@ async def send_watchlist_digests() -> None:
 async def _run_digests(db: AsyncSession) -> None:
     result = await db.execute(text("""
         SELECT DISTINCT u.id AS user_id, u.email, u.name,
-               COALESCE(np.email_enabled, TRUE) AS email_enabled
+               -- `email_enabled` does not exist on this table and never did;
+               -- this query raised UndefinedColumn on every run.
+               --
+               -- There is no watchlist-specific preference. The digest is a
+               -- weekly summary email, so it is governed by the weekly flag
+               -- -- a REUSE, not an exact match: a customer who turns off
+               -- "portfolio weekly summary" also turns off this digest, and
+               -- the settings UI does not say so. If that matters, the fix
+               -- is a watchlist_digest_email column, not a change here.
+               COALESCE(np.portfolio_weekly_email, TRUE) AS email_enabled
         FROM users.users u
         JOIN users.watchlists wl ON wl.user_id = u.id
         LEFT JOIN users.notification_preferences np ON np.user_id = u.id
         WHERE u.email IS NOT NULL
-          AND COALESCE(np.email_enabled, TRUE) = TRUE
+          AND COALESCE(np.portfolio_weekly_email, TRUE) = TRUE
     """))
     users = result.fetchall()
 

@@ -48,7 +48,7 @@ from compute.engine.run_plans import plan_requirements
 from compute.engine.run_resolution import VALIDATED_RUNS_SQL
 from compute.engine.screen_predicates import CriterionType
 from compute.engine.screen_sql import (
-    CompileError, RunScope, ValidatedRun, plan_screen,
+    CompileError, RunScope, UnknownOperator, ValidatedRun, plan_screen,
 )
 
 # The resolver's query, inlined here so the route uses one definition of
@@ -961,6 +961,11 @@ def _plan_for(req, scope):
         return plan_screen(parsed, FIELD_REGISTRY, scope,
                            dialect="postgres", table_alias="u",
                            paramstyle="named")
+    except UnknownOperator as exc:
+        # The request is the problem and retrying will not help. 503 here
+        # would tell the client to come back later for an operator we are
+        # never going to support.
+        raise HTTPException(status_code=400, detail=str(exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2268,6 +2273,11 @@ async def query_screener(
         plan = plan_screen(parsed, FIELD_REGISTRY, scope,
                            dialect="postgres", table_alias="u",
                            paramstyle="named")
+    except UnknownOperator as exc:
+        # The request is the problem and retrying will not help. 503 here
+        # would tell the client to come back later for an operator we are
+        # never going to support.
+        raise HTTPException(status_code=400, detail=str(exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2411,6 +2421,11 @@ async def export_query_screener(
         plan = plan_screen(parsed, FIELD_REGISTRY, scope,
                            dialect="postgres", table_alias="u",
                            paramstyle="named")
+    except UnknownOperator as exc:
+        # The request is the problem and retrying will not help. 503 here
+        # would tell the client to come back later for an operator we are
+        # never going to support.
+        raise HTTPException(status_code=400, detail=str(exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

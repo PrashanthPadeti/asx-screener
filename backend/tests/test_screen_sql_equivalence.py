@@ -137,7 +137,12 @@ def _test(operator: str, value: float):
     return {
         "gt": lambda v: v > value, "gte": lambda v: v >= value,
         "lt": lambda v: v < value, "lte": lambda v: v <= value,
+        # `neq` is the API's spelling of `ne` and must mean the same thing.
+        # It reached Postgres as the literal word `neq` until v11.2.29
+        # because the compiler knew only `ne`; both are compiled now, and
+        # this reference carries both so the equivalence check covers them.
         "eq": lambda v: v == value, "ne": lambda v: v != value,
+        "neq": lambda v: v != value,
     }[operator]
 
 

@@ -68,14 +68,64 @@ def placeholder_for(key: str, paramstyle: Paramstyle) -> str:
 #: Comparison operators a screen definition may use, mapped to SQL. Kept as a
 #: closed set: a screen cannot inject an operator, and an unknown one is a
 #: definition error rather than something that reaches the database.
+#: `neq` is the spelling the API's FilterOperator enum uses and the UI sends;
+#: `ne` was the only one here, so every "≠" filter a customer built fell
+#: through the fallback below and reached Postgres as the literal word `neq`
+#: — "syntax error at or near \"neq\"", a 500 on the screener. Two
+#: vocabularies for one concept, neither aware of the other. Both spellings
+#: are accepted now; `test_the_api_and_the_compiler_agree_on_operators`
+#: asserts the two stay in step rather than relying on anyone noticing.
 OPERATORS: dict[str, str] = {
     "gt": ">", "gte": ">=", "lt": "<", "lte": "<=",
-    "eq": "=", "ne": "<>",
+    "eq": "=", "ne": "<>", "neq": "<>",
 }
+
+
+def _sql_operator(operator: str) -> str:
+    """The SQL for `operator`, or a refusal.
+
+    This used to be `OPERATORS.get(op) or op`, which handed any unrecognised
+    string straight to the database — defeating, in one expression, the
+    closed set the comment above it promises. `neq` and `in` are both in the
+    API's enum and neither was in this map, so both reached Postgres raw.
+
+    An operator the compiler does not know is a definition error. Refusing
+    it produces a 400 naming the problem instead of a 500 carrying our SQL
+    into the customer's face.
+    """
+    sql = OPERATORS.get(operator)
+    if sql is None:
+        raise UnknownOperator(
+            f"{operator!r} is not a permitted operator "
+            f"({', '.join(sorted(OPERATORS))})")
+    return sql
+
+
+def _as_bool(value) -> bool:
+    """A boolean filter's value, however the caller spelled it.
+
+    `ScreenerFilter.value` is typed `Any`, so "true" arrives as a string
+    from the UI. `bool("false")` is True, so comparing the raw value would
+    make "is REIT: No" mean the same as "is REIT: Yes".
+    """
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "t", "yes", "y", "1")
+    return bool(value)
 
 
 class CompileError(Exception):
     """A criterion that cannot be compiled honestly."""
+
+
+class UnknownOperator(CompileError):
+    """The caller asked for an operator this compiler does not implement.
+
+    A subclass so every existing `except CompileError` still catches it, but
+    distinguishable where the status code is chosen: CompileError at the
+    route means 503, which is right for "no validated run scope" and wrong
+    for a client sending an operator we do not support. That is a 400 — the
+    request is the problem and retrying will not help.
+    """
 
 
 @dataclass(frozen=True)
@@ -645,11 +695,24 @@ def _ungoverned_sql(node, definition, key: str, params: dict,
     applicability contract would add a run dependency and a CASE expression to
     every sector filter for no correctness gain.
     """
-    operator = OPERATORS.get(node.operator) or node.operator
+    operator = _sql_operator(node.operator)
     placeholder = placeholder_for(key, _paramstyle_for(dialect, paramstyle))
 
-    if node.kind == "boolean":
-        want_true = node.value if operator in ("=", "==") else not node.value
+    # The DEFINITION decides whether this is a boolean, not the criterion.
+    #
+    # `Criterion.kind` defaults to "number" and the API never sets it —
+    # screener.py constructs TypedCriterion without that argument — so this
+    # branch was unreachable for every filter a customer built. `is_reit`
+    # fell through to the numeric path and bound the string "true" to a
+    # boolean column: "invalid input for query argument $1: 'true' (a
+    # boolean is required (got type str))", a 500 on the screener.
+    #
+    # ALLOWED_FIELDS already declares `"type": "boolean"` for these columns,
+    # and `_scaled` above keys off definition.type for exactly this reason.
+    # node.kind is still honoured so callers that DO set it keep working.
+    if definition.type == "boolean" or node.kind == "boolean":
+        want_true = _as_bool(node.value) if operator in ("=", "==") \
+            else not _as_bool(node.value)
         cast = "" if dialect == "sqlite" else "::int"
         clause = (f"({definition.column}){cast} != 0" if want_true
                   else f"({definition.column}){cast} = 0")

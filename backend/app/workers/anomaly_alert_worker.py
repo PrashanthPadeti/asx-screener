@@ -92,13 +92,18 @@ async def _run(db: AsyncSession) -> None:
                usr.id         AS user_id,
                usr.email,
                usr.name,
-               COALESCE(np.email_enabled, TRUE) AS email_enabled
+               -- `email_enabled` does not exist on this table and never did;
+               -- this query raised UndefinedColumn on every run. Anomaly
+               -- alerts are an alert, so they are governed by alerts_email.
+               -- COALESCE preserves the original default-to-send intent and
+               -- matches NotificationPreferences.alerts_email's default.
+               COALESCE(np.alerts_email, TRUE) AS email_enabled
         FROM users.users usr
         JOIN users.watchlists wl  ON wl.user_id = usr.id
         JOIN users.watchlist_items wi ON wi.watchlist_id = wl.id
         LEFT JOIN users.notification_preferences np ON np.user_id = usr.id
         WHERE usr.email IS NOT NULL
-          AND COALESCE(np.email_enabled, TRUE) = TRUE
+          AND COALESCE(np.alerts_email, TRUE) = TRUE
           AND wi.asx_code = ANY(:codes)
     """), {"codes": list(flagged_codes)})).mappings().all()
 

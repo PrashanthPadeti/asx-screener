@@ -153,19 +153,42 @@ NO_DATA = "no_data"
 #: while the rows are still wrong would be the quietest possible way to
 #: reintroduce the defect.
 #: See docs/finding_2026-10-19_three_indices_wrong_for_13_months.md
-KNOWN_BAD_WINDOWS: dict[str, dict] = {
+#: Empty since 21 Oct 2026. The three entries it held were removed when the
+#: rows behind them were repaired -- not before. The mechanism stays: a
+#: bounded stretch of wrong data is a thing that can happen again, and the
+#: next one should be declarable without rebuilding this.
+KNOWN_BAD_WINDOWS: dict[str, dict] = {}
+
+#: History that has been RESTATED, and when.
+#:
+#: Removing a bad-window notice is not the whole of telling the truth. A
+#: reader who looked at one of these charts last week saw different numbers
+#: and is owed an explanation for why they changed; without one, a restated
+#: series is indistinguishable from an unstable one. A correction nobody is
+#: told about erodes the same trust the correction was meant to restore.
+#:
+#: Repaired 21 Oct 2026: 796 rows across three indices, every stored column,
+#: in one transaction. Verified by re-running the reconciliation -- inside
+#: the window 0 of 275 rows differ on all three, while the 252 rows at the
+#: series start and eight scattered sessions outside it are unchanged to the
+#: individual date and value.
+#: See docs/finding_2026-10-19_three_indices_wrong_for_13_months.md
+HISTORY_REPAIRS: dict[str, dict] = {
     code: {
         "from": "2025-05-01",
         "to": "2026-05-31",
-        "reason": reason,
-        "note": (f"Between May 2025 and May 2026 this chart shows {reason}, "
-                 f"not the index it is labelled with. Data before and after "
-                 f"that period is correct. A repair is pending."),
+        "repaired_on": "2026-10-21",
+        "rows": rows,
+        "note": (f"Between May 2025 and May 2026 this series held {held}. "
+                 f"It was corrected on 21 October 2026 from the same source "
+                 f"that matches this index exactly on either side of that "
+                 f"period. Figures shown for those dates before the "
+                 f"correction were wrong."),
     }
-    for code, reason in (
-        ("ASX20", "the All Ordinaries"),
-        ("AXFJ",  "values that are not index levels"),
-        ("AXMJ",  "values that are not index levels"),
+    for code, held, rows in (
+        ("ASX20", "the All Ordinaries rather than the S&P/ASX 20", 266),
+        ("AXFJ",  "values that were not index levels", 265),
+        ("AXMJ",  "values that were not index levels", 265),
     )
 }
 
@@ -341,6 +364,7 @@ def containment_version() -> str:
     # changes what we publish about a series, it changes the key.
     material = (repr(sorted(SOURCE_CHANGES.items()))
                 + repr(sorted(KNOWN_BAD_WINDOWS.items()))
+                + repr(sorted(HISTORY_REPAIRS.items()))
                 + repr(sorted(UNVERIFIED_SERIES.items())) + repr(SUPPRESSED_FIELDS)
                 + repr(STALE_SUPPRESSED_FIELDS) + repr(STALE_AFTER_SESSIONS)
                 + repr(PUBLICATION_CUTOFF_HOUR) + repr(MARKET_TZ))

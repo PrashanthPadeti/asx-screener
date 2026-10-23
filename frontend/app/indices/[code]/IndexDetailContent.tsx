@@ -4,7 +4,7 @@ import Link from 'next/link'
 import {
   ArrowLeft, TrendingUp, TrendingDown, Minus,
   RefreshCw, ChevronUp, ChevronDown,
-  Search, ExternalLink, Download, Bell, Bookmark, AlertTriangle,
+  Search, ExternalLink, Download, Bell, Bookmark, AlertTriangle, History,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis,
@@ -160,6 +160,9 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
   // Declared by the backend, not listed here: a hardcoded index code in the
   // UI would outlive the repair that removes it.
   const [badWindow, setBadWindow] = useState<{ note?: string } | null>(null)
+  // History that was restated. Distinct from badWindow: that one warns the
+  // line is wrong, this one explains why it changed since you last looked.
+  const [repair, setRepair] = useState<{ note?: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -169,6 +172,7 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
         setHistory(r.history)
         setSourceChange((r as any).source_change ?? null)
         setBadWindow((r as any).known_bad_window ?? null)
+        setRepair((r as any).history_repair ?? null)
       })
       .finally(() => setLoading(false))
   }, [code, period])
@@ -276,6 +280,16 @@ function PerformanceChart({ code, unavailable, stale }: { code: string; unavaila
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
           <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
           <p className="text-[11px] leading-relaxed text-amber-800">{badWindow.note}</p>
+        </div>
+      )}
+
+      {/* Deliberately NOT amber. Amber says "do not trust this line"; this
+          says "this line changed, and here is why". Dressing a completed
+          correction as a warning teaches people to ignore the warnings. */}
+      {repair?.note && (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <History className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+          <p className="text-[11px] leading-relaxed text-slate-600">{repair.note}</p>
         </div>
       )}
     </SectionCard>

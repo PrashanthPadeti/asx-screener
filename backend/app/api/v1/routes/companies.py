@@ -121,6 +121,39 @@ async def list_companies(
 # ── Search / Autocomplete ─────────────────────────────────────
 
 @router.get("/search", response_model=list[CompanySearchResult])
+def _bool_nulls_to_false(model, row) -> dict:
+    """NULL in a column the schema declares `bool`, rendered as False.
+
+    `/api/v1/companies/search` returned 500 on 136 occasions — the most
+    frequent error on the site — because `is_reit` and `is_miner` are NULL
+    for 805 of 2,589 current companies and `CompanySearchResult` declares
+    them `bool`. A Pydantic default covers a MISSING key; it does not accept
+    an explicit None. Two NULL columns, "2 validation errors", 500. The same
+    cause broke `/companies/{code}` for those companies.
+
+    The fields are DERIVED from the model rather than listed, so a boolean
+    added to the schema later is covered without anyone remembering to add
+    it here. Listing them is how `is_reit` and `is_miner` were fixed in the
+    screener in June (9c50b4c) and left broken here.
+
+    Only non-optional bools are touched: a field declared `Optional[bool]`
+    means the schema WANTS to distinguish unknown from false, and silently
+    collapsing it would destroy exactly that distinction.
+
+    HONESTY NOTE: for those 805 companies this renders "we do not know" as
+    "not a REIT". The schema's own default already says absent means false,
+    so this is consistent with the declared contract rather than a new
+    claim — but it is still an assertion the data does not support, and the
+    underlying gap is recorded in
+    docs/finding_2026-10-24_company_flags_null_for_805_companies.md
+    """
+    out = dict(row)
+    for name, field in model.model_fields.items():
+        if field.annotation is bool and out.get(name) is None:
+            out[name] = False
+    return out
+
+
 async def search_companies(
     q:    str = Query(..., min_length=1, description="ASX code or company name"),
     limit: int = Query(10, ge=1, le=30),
@@ -156,7 +189,8 @@ async def search_companies(
         "limit": limit,
     })
     rows = result.mappings().all()
-    return [CompanySearchResult(**dict(r)) for r in rows]
+    return [CompanySearchResult(**_bool_nulls_to_false(CompanySearchResult, r))
+            for r in rows]
 
 
 # ── Company Detail ────────────────────────────────────────────
@@ -177,7 +211,7 @@ async def get_company(
     if not row:
         raise HTTPException(status_code=404, detail=f"Company {asx_code.upper()} not found")
 
-    return CompanyDetail(**dict(row))
+    return CompanyDetail(**_bool_nulls_to_false(CompanyDetail, row))
 
 
 # ── Company Overview (screener.universe) ──────────────────────

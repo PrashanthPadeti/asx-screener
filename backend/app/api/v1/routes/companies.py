@@ -126,7 +126,7 @@ def _bool_nulls_to_false(model, row) -> dict:
 
     `/api/v1/companies/search` returned 500 on 136 occasions — the most
     frequent error on the site — because `is_reit` and `is_miner` are NULL
-    for 805 of 2,589 current companies and `CompanySearchResult` declares
+    for 805 of 2,589 current companies (598 of them active, so 598 reachable through the search box) and `CompanySearchResult` declares
     them `bool`. A Pydantic default covers a MISSING key; it does not accept
     an explicit None. Two NULL columns, "2 validation errors", 500. The same
     cause broke `/companies/{code}` for those companies.

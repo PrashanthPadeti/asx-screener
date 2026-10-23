@@ -13,7 +13,7 @@
   description 1818 / 2589  70.2%
 ```
 
-**805 companies have NULL for both flags.** Not false — unknown. Nothing
+**805 companies have NULL for both flags**, 598 of them `active` and therefore reachable through the search box. Not false — unknown. Nothing
 has ever determined whether they are REITs or miners.
 
 ## Two consequences, one fixed and one not

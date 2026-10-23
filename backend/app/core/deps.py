@@ -148,8 +148,20 @@ def require_plan(minimum: str):
                 detail=f"This feature requires the '{minimum}' plan or higher.",
             )
 
-        # For paid plans, block access if subscription payment has failed
-        if min_rank > 0:
+        # For paid plans, block access if subscription payment has failed.
+        #
+        # `min_rank` here was a NameError. A rename to `_level(minimum)`
+        # missed this one reference, and because the line sits AFTER the
+        # plan check it is only ever reached by users who PASS it — so the
+        # gate returned a clean 403 to everyone unentitled and a 500 to
+        # everyone entitled. Every premium feature 500'd for every premium
+        # subscriber: commodities, global markets, indices, funds, the
+        # heatmap and top5 are all gated by this function.
+        #
+        # It also meant this block never ran, so a past_due subscriber was
+        # never shown the 402 asking them to fix their payment method —
+        # they were shown a broken site instead.
+        if _level(minimum) > 0:
             sub_status = user.get("subscription_status", "inactive")
             if sub_status == "past_due":
                 raise HTTPException(

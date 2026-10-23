@@ -1,4 +1,4 @@
-# A bind parameter followed by `::` is two parameters, not one and a cast
+# A bind parameter followed by `::` is never substituted at all
 
 **Found** 24 October 2026, in the production log, while confirming the
 v11.2.29 screener fixes had taken.
@@ -21,20 +21,44 @@ have executed.
 
 ## Why
 
-```sql
-VALUES (:uid, :channel, :type, :subject, :recipient,
-        :status, :error, :meta::jsonb, :attempts, ...)
+Measured against SQLAlchemy 2.0.36 — the version in `asx-venv`:
+
+```
+text("INSERT INTO t (a,b) VALUES (:meta::jsonb, :attempts)")
+  binds    -> ['attempts', 'met']
+  compiled -> INSERT INTO t (a,b) VALUES (:meta::jsonb, $1)
 ```
 
-SQLAlchemy's `text()` finds bind parameters by matching a colon followed by
-a word. Given `:meta::jsonb` it takes `:meta`; of the two colons left, the
-first is followed by a colon and does not match, and **the second is
-followed by `jsonb`, which it takes as a second bind parameter.** Nothing
-supplies `jsonb`, so the statement reaches Postgres with an unfilled
-placeholder and the parser stops at the colon.
+Two things go wrong at once.
 
-Verified against the library rather than asserted:
-`text("... :meta::jsonb ...")._bindparams` contains `jsonb`.
+**The cast expression is never substituted.** `:attempts` became `$1`.
+`:meta::jsonb` was left in the SQL exactly as written, so Postgres received
+a literal colon and stopped at it. That is the reported syntax error.
+
+**A truncated phantom parameter is registered.** Not `meta` — `met`. The
+scanner stops one character short of the `::` and keeps the shortened name.
+It is registered as a bind and then never rendered, so nothing supplies it
+and nothing raises about it. `:uid::uuid` registers `ui` the same way.
+
+The correct form substitutes cleanly:
+
+```
+text("... VALUES (CAST(:meta AS jsonb), :attempts)")
+  binds    -> ['attempts', 'meta']
+  compiled -> ... VALUES (CAST($1 AS jsonb), $2)
+```
+
+### A correction, recorded because it nearly shipped
+
+The first version of this document and of the commit message said
+`:meta::jsonb` registers `jsonb` as a *second* bind parameter. That is
+wrong; it registers `met`. The guard written around that wrong story
+rejected bind names that are SQL type names — and `met` is not one, so
+**the guard passed the live defect.** It was only caught because a separate
+test asserted the mechanism against the library itself and failed.
+
+A guard derived from an explanation is only as good as the explanation.
+This one is now derived from a measurement.
 
 ## The convention was already right
 
@@ -67,20 +91,32 @@ only because of how `text()` scans for colons.
 
 ## The guard
 
-`backend/tests/test_no_bindparam_followed_by_cast.py`, four properties:
+`backend/tests/test_no_bindparam_followed_by_cast.py`.
 
-1. **Population, not a list.** No `:name::type` anywhere under `app/`,
-   `compute/`, `scripts/` — so a fourth site added tomorrow fails the gate
-   rather than waiting for a customer.
-2. **The mechanism, behaviourally.** SQLAlchemy itself is asserted to
-   extract `jsonb` from the broken form and exactly `{meta, attempts}` from
-   the fixed one. If a future version changes that, the test says so
-   instead of quietly protecting nothing.
-3. **End-to-end on the shipped source.** Every `text()` literal in the
-   three repaired files is parsed out of the file by AST and handed to
-   `text()`; none may bind a SQL type name.
-4. **A mutation control**, and a false-positive control over forms that
-   must not be flagged (`SELECT a::text`, `INTERVAL '1 day'`).
+The load-bearing one is a property, not a pattern:
+
+> **Every bind parameter a statement registers must appear as a `$n`
+> placeholder in the compiled SQL.**
+
+Applied by AST to every `text()` literal under `app/`, `compute/` and
+`scripts/`, each compiled against the asyncpg dialect. The broken form
+registers two and renders one, so it fails. This holds whatever the
+scanner's regex turns out to be, and it catches *any* construct that
+defeats substitution — not only `::`, and not only the spellings I thought
+to enumerate.
+
+Supporting it:
+
+- A **mutation control** on the exact statement from the traceback, which
+  fails loudly if SQLAlchemy's behaviour ever changes.
+- An assertion that the phantom is `met` and `ui` — pinning the detail I
+  got wrong so it cannot quietly revert to the wrong story.
+- The cheap **textual tripwire** (no `:name::type` anywhere in the tree),
+  kept because it needs no dialect and names the offending line directly,
+  with a false-positive control over `SELECT a::text` and
+  `INTERVAL '1 day'`.
+- A **coverage floor**: the AST pass must compile at least 20 statements,
+  so the property cannot silently narrow to nothing.
 
 ## What this does not fix
 
@@ -93,6 +129,10 @@ product decision, not a rename, so it is left for a separate change.
 ## Rule
 
 A construct that is correct in four contexts and wrong in the fifth will
-not be caught by reading it. The textual guard is cheap and belongs in the
-gate; but the property is behavioural, and the only thing that actually
-establishes it is handing the shipped SQL to the library that parses it.
+not be caught by reading it — and neither will it be caught by a guard
+built from your explanation of why it is wrong. The explanation here was
+wrong, and the guard built on it passed the live defect.
+
+The only thing that established the property was handing the shipped SQL to
+the library that parses it and comparing what went in against what came
+out. Measure the mechanism, then derive the guard from the measurement.

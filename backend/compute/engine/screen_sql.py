@@ -349,9 +349,12 @@ def compile_criterion(criterion: Criterion, param: str,
     would turn a soft signal into a hard filter, which is the same class of
     error as treating a non-evaluation as a failure.
     """
-    applicable = applicable_sql(criterion.metric, dialect, states_col)
-    predicate = predicate_sql(criterion, param, dialect)
-
+    # `applicable` and `predicate` were computed here and never used: leftovers
+    # from before the three-valued refactor, which moved both inside
+    # three_valued_sql(). Removed rather than left in place -- the dead copy
+    # also called predicate_sql() WITHOUT paramstyle, so it had already drifted
+    # from the live one, and a stale duplicate of a governed expression sitting
+    # beside the real one is a trap for the next reader.
     if criterion.criterion in (CriterionType.REQUIRED, CriterionType.EXCLUDED):
         # Three-valued at the leaf, collapsed to membership by role. Both
         # steps matter: the CASE keeps UNKNOWN from becoming a claim, and the

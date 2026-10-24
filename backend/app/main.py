@@ -116,6 +116,24 @@ async def lifespan(app: FastAPI):
 
     # NOTE: email_verification_token + email_verification_sent_at columns were
     # added manually via psql (ALTER TABLE requires superuser on this DB setup).
+    # A paid capability that depends on an external credential must announce
+    # its own absence. Without ANTHROPIC_API_KEY, NL Screener (Pro+) and AI
+    # Portfolio Insights (Premium+) return 503 to every entitled subscriber,
+    # and before v11.2.34 nothing said so anywhere: no startup line, no log
+    # on the refusal, nothing on /health. A customer found it instead, and
+    # only after paying.
+    #
+    # Logged at ERROR deliberately. This is not a note about optional
+    # tooling; it means people are being charged for features that cannot
+    # run. The key itself is never logged -- only whether one is present.
+    if not settings.ANTHROPIC_API_KEY:
+        logger.error(
+            "ANTHROPIC_API_KEY is not set — NL Screener and AI Portfolio "
+            "Insights will return 503 to every Pro and Premium subscriber. "
+            "Paid features are unavailable until a key is installed.")
+    else:
+        logger.info("AI features configured (NL Screener, Portfolio Insights)")
+
     # Schema is confirmed correct — no DDL needed at startup.
 
     # ── Start schedulers ──────────────────────────────────────
@@ -438,6 +456,17 @@ async def health():
             # this; surfacing it here is what lets an operator verify that
             # after a thaw rather than take it on trust.
             "anomaly_alerts": settings.ANOMALY_ALERTS_ENABLED,
+        },
+        # Paid features that depend on an external credential. A missing key
+        # turns NL Screener (Pro+) and AI Portfolio Insights (Premium+) into a
+        # 503 for every subscriber entitled to them, and until now nothing
+        # said so: no startup warning, no log on the refusal, nothing here.
+        # The only signal was a customer complaining, 16 days in.
+        #
+        # Boolean only -- never the key, never its length. Whether the
+        # capability is available is operational state; the credential is not.
+        "features": {
+            "ai_configured": bool(settings.ANTHROPIC_API_KEY),
         },
     }
 

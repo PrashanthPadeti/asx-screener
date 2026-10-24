@@ -288,12 +288,50 @@ show c "$(sort -u "$WORK/candidate.inconclusive" "$WORK/baseline.inconclusive" 2
 P0_PATTERN='test_primary_features_contract'
 p0_failures="$(grep -E "^${P0_PATTERN}" "$WORK/candidate.failures" 2>/dev/null || true)"
 
+# A suite that could not RUN is not a suite that passed. The first version of
+# this check grepped only the failure list, so when the contract tests were
+# blocked by a database they could not reach, P0 printed "all primary-feature
+# contracts hold" -- a clean bill of health from a suite that never executed.
+# That is the same error the gate's INCONCLUSIVE category exists to prevent,
+# committed inside the guard written to prevent it.
+p0_inconclusive="$(grep -E "^${P0_PATTERN}" "$WORK/candidate.inconclusive" 2>/dev/null || true)"
+
+# And a suite that produced no result at all is the third way to learn
+# nothing: deleted, renamed, or never matched by the glob. The gate writes one
+# .out file per suite it EXECUTES, so the presence of that file is the
+# evidence -- there is no "passed" list to consult, which the first version of
+# this line assumed there was. It referenced $WORK/candidate.passed, a file
+# nothing writes, so a clean run would have counted zero and blocked every
+# release.
+p0_ran=0
+for _o in "$WORK"/candidate.*"$P0_PATTERN"*.out; do
+    [ -s "$_o" ] && p0_ran=$((p0_ran + 1))
+done
+
 echo
 echo "════ P0 — primary features (block on state, not attribution) ════"
 if [ -n "$p0_failures" ]; then
     echo "$p0_failures" | sed 's/^/    /'
+elif [ -n "$p0_inconclusive" ]; then
+    echo "    INCONCLUSIVE — the contracts did not run, so they prove nothing:"
+    echo "$p0_inconclusive" | sed 's/^/        /'
+elif [ "$p0_ran" = "0" ]; then
+    echo "    MISSING — no primary-feature suite was executed at all."
 else
     echo "    all primary-feature contracts hold"
+fi
+
+if [ -n "$p0_inconclusive" ] || [ "$p0_ran" = "0" ]; then
+    echo
+    echo "════ the PRIMARY FEATURE contracts did not run ════"
+    echo "They prove nothing, so this release is not cleared. An environment"
+    echo "fault and a broken screener are different problems; neither is a"
+    echo "reason to ship."
+    for f in $p0_inconclusive; do
+        echo "──── $f"
+        cat "$WORK/candidate.$f.out" 2>/dev/null | tail -40
+    done
+    exit 1
 fi
 
 if [ -n "$p0_failures" ]; then

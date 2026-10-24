@@ -12,7 +12,6 @@ POST   /watchlist/{id}/stocks          — add stock to watchlist
 DELETE /watchlist/{id}/stocks/{code}   — remove stock from watchlist
 """
 import logging
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import text

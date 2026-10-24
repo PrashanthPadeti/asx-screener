@@ -25,20 +25,16 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Mapping, Optional, Sequence
+from typing import Mapping, Optional, Sequence
 
 from compute.engine.applicability import Assessment
 from compute.engine.metric_registry import normalise
 from compute.engine.metric_states import (
-    GOVERNED_METRICS,
     LATEST_MODEL_VERSION,
     SourceHealth,
-    UnsupportedModelVersion,
     assert_complete,
-    encode,
     governed_for,
     persist_row,
-    violations,
 )
 
 
@@ -565,4 +561,4 @@ def read_back(cur, asx_code: str, run: ComputeRun,
             f"a later run has overwritten it and this is not verification")
 
     from compute.engine.metric_states import decode_all, load_states
-    return decode_all(dict(zip(wanted, values)), load_states(states))
+    return decode_all(dict(zip(wanted, values, strict=True)), load_states(states))

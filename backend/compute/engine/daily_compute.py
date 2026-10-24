@@ -20,7 +20,6 @@ Run after market close:
     python compute/engine/daily_compute.py --limit 100      # first N stocks
 """
 
-import os
 import sys
 import logging
 import argparse
@@ -29,9 +28,6 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extensions
-from psycopg2.extras import execute_values
-import pandas as pd
-import numpy as np
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -39,12 +35,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.dividends import (  # noqa: E402
-    FEED_STALENESS_DAYS, DividendSource, FeedHealth,
-    # fetch_feed_health now lives beside the thresholds and the dataclass
-    # it returns. Re-exported here because composite_score,
-    # sector_benchmarks and several scripts import it from this module,
-    # and moving a symbol is not a reason to break its callers.
-    fetch_feed_health,  # noqa: F401
+    DividendSource, fetch_feed_health,  # noqa: F401
 )
 
 
@@ -103,7 +94,7 @@ def fetch_financials(cur, asx_code: str) -> dict:
     pnl_cols = ["fiscal_year","revenue","gross_profit","ebitda","ebit",
                 "net_profit","pat","eps","dps","dps_franking_pct",
                 "interest_expense","tax","depreciation"]
-    pnl = [dict(zip(pnl_cols, r)) for r in pnl_rows]
+    pnl = [dict(zip(pnl_cols, r, strict=True)) for r in pnl_rows]
 
     # Balance Sheet — latest
     cur.execute("""
@@ -122,7 +113,7 @@ def fetch_financials(cur, asx_code: str) -> dict:
                "total_current_assets","total_current_liab",
                "shares_outstanding","book_value_per_share",
                "goodwill","intangibles","inventory","trade_receivables"]
-    bs = dict(zip(bs_cols, bs_row)) if bs_row else {}
+    bs = dict(zip(bs_cols, bs_row, strict=True)) if bs_row else {}
 
     # Cash Flow — latest
     cur.execute("""
@@ -133,7 +124,7 @@ def fetch_financials(cur, asx_code: str) -> dict:
     """, (asx_code,))
     cf_row = cur.fetchone()
     cf_cols = ["cfo","cfi","cff","capex","fcf","dividends_paid"]
-    cf = dict(zip(cf_cols, cf_row)) if cf_row else {}
+    cf = dict(zip(cf_cols, cf_row, strict=True)) if cf_row else {}
 
     return {"pnl": pnl, "bs": bs, "cf": cf}
 

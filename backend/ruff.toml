@@ -86,6 +86,14 @@ extend-immutable-calls = [
     "fastapi.Security",
     "Depends", "Query", "Path", "Body", "Header", "Cookie", "Form", "File",
     "Security",
+    # This project's own dependency factories, used the same way:
+    #   _user: dict = Depends(require_plan("premium"))
+    # The inner call runs once at import to BUILD the dependency, which is
+    # the intended shape. Whitelisted by name rather than suppressed per
+    # site, so a genuine mutable default elsewhere still fires.
+    # Matched by QUALIFIED name: the bare name alone does not match, which is
+    # why "Depends" above only works through "fastapi.Depends".
+    "app.core.deps.require_plan", "app.core.deps.require_feature",
 ]
 
 [lint.per-file-ignores]

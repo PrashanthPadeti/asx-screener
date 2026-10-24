@@ -30,7 +30,7 @@ compared against the Python engine rather than eyeballed.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Literal, Mapping, Optional, Sequence
+from typing import Literal, Mapping, Optional, Sequence
 
 from compute.engine.metric_registry import normalise
 from compute.engine.screen_predicates import CriterionType
@@ -614,7 +614,6 @@ def plan_screen(parsed, registry, scope: Optional[RunScope] = None,
     without supplying the guarantee, which is why resolve_run_scope exists.
     """
     from app.core.parsed_query import AllOf, AnyOf
-    from app.core.parsed_query import Criterion as TypedCriterion
 
     assert_role_is_decidable(parsed.expression)
 

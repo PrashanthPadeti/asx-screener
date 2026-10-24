@@ -3,7 +3,6 @@ Indices and ETF/Managed Funds endpoints.
 Reads from market.indices, market.index_prices, market.funds, market.fund_prices.
 """
 from collections import defaultdict
-from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.deps import require_plan

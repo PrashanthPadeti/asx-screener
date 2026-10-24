@@ -35,7 +35,6 @@ Usage:
     python compute/engine/monthly_compute.py --limit 20
 """
 
-import os
 import sys
 import logging
 import argparse

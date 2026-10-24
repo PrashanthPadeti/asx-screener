@@ -31,11 +31,10 @@ Usage:
     python compute/engine/weekly_compute.py --limit 20
 """
 
-import os
 import sys
 import logging
 import argparse
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import psycopg2

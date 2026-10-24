@@ -44,12 +44,11 @@ _ENGLISH_WORDS = {
     'SUCH', 'INTO', 'DOES', 'GIVE', 'JUST', 'THAN', 'THEM', 'THEN',
     'WELL', 'WERE', 'YOUR', 'STOCK', 'SHARE', 'PRICE', 'FUND', 'BANK',
     'MINE', 'GOLD', 'COAL', 'IRON', 'DATA', 'TELL', 'SHOW', 'WANT',
-    'LIKE', 'GOOD', 'MAKE', 'TOOK', 'FROM', 'SOME', 'ONLY', 'COME',
-    'THAN', 'BEEN', 'CALL', 'DOWN', 'LOOK', 'FIND', 'HERE', 'GIVE',
-    'LIVE', 'MEAN', 'PLAN', 'KNOW', 'NEED', 'GROW', 'EARN', 'REAL',
+    'LIKE', 'GOOD', 'MAKE', 'TOOK', 'SOME', 'ONLY', 'COME',
+    'CALL', 'DOWN', 'LOOK', 'FIND', 'HERE', 'LIVE', 'MEAN', 'PLAN', 'KNOW', 'NEED', 'GROW', 'EARN', 'REAL',
     'RISK', 'SALE', 'SELL', 'HOLD', 'LONG', 'NEXT', 'SAME', 'TIME',
     'CASH', 'DEBT', 'LOSS', 'GAIN', 'FULL', 'HALF', 'PAST', 'ONCE',
-    'FIVE', 'FOUR', 'NINE', 'ZERO', 'VERY', 'MUCH', 'ALSO', 'EVEN',
+    'FIVE', 'FOUR', 'NINE', 'ZERO', 'VERY', 'EVEN',
 }
 
 

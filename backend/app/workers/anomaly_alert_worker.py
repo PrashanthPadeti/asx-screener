@@ -14,7 +14,7 @@ Dedup guard: skips stocks whose anomaly was already notified today
 """
 import json
 import logging
-from datetime import date, timezone, datetime
+from datetime import date
 from typing import Optional
 
 from sqlalchemy import text

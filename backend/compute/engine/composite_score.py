@@ -24,7 +24,6 @@ Usage:
 
 import argparse
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Mapping, Optional
 
@@ -256,7 +255,7 @@ def compute_factor(df: pd.DataFrame, factor_name: str,
     # now the only thing that decides.
     score = pd.Series(float("nan"), index=df.index)
 
-    for position, code in zip(df.index, codes):
+    for position, code in zip(df.index, codes, strict=True):
         assessed = dict(assessments.get(code, {}))
 
         # An ungoverned constituent has no assessment because no gate ran for
@@ -334,7 +333,7 @@ def compute_composite(df_scores: pd.DataFrame,
     codes = df_scores[CODE_COLUMN]
     composite = pd.Series(float("nan"), index=df_scores.index)
 
-    for position, code in zip(df_scores.index, codes):
+    for position, code in zip(df_scores.index, codes, strict=True):
         # A factor's own EffectiveWeights becomes this composite's assessment
         # of it. NOT_MEANINGFUL travels as NOT_MEANINGFUL so the composite may
         # reweight within its floor; UNAVAILABLE travels as UNAVAILABLE so it
@@ -463,7 +462,12 @@ def _dilution_curve(d: float) -> float:
     """Share-count change over the window (percent, positive = dilution) -> 0-100."""
     if d <= _DILUTION_KNEES[0][0]:
         return _DILUTION_KNEES[0][1]
-    for (x0, y0), (x1, y1) in zip(_DILUTION_KNEES, _DILUTION_KNEES[1:]):
+    # strict=False is correct here and everywhere else in this file it is not:
+    # the pairwise sliding window zips n against n-1 on purpose, so truncation
+    # IS the mechanism. Stated explicitly rather than relying on the default,
+    # because the default is what let a genuine length mismatch elsewhere drop
+    # rows in silence.
+    for (x0, y0), (x1, y1) in zip(_DILUTION_KNEES, _DILUTION_KNEES[1:], strict=False):
         if d <= x1:
             return y0 + (y1 - y0) * (d - x0) / (x1 - x0)
     return _DILUTION_KNEES[-1][1]
@@ -494,7 +498,7 @@ def _ownership_curve(pct: float) -> float:
     """
     if pct <= _OWNERSHIP_KNEES[0][0]:
         return _OWNERSHIP_KNEES[0][1]
-    for (x0, y0), (x1, y1) in zip(_OWNERSHIP_KNEES, _OWNERSHIP_KNEES[1:]):
+    for (x0, y0), (x1, y1) in zip(_OWNERSHIP_KNEES, _OWNERSHIP_KNEES[1:], strict=False):
         if pct <= x1:
             return y0 + (y1 - y0) * (pct - x0) / (x1 - x0)
     return _OWNERSHIP_KNEES[-1][1]
@@ -693,7 +697,7 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
                     feed_health.reason)
 
     masked = apply_applicability(df, dividend_source)
-    df, metric_states = masked.frame, masked.states
+    df = masked.frame
     for key, count in sorted(masked.tally.items()):
         log.info("  %-40s %5d", key, count)
 

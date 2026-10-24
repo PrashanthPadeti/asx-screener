@@ -345,7 +345,7 @@ def predict_stock(
             svm.fit(X_tr_s, y_cls)
             proba  = svm.predict_proba(X_inf_s)[0]
             cls_   = svm.predict(X_inf_s)[0]
-            cmap   = {c: p for c, p in zip(svm.classes_, proba)}
+            cmap   = {c: p for c, p in zip(svm.classes_, proba, strict=True)}
             conf   = float(max(proba))
             # Convert classification to rough % estimate
             if   cls_ ==  1: pct_est =  3.0 * conf

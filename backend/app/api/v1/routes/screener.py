@@ -31,9 +31,9 @@ from app.schemas.screener import (
     OrderingExclusion,
 )
 from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
-from app.core.deps import get_optional_user, get_current_user, require_admin, require_query_access
+from app.core.deps import get_optional_user, get_current_user, require_query_access
 from app.core.query_parser import (
-    parse_query, parse_query_typed, get_field_reference, QueryParseError,
+    parse_query_typed, get_field_reference, QueryParseError,
 )
 from app.core.parsed_query import (
     AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
@@ -986,6 +986,10 @@ def build_screener_sql(req: ScreenerRequest, scope=None,
 
     # Ranking participation lives in the WHERE, so a non-participant never
     # reaches the ORDER BY and cannot spend a pagination slot.
+    # This endpoint DOES apply it: the data query below selects on
+    # {data_where}, so a governed sort restricts the rows to those the
+    # metric can actually be evaluated for. The sibling endpoint built the
+    # same value and never used it; see the note there.
     data_where = where
     if plan.order_governed and plan.order_applicable:
         data_where = f"{where} AND {plan.order_applicable}"
@@ -2282,10 +2286,15 @@ async def query_screener(
     sort_expr = plan.order_column or "u.market_cap"
     sort_dir  = plan.order_direction
 
-    data_where = where
-    if plan.order_governed and plan.order_applicable:
-        data_where = f"{where} AND {plan.order_applicable}"
-
+    # NOTE: a `data_where` was built here as
+    #     where AND plan.order_applicable   (when the sort is governed)
+    # and then never used -- the data query below runs plain {where}. So a
+    # screen sorted by a governed metric still returns rows the metric
+    # cannot be evaluated for; they sort to the bottom under NULLS LAST.
+    # Removed rather than wired in: count_sql uses {where} too, so applying
+    # it to the data query alone would make the pagination count disagree
+    # with the rows returned. Restoring the intent is a deliberate change
+    # to screen results and belongs in its own candidate.
     count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
 
     data_sql = f"""

@@ -6,7 +6,6 @@ Endpoints:
   GET /api/v1/top5/history   — last N weeks of picks (grouped by week)
 """
 
-from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query

@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 from app.db.session import get_db
 from app.core.deps import require_plan
-from app.core.cache import cache_get, cache_set, make_key, MARKET_TTL, STATIC_TTL
+from app.core.cache import cache_get, cache_set, make_key, MARKET_TTL
 from app.schemas.market import (
     MarketSummary,
     MoversResponse,
@@ -454,7 +454,7 @@ async def market_signals(
 
     if has_table:
         # Fast path: read from pre-computed table
-        period_join = f"""
+        period_join = """
             INNER JOIN market.period_metrics pm
                 ON pm.asx_code = u.asx_code
                AND pm.computed_date = CURRENT_DATE
@@ -969,7 +969,6 @@ async def market_heatmap_export(
     try:
         import openpyxl
         from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
-        from openpyxl.styles.numbers import FORMAT_NUMBER_COMMA_SEP1
         from openpyxl.utils import get_column_letter
     except ImportError:
         from fastapi import HTTPException

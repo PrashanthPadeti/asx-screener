@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, List
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, HTTPException,
-                     Query, Request, status)
+                     Query, Request)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from pydantic import BaseModel
@@ -320,8 +320,6 @@ async def system_health(
     Includes RAG status, growth projections, and upgrade timeline.
     """
     import os
-    import subprocess
-    import re
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

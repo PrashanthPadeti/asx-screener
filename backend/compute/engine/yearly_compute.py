@@ -33,11 +33,10 @@ Usage:
     python compute/engine/yearly_compute.py --min-year 2020
 """
 
-import os
 import logging
 import argparse
 from datetime import datetime, timezone
-from typing import Mapping, Optional
+from typing import Optional
 
 import psycopg2
 import psycopg2.extensions
@@ -611,7 +610,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         tcl    = _f(row.get("total_current_liab"))
         ltd    = _f(row.get("long_term_debt"))
         rec    = _f(row.get("trade_receivables"))
-        inv    = _f(row.get("inventory"))
+        # inventory was fetched and never used -- no ratio here consumes it.
         fpc    = fpc_raw  # already set above from derived_franking_pct or dps_franking_pct
 
         # ── Shares fallback (EODHD omits shares from balance sheet) ──────

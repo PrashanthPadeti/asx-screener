@@ -31,12 +31,11 @@ storage translation happens at compilation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Optional
 
 from app.core.screener_fields import FieldDef, UnknownField, resolve
-from compute.engine.metric_registry import normalise
 from compute.engine.screen_predicates import CriterionType
 
 

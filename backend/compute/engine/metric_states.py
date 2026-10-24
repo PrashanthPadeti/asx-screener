@@ -55,7 +55,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Iterable, Mapping, Optional
 
 from compute.engine.applicability import (

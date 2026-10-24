@@ -3,7 +3,6 @@ Mining & REIT Metrics Sync Worker
 Syncs mining and REIT sector metrics weekly on Sunday at 7:00am AEST.
 """
 import logging
-import asyncio
 
 log = logging.getLogger(__name__)
 

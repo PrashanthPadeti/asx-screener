@@ -227,8 +227,8 @@ async def run(dry_run: bool = False) -> None:
 
         total_active = sum(len(v) for v in flagged_codes.values())
         log.info(
-            "Done — %d flags upserted, active across %d stocks%s",
-            inserted, len(flagged_codes),
+            "Done — %d flags upserted, %d active across %d stocks%s",
+            inserted, total_active, len(flagged_codes),
             " [DRY RUN — nothing written]" if dry_run else "",
         )
 

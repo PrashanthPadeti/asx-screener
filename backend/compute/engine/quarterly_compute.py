@@ -28,14 +28,11 @@ Usage:
     python compute/engine/quarterly_compute.py --min-year 2022
 """
 
-import os
 import logging
 import argparse
-from datetime import datetime, timezone
 
 import psycopg2
 import psycopg2.extensions
-from psycopg2.extras import execute_values
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv

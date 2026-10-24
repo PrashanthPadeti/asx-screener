@@ -54,9 +54,23 @@ from unittest.mock import MagicMock, patch
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
+# Placeholders so the suite is SELF-SUFFICIENT. setdefault, so a real
+# environment still wins.
+#
+# ANTHROPIC_API_KEY matters most here. Without it the AI endpoint refuses
+# before the stub is reached -- correctly, and v11.2.34's logging says so:
+# "AI refused: ANTHROPIC_API_KEY is not set. Plan=premium." The gate
+# symlinks the real .env, so this would have PASSED there and failed in a
+# bare worktree: a suite whose result depends on whether a credential
+# happens to be installed proves something different each time it runs.
+#
+# The value is obviously fake and never used: anthropic.Anthropic is
+# patched in every AI test, so no request leaves the process and nothing
+# is billed. What the key has to do is get past the configuration guard.
 for _k, _v in (("DATABASE_URL", "postgresql+asyncpg://unused/unused"),
                ("DATABASE_URL_SYNC", "postgresql://unused/unused"),
-               ("JWT_SECRET", "test-only-not-a-secret")):
+               ("JWT_SECRET", "test-only-not-a-secret"),
+               ("ANTHROPIC_API_KEY", "sk-ant-NOT-A-REAL-KEY-for-tests")):
     os.environ.setdefault(_k, _v)
 
 #: A code that will not exist in a schema-only clone. Used where the test is

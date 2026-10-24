@@ -97,9 +97,45 @@ def _client():
         return _CLIENT
 
     from fastapi.testclient import TestClient
+    from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                        create_async_engine)
+    from sqlalchemy.pool import NullPool
     from app.main import app
+    from app.db.session import get_db
     from app.core.deps import (get_current_user, get_optional_user,
                                require_query_access)
+
+    # A NullPool engine, because TestClient opens a NEW event loop for every
+    # request when it is not used as a context manager. The application
+    # engine pools connections (pool_size=5), and a pooled connection created
+    # on one loop and reused on the next fails with
+    #
+    #     RuntimeError: Event loop is closed
+    #     Future ... attached to a different loop
+    #
+    # which presented as nine broken primary features and was the pool.
+    # NullPool opens and closes a connection per checkout, so nothing
+    # survives a loop. Sharing one TestClient does NOT fix this on its own --
+    # the portal, and the loop, are still per-request.
+    #
+    # Using `with TestClient(app)` would pin one loop, but it also runs
+    # lifespan: that registers the 18 scheduler jobs, and a test must not
+    # start the production scheduler to ask whether a screen compiles.
+    test_engine = create_async_engine(os.environ["DATABASE_URL"],
+                                      poolclass=NullPool)
+    test_sessions = async_sessionmaker(test_engine, class_=AsyncSession,
+                                       expire_on_commit=False)
+
+    async def _db():
+        async with test_sessions() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
+    app.dependency_overrides[get_db] = _db
 
     premium = {"id": "00000000-0000-0000-0000-000000000001",
                "email": "contract-test@example.invalid",

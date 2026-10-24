@@ -27,7 +27,6 @@ Usage:
     python compute/engine/halfyearly_compute.py --min-year 2020
 """
 
-import os
 import logging
 import argparse
 from datetime import datetime, timezone

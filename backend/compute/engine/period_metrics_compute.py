@@ -11,7 +11,6 @@ Run daily after market close (after price ingest):
     python compute/engine/period_metrics_compute.py --codes BHP CBA
 """
 
-import os
 import sys
 import logging
 import argparse

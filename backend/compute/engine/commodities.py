@@ -241,7 +241,6 @@ def fetch_yahoo_commodity(
     Fetch daily commodity data from Yahoo Finance v8 API (free, no API key).
     ticker: e.g. 'TIO=F' for SGX TSI Iron Ore 62% Fe CFR China futures.
     """
-    import time as _time
     period1 = int(pd.Timestamp(start_date - timedelta(days=400)).timestamp())
     period2 = int(pd.Timestamp(end_date   + timedelta(days=1)  ).timestamp())
     url     = f"{YAHOO_BASE}/{ticker}"

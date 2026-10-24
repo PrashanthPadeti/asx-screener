@@ -339,7 +339,7 @@ def verify_population(cur, by_code: Mapping[str, Mapping[str, object]],
             report.unexpected.append(code)
             continue
 
-        restored = decode_all(dict(zip(metrics, values)), load_states(states))
+        restored = decode_all(dict(zip(metrics, values, strict=True)), load_states(states))
 
         # Field level first, so a failure names the metric and both values.
         # The hash is the attestation; it is not the diagnosis.

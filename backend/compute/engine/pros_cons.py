@@ -18,7 +18,6 @@ Usage:
 
 import argparse
 import logging
-import os
 from typing import Optional
 
 import psycopg2
@@ -179,7 +178,8 @@ def eval_row(r: pd.Series) -> tuple[list[str], list[str]]:
     pf = v("piotroski_f_score")
     az = v("altman_z_score")
     roe_v = v("roe")
-    roce_v = v("roce")
+    # roce was fetched and never used: no pro or con is derived from it,
+    # though one was evidently intended. A gap, not a defect.
     nm = v("net_margin")
 
     if pf is not None and pf >= T["piotroski_strong"]:

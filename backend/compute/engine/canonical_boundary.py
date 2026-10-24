@@ -369,7 +369,7 @@ def stage_scripts() -> dict[str, Path]:
                 and any(getattr(t, "id", "") == "STAGE_COMMANDS"
                         for t in node.targets)):
             continue
-        for key, value in zip(node.value.keys, node.value.values):
+        for key, value in zip(node.value.keys, node.value.values, strict=True):
             stage = ast.literal_eval(key)
             for sub in ast.walk(value):
                 if (isinstance(sub, ast.Constant) and isinstance(sub.value, str)

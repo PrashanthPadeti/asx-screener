@@ -35,7 +35,6 @@ Usage:
     python compute/engine/monthly_compute.py --limit 20
 """
 
-import os
 import sys
 import logging
 import argparse
@@ -297,7 +296,7 @@ def build_monthly_rows(asx_code: str, daily: pd.DataFrame,
     rows = []
 
     for dt in m.index:
-        def g(series, default=None):
+        def g(series, default=None, dt=dt):
             val = series.get(dt, default)
             return _nan_to_none(val)
 

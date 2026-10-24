@@ -31,9 +31,9 @@ from app.schemas.screener import (
     OrderingExclusion,
 )
 from app.core.cache import cache_get, cache_set, make_key, SCREENER_TTL
-from app.core.deps import get_optional_user, get_current_user, require_admin, require_query_access
+from app.core.deps import get_optional_user, get_current_user, require_query_access
 from app.core.query_parser import (
-    parse_query, parse_query_typed, get_field_reference, QueryParseError,
+    parse_query_typed, get_field_reference, QueryParseError,
 )
 from app.core.parsed_query import (
     AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
@@ -247,7 +247,6 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "total_debt":            {"col": "u.total_debt",           "scale": 1,    "type": "number", "label": "Total Debt (AUD M)",          "unit": "AUD M","cat": "Financial Health"},
     "debt_to_ebitda":        {"col": "u.debt_to_ebitda",       "scale": 1,    "type": "number", "label": "Debt / EBITDA",               "unit": "x",    "cat": "Financial Strength"},
     "net_debt_to_ebitda":    {"col": "u.net_debt_to_ebitda",   "scale": 1,    "type": "number", "label": "Net Debt / EBITDA",           "unit": "x",    "cat": "Financial Strength"},
-    "cash_conversion_cycle": {"col": "u.cash_conversion_cycle","scale": 1,    "type": "number", "label": "Cash Conversion Cycle (days)","unit": "days", "cat": "Financial Health"},
     "fcf_fy0":               {"col": "u.fcf_fy0",              "scale": 1,    "type": "number", "label": "Free Cash Flow (AUD M)",      "unit": "AUD M","cat": "Financial Health"},
     "cfo_fy0":               {"col": "u.cfo_fy0",              "scale": 1,    "type": "number", "label": "Operating CF (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
     "total_assets":          {"col": "u.total_assets",         "scale": 1,    "type": "number", "label": "Total Assets (AUD M)",        "unit": "AUD M","cat": "Financial Health"},
@@ -324,11 +323,6 @@ ALLOWED_FIELDS: dict[str, dict] = {
     "sma_200":             {"col": "u.sma_200",       "scale": 1,    "type": "number",  "label": "SMA 200",                 "unit": "AUD", "cat": "Technicals"},
     "ema_20":              {"col": "u.ema_20",        "scale": 1,    "type": "number",  "label": "EMA 20",                  "unit": "AUD", "cat": "Technicals"},
     "above_sma20":         {"col": "(u.price > u.sma_20 AND u.sma_20 IS NOT NULL)",   "scale": 1, "type": "boolean", "label": "Above SMA 20",  "unit": "", "cat": "Technicals"},
-    "above_sma50":         {"col": "(u.price > u.sma_50 AND u.sma_50 IS NOT NULL)",   "scale": 1, "type": "boolean", "label": "Above SMA 50",  "unit": "", "cat": "Technicals"},
-    "above_sma200":        {"col": "(u.price > u.sma_200 AND u.sma_200 IS NOT NULL)", "scale": 1, "type": "boolean", "label": "Above SMA 200", "unit": "", "cat": "Technicals"},
-    "golden_cross":        {"col": "(u.sma_50 > u.sma_200 AND u.sma_50 IS NOT NULL AND u.sma_200 IS NOT NULL)", "scale": 1, "type": "boolean", "label": "Golden Cross (SMA50 > SMA200)", "unit": "", "cat": "Technicals"},
-    "death_cross":         {"col": "(u.sma_50 < u.sma_200 AND u.sma_50 IS NOT NULL AND u.sma_200 IS NOT NULL)", "scale": 1, "type": "boolean", "label": "Death Cross (SMA50 < SMA200)",  "unit": "", "cat": "Technicals"},
-    "bb_pct":              {"col": "((u.price - u.bb_lower) / NULLIF(u.bb_upper - u.bb_lower, 0) * 100)", "scale": 1, "type": "number", "label": "BB %B (position in band)", "unit": "%", "cat": "Technicals"},
     "bb_width":            {"col": "((u.bb_upper - u.bb_lower) / NULLIF(u.sma_20, 0) * 100)",             "scale": 1, "type": "number", "label": "BB Width %",               "unit": "%", "cat": "Technicals"},
     "volatility_20d":      {"col": "u.volatility_20d","scale": 0.01, "type": "number",  "label": "Volatility 20D %",        "unit": "%",   "cat": "Technicals"},
     "volatility_60d":      {"col": "u.volatility_60d","scale": 0.01, "type": "number",  "label": "Volatility 60D %",        "unit": "%",   "cat": "Technicals"},
@@ -992,6 +986,10 @@ def build_screener_sql(req: ScreenerRequest, scope=None,
 
     # Ranking participation lives in the WHERE, so a non-participant never
     # reaches the ORDER BY and cannot spend a pagination slot.
+    # This endpoint DOES apply it: the data query below selects on
+    # {data_where}, so a governed sort restricts the rows to those the
+    # metric can actually be evaluated for. The sibling endpoint built the
+    # same value and never used it; see the note there.
     data_where = where
     if plan.order_governed and plan.order_applicable:
         data_where = f"{where} AND {plan.order_applicable}"
@@ -2288,10 +2286,15 @@ async def query_screener(
     sort_expr = plan.order_column or "u.market_cap"
     sort_dir  = plan.order_direction
 
-    data_where = where
-    if plan.order_governed and plan.order_applicable:
-        data_where = f"{where} AND {plan.order_applicable}"
-
+    # NOTE: a `data_where` was built here as
+    #     where AND plan.order_applicable   (when the sort is governed)
+    # and then never used -- the data query below runs plain {where}. So a
+    # screen sorted by a governed metric still returns rows the metric
+    # cannot be evaluated for; they sort to the bottom under NULLS LAST.
+    # Removed rather than wired in: count_sql uses {where} too, so applying
+    # it to the data query alone would make the pagination count disagree
+    # with the rows returned. Restoring the intent is a deliberate change
+    # to screen results and belongs in its own candidate.
     count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
 
     data_sql = f"""

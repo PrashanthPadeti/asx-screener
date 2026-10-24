@@ -27,7 +27,6 @@ Usage:
     python compute/engine/technical_compute.py --full          # all history (slow)
 """
 
-import os
 import logging
 import argparse
 from datetime import datetime, date, timezone, timedelta
@@ -274,7 +273,8 @@ def compute_adx(high: pd.Series, low: pd.Series, close: pd.Series,
     """Returns (adx, plus_di, minus_di) as three pd.Series."""
     prev_high  = high.shift(1)
     prev_low   = low.shift(1)
-    prev_close = close.shift(1)
+    # prev_close was computed here and unused: compute_atr() below derives
+    # its own for the true range, which is where it is actually needed.
 
     up_move   = high - prev_high
     down_move = prev_low - low
@@ -357,7 +357,11 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     h = df["high"]
     l = df["low"]
     c = df["close"]
-    a = df["adj_close"]
+    # NOTE: adj_close is selected, cast and written to the output row, but
+    # used in NO calculation -- this binding was the only attempt. Every
+    # indicator here, daily_return included, is computed on the UNADJUSTED
+    # close. Flagged rather than changed: switching the basis moves many
+    # downstream metrics and is a methodology decision.
     v = df["volume"].astype(float)
 
     # ── Returns ───────────────────────────────────────────────────────────────
@@ -628,7 +632,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
 
     rows = []
     for _, row in df.iterrows():
-        def g(col):
+        def g(col, row=row):
             return _v(row.get(col)) if col in row.index else None
 
         # Integer volume columns
@@ -644,7 +648,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
         # _vc = _v + overflow guard (returns None if |val| > 9_999_999)
         # Applied to ratio/return/volatility columns that were originally
         # NUMERIC(8,4) and can blow up for near-zero-price penny stocks.
-        c = lambda col: _vc(row.get(col)) if col in row.index else None  # noqa: E731
+        c = lambda col, row=row: _vc(row.get(col)) if col in row.index else None  # noqa: E731
 
         rows.append((
             asx_code,

@@ -33,12 +33,10 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
     UserProfile,
-    UpdateProfileRequest,
 )
 from app.services.email import (
     send_login_failure_alert,
     send_password_reset_email,
-    send_verification_reminder_email,
     send_welcome_email,
 )
 

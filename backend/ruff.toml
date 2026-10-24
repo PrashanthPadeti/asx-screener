@@ -1,0 +1,101 @@
+# Ruff configuration
+# ==================
+# Until 24 Oct 2026 there was no config at all, so `ruff check app/` applied
+# whatever the newest ruff happened to default to. Two consequences:
+#
+#   - CI failed on 1,268 findings, ~1,050 of them cosmetic or simply wrong
+#     about this codebase, and went on failing for days. The signal was
+#     unreadable, so nobody read it.
+#   - Because the workflow installed ruff UNPINNED, a release on PyPI could
+#     turn `main` red with no change to this repository. That is what
+#     happened around 21 October.
+#
+# Buried in that noise were findings that mattered: a duplicate dict key
+# meant every natural-language query for "profit growth" was answered with
+# PRE-TAX profit growth while a line in the earnings section declared it
+# meant net. One real customer-facing bug, invisible under 1,200 style
+# complaints.
+#
+# So the rules below are chosen, not inherited. The test is: would this rule
+# have caught a defect that reached a customer, or prevented one that could?
+# Everything else is off -- not because style does not matter, but because a
+# linter nobody reads catches nothing.
+
+target-version = "py312"
+line-length = 100
+
+[lint]
+# F  pyflakes       -- undefined names, unused imports, duplicate dict keys,
+#                      redefinitions. This is the family that found the real
+#                      bug (F601) and it earns its place outright.
+# E4/E7/E9          -- the pycodestyle errors that are actual errors: bad
+#                      imports, statement problems, syntax. E1/E2/E3 are
+#                      whitespace opinions and are left out.
+# B  bugbear        -- genuine traps: mutable default arguments (B006),
+#                      duplicate set members (B033), loop-variable capture in
+#                      closures (B023), and zip() without strict= (B905),
+#                      which silently truncates to the shorter sequence and
+#                      drops rows while every number still looks plausible.
+#                      All of these are silent-wrongness bugs, which is the
+#                      failure mode this project keeps meeting.
+select = ["F", "E4", "E9", "B"]
+
+# E7 was selected in the first version of this file and immediately brought
+# in 88 findings of exactly the noise this config exists to remove: E701
+# (`if x: return` on one line), E702 (semicolons), E731 (lambda assignment),
+# E741 (short names like `l`). Chosen-not-inherited means reading what is in
+# a family, not reaching for the family.
+ignore = [
+    # Exception chaining (`raise ... from err`). Good practice and better
+    # tracebacks, but it produces no wrong answers, and 36 mechanical edits
+    # inside except blocks is churn that would obscure real changes. Worth
+    # doing as its own commit if anyone wants it.
+    "B904",
+    # Unused loop control variable (`for i, x in ...` where i is unused).
+    # Cosmetic.
+    "B007",
+    # Import not at top of file. Several modules deliberately manipulate
+    # sys.path before importing, and tests insert the backend root first.
+    # The rule cannot tell that from carelessness.
+    "E402",
+]
+
+# Deliberately NOT selected, with reasons, so this is a decision and not an
+# oversight. Re-enabling any of them is a judgement call someone can make
+# later with this list in front of them:
+#
+#   UP   (721 findings) Optional[X] -> X | None and similar. Pure syntax
+#        preference; no defect has ever come from it here.
+#   I    (64)  import sorting. Worth having one day, but it would rewrite
+#        imports across the tree in the same commit as real fixes, which
+#        makes the real fixes unreviewable.
+#   BLE001 (97) blind `except Exception`. This project NEEDS those: the
+#        per-subscriber catch in announcement_worker exists precisely so one
+#        failure cannot silence every later subscriber. The rule and
+#        correctness genuinely disagree here, and correctness wins.
+#   G201, S110, SIM, RUF, FURB, PLC, RET, C4, PYI -- style and micro-idiom.
+
+[lint.flake8-bugbear]
+# B008 flags "function call in a default argument". In FastAPI that IS the
+# documented idiom -- `db: AsyncSession = Depends(get_db)` -- and it accounted
+# for 229 of the 1,268 findings. Every one was a false positive about a
+# framework requirement, and nothing is gained by suppressing them one by one.
+extend-immutable-calls = [
+    "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body",
+    "fastapi.Header", "fastapi.Cookie", "fastapi.Form", "fastapi.File",
+    "fastapi.Security",
+    "Depends", "Query", "Path", "Body", "Header", "Cookie", "Form", "File",
+    "Security",
+    # This project's own dependency factories, used the same way:
+    #   _user: dict = Depends(require_plan("premium"))
+    # The inner call runs once at import to BUILD the dependency, which is
+    # the intended shape. Whitelisted by name rather than suppressed per
+    # site, so a genuine mutable default elsewhere still fires.
+    # Matched by QUALIFIED name: the bare name alone does not match, which is
+    # why "Depends" above only works through "fastapi.Depends".
+    "app.core.deps.require_plan", "app.core.deps.require_feature",
+]
+
+[lint.per-file-ignores]
+# Tests build deliberately malformed inputs and assert on them.
+"tests/*" = ["B011", "F841"]

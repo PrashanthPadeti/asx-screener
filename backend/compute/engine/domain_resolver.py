@@ -276,7 +276,7 @@ class Coverage:
         for source, n in self.by_source.most_common():
             lines.append(f"  {source.value:20} {n:5}")
         if self.unmapped_industries:
-            lines += ["", f"top unmapped industries (author these first):"]
+            lines += ["", "top unmapped industries (author these first):"]
             for industry, n in self.unmapped_industries.most_common(top_unmapped):
                 lines.append(f"  {n:5}  {industry}")
         return "\n".join(lines)

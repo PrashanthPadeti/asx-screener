@@ -19,7 +19,7 @@ import logging
 from collections import defaultdict
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -580,7 +580,7 @@ async def get_portfolio_history(
     if not txn_rows:
         return {"portfolio_id": portfolio_id, "period": period, "history": []}
 
-    from datetime import timedelta, date as date_type
+    from datetime import date as date_type
     end_date   = date_type.today()
     start_date = end_date - timedelta(days=days)
     first_txn_date = txn_rows[0]["transaction_date"]
@@ -696,7 +696,7 @@ async def get_portfolio_dividends(
     placeholders = ", ".join(f":c{i}" for i in range(len(codes)))
     code_params  = {f"c{i}": code for i, code in enumerate(codes)}
 
-    from datetime import timedelta, date as date_type
+    from datetime import date as date_type
     today      = date_type.today()
     future_end = today + timedelta(days=months_ahead * 30)
     past_start = today - timedelta(days=365)

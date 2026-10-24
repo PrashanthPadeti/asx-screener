@@ -15,7 +15,6 @@ Usage:
 import argparse
 import json
 import logging
-import os
 from datetime import datetime, timezone
 
 import psycopg2
@@ -191,7 +190,7 @@ def run(conn, dry_run: bool = False) -> int:
                     "withheld with a stated cause.", feed_health.reason)
 
     masked = apply_applicability(df, dividend_source)
-    sector_by_code = dict(zip(df["asx_code"], df["sector"]))
+    sector_by_code = dict(zip(df["asx_code"], df["sector"], strict=True))
     governed_results = by_sector(masked.assessments, sector_by_code,
                                  GOVERNED_BENCHMARK_METRICS)
 
@@ -205,7 +204,7 @@ def run(conn, dry_run: bool = False) -> int:
 
         gb = governed_results.get(sector, {})
 
-        def g(metric: str, which: str):
+        def g(metric: str, which: str, gb=gb):
             """A governed statistic, or None with its reason in the sidecar."""
             return _governed_stat(gb.get(metric), which)
 

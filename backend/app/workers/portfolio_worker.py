@@ -9,7 +9,6 @@ Portfolio holdings are derived from users.portfolio_transactions
 (buys add quantity, sells subtract).
 """
 import logging
-from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import text
 

@@ -31,11 +31,10 @@ Usage:
     python compute/engine/weekly_compute.py --limit 20
 """
 
-import os
 import sys
 import logging
 import argparse
-from datetime import datetime, timezone, date, timedelta
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import psycopg2
@@ -259,7 +258,7 @@ def build_weekly_rows(asx_code: str, daily: pd.DataFrame,
     rows = []
 
     for dt in w.index:
-        def g(series, default=None):
+        def g(series, default=None, dt=dt):
             val = series.get(dt, default)
             return _nan_to_none(val)
 

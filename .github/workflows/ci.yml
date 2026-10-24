@@ -18,9 +18,16 @@ jobs:
       - name: Install deps
         run: |
           cd backend
-          pip install ruff mypy
+          # PINNED. Unpinned, a release on PyPI changes which rules apply and
+          # turns `main` red with no change to this repository -- which is
+          # exactly what happened around 21 Oct 2026. Bump this deliberately,
+          # and read the new findings when you do.
+          pip install ruff==0.17.2 mypy
       - name: Ruff lint
-        run: cd backend && ruff check app/
+        # Rules are declared in backend/ruff.toml, not inherited from whatever
+        # the newest ruff defaults to. compute/ is included because the
+        # governed-metrics engine lives there and had never been linted at all.
+        run: cd backend && ruff check app/ compute/
       - name: Type check
         run: cd backend && mypy app/ --ignore-missing-imports || true
 

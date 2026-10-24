@@ -7,13 +7,12 @@ Handles retry logic: up to 3 attempts with exponential backoff.
 """
 import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.email import send_alert_email, send_welcome_email
+from app.services.email import send_alert_email
 from app.services.sms import send_sms
 
 log = logging.getLogger(__name__)
@@ -71,7 +70,6 @@ async def send_alert_notification(
     via_email: bool,
     via_sms: bool,
 ) -> None:
-    label = company_name or asx_code
     direction = "rose above" if "above" in alert_type else "fell below"
 
     if "pct_change" in alert_type:

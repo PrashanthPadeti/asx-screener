@@ -180,12 +180,35 @@ def register_observed(crontab: str) -> dict[str, Path]:
 
 def reconciliation(crontab: str) -> list[str]:
     """Where desired and observed disagree on a canonical-relevant entry."""
-    want = {s.identity: s for s in desired()}
-    have = {s.identity: s for s in observed(crontab)}
     found: list[str] = []
 
     want_targets = {s.target for s in desired()}
     have_targets = {s.target for s in observed(crontab)}
+
+    # A target scheduled more than once breaks the pairing below, which uses
+    # next() over a set of targets and so compares only the FIRST entry for
+    # each. A second installed schedule for an already-declared target would
+    # raise no UNDECLARED (the target is declared) and no CADENCE DRIFT (the
+    # first one matched) -- invisible to the one control whose job is to catch
+    # production running what review cannot see.
+    #
+    # Running a script at two cadences is ordinary, so this is reported rather
+    # than assumed away. Detection first; pairing many-to-many is a separate
+    # decision from noticing that it is needed.
+    for source, entries in (("generator", desired()),
+                            ("crontab", observed(crontab))):
+        counts: dict[str, int] = {}
+        for s in entries:
+            if s.target:
+                counts[s.target] = counts.get(s.target, 0) + 1
+        for target, n in sorted(counts.items()):
+            if n > 1:
+                found.append(
+                    f"AMBIGUOUS  {target} appears {n} times in the {source}. "
+                    f"Reconciliation pairs one declared entry with one "
+                    f"observed entry per target, so only the first is "
+                    f"compared and any further schedule for this target is "
+                    f"unchecked.")
 
     for target in sorted(have_targets - want_targets):
         if touches_canonical(target):

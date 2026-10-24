@@ -33,12 +33,26 @@ Run:  python tests/test_announcement_notification_isolation.py
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
+
+# Importing the worker constructs Settings, which requires these. This test
+# never opens a connection -- the session is a fake passed in by hand -- so
+# it supplies its own placeholders rather than depending on a deployed .env.
+# Without this the suite errors in any checkout that is not a live install,
+# including the disposable worktrees the gate and this session use, and the
+# failure looks like a defect in the code under test rather than a missing
+# file. Existing values are never overwritten, so a real environment wins.
+for _key, _placeholder in (
+        ("DATABASE_URL",      "postgresql+asyncpg://unused/unused"),
+        ("DATABASE_URL_SYNC", "postgresql://unused/unused"),
+        ("JWT_SECRET",        "test-only-not-a-secret")):
+    os.environ.setdefault(_key, _placeholder)
 
 
 class FakeResult:

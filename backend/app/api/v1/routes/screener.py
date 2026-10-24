@@ -96,6 +96,36 @@ router = APIRouter()
 # Matches the convention in market.py and ai.py.
 log = logging.getLogger(__name__)
 
+
+def _log_parse_error(query: str, exc: Exception) -> None:
+    """Record a refusal the customer saw and the server did not.
+
+    Query Mode returned 422 with the reason in the response body and wrote
+    NOTHING anywhere. When v11.2.29 broke the feature -- every query in the
+    documented syntax failing with "'>' is not a permitted operator" -- the
+    log held no trace of it. Six releases shipped over the top, each gated
+    green, and it surfaced only when a customer pasted a screenshot.
+
+    So the size of that outage is still unknown: `grep -c` over the log
+    returns 0 because nothing was ever written, not because nobody hit it.
+    That is the difference between a measurement and a missing instrument,
+    and it is why this exists.
+
+    WARNING, not ERROR: a malformed query is usually the customer's typo and
+    those are ordinary. The signal is in the RATE -- a sudden run of
+    identical reasons means the product rejected something it used to
+    accept, which is what a release did here.
+
+    The query text is included because the reason alone cannot be acted on.
+    It is a screener expression over public field names, not credentials,
+    and it is truncated so a pathological paste cannot flood the file.
+    """
+    text = " ".join((query or "").split())
+    if len(text) > 300:
+        text = text[:300] + f"... [{len(query)} chars]"
+    log.warning("query parse refused: %s | query=%r", exc, text)
+
+
 # ── Field registry ────────────────────────────────────────────────────────────
 # col   : SQL column name or expression in screener.universe (alias: u)
 # scale : multiply user-supplied filter value by this before comparing
@@ -2257,6 +2287,7 @@ async def query_screener(
     try:
         parsed = parse_query_typed(req.query, ALLOWED_FIELDS)
     except QueryParseError as exc:
+        _log_parse_error(req.query, exc)
         raise HTTPException(status_code=422, detail=str(exc))
 
     # AI Query interprets language and then stops. From here the path is
@@ -2416,6 +2447,7 @@ async def export_query_screener(
     try:
         parsed = parse_query_typed(req.query, ALLOWED_FIELDS)
     except QueryParseError as exc:
+        _log_parse_error(req.query, exc)
         raise HTTPException(status_code=422, detail=str(exc))
 
     try:

@@ -205,7 +205,7 @@ def run(conn, dry_run: bool = False) -> int:
 
         gb = governed_results.get(sector, {})
 
-        def g(metric: str, which: str):
+        def g(metric: str, which: str, gb=gb):
             """A governed statistic, or None with its reason in the sidecar."""
             return _governed_stat(gb.get(metric), which)
 

@@ -628,7 +628,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
 
     rows = []
     for _, row in df.iterrows():
-        def g(col):
+        def g(col, row=row):
             return _v(row.get(col)) if col in row.index else None
 
         # Integer volume columns
@@ -644,7 +644,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
         # _vc = _v + overflow guard (returns None if |val| > 9_999_999)
         # Applied to ratio/return/volatility columns that were originally
         # NUMERIC(8,4) and can blow up for near-zero-price penny stocks.
-        c = lambda col: _vc(row.get(col)) if col in row.index else None  # noqa: E731
+        c = lambda col, row=row: _vc(row.get(col)) if col in row.index else None  # noqa: E731
 
         rows.append((
             asx_code,

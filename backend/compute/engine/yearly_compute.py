@@ -705,7 +705,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             fr_yld = _clamp(round(div_yld * (1 + (fpc / 100) * 0.4286), 4))
 
         # ── YoY growth ────────────────────────────────────────────────────
-        def yoy(f1, f2):
+        def yoy(f1, f2, row=row, prev=prev):
             return _cagr(row.get(f1), prev.get(f2) if prev else None, 1)
 
         rev_g1   = yoy("revenue",      "revenue")

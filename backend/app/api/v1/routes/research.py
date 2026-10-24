@@ -407,7 +407,7 @@ async def ask(
         """), {"codes": mentioned})
         for row in ctx_r.fetchall():
             d = dict(row._mapping)
-            def _v(k): return d.get(k)
+            def _v(k, d=d): return d.get(k)
             context_parts.append(
                 f"**{d['asx_code']} — {d['company_name']}** | {d['sector']}\n"
                 f"  Price: ${_v('price')}  |  Market Cap: ${_v('market_cap')}M  |  52W: ${_v('low_52w')}–${_v('high_52w')}\n"

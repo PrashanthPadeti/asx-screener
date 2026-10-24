@@ -75,6 +75,15 @@ def placeholder_for(key: str, paramstyle: Paramstyle) -> str:
 #: vocabularies for one concept, neither aware of the other. Both spellings
 #: are accepted now; `test_the_api_and_the_compiler_agree_on_operators`
 #: asserts the two stay in step rather than relying on anyone noticing.
+#: ONE vocabulary. Callers that use a different surface syntax translate to
+#: it at their own boundary -- Query Mode's parser maps >, >=, != to these
+#: names in _ConditionNode._CANONICAL, because its node also renders raw SQL
+#: and so must keep the symbol for that path.
+#:
+#: Widening this map to accept symbols was tried first and was wrong: the
+#: equivalence suite keeps a Python reference implementation keyed by these
+#: names, so a second spelling here becomes a third vocabulary to hold in
+#: sync. The gate caught it as KeyError: '>'.
 OPERATORS: dict[str, str] = {
     "gt": ">", "gte": ">=", "lt": "<", "lte": "<=",
     "eq": "=", "ne": "<>", "neq": "<>",

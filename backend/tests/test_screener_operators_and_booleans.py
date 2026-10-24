@@ -27,10 +27,14 @@ built. `is_reit` fell through to the numeric path and bound the string
 `"true"` to a boolean column. `bool("false")` is also True, so even had it
 bound, "is REIT: No" would have meant "Yes".
 
-And a fourth, found while fixing these and NOT fixed: the UI offers
+And a fourth, found while fixing these: the UI offered
 `{"value": "in", "label": "in list"}` for text fields, and `in` has never
-been in `OPERATORS` either. It now refuses with a 400 naming the problem
-instead of a 500 carrying our SQL, but "in list" still does not work.
+been in `OPERATORS`. v11.2.29 turned the 500 into a 400 naming the problem
+-- an honest refusal of a filter the UI still invited customers to pick.
+v11.2.36 withdrew the option: an operator that cannot run is worse offered
+than absent, because the attempt is how the customer finds out. The
+compiler still refuses `in`, because a saved screen or a stale client can
+send one long after the UI stopped offering it.
 
 Run:  python tests/test_screener_operators_and_booleans.py
 """
@@ -67,16 +71,114 @@ def test_every_operator_the_ui_offers_compiles():
     assert offered, "could not read the operator list the UI is served"
 
     unsupported = sorted(offered - set(OPERATORS))
-    assert unsupported == ["in"], (
+    assert unsupported == [], (
         f"the UI offers operators the compiler cannot build: {unsupported}. "
-        f"Each one is a 500 the moment a customer selects it.")
+        f"Each one is a filter a customer can select and the system cannot "
+        f"run. Either implement it in OPERATORS or withdraw the option; "
+        f"`in list` was withdrawn in v11.2.36 for exactly this reason.")
 
 
-def test_in_is_the_known_gap_and_fails_cleanly():
-    """`in list` is offered for text fields and has never worked.
+def test_every_symbol_query_mode_accepts_reaches_a_real_operator():
+    """The regression v11.2.29 shipped, as a chain over three declarations.
 
-    Recorded as a test rather than a comment so it cannot be forgotten, and
-    so that implementing it turns this red.
+    Query Mode accepts SQL symbols. Its node keeps the symbol because it
+    also renders raw SQL, and translates to the compiler's canonical name
+    in _CANONICAL. So the chain is
+
+        _OP_SQL values  ->  _CANONICAL  ->  OPERATORS
+
+    and a break anywhere in it is a Parse Error on a query written in the
+    syntax the UI documents. Before v11.2.29 the symbol was handed straight
+    to the compiler and only worked because unrecognised operators were
+    forwarded to the database verbatim; closing that hole to stop the word
+    `neq` reaching Postgres took Query Mode down with it.
+
+    Read from the source by AST, never retyped: a list copied into a test
+    drifts from what it protects, which is the fault being guarded.
+    """
+    import ast
+    src = (BACKEND / "app" / "core" / "query_parser.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+
+    def _dict_named(name):
+        for node in ast.walk(tree):
+            targets = (node.targets if isinstance(node, ast.Assign)
+                       else [node.target] if isinstance(node, ast.AnnAssign)
+                       else [])
+            if (any(getattr(t, "id", None) == name for t in targets)
+                    and isinstance(node.value, ast.Dict)):
+                return {k.value: v.value for k, v in
+                        zip(node.value.keys, node.value.values)
+                        if isinstance(k, ast.Constant)
+                        and isinstance(v, ast.Constant)}
+        return {}
+
+    op_sql = _dict_named("_OP_SQL")
+    canonical = _dict_named("_CANONICAL")
+    assert op_sql, "could not read _OP_SQL from query_parser.py"
+    assert canonical, "could not read _CANONICAL from query_parser.py"
+    assert ">" in op_sql, "the parser no longer accepts '>'; re-read this test"
+
+    # Every symbol the node can carry must have a canonical form.
+    untranslated = sorted(set(op_sql.values()) - set(canonical))
+    assert untranslated == [], (
+        f"Query Mode can produce operators with no canonical form: "
+        f"{untranslated}. Each one reaches the compiler as a symbol and is "
+        f"refused at request time.")
+
+    # And every canonical form must be one the compiler actually builds.
+    unknown = sorted(set(canonical.values()) - set(OPERATORS))
+    assert unknown == [], (
+        f"_CANONICAL maps to operators the compiler does not know: {unknown}")
+
+
+def test_the_two_compilers_accept_the_same_operators():
+    """Four operator maps existed in this codebase. They did not agree.
+
+        compute/engine/screen_sql.py   OPERATORS      names
+        app/core/parsed_query.py       OPERATOR_SQL   names AND symbols
+        app/core/query_parser.py       _OP_SQL        surface syntax
+        app/api/v1/routes/screener.py  OPERATOR_MAP   dead (removed v11.2.36)
+
+    v11.2.29 added `neq` to the first because the API offered it and the
+    compiler knew only `ne`, so every "≠" filter reached Postgres as a word.
+    The identical gap sat in the second and was missed, because nothing
+    compared them. Query Mode surfaced it as
+    `unsupported operator: 'neq'` once its parser began emitting canonical
+    names.
+
+    A screen can be compiled by either path. An operator one accepts and the
+    other refuses is a query that works or fails depending on which compiler
+    runs it -- which is not a property anyone can reason about.
+    """
+    from app.core.parsed_query import OPERATOR_SQL
+
+    missing = sorted(set(OPERATORS) - set(OPERATOR_SQL))
+    assert missing == [], (
+        f"screen_sql.OPERATORS accepts {missing} and parsed_query."
+        f"OPERATOR_SQL does not. A query compiled by the legacy path raises "
+        f"`unsupported operator` while the same query succeeds on the other.")
+
+    # Both must agree on what the SQL IS, not merely that they accept it.
+    for name in sorted(set(OPERATORS) & set(OPERATOR_SQL)):
+        a, b = OPERATORS[name], OPERATOR_SQL[name]
+        assert a == b, (
+            f"the two compilers disagree on {name!r}: screen_sql gives {a!r}, "
+            f"parsed_query gives {b!r}")
+
+
+def test_in_is_still_unimplemented_and_refuses_cleanly():
+    """`in` has never been implemented, and is no longer offered.
+
+    v11.2.36 withdrew `{"value": "in", "label": "in list"}` from the text
+    operators: an option a customer can select and the system cannot run is
+    worse than an absent one, because the attempt is how they find out.
+
+    Kept as a test because the compiler must still REFUSE it rather than
+    forward it -- a filter can arrive from a saved screen, a stale client or
+    a hand-written request long after the UI stopped offering it. Turns red
+    if `in` is ever implemented, which is the signal to re-offer it.
     """
     try:
         _sql_operator("in")
@@ -84,8 +186,9 @@ def test_in_is_the_known_gap_and_fails_cleanly():
         assert "not a permitted operator" in str(exc)
         return
     raise AssertionError(
-        "`in` now compiles — implement it properly and update this test, "
-        "or remove it from the operator list the UI is served")
+        "`in` now compiles — implement it properly, then re-add "
+        "{\"value\": \"in\", \"label\": \"in list\"} to the text "
+        "operators and update this test")
 
 
 def test_neq_and_ne_mean_the_same_thing():
@@ -101,8 +204,14 @@ def test_an_unknown_operator_is_refused_not_forwarded():
     outright hostile: none of them may come back as something to put in a
     query.
     """
-    for bogus in ("neqq", "NEQ", "=", "<>", "like", "between", "", "1=1",
-                  "; DROP TABLE universe --"):
+    # "=" and "<>" belong here: they are SQL symbols, not compiler operators.
+    # Query Mode uses that syntax and translates it to a canonical name at its
+    # own boundary (_ConditionNode._CANONICAL), so the compiler never sees a
+    # symbol. Briefly in v11.2.36 this map was widened to accept them, which
+    # made a third vocabulary for the equivalence suite to hold in sync; the
+    # gate caught it.
+    for bogus in ("neqq", "NEQ", "=", "<>", ">", "=>", "==", "like",
+                  "between", "", "1=1", "; DROP TABLE universe --", "'"):
         try:
             compiled = _sql_operator(bogus)
         except UnknownOperator:

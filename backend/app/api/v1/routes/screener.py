@@ -505,15 +505,18 @@ CATEGORY_ORDER: list[str] = [
 ]
 
 
-OPERATOR_MAP = {
-    "gt":  ">",
-    "gte": ">=",
-    "lt":  "<",
-    "lte": "<=",
-    "eq":  "=",
-    "neq": "!=",
-    "in":  "IN",
-}
+# OPERATOR_MAP lived here: a second operator vocabulary, in the route, mapping
+# gt/gte/lt/lte/eq/neq/in to SQL. It was defined once and referenced nowhere.
+#
+# Removed with the "in list" option because it is the same hazard that caused
+# the neq bug in v11.2.29: two lists for one concept, neither aware of the
+# other, so the API offered `neq` while the compiler knew only `ne` and every
+# customer's "≠" filter reached Postgres as the literal word. A dead second
+# vocabulary is that bug waiting to be wired up -- and this one still claimed
+# to support `in`, which nothing implements.
+#
+# The single source is OPERATORS in compute/engine/screen_sql.py, and
+# test_every_operator_the_ui_offers_compiles holds the two in agreement.
 
 # Columns allowed in ORDER BY (must be real columns, not expressions)
 # Note: expression-based fields (above_sma*, golden_cross, bb_pct, bb_width, etc.)
@@ -1673,10 +1676,20 @@ async def get_screener_fields():
                 {"value": "neq", "label": "≠"},
             ],
             "boolean": [{"value": "eq", "label": "is"}],
+            # "in list" was offered here and never implemented. The compiler
+            # has no `in` operator, so selecting it produced a 500 carrying
+            # our SQL until v11.2.29 made it a 400 naming the problem -- an
+            # honest refusal, but still a filter the UI invited customers to
+            # choose and could not run. Withdrawn rather than left advertised:
+            # an option that cannot work is worse than an absent one, because
+            # the customer spends the attempt finding out.
+            #
+            # Re-adding it means implementing `in` in compute/engine/screen_sql.py
+            # first; test_in_is_the_known_gap_and_fails_cleanly turns red the
+            # moment it compiles, which is the signal to put this back.
             "text":    [
                 {"value": "eq",  "label": "="},
                 {"value": "neq", "label": "≠"},
-                {"value": "in",  "label": "in list"},
             ],
         },
         "total_fields": len(ALLOWED_FIELDS),

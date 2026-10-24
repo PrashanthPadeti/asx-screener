@@ -190,10 +190,21 @@ def canonicalise(parsed: ParsedQuery,
 
 # ── The one-way adapter ───────────────────────────────────────────────────────
 
+# The legacy compiler's operator map. It knew `ne` and not `neq` -- the same
+# gap that made every "≠" filter reach Postgres as the literal word `neq` and
+# 500, fixed in screen_sql.py in v11.2.29 and missed HERE because nothing
+# compared the two maps. Query Mode then began emitting `neq` (its parser
+# translates `!=` to a canonical name) and this raised
+# `unsupported operator: 'neq'`.
+#
+# test_the_two_compilers_accept_the_same_operators now holds them in
+# agreement, so a name added to one and not the other fails the gate instead
+# of a customer's query.
 OPERATOR_SQL = {
     "gt": ">", "gte": ">=", "lt": "<", "lte": "<=",
-    "eq": "=", "ne": "<>", ">": ">", ">=": ">=", "<": "<", "<=": "<=",
-    "=": "=", "!=": "<>",
+    "eq": "=", "ne": "<>", "neq": "<>",
+    ">": ">", ">=": ">=", "<": "<", "<=": "<=",
+    "=": "=", "!=": "<>", "<>": "<>",
 }
 
 

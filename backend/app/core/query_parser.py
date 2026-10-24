@@ -169,15 +169,22 @@ EXTRA_ALIASES: dict[str, str] = {
     "revenue growth 10years":                        "revenue_cagr_10y",
 
     # ── Growth — Earnings / Profit ─────────────────────────────────────────────
-    # "profit growth" was mapped here to earnings_growth_1y AND again further
-    # down to pbt_growth_1y. A dict literal keeps the last, so the mapping on
-    # this line never applied: a query saying "profit growth > 20" has always
-    # been answered with PRE-TAX profit growth, silently.
+    # "profit growth" was declared here AND again in the PBT block below. A
+    # dict literal keeps the last, so this line never applied and every query
+    # saying "profit growth > 20" was answered with PRE-TAX profit growth,
+    # silently. v11.2.33 removed the duplicate and kept the pre-tax meaning so
+    # saved queries would not move; v11.2.39 resolves it the other way, on
+    # purpose.
     #
-    # The duplicate is removed rather than resolved in this release, because
-    # changing which metric answers the bare phrase changes the results of
-    # every saved query that uses it. "net profit growth" is added below so
-    # the meaning this line intended is at least reachable by name.
+    # Net, because that is what "profit" means to an ASX investor -- and
+    # because every sibling in this family already meant net: "profit growth
+    # 1y" and "profit growth 3y" both map to earnings. The bare phrase was the
+    # odd one out in its own family.
+    #
+    # A saved query using "profit growth" now returns NPAT growth instead of
+    # pre-tax growth. The numbers will differ. Anyone who wanted pre-tax has
+    # "pretax profit growth", which is unchanged and now unambiguous.
+    "profit growth":                                 "earnings_growth_1y",
     "net profit growth":                             "earnings_growth_1y",
     "npat growth":                                   "earnings_growth_1y",
     "earnings growth":                               "earnings_growth_1y",
@@ -529,13 +536,20 @@ EXTRA_ALIASES: dict[str, str] = {
     "dividends paid":                      "dividends_paid",
 
     # ── Profit growth (PBT) ─────────────────────────────────────────────────────
-    # This is the mapping that has actually been in force for the bare phrase;
-    # see the note beside "net profit growth" above. Kept so query results do
-    # not move, flagged because "profit" meaning pre-tax rather than net is a
-    # product decision nobody made deliberately.
-    "profit growth":                       "pbt_growth_1y",
+    # The bare "profit growth" moved to the earnings block above in v11.2.39
+    # and now means NET. Everything here says pre-tax in its own name.
+    #
+    # "profit growth last year" was removed rather than remapped: there is no
+    # earnings_growth_prev_y in the universe, so it could only ever be
+    # answered with pre-tax -- which would recreate the defect being fixed, in
+    # a different phrase. A query using it now fails with a message naming the
+    # alternatives, instead of quietly returning a number for a question the
+    # customer did not ask.
     "pretax profit growth":                "pbt_growth_1y",
-    "profit growth last year":             "pbt_growth_prev_y",
+    "pbt growth":                          "pbt_growth_1y",
+    "profit before tax growth":            "pbt_growth_1y",
+    "pretax profit growth last year":      "pbt_growth_prev_y",
+    "pbt growth last year":                "pbt_growth_prev_y",
     "sales growth last year":              "sales_growth_prev_y",
     "revenue growth last year":            "sales_growth_prev_y",
 
@@ -552,20 +566,38 @@ EXTRA_ALIASES: dict[str, str] = {
     "gross profit 5 years":                  "gross_profit_fy5",
     "gross profit 7 years":                  "gross_profit_fy7",
     "gross profit 10 years":                 "gross_profit_fy10",
-    "profit":                                "pbt_fy0",
-    "profit last year":                      "pbt_fy1",
-    "profit 3 years":                        "pbt_fy3",
-    "profit 5 years":                        "pbt_fy5",
-    "profit 7 years":                        "pbt_fy7",
-    "profit 10 years":                       "pbt_fy10",
+    # The bare "profit" series meant PRE-TAX, like "profit growth" did, and
+    # for the same reason: nobody compared the phrase to its own family.
+    # "net profit" sat directly below mapping to net_profit_fy0 while
+    # "profit" answered with pbt_fy0 -- two phrases a customer would read as
+    # the same question, returning different numbers.
+    #
+    # Found by the property test over the whole synonym map, not by anyone
+    # enumerating phrases: it asserts that nothing answered with a pre-tax
+    # metric may omit "pretax", "pbt" or "before tax" from its own name.
+    #
+    # A full net_profit_fy0..fy10 series exists, so these remap cleanly.
+    # Pre-tax stays reachable under names that say so.
+    "profit":                                "net_profit_fy0",
+    "profit last year":                      "net_profit_fy1",
+    "profit 3 years":                        "net_profit_fy3",
+    "profit 5 years":                        "net_profit_fy5",
+    "profit 7 years":                        "net_profit_fy7",
+    "profit 10 years":                       "net_profit_fy10",
+    "pretax profit":                         "pbt_fy0",
+    "pbt":                                   "pbt_fy0",
+    "profit before tax":                     "pbt_fy0",
+    "pretax profit last year":               "pbt_fy1",
+    "pretax profit 3 years":                 "pbt_fy3",
+    "pretax profit 5 years":                 "pbt_fy5",
+    "pretax profit 7 years":                 "pbt_fy7",
+    "pretax profit 10 years":                "pbt_fy10",
     "net profit":                            "net_profit_fy0",
     "net profit last year":                  "net_profit_fy1",
     "net profit 3 years":                    "net_profit_fy3",
     "net profit 5 years":                    "net_profit_fy5",
     "net profit 7 years":                    "net_profit_fy7",
     "net profit 10 years":                   "net_profit_fy10",
-    "pretax profit":                       "pbt_fy0",
-    "pbt":                                 "pbt_fy0",
 
     # ── Balance sheet absolutes & derived ──────────────────────────────────────
     "total assets":                                  "total_assets",

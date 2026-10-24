@@ -181,7 +181,19 @@ def test_the_fixed_form_substitutes_cleanly():
 
 def test_no_bind_parameter_is_followed_by_a_double_colon_cast():
     """Subsumed by the property above, but runs without a database or a
-    dialect and names the offending line directly."""
+    dialect and names the offending line directly.
+
+    Comment lines are skipped. The first version of this check was not
+    comment-aware and blocked the very next release by flagging a comment
+    in announcement_worker.py that quotes `:meta::jsonb` while explaining
+    this defect -- a matcher reading its own explanation as the offence it
+    warns about, which is a mistake this repo has made repeatedly and has a
+    helper for (`_code()` in test_alert_isolation).
+
+    Prose cannot reach Postgres. The executable property is the AST-based
+    check above, which parses real statements and is unaffected by any of
+    this; losing a commented-out occurrence here costs nothing.
+    """
     offenders = []
     for path in _python_files():
         try:
@@ -189,13 +201,46 @@ def test_no_bind_parameter_is_followed_by_a_double_colon_cast():
         except (OSError, UnicodeDecodeError):
             continue
         for i, line in enumerate(source.splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#") or stripped.startswith("--"):
+                continue
             if BAD.search(line):
                 offenders.append(
-                    f"{path.relative_to(BACKEND)}:{i}  {line.strip()[:80]}")
+                    f"{path.relative_to(BACKEND)}:{i}  {stripped[:80]}")
     assert not offenders, (
         "a bind parameter is followed by `::`, which defeats substitution "
         "and sends a literal colon to Postgres — use CAST(:name AS type):"
         "\n  " + "\n  ".join(offenders))
+
+
+def _scan(source: str) -> list:
+    """The textual scan, over a string, so the skipping rule is testable."""
+    hits = []
+    for i, line in enumerate(source.splitlines(), 1):
+        stripped = line.strip()
+        if stripped.startswith("#") or stripped.startswith("--"):
+            continue
+        if BAD.search(line):
+            hits.append(i)
+    return hits
+
+
+def test_skipping_comments_does_not_blind_the_detector():
+    """The control on the fix that unblocked this release.
+
+    Skipping comment lines is only safe if executable lines are still
+    caught. Both halves asserted together, so a future broadening of the
+    skip rule that swallows real code fails here.
+    """
+    source = (
+        '# the `:meta::jsonb` defect left a literal colon in the SQL\n'   # 1
+        'VALUES (CAST(:meta AS jsonb), :attempts)\n'                      # 2
+        '    -- VALUES (:meta::jsonb, :attempts)   historical, commented\n'  # 3
+        'VALUES (:payload::json, :id)\n'                                  # 4
+    )
+    assert _scan(source) == [4], (
+        "the scan must ignore the two comment lines and catch line 4; "
+        f"it reported {_scan(source)}")
 
 
 def test_the_detector_catches_the_shape_it_exists_for():

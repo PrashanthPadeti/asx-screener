@@ -220,6 +220,15 @@ async def nl_screener(
     if not get_limits(current_user.get("plan", "free"))["nl_screener"]:
         raise HTTPException(status_code=403, detail="NL Screener requires a Pro plan or higher.")
     if not settings.ANTHROPIC_API_KEY:
+        # An entitled subscriber is being refused a feature they pay for.
+        # Logged at ERROR with the plan, because the 503 alone told
+        # nobody anything: the first report of this came from a Premium
+        # customer, 16 days after they subscribed. The key is never
+        # logged -- only that one is absent.
+        log.error(
+            "AI refused: ANTHROPIC_API_KEY is not set. Plan=%s. This is a "
+            "paid feature returning 503 to an entitled subscriber.",
+            current_user.get("plan", "unknown"))
         raise HTTPException(status_code=503, detail="AI features not configured.")
 
     query = body.query.strip()
@@ -512,6 +521,15 @@ async def get_portfolio_insights(
     if not get_limits(current_user.get("plan", "free"))["portfolio_insights"]:
         raise HTTPException(status_code=403, detail="AI Portfolio Insights requires a Premium plan or higher.")
     if not settings.ANTHROPIC_API_KEY:
+        # An entitled subscriber is being refused a feature they pay for.
+        # Logged at ERROR with the plan, because the 503 alone told
+        # nobody anything: the first report of this came from a Premium
+        # customer, 16 days after they subscribed. The key is never
+        # logged -- only that one is absent.
+        log.error(
+            "AI refused: ANTHROPIC_API_KEY is not set. Plan=%s. This is a "
+            "paid feature returning 503 to an entitled subscriber.",
+            current_user.get("plan", "unknown"))
         raise HTTPException(status_code=503, detail="AI features not configured.")
 
     p = (await db.execute(

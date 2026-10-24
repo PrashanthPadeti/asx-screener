@@ -52,8 +52,15 @@ SCD2_FIELDS = (
     "company_type", "status", "fiscal_year_end_month", "is_reit", "is_miner",
 )
 
-def sn(v): return None if v is None or str(v).strip() in ("", "None", "N/A") else str(v).strip()
-def sb(v): return bool(v) if v is not None else False
+from classification import (classify_miner, classify_reit, sn)
+
+
+
+# `sb(v) = bool(v) if v is not None else False` lived here, unused. It turned
+# None into False, which is precisely the collapse that published 805
+# unassessed companies as confirmed non-REITs. Removed rather than left
+# available: the only thing it could plausibly be applied to is a flag that
+# must keep its third state.
 
 FISCAL_MONTH_MAP = {
     "January": 1, "February": 2, "March": 3, "April": 4,
@@ -97,10 +104,8 @@ def transform_one(cur, row: dict) -> str:
         "company_type":          _stock_type(row.get("type")),
         "status":                "active",        # staging doesn't have status; default active
         "fiscal_year_end_month": _fiscal_month(row.get("fiscal_year_end")),
-        "is_reit":               "reit" in (sn(row.get("gic_industry")) or "").lower()
-                                  or "reit" in (sn(row.get("type")) or "").lower(),
-        "is_miner":              any(k in (sn(row.get("gic_industry")) or "").lower()
-                                     for k in ("mining", "gold", "metals", "coal")),
+        "is_reit":               classify_reit(row),
+        "is_miner":              classify_miner(row),
         # Non-tracked
         "company_name":          sn(row.get("name")),
         "isin":                  sn(row.get("isin")),

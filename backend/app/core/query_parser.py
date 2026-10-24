@@ -169,7 +169,17 @@ EXTRA_ALIASES: dict[str, str] = {
     "revenue growth 10years":                        "revenue_cagr_10y",
 
     # ── Growth — Earnings / Profit ─────────────────────────────────────────────
-    "profit growth":                                 "earnings_growth_1y",
+    # "profit growth" was mapped here to earnings_growth_1y AND again further
+    # down to pbt_growth_1y. A dict literal keeps the last, so the mapping on
+    # this line never applied: a query saying "profit growth > 20" has always
+    # been answered with PRE-TAX profit growth, silently.
+    #
+    # The duplicate is removed rather than resolved in this release, because
+    # changing which metric answers the bare phrase changes the results of
+    # every saved query that uses it. "net profit growth" is added below so
+    # the meaning this line intended is at least reachable by name.
+    "net profit growth":                             "earnings_growth_1y",
+    "npat growth":                                   "earnings_growth_1y",
     "earnings growth":                               "earnings_growth_1y",
     "profit growth 1y":                              "earnings_growth_1y",
     "earnings growth 1y":                            "earnings_growth_1y",
@@ -519,6 +529,10 @@ EXTRA_ALIASES: dict[str, str] = {
     "dividends paid":                      "dividends_paid",
 
     # ── Profit growth (PBT) ─────────────────────────────────────────────────────
+    # This is the mapping that has actually been in force for the bare phrase;
+    # see the note beside "net profit growth" above. Kept so query results do
+    # not move, flagged because "profit" meaning pre-tax rather than net is a
+    # product decision nobody made deliberately.
     "profit growth":                       "pbt_growth_1y",
     "pretax profit growth":                "pbt_growth_1y",
     "profit growth last year":             "pbt_growth_prev_y",

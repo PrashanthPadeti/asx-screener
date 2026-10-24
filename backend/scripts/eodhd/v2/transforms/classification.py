@@ -39,7 +39,34 @@ without a driver, a connection or a .env file.
 NON_OPERATING_TYPES = {"etf", "notes", "fund", "preferred_stock"}
 
 #: Industry substrings that identify a miner. Matched case-insensitively.
-MINING_KEYWORDS = ("mining", "gold", "metals", "coal")
+#:
+#: The original list was ("mining", "gold", "metals", "coal"), which misses
+#: every industry named for the commodity rather than the activity. Measured
+#: against the live industry vocabulary on 24 Oct 2026, that silently
+#: excluded Copper (6 companies), Uranium (3) and Aluminum (1) -- all of them
+#: recorded as confirmed non-miners, and all of them miners.
+#:
+#: The named metals below are added for that reason. Several do not appear in
+#: today's data (Nickel, Zinc, Lithium, Silver, Platinum, Rare Earth); they
+#: are included because the industry vocabulary is a controlled list that
+#: gains values over time, and the failure mode of omitting one is silent.
+#:
+#: Deliberately NOT included:
+#:   "steel"  -- GICS Steel covers manufacturers such as BlueScope as well as
+#:               miners, so it would assert mining of companies that smelt
+#:               and roll. No company currently carries it.
+#:   "oil", "gas" -- "Oil, Gas & Consumable Fuels" holds 127 companies,
+#:               overwhelmingly oil and gas producers. Sweeping those in to
+#:               catch a few coal names would be a larger error than the one
+#:               being fixed. Coal is already matched by "coal".
+#:   "construction materials" -- cement and aggregates, not mining.
+MINING_KEYWORDS = (
+    # activity and category
+    "mining", "metals", "coal", "rare earth",
+    # commodities that name an industry on their own
+    "gold", "copper", "uranium", "aluminum", "aluminium", "nickel",
+    "lithium", "silver", "platinum", "zinc", "iron ore",
+)
 
 
 def sn(v):

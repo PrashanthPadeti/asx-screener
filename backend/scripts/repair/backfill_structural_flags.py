@@ -93,6 +93,38 @@ POPULATION = """
     ORDER BY c.asx_code
 """
 
+#: Rows that ALREADY carry a verdict, to be re-derived and compared.
+#:
+#: The backfill above only fills NULLs, so it cannot correct a row that was
+#: confidently wrong. The original keyword list missed industries named for
+#: the commodity -- Copper, Uranium, Aluminum -- so companies classified
+#: before this release may hold FALSE where the corrected rule says TRUE.
+#: Those are found here and reported; they are only written under an
+#: explicit flag, because overwriting a derived value is a different act
+#: from filling an absence.
+DISAGREEMENT = """
+    SELECT c.asx_code,
+           c.company_name,
+           c.company_type,
+           c.is_reit   AS current_is_reit,
+           c.is_miner  AS current_is_miner,
+           COALESCE(p.gic_industry, f.general_industry) AS industry
+    FROM market.companies c
+    LEFT JOIN staging_au.company_profile p ON p.asx_code = c.asx_code
+    LEFT JOIN staging_au.fundamentals     f ON f.asx_code = c.asx_code
+    WHERE c.is_current
+      AND c.is_reit IS NOT NULL
+      AND c.is_miner IS NOT NULL
+      AND COALESCE(p.gic_industry, f.general_industry) IS NOT NULL
+    ORDER BY c.asx_code
+"""
+
+OVERWRITE = """
+    UPDATE market.companies
+       SET is_reit = %(is_reit)s, is_miner = %(is_miner)s, updated_at = NOW()
+     WHERE asx_code = %(asx_code)s AND is_current
+"""
+
 DUPLICATE_CHECK = """
     SELECT 'company_profile' AS t, count(*) - count(DISTINCT asx_code) AS dupes
     FROM staging_au.company_profile
@@ -118,6 +150,10 @@ def main() -> int:
                     help="write the repair (default is a dry run)")
     ap.add_argument("--limit", type=int, default=0,
                     help="print only the first N planned rows")
+    ap.add_argument("--fix-disagreements", action="store_true",
+                    help="also correct rows that already hold a verdict the "
+                         "current rule disagrees with (overwrites a derived "
+                         "value; reported either way)")
     args = ap.parse_args()
 
     if not DSN:
@@ -176,6 +212,34 @@ def main() -> int:
     print(f"\nwould set is_miner = TRUE for {new_miners} companies")
     print(f"would set is_reit  = TRUE for {new_reits} companies")
 
+    # ── Rows that already hold a verdict the current rule disagrees with ──
+    cur.execute(DISAGREEMENT)
+    disagreements = []
+    for r in cur.fetchall():
+        evidence = {"gic_industry": r["industry"], "type": r["company_type"]}
+        reit, miner = classify_reit(evidence), classify_miner(evidence)
+        # Only a definite verdict may displace a definite verdict. None here
+        # means the rule has nothing to say, which is not grounds to erase
+        # what a previous run recorded.
+        if reit is None or miner is None:
+            continue
+        if reit != r["current_is_reit"] or miner != r["current_is_miner"]:
+            disagreements.append((r, reit, miner))
+
+    print(f"\nalready classified, current rule DISAGREES: "
+          f"{len(disagreements)}")
+    if disagreements:
+        print(f"{'code':<8} {'is_reit':<18} {'is_miner':<18} industry")
+        print("-" * 100)
+        for r, reit, miner in disagreements[:args.limit or 40]:
+            print(f"{r['asx_code']:<8} "
+                  f"{str(r['current_is_reit']) + ' -> ' + str(reit):<18} "
+                  f"{str(r['current_is_miner']) + ' -> ' + str(miner):<18} "
+                  f"{r['industry']}")
+        if not args.fix_disagreements:
+            print("  (not corrected — pass --fix-disagreements to write "
+                  "these; they overwrite a derived value)")
+
     if not args.apply:
         print("\nDRY RUN — nothing written. Re-run with --apply.")
         conn.rollback()
@@ -186,8 +250,17 @@ def main() -> int:
         cur.execute(UPDATE, {"asx_code": r["asx_code"],
                              "is_reit": reit, "is_miner": miner})
         written += cur.rowcount
+
+    corrected = 0
+    if args.fix_disagreements:
+        for r, reit, miner in disagreements:
+            cur.execute(OVERWRITE, {"asx_code": r["asx_code"],
+                                    "is_reit": reit, "is_miner": miner})
+            corrected += cur.rowcount
+
     conn.commit()
-    print(f"\nAPPLIED — {written} rows updated in one transaction.")
+    print(f"\nAPPLIED — {written} filled, {corrected} corrected, "
+          f"one transaction.")
 
     # Prove the population is gone, from the target, after the write.
     cur.execute("""

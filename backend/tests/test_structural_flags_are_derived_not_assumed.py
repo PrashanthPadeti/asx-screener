@@ -113,6 +113,47 @@ def test_a_known_industry_classifies_as_before():
     assert _is_miner(row(gic_industry="Banks")) is False
 
 
+def test_industries_named_for_the_commodity_are_mining():
+    """The gap the dry run exposed before anything was written.
+
+    The original keywords -- mining, gold, metals, coal -- matched the
+    activity but not the industries named for the commodity. Measured
+    against the live vocabulary: Copper (6 companies), Uranium (3),
+    Aluminum (1), every one recorded as a confirmed non-miner.
+    """
+    for industry in ("Copper", "Uranium", "Aluminum", "Aluminium",
+                     "Nickel", "Lithium", "Silver", "Platinum", "Zinc",
+                     "Iron Ore", "Rare Earth Minerals"):
+        assert _is_miner(row(gic_industry=industry)) is True, (
+            f"{industry!r} is not classified as mining")
+
+
+def test_the_exclusions_are_deliberate_and_stay_excluded():
+    """Pinned so a later 'while we're here' widening has to argue for it.
+
+    Steel covers manufacturers as well as miners; oil and gas is 127
+    companies that are not miners; construction materials is cement.
+    """
+    for industry in ("Steel", "Oil & Gas E&P", "Oil, Gas & Consumable Fuels",
+                     "Construction Materials", "Chemicals",
+                     "Specialty Chemicals", "Paper & Forest Products"):
+        assert _is_miner(row(gic_industry=industry)) is False, (
+            f"{industry!r} is now classified as mining; if that is "
+            f"intended, say why here -- it was excluded on purpose")
+
+
+def test_real_estate_that_is_not_a_reit_stays_out():
+    """REIT industries all contain the word; real-estate operating
+    companies must not be swept in with them."""
+    for industry in ("Diversified REITs", "Retail REITs", "REIT - Industrial",
+                     "REIT - Specialty"):
+        assert _is_reit(row(gic_industry=industry)) is True, industry
+    for industry in ("Real Estate Management & Development",
+                     "Real Estate Services", "Real Estate - Diversified",
+                     "Real Estate - Development"):
+        assert _is_reit(row(gic_industry=industry)) is False, industry
+
+
 def test_the_classification_is_case_insensitive():
     assert _is_reit(row(gic_industry="EQUITY REIT")) is True
     assert _is_miner(row(gic_industry="GOLD MINING")) is True

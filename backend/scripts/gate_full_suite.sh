@@ -247,6 +247,41 @@ show u "$unverifiable"
 echo "INCONCLUSIVE suites (could not run; neither pass nor failure):"
 show c "$(sort -u "$WORK/candidate.inconclusive" "$WORK/baseline.inconclusive" 2>/dev/null)"
 
+# ── P0: the three features the product exists to provide ────────────────────
+# Attribution decides whether a failure is NEW. For most tests that is the
+# right question. For the primary surfaces it is not: a screener that is
+# broken at both commits is still a screener that is broken, and "PRE-EXISTING"
+# would wave it through.
+#
+# That is not hypothetical. Three failures rode EIGHT releases under that
+# label on 24 Oct 2026, one of them warning that a freeze-window run could
+# fail. Being correctly classified is not the same as being read.
+#
+# So these block on their state at the CANDIDATE, regardless of attribution.
+P0_PATTERN='test_primary_features_contract'
+p0_failures="$(grep -E "^${P0_PATTERN}" "$WORK/candidate.failures" 2>/dev/null || true)"
+
+echo
+echo "════ P0 — primary features (block on state, not attribution) ════"
+if [ -n "$p0_failures" ]; then
+    echo "$p0_failures" | sed 's/^/    /'
+else
+    echo "    all primary-feature contracts hold"
+fi
+
+if [ -n "$p0_failures" ]; then
+    echo
+    echo "════ a PRIMARY FEATURE is broken at the candidate ════"
+    echo "Stock screening, the market overview or the company pages do not"
+    echo "work. This blocks whether or not the baseline was also broken."
+    echo "$p0_failures" | cut -d: -f1 | sort -u | while read -r f; do
+        [ -z "$f" ] && continue
+        echo "──── $f"
+        cat "$WORK/candidate.$f.out"
+    done
+    exit 1
+fi
+
 if [ -n "$introduced" ]; then
     echo
     echo "════ output of introduced failures ════"

@@ -27,10 +27,14 @@ built. `is_reit` fell through to the numeric path and bound the string
 `"true"` to a boolean column. `bool("false")` is also True, so even had it
 bound, "is REIT: No" would have meant "Yes".
 
-And a fourth, found while fixing these and NOT fixed: the UI offers
+And a fourth, found while fixing these: the UI offered
 `{"value": "in", "label": "in list"}` for text fields, and `in` has never
-been in `OPERATORS` either. It now refuses with a 400 naming the problem
-instead of a 500 carrying our SQL, but "in list" still does not work.
+been in `OPERATORS`. v11.2.29 turned the 500 into a 400 naming the problem
+-- an honest refusal of a filter the UI still invited customers to pick.
+v11.2.36 withdrew the option: an operator that cannot run is worse offered
+than absent, because the attempt is how the customer finds out. The
+compiler still refuses `in`, because a saved screen or a stale client can
+send one long after the UI stopped offering it.
 
 Run:  python tests/test_screener_operators_and_booleans.py
 """
@@ -67,16 +71,24 @@ def test_every_operator_the_ui_offers_compiles():
     assert offered, "could not read the operator list the UI is served"
 
     unsupported = sorted(offered - set(OPERATORS))
-    assert unsupported == ["in"], (
+    assert unsupported == [], (
         f"the UI offers operators the compiler cannot build: {unsupported}. "
-        f"Each one is a 500 the moment a customer selects it.")
+        f"Each one is a filter a customer can select and the system cannot "
+        f"run. Either implement it in OPERATORS or withdraw the option; "
+        f"`in list` was withdrawn in v11.2.36 for exactly this reason.")
 
 
-def test_in_is_the_known_gap_and_fails_cleanly():
-    """`in list` is offered for text fields and has never worked.
+def test_in_is_still_unimplemented_and_refuses_cleanly():
+    """`in` has never been implemented, and is no longer offered.
 
-    Recorded as a test rather than a comment so it cannot be forgotten, and
-    so that implementing it turns this red.
+    v11.2.36 withdrew `{"value": "in", "label": "in list"}` from the text
+    operators: an option a customer can select and the system cannot run is
+    worse than an absent one, because the attempt is how they find out.
+
+    Kept as a test because the compiler must still REFUSE it rather than
+    forward it -- a filter can arrive from a saved screen, a stale client or
+    a hand-written request long after the UI stopped offering it. Turns red
+    if `in` is ever implemented, which is the signal to re-offer it.
     """
     try:
         _sql_operator("in")
@@ -84,8 +96,9 @@ def test_in_is_the_known_gap_and_fails_cleanly():
         assert "not a permitted operator" in str(exc)
         return
     raise AssertionError(
-        "`in` now compiles — implement it properly and update this test, "
-        "or remove it from the operator list the UI is served")
+        "`in` now compiles — implement it properly, then re-add "
+        "{\"value\": \"in\", \"label\": \"in list\"} to the text "
+        "operators and update this test")
 
 
 def test_neq_and_ne_mean_the_same_thing():

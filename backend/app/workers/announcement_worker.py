@@ -340,6 +340,10 @@ async def _run(db) -> int:
 async def _notify_subscribers(db, announcements: list[dict]) -> None:
     from app.services.notification_service import send_announcement_notification
 
+    attempted = 0
+    delivered = 0
+    failures: list[tuple[str, str, str]] = []
+
     for ann in announcements:
         code = ann["asx_code"]
 
@@ -372,18 +376,62 @@ async def _notify_subscribers(db, announcements: list[dict]) -> None:
         subscribers = result.fetchall()
 
         for sub in subscribers:
-            await send_announcement_notification(
-                db=db,
-                user_id=str(sub.user_id),
-                email=sub.email if sub.announcements_email else None,
-                phone=sub.phone_number if sub.announcements_sms else None,
-                asx_code=code,
-                company_name=sub.company_name,
-                title=ann["title"],
-                doc_type=ann["doc_type"],
-                url=ann.get("url"),
-                via_email=bool(sub.announcements_email),
-                via_sms=bool(sub.announcements_sms),
-            )
+            # One subscriber's failure must not silence the rest.
+            #
+            # Until v11.2.31 this call was unguarded, so the first
+            # subscriber whose notification raised aborted _notify_subscribers
+            # entirely -- every later subscriber for this announcement, and
+            # every later announcement, was skipped. That is exactly what the
+            # `:meta::jsonb` defect did: the email went out (it is sent before
+            # it is logged), the log write raised, and nobody after the first
+            # person heard about the filing.
+            #
+            # The rollback is load-bearing, not tidiness. _log_notification
+            # does not commit; the caller does. A failed statement leaves the
+            # transaction ABORTED, and every subsequent db.execute in it fails
+            # with InFailedSqlTransaction -- so catching the exception without
+            # clearing the transaction would look like isolation while quietly
+            # failing everyone downstream. Committing per subscriber also makes
+            # each record durable on its own, instead of one failure at the end
+            # discarding the history of everyone who did receive theirs.
+            attempted += 1
+            try:
+                await send_announcement_notification(
+                    db=db,
+                    user_id=str(sub.user_id),
+                    email=sub.email if sub.announcements_email else None,
+                    phone=sub.phone_number if sub.announcements_sms else None,
+                    asx_code=code,
+                    company_name=sub.company_name,
+                    title=ann["title"],
+                    doc_type=ann["doc_type"],
+                    url=ann.get("url"),
+                    via_email=bool(sub.announcements_email),
+                    via_sms=bool(sub.announcements_sms),
+                )
+                await db.commit()
+                delivered += 1
+            except Exception as e:                             # noqa: BLE001
+                await db.rollback()
+                failures.append((code, str(sub.user_id), type(e).__name__))
+                log.error(
+                    f"Announcement notification failed for user "
+                    f"{sub.user_id} on {code}: {type(e).__name__}: {e}",
+                    exc_info=True)
 
     await db.commit()
+
+    # Partial failure is a state of its own: it is neither success nor the
+    # total failure that a raise would report. Say what happened, per entity.
+    if failures:
+        log.error(
+            f"Announcement notifications DEGRADED: {delivered}/{attempted} "
+            f"delivered, {len(failures)} failed. Failures: {failures[:20]}")
+
+    # Nothing delivered when there was work to do is systemic -- SMTP down, a
+    # schema change, a credential expired -- and must reach telemetry as a
+    # failure rather than a log line nobody reads.
+    if attempted and not delivered:
+        raise RuntimeError(
+            f"every announcement notification failed ({attempted} attempted, "
+            f"{len(failures)} errors); first: {failures[0] if failures else 'n/a'}")

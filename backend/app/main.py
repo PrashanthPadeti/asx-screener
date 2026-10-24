@@ -194,10 +194,28 @@ async def lifespan(app: FastAPI):
                       CronTrigger(hour=19, minute=10, timezone="Australia/Sydney"),
                       id="announcement_fetcher", replace_existing=True)
 
-    # Watchlist daily digest — 7:30am AEST
-    scheduler.add_job(instrumented("watchlist_digest", send_watchlist_digests),
-                      CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
-                      id="watchlist_digest", replace_existing=True)
+    # Watchlist daily digest — 7:30am AEST.
+    #
+    # Registered ONLY when deliberately enabled. This has never sent: it was
+    # written against a column that does not exist and raised on every run
+    # from 6 May 2026 until v11.2.30 repaired the query. Fixing the column
+    # would otherwise have launched a daily email to every user with a
+    # watchlist, governed by a preference labelled "weekly", without anyone
+    # choosing to launch it.
+    if settings.WATCHLIST_DIGEST_ENABLED:
+        scheduler.add_job(instrumented("watchlist_digest", send_watchlist_digests),
+                          CronTrigger(hour=7, minute=30, timezone="Australia/Sydney"),
+                          id="watchlist_digest", replace_existing=True)
+        logger.warning(
+            "WATCHLIST DIGEST EMAILS ARE ENABLED — a daily digest will be "
+            "sent at 07:30 AEST to every user with a watchlist. This feature "
+            "has never sent before; confirm the opt-in preference exists and "
+            "the first send is intended.")
+    else:
+        logger.info(
+            "Watchlist digest disabled (WATCHLIST_DIGEST_ENABLED is off). "
+            "It has never sent; enabling it is a first launch, not a "
+            "restoration.")
 
     # ASX index prices — daily at 5:30pm AEST (30 min after market close)
     scheduler.add_job(instrumented("index_prices", compute_index_prices),

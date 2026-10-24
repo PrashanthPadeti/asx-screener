@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.services.notification_service import _send_raw_email, _log_notification, _BASE, _GREEN, _RED
 
@@ -18,7 +19,23 @@ log = logging.getLogger(__name__)
 
 
 async def send_watchlist_digests() -> None:
-    """Main entry point called by APScheduler."""
+    """Main entry point called by APScheduler.
+
+    The second of two boundaries. main.py does not register this job unless
+    WATCHLIST_DIGEST_ENABLED is on; this check does not care how it was
+    invoked -- a manual run, a REPL, a test harness pointed at production,
+    or a future scheduler added by someone who did not read main.py.
+
+    What is being prevented is a daily email arriving in the inbox of a
+    customer who never asked for it, and there is no undo for that.
+    """
+    if not settings.WATCHLIST_DIGEST_ENABLED:
+        log.info(
+            "Watchlist digest refused: WATCHLIST_DIGEST_ENABLED is off. "
+            "This feature has never sent; enabling it is a first launch and "
+            "needs an opt-in preference of its own.")
+        return
+
     async with AsyncSessionLocal() as db:
         try:
             await _run_digests(db)

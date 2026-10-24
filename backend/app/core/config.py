@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "11.2.30"
+    APP_VERSION: str = "11.2.31"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
@@ -47,6 +47,23 @@ class Settings(BaseSettings):
     # Turning this on is a release decision with its own gate (P0-A-7), not a
     # side effect of thawing.
     ANOMALY_ALERTS_ENABLED: bool = False
+
+    # The watchlist daily digest has never sent. It was introduced on
+    # 6 May 2026 reading `np.email_enabled`, a column that does not exist on
+    # users.notification_preferences, so every run raised UndefinedColumn.
+    # v11.2.30 fixed the column; that fix turned a five-month dead feature
+    # into a DAILY email to every user holding a watchlist, at 07:30 AEST,
+    # for people who never opted into it and will not remember the feature.
+    #
+    # Restoring a service customers miss and launching one they have never
+    # received are different acts, and the second is not a side effect the
+    # first is allowed to have. So the digest is off until it has a
+    # preference of its own: `portfolio_weekly_email` currently governs it,
+    # which is a weekly flag on a daily email and not a consent anyone gave.
+    #
+    # Turning this on is a release decision. It needs a watchlist_digest_email
+    # column, a settings field customers can see, and a deliberate first send.
+    WATCHLIST_DIGEST_ENABLED: bool = False
 
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""

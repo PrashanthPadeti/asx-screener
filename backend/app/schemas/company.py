@@ -11,8 +11,18 @@ class CompanyBase(BaseModel):
     company_name: str
     gics_sector: Optional[str] = None
     gics_industry_group: Optional[str] = None
-    is_reit: bool = False
-    is_miner: bool = False
+    # Optional, NOT `bool = False`. 563 of 2,552 universe rows have never
+    # been classified: 111 operating companies with only a sector, 11 with
+    # nothing, and 441 ETFs/notes/funds where the question cannot apply.
+    # Rendering those as False told the customer we had checked and the
+    # answer was no.
+    #
+    # The index-membership flags stay `bool = False` deliberately: absence
+    # from the ASX 200 list IS evidence of non-membership, because that is a
+    # closed-world list. Absence of an industry classification is evidence of
+    # nothing. The two look identical in the column and are different facts.
+    is_reit: Optional[bool] = None
+    is_miner: Optional[bool] = None
     status: str = "active"
 
 
@@ -70,8 +80,9 @@ class CompanySearchResult(BaseModel):
     asx_code: str
     company_name: str
     gics_sector: Optional[str] = None
-    is_reit: bool = False
-    is_miner: bool = False
+    # See the note above: unknown is not False.
+    is_reit: Optional[bool] = None
+    is_miner: Optional[bool] = None
 
     model_config = {"from_attributes": True}
 

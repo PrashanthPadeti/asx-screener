@@ -31,8 +31,13 @@ export interface Company {
   company_name: string
   gics_sector: string | null
   gics_industry_group: string | null
-  is_reit: boolean
-  is_miner: boolean
+  // null = never classified. 563 of 2,552 companies have no industry
+  // data, or are ETFs/notes where the question does not apply. The API
+  // used to send false for those, which is a claim we could not make.
+  // `null` is falsy in JS, so `is_reit && <Badge/>` still behaves --
+  // but a cell that prints Yes/No must print Unknown for null.
+  is_reit: boolean | null
+  is_miner: boolean | null
   is_asx200: boolean
   status: string
   listing_date: string | null
@@ -63,8 +68,13 @@ export interface SearchResult {
   asx_code: string
   company_name: string
   gics_sector: string | null
-  is_reit: boolean
-  is_miner: boolean
+  // null = never classified. 563 of 2,552 companies have no industry
+  // data, or are ETFs/notes where the question does not apply. The API
+  // used to send false for those, which is a claim we could not make.
+  // `null` is falsy in JS, so `is_reit && <Badge/>` still behaves --
+  // but a cell that prints Yes/No must print Unknown for null.
+  is_reit: boolean | null
+  is_miner: boolean | null
 }
 
 export interface ScreenerFilter {
@@ -98,8 +108,13 @@ export interface ScreenerRow {
   industry: string | null
   stock_type: string | null
   status: string | null
-  is_reit: boolean
-  is_miner: boolean
+  // null = never classified. 563 of 2,552 companies have no industry
+  // data, or are ETFs/notes where the question does not apply. The API
+  // used to send false for those, which is a claim we could not make.
+  // `null` is falsy in JS, so `is_reit && <Badge/>` still behaves --
+  // but a cell that prints Yes/No must print Unknown for null.
+  is_reit: boolean | null
+  is_miner: boolean | null
   is_asx200: boolean
   is_asx300: boolean
 

@@ -26,6 +26,22 @@ prevent Pydantic bool validation error on NULL rows" — to the screener, by
 listing the columns. The same defect in these two endpoints survived,
 because a list only covers what someone remembered to put in it.
 
+v11.2.38 changed the schema rather than the value: is_reit and is_miner
+are now `Optional[bool] = None`, so an unclassified company validates
+without being coerced. Both fixes stop the 500; only the second stops
+claiming that 563 companies are confirmed non-REITs.
+
+That also reverses half of 9c50b4c above, deliberately. COALESCE was the
+right fix for a crash and the wrong fix for the truth -- it made the
+endpoint work by answering a question nobody could answer. The index
+flags it also coalesced keep that treatment, because absence from an
+enumerable list IS non-membership.
+
+The helper remains for the bools that are still non-optional (index
+membership, is_bank, is_insurer), and must leave Optional fields alone --
+collapsing one would destroy the distinction one layer below the schema
+that declares it.
+
 Run:  python tests/test_search_survives_null_flags.py
 Requires pydantic.
 """
@@ -63,24 +79,52 @@ NULL_ROW = {"asx_code": "BTL", "company_name": "Brightstar", "gics_sector": None
 
 # ── The defect, and that it is really a defect ──────────────────────────────
 
-def test_the_raw_row_really_does_fail():
-    """Control. If this ever stops raising, the fix below proves nothing."""
+def test_a_null_in_a_non_optional_bool_still_fails():
+    """Control. If this stops raising, the helper below proves nothing.
+
+    It used to use CompanySearchResult, whose is_reit/is_miner were
+    `bool = False`. v11.2.38 made those Optional -- unknown is not false --
+    so that model no longer fails on them and could no longer serve as the
+    control. The helper is still needed for the bools that remain
+    non-optional (index membership, is_bank, is_insurer), and `_Model`
+    declares one, so the control moves there rather than being deleted.
+    """
     try:
-        CompanySearchResult(**NULL_ROW)
+        _Model(asx_code="BTL", is_reit=None)
     except Exception as exc:                                   # noqa: BLE001
-        assert "2 validation errors" in str(exc), (
-            f"expected the two NULL flags to fail validation, got: {exc}")
+        assert "validation error" in str(exc).lower(), (
+            f"expected a NULL in a non-optional bool to fail, got: {exc}")
         return
     raise AssertionError(
-        "a row with NULL is_reit/is_miner now validates on its own — the "
-        "schema or the data changed and this guard is testing nothing")
+        "a NULL in a non-optional bool now validates on its own — every "
+        "model's bools became Optional, or pydantic changed, and this guard "
+        "is testing nothing")
+
+
+def test_the_search_schema_now_accepts_an_unclassified_company():
+    """The other half of v11.2.38, asserted directly.
+
+    805 companies crashed /companies/search with "2 validation errors"
+    because the schema demanded a bool and the column held NULL. The first
+    fix coerced NULL to False, which stopped the 500 and asserted something
+    untrue about 563 companies. The schema now admits the unknown, so the
+    row validates WITHOUT being coerced.
+    """
+    row = CompanySearchResult(**NULL_ROW)
+    assert row.asx_code == "BTL"
+    assert row.is_reit is None and row.is_miner is None, (
+        "the unknown was collapsed; a company nobody has classified is "
+        "being reported as a confirmed non-REIT")
 
 
 def test_a_company_with_unknown_flags_can_be_searched():
-    """The 500 that 805 companies produced."""
+    """The 500 that 805 companies produced — still gone, and now the
+    unknown survives the helper rather than being flattened by it."""
     row = CompanySearchResult(**_bool_nulls_to_false(CompanySearchResult, NULL_ROW))
     assert row.asx_code == "BTL"
-    assert row.is_reit is False and row.is_miner is False
+    assert row.is_reit is None and row.is_miner is None, (
+        "_bool_nulls_to_false overwrote an Optional field; unknown became "
+        "False one layer below the schema that exists to preserve it")
 
 
 # ── It must not do more than it was asked to ────────────────────────────────

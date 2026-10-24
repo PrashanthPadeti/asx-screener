@@ -81,6 +81,33 @@ if [ -z "$PROD_URL" ]; then
 fi
 DB_OWNER="$(printf '%s' "$PROD_URL" | sed -E 's|^[^:]+://([^:/]+).*|\1|')"
 export DATABASE_URL="${PROD_URL%/*}/$DB"
+
+# Inside `unshare -n` the namespace gets its OWN loopback, so the host's
+# Postgres TCP listener is not reachable at 127.0.0.1:5432 -- `ip link set lo
+# up` brings up a fresh, empty loopback, not the host's. A unix socket crosses
+# the boundary because it is a filesystem path, which is why psql works there
+# and asyncpg did not.
+#
+# Until the primary-feature contract tests existed, nothing in the suite opened
+# an ASYNC connection, so this never surfaced. They failed on their first gate
+# run with "Connect call failed ('127.0.0.1', 5432)" -- an environment fault
+# reported as nine broken features.
+#
+# The socket directory is detected rather than assumed.
+PGSOCKET_DIR=""
+for _d in /var/run/postgresql /run/postgresql /tmp; do
+    if ls "$_d"/.s.PGSQL.* >/dev/null 2>&1; then PGSOCKET_DIR="$_d"; break; fi
+done
+if [ -z "$PGSOCKET_DIR" ]; then
+    echo "gate: no postgres unix socket found; tests that open a database"
+    echo "gate: connection cannot reach it inside the network namespace."
+    echo "gate: refusing to run rather than report that as nine failures."
+    exit 2
+fi
+# user:pass@host[:port]/db  ->  user:pass@/db?host=<socket dir>
+DATABASE_URL_NS="$(printf '%s' "$DATABASE_URL" | sed -E 's#@[^/@]*/#@/#')?host=$PGSOCKET_DIR"
+export DATABASE_URL_NS
+echo "gate: namespace database URL uses the unix socket at $PGSOCKET_DIR"
 case "$DATABASE_URL" in
     *"/$DB") : ;;
     *) echo "gate: DATABASE_URL does not end in the isolated database name"
@@ -146,7 +173,7 @@ run_at() {
         # Loopback up so the unix socket and localhost still work; nothing
         # else is reachable. DATABASE_URL re-exported inside the namespace.
         unshare -n -- bash -c \
-            "ip link set lo up 2>/dev/null; export DATABASE_URL='$DATABASE_URL'; cd '$dir/backend' && '$PY' '$t'" \
+            "ip link set lo up 2>/dev/null; export DATABASE_URL='$DATABASE_URL_NS'; cd '$dir/backend' && '$PY' '$t'" \
             > "$out" 2>&1
         local rc=$?
 

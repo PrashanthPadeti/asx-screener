@@ -23,6 +23,50 @@ from app.api.v1.routes.screener import ALLOWED_FIELDS, build_screener_sql, SORTA
 from app.core.market_taxonomy import describe_bands
 
 log = logging.getLogger(__name__)
+
+_TRUE  = {"true", "t", "yes", "y", "1"}
+_FALSE = {"false", "f", "no", "n", "0"}
+
+
+def coerce_filter_value(field: str, value):
+    """(ok, coerced) — a model's value as the field's own type, or a refusal.
+
+    Module level, not nested in the route, so the rule can be exercised
+    directly. A validator that can only be reached by issuing an HTTP request
+    is a validator nothing tests.
+
+    Checked here rather than left to the driver: the driver's objection
+    arrives as `could not convert string to float` after the statement is
+    built, surfaces as a 500, and tells neither the customer nor an operator
+    anything they can act on.
+    """
+    ftype = ALLOWED_FIELDS[field].get("type", "number")
+
+    if ftype == "boolean":
+        if isinstance(value, bool):
+            return True, value
+        s = str(value).strip().lower()
+        if s in _TRUE:
+            return True, True
+        if s in _FALSE:
+            return True, False
+        return False, None
+
+    if ftype == "number":
+        # bool is a subclass of int; True is not a quantity here.
+        if isinstance(value, bool):
+            return False, None
+        if isinstance(value, (int, float)):
+            return True, value
+        try:
+            return True, float(str(value).replace(",", "").strip().rstrip("%"))
+        except (TypeError, ValueError):
+            return False, None
+
+    # Text and anything else: a string is the only sensible shape, and an
+    # empty one constrains nothing.
+    s = str(value).strip()
+    return (True, s) if s else (False, None)
 router = APIRouter()
 
 
@@ -275,6 +319,7 @@ async def nl_screener(
     # which is what stops a reasonable request collapsing to zero rows.
     OPS = ("gt", "gte", "lt", "lte", "eq", "neq", "in")
 
+
     def _clean(bucket: str) -> list[ScreenerFilter]:
         out: list[ScreenerFilter] = []
         for f in parsed.get(bucket) or []:
@@ -292,7 +337,28 @@ async def nl_screener(
             if value is None:
                 log.warning("nl-screener: null value for '%s' in %s — dropped", field, bucket)
                 continue
-            out.append(ScreenerFilter(field=field, operator=op, value=value))
+            # The field, the operator and the null case were each checked; the
+            # VALUE's type never was. A model asked for "stocks near their
+            # 52-week low" answered with {"field": "price", "value": "low_52w"}
+            # -- a field name where a number belongs. Nothing here objected, the
+            # string was bound to a numeric column, and asyncpg raised
+            # `could not convert string to float: 'low_52w'`, which the route
+            # turned into a 500. Three of nine nl-screener requests ever served
+            # were that 500.
+            #
+            # A model that proposes a comparison between two FIELDS is asking
+            # for something this screener cannot express. Dropping the
+            # criterion answers the rest of the question; passing it on cannot
+            # answer any of it.
+            ok, coerced = coerce_filter_value(field, value)
+            if not ok:
+                log.warning(
+                    "nl-screener: value %r is not a %s for '%s' in %s — "
+                    "dropped (a field-to-field comparison cannot be expressed)",
+                    value, ALLOWED_FIELDS[field].get("type", "number"),
+                    field, bucket)
+                continue
+            out.append(ScreenerFilter(field=field, operator=op, value=coerced))
         return out
 
     mandatory  = _clean("mandatory")

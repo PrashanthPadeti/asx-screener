@@ -78,6 +78,61 @@ def test_every_operator_the_ui_offers_compiles():
         f"`in list` was withdrawn in v11.2.36 for exactly this reason.")
 
 
+def test_every_operator_query_mode_can_emit_compiles():
+    """The regression v11.2.29 shipped, as a population check.
+
+    Query Mode's parser maps the documented symbols to SQL in `_OP_SQL`
+    and hands the RESULT to this compiler. Before v11.2.29 the compiler
+    had `OPERATORS.get(op) or op`, so `>` was forwarded verbatim and
+    worked by accident. Removing that fallback fixed `neq` reaching
+    Postgres as a word and simultaneously refused every symbol, so
+    `return_1y > 0` -- the syntax the UI's own hint bar, error messages
+    and Field Reference panel all advertise -- failed to parse. A Premium
+    feature went dark.
+
+    Derived from _OP_SQL by AST rather than retyped here: a list copied
+    into a test is a list that drifts from the thing it is meant to
+    protect, which is the fault being guarded against.
+    """
+    import ast
+    src = (BACKEND / "app" / "core" / "query_parser.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+    emitted = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.AnnAssign)
+                and getattr(node.target, "id", None) == "_OP_SQL"
+                and isinstance(node.value, ast.Dict)):
+            emitted = {k.value for k in node.value.keys
+                       if isinstance(k, ast.Constant)}
+        elif (isinstance(node, ast.Assign)
+                and any(getattr(t, "id", None) == "_OP_SQL" for t in node.targets)
+                and isinstance(node.value, ast.Dict)):
+            emitted = {k.value for k in node.value.keys
+                       if isinstance(k, ast.Constant)}
+    assert emitted, "could not read _OP_SQL from query_parser.py"
+    assert ">" in emitted, "the parser no longer emits '>'; re-read this test"
+
+    # The parser emits the VALUES of _OP_SQL, not its keys -- the keys are
+    # what a customer types. Both must compile: the keys because an operator
+    # may arrive unmapped from a saved query, the values because that is what
+    # the compiler is actually handed.
+    values = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict) and any(
+                isinstance(k, ast.Constant) and k.value == ">"
+                for k in node.keys):
+            values = {v.value for v in node.values
+                      if isinstance(v, ast.Constant)}
+            break
+
+    unsupported = sorted((emitted | values) - set(OPERATORS))
+    assert unsupported == [], (
+        f"Query Mode can emit operators the compiler refuses: {unsupported}. "
+        f"Every one is a Parse Error on a query written in the documented "
+        f"syntax.")
+
+
 def test_in_is_still_unimplemented_and_refuses_cleanly():
     """`in` has never been implemented, and is no longer offered.
 
@@ -114,8 +169,14 @@ def test_an_unknown_operator_is_refused_not_forwarded():
     outright hostile: none of them may come back as something to put in a
     query.
     """
-    for bogus in ("neqq", "NEQ", "=", "<>", "like", "between", "", "1=1",
-                  "; DROP TABLE universe --"):
+    # "=" and "<>" were in this list until v11.2.36 and are now PERMITTED:
+    # they are Query Mode's documented syntax, and refusing them is what
+    # broke that feature. The property under test is unchanged -- an
+    # operator outside the closed set is refused rather than forwarded --
+    # only the set is now honest about both vocabularies. Everything below
+    # is still outside it, including the two that would be an injection.
+    for bogus in ("neqq", "NEQ", "=>", "=<", "==", "like", "between", "",
+                  "1=1", "; DROP TABLE universe --", ">>", "'"):
         try:
             compiled = _sql_operator(bogus)
         except UnknownOperator:

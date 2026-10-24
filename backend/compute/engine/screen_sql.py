@@ -75,9 +75,32 @@ def placeholder_for(key: str, paramstyle: Paramstyle) -> str:
 #: vocabularies for one concept, neither aware of the other. Both spellings
 #: are accepted now; `test_the_api_and_the_compiler_agree_on_operators`
 #: asserts the two stay in step rather than relying on anyone noticing.
+#: Two input vocabularies reach this compiler, and both are legitimate.
+#:
+#:   the REST filter API sends NAMES     gt, gte, lt, lte, eq, ne, neq
+#:   Query Mode's parser sends SYMBOLS   >, >=, <, <=, =, !=, <>
+#:
+#: The symbols used to work by accident. Before v11.2.29 this was
+#: `OPERATORS.get(op) or op`, so anything unrecognised was handed to the
+#: database verbatim -- which is how the literal word `neq` reached Postgres
+#: and 500'd every "≠" filter. Removing that fallback fixed `neq` and broke
+#: Query Mode in the same stroke: `>` stopped being forwarded and started
+#: being refused, so every query written in the documented syntax
+#: (`return_1y > 0`) failed to parse. A Premium feature, dark from v11.2.29
+#: until v11.2.36.
+#:
+#: Both vocabularies are now declared. The closed set is what matters, not
+#: which spelling a caller uses: an operator outside this map is still
+#: refused rather than forwarded, so the guarantee that defeated `neq` holds
+#: while the syntax the UI documents works.
 OPERATORS: dict[str, str] = {
+    # Named — the REST filter API
     "gt": ">", "gte": ">=", "lt": "<", "lte": "<=",
     "eq": "=", "ne": "<>", "neq": "<>",
+    # Symbolic — Query Mode, per _OP_SQL in app/core/query_parser.py and the
+    # syntax its own error messages and Field Reference panel advertise.
+    ">": ">", ">=": ">=", "<": "<", "<=": "<=",
+    "=": "=", "!=": "<>", "<>": "<>",
 }
 
 

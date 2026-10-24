@@ -699,11 +699,36 @@ class _ConditionNode:
         self.field_key  = field_key
         self.user_value = user_value if user_value is not None else value
 
+    #: Surface syntax -> the compiler's canonical operator name.
+    #:
+    #: `self.op` is a SQL SYMBOL because to_sql() below renders it straight
+    #: into a statement. The compiler speaks NAMES. One field, two consumers,
+    #: two vocabularies -- and until v11.2.36 the symbol was handed to both.
+    #: It reached the compiler and only worked because screen_sql had
+    #: `OPERATORS.get(op) or op`, forwarding anything it did not recognise.
+    #: Closing that hole in v11.2.29 to stop the literal word `neq` reaching
+    #: Postgres also stopped forwarding `>`, and every Query Mode query --
+    #: the syntax this parser's own error messages document -- began failing
+    #: with "'>' is not a permitted operator".
+    #:
+    #: Translating here, at the boundary, is what a parser is for. The
+    #: compiler keeps ONE vocabulary and its closed set is unweakened.
+    _CANONICAL = {">": "gt", ">=": "gte", "<": "lt", "<=": "lte",
+                  "=": "eq", "!=": "neq", "<>": "neq"}
+
     def to_expression(self):
         from app.core.parsed_query import Criterion
         from compute.engine.screen_predicates import CriterionType
+        canonical = self._CANONICAL.get(self.op)
+        if canonical is None:
+            # Unreachable via the parser, which only produces _OP_SQL values.
+            # Explicit so a new symbol added there cannot silently arrive at
+            # the compiler as something it will refuse at request time.
+            raise QueryParseError(
+                f"operator '{self.op}' has no canonical form; add it to "
+                f"_ConditionNode._CANONICAL alongside _OP_SQL")
         return Criterion(self.field_key, CriterionType.REQUIRED,
-                         self.op, self.user_value, kind=self.kind)
+                         canonical, self.user_value, kind=self.kind)
 
     def to_sql(self, params: dict, counter: list) -> str:
         if self.kind == "boolean":

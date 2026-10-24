@@ -78,59 +78,94 @@ def test_every_operator_the_ui_offers_compiles():
         f"`in list` was withdrawn in v11.2.36 for exactly this reason.")
 
 
-def test_every_operator_query_mode_can_emit_compiles():
-    """The regression v11.2.29 shipped, as a population check.
+def test_every_symbol_query_mode_accepts_reaches_a_real_operator():
+    """The regression v11.2.29 shipped, as a chain over three declarations.
 
-    Query Mode's parser maps the documented symbols to SQL in `_OP_SQL`
-    and hands the RESULT to this compiler. Before v11.2.29 the compiler
-    had `OPERATORS.get(op) or op`, so `>` was forwarded verbatim and
-    worked by accident. Removing that fallback fixed `neq` reaching
-    Postgres as a word and simultaneously refused every symbol, so
-    `return_1y > 0` -- the syntax the UI's own hint bar, error messages
-    and Field Reference panel all advertise -- failed to parse. A Premium
-    feature went dark.
+    Query Mode accepts SQL symbols. Its node keeps the symbol because it
+    also renders raw SQL, and translates to the compiler's canonical name
+    in _CANONICAL. So the chain is
 
-    Derived from _OP_SQL by AST rather than retyped here: a list copied
-    into a test is a list that drifts from the thing it is meant to
-    protect, which is the fault being guarded against.
+        _OP_SQL values  ->  _CANONICAL  ->  OPERATORS
+
+    and a break anywhere in it is a Parse Error on a query written in the
+    syntax the UI documents. Before v11.2.29 the symbol was handed straight
+    to the compiler and only worked because unrecognised operators were
+    forwarded to the database verbatim; closing that hole to stop the word
+    `neq` reaching Postgres took Query Mode down with it.
+
+    Read from the source by AST, never retyped: a list copied into a test
+    drifts from what it protects, which is the fault being guarded.
     """
     import ast
     src = (BACKEND / "app" / "core" / "query_parser.py").read_text(
         encoding="utf-8")
     tree = ast.parse(src)
-    emitted = set()
-    for node in ast.walk(tree):
-        if (isinstance(node, ast.AnnAssign)
-                and getattr(node.target, "id", None) == "_OP_SQL"
-                and isinstance(node.value, ast.Dict)):
-            emitted = {k.value for k in node.value.keys
-                       if isinstance(k, ast.Constant)}
-        elif (isinstance(node, ast.Assign)
-                and any(getattr(t, "id", None) == "_OP_SQL" for t in node.targets)
-                and isinstance(node.value, ast.Dict)):
-            emitted = {k.value for k in node.value.keys
-                       if isinstance(k, ast.Constant)}
-    assert emitted, "could not read _OP_SQL from query_parser.py"
-    assert ">" in emitted, "the parser no longer emits '>'; re-read this test"
 
-    # The parser emits the VALUES of _OP_SQL, not its keys -- the keys are
-    # what a customer types. Both must compile: the keys because an operator
-    # may arrive unmapped from a saved query, the values because that is what
-    # the compiler is actually handed.
-    values = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Dict) and any(
-                isinstance(k, ast.Constant) and k.value == ">"
-                for k in node.keys):
-            values = {v.value for v in node.values
-                      if isinstance(v, ast.Constant)}
-            break
+    def _dict_named(name):
+        for node in ast.walk(tree):
+            targets = (node.targets if isinstance(node, ast.Assign)
+                       else [node.target] if isinstance(node, ast.AnnAssign)
+                       else [])
+            if (any(getattr(t, "id", None) == name for t in targets)
+                    and isinstance(node.value, ast.Dict)):
+                return {k.value: v.value for k, v in
+                        zip(node.value.keys, node.value.values)
+                        if isinstance(k, ast.Constant)
+                        and isinstance(v, ast.Constant)}
+        return {}
 
-    unsupported = sorted((emitted | values) - set(OPERATORS))
-    assert unsupported == [], (
-        f"Query Mode can emit operators the compiler refuses: {unsupported}. "
-        f"Every one is a Parse Error on a query written in the documented "
-        f"syntax.")
+    op_sql = _dict_named("_OP_SQL")
+    canonical = _dict_named("_CANONICAL")
+    assert op_sql, "could not read _OP_SQL from query_parser.py"
+    assert canonical, "could not read _CANONICAL from query_parser.py"
+    assert ">" in op_sql, "the parser no longer accepts '>'; re-read this test"
+
+    # Every symbol the node can carry must have a canonical form.
+    untranslated = sorted(set(op_sql.values()) - set(canonical))
+    assert untranslated == [], (
+        f"Query Mode can produce operators with no canonical form: "
+        f"{untranslated}. Each one reaches the compiler as a symbol and is "
+        f"refused at request time.")
+
+    # And every canonical form must be one the compiler actually builds.
+    unknown = sorted(set(canonical.values()) - set(OPERATORS))
+    assert unknown == [], (
+        f"_CANONICAL maps to operators the compiler does not know: {unknown}")
+
+
+def test_the_two_compilers_accept_the_same_operators():
+    """Four operator maps existed in this codebase. They did not agree.
+
+        compute/engine/screen_sql.py   OPERATORS      names
+        app/core/parsed_query.py       OPERATOR_SQL   names AND symbols
+        app/core/query_parser.py       _OP_SQL        surface syntax
+        app/api/v1/routes/screener.py  OPERATOR_MAP   dead (removed v11.2.36)
+
+    v11.2.29 added `neq` to the first because the API offered it and the
+    compiler knew only `ne`, so every "≠" filter reached Postgres as a word.
+    The identical gap sat in the second and was missed, because nothing
+    compared them. Query Mode surfaced it as
+    `unsupported operator: 'neq'` once its parser began emitting canonical
+    names.
+
+    A screen can be compiled by either path. An operator one accepts and the
+    other refuses is a query that works or fails depending on which compiler
+    runs it -- which is not a property anyone can reason about.
+    """
+    from app.core.parsed_query import OPERATOR_SQL
+
+    missing = sorted(set(OPERATORS) - set(OPERATOR_SQL))
+    assert missing == [], (
+        f"screen_sql.OPERATORS accepts {missing} and parsed_query."
+        f"OPERATOR_SQL does not. A query compiled by the legacy path raises "
+        f"`unsupported operator` while the same query succeeds on the other.")
+
+    # Both must agree on what the SQL IS, not merely that they accept it.
+    for name in sorted(set(OPERATORS) & set(OPERATOR_SQL)):
+        a, b = OPERATORS[name], OPERATOR_SQL[name]
+        assert a == b, (
+            f"the two compilers disagree on {name!r}: screen_sql gives {a!r}, "
+            f"parsed_query gives {b!r}")
 
 
 def test_in_is_still_unimplemented_and_refuses_cleanly():
@@ -169,14 +204,14 @@ def test_an_unknown_operator_is_refused_not_forwarded():
     outright hostile: none of them may come back as something to put in a
     query.
     """
-    # "=" and "<>" were in this list until v11.2.36 and are now PERMITTED:
-    # they are Query Mode's documented syntax, and refusing them is what
-    # broke that feature. The property under test is unchanged -- an
-    # operator outside the closed set is refused rather than forwarded --
-    # only the set is now honest about both vocabularies. Everything below
-    # is still outside it, including the two that would be an injection.
-    for bogus in ("neqq", "NEQ", "=>", "=<", "==", "like", "between", "",
-                  "1=1", "; DROP TABLE universe --", ">>", "'"):
+    # "=" and "<>" belong here: they are SQL symbols, not compiler operators.
+    # Query Mode uses that syntax and translates it to a canonical name at its
+    # own boundary (_ConditionNode._CANONICAL), so the compiler never sees a
+    # symbol. Briefly in v11.2.36 this map was widened to accept them, which
+    # made a third vocabulary for the equivalence suite to hold in sync; the
+    # gate caught it.
+    for bogus in ("neqq", "NEQ", "=", "<>", ">", "=>", "==", "like",
+                  "between", "", "1=1", "; DROP TABLE universe --", "'"):
         try:
             compiled = _sql_operator(bogus)
         except UnknownOperator:

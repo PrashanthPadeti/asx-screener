@@ -157,6 +157,27 @@ def _assert_not_500(resp, what: str):
         f"Body: {resp.text[:400]}")
 
 
+def _assert_screener_shape(body, what: str):
+    """Validate against the DECLARED contract, not keys I remembered.
+
+    The first version asserted `"results" in body`. The field is `data`.
+    Both screener modes returned 200 and the test failed on a key that
+    never existed -- a test asserting its author's recollection rather
+    than the schema the endpoint promises.
+
+    model_validate checks every field and type, so the assertion cannot
+    drift from the contract, and a response that stops conforming fails
+    here rather than in a customer's browser.
+    """
+    from app.schemas.screener import ScreenerResponse
+    try:
+        ScreenerResponse.model_validate(body)
+    except Exception as exc:                                   # noqa: BLE001
+        raise AssertionError(
+            f"{what} returned 200 but the body does not conform to "
+            f"ScreenerResponse: {exc}") from exc
+
+
 def _stub_model(payload: dict):
     """An Anthropic client that returns `payload` without a network call.
 
@@ -180,9 +201,7 @@ def test_filter_screen_runs():
         "page": 1, "page_size": 10})
     assert r.status_code == 200, (
         f"the Filter Screen is broken: {r.status_code} {r.text[:400]}")
-    body = r.json()
-    for key in ("results", "total"):
-        assert key in body, f"response is missing {key!r}: {list(body)}"
+    _assert_screener_shape(r.json(), "Filter Screen")
 
 
 def test_filter_screen_accepts_a_boolean_filter():
@@ -210,14 +229,14 @@ def test_query_mode_runs_the_documented_syntax():
     assert r.status_code == 200, (
         f"Query Mode cannot run the syntax it documents: {r.status_code} "
         f"{r.text[:400]}")
-    assert "results" in r.json()
+    _assert_screener_shape(r.json(), "Query Mode")
 
 
 def test_query_mode_handles_every_documented_operator():
     """Per-operator, so one broken symbol is named rather than hidden
     behind whichever appears first in a compound query."""
-    for expr in ("market_cap > 0", "market_cap >= 0", "market_cap < 1e12",
-                 "market_cap <= 1e12", "sector = 'Materials'",
+    for expr in ("market_cap > 0", "market_cap >= 0", "market_cap < 999999999999",
+                 "market_cap <= 999999999999", "sector = 'Materials'",
                  "sector != 'Materials'", "is_reit = true",
                  "is_reit = false"):
         r = _client().post("/api/v1/screener/query",

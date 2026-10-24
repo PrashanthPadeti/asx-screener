@@ -87,8 +87,10 @@ class ScreenerRow(BaseModel):
     industry:     Optional[str]   = None
     stock_type:   Optional[str]   = None
     status:       Optional[str]   = None
-    is_reit:      bool            = False
-    is_miner:     bool            = False
+    # See app/schemas/company.py: unknown is not False. 563 of 2,552
+    # universe rows have never been classified.
+    is_reit:      Optional[bool] = None
+    is_miner:     Optional[bool] = None
     is_asx200:    bool            = False
     is_asx300:    bool            = False
 

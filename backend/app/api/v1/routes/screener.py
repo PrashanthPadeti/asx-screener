@@ -1033,7 +1033,11 @@ def build_screener_sql(req: ScreenerRequest, scope=None,
         SELECT
             -- Identity
             u.asx_code, u.company_name, u.sector, u.industry, u.stock_type, u.status,
-            COALESCE(u.is_reit, FALSE) AS is_reit, COALESCE(u.is_miner, FALSE) AS is_miner,
+            -- NOT coalesced. 563 universe rows have never been classified,
+            -- and FALSE here claimed we had checked. The index flags below
+            -- keep their COALESCE: absence from a closed-world index list is
+            -- real evidence of non-membership; absence of an industry is not.
+            u.is_reit, u.is_miner,
             COALESCE(u.is_asx200, FALSE) AS is_asx200, COALESCE(u.is_asx300, FALSE) AS is_asx300,
 
             -- Price
@@ -1189,7 +1193,11 @@ async def batch_screener(
     sql = f"""
         SELECT
             u.asx_code, u.company_name, u.sector, u.industry, u.stock_type, u.status,
-            COALESCE(u.is_reit, FALSE) AS is_reit, COALESCE(u.is_miner, FALSE) AS is_miner,
+            -- NOT coalesced. 563 universe rows have never been classified,
+            -- and FALSE here claimed we had checked. The index flags below
+            -- keep their COALESCE: absence from a closed-world index list is
+            -- real evidence of non-membership; absence of an industry is not.
+            u.is_reit, u.is_miner,
             COALESCE(u.is_asx200, FALSE) AS is_asx200, COALESCE(u.is_asx300, FALSE) AS is_asx300,
             u.price, u.high_52w, u.low_52w, u.volume, u.avg_volume_20d, u.market_cap,
             u.pe_ratio, u.forward_pe, u.price_to_book, u.price_to_sales,
@@ -2344,7 +2352,11 @@ async def query_screener(
     data_sql = f"""
         SELECT
             u.asx_code, u.company_name, u.sector, u.industry, u.stock_type, u.status,
-            COALESCE(u.is_reit, FALSE) AS is_reit, COALESCE(u.is_miner, FALSE) AS is_miner,
+            -- NOT coalesced. 563 universe rows have never been classified,
+            -- and FALSE here claimed we had checked. The index flags below
+            -- keep their COALESCE: absence from a closed-world index list is
+            -- real evidence of non-membership; absence of an industry is not.
+            u.is_reit, u.is_miner,
             COALESCE(u.is_asx200, FALSE) AS is_asx200, COALESCE(u.is_asx300, FALSE) AS is_asx300,
             u.price, u.high_52w, u.low_52w, u.volume, u.avg_volume_20d, u.market_cap,
             u.pe_ratio, u.forward_pe, u.price_to_book, u.price_to_sales,

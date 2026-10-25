@@ -1,0 +1,19 @@
+[Unit]
+Description=ASX Screener — primary feature monitor (every 10 minutes)
+# The number that matters is how long a customer can be on a broken site
+# before anyone knows. Query Mode was dark for six releases. Ten minutes is
+# chosen as the point where the check is frequent enough to bound the damage
+# and infrequent enough that the smoke's own load is negligible -- it issues
+# roughly a dozen read-only requests.
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=10min
+# Spread across the minute so the monitor never lands exactly on a scheduled
+# job's start and measures the system at its busiest.
+RandomizedDelaySec=60
+Persistent=true
+Unit=asx-primary-features.service
+
+[Install]
+WantedBy=timers.target

@@ -301,12 +301,33 @@ def test_ai_query_survives_a_field_name_as_a_value():
 
 # ── 2. Market overview ──────────────────────────────────────────────────────
 
+#: The one 503 a schema-only clone may legitimately produce: a panel built
+#: from a precomputed snapshot, on a database that has no rows yet. The
+#: endpoint says so in plain words and tells an operator what to run.
+NO_SNAPSHOT = "not yet available"
+
+
 def test_market_surfaces_respond():
     """Each panel separately, so one broken section is named rather than
-    collapsing the whole page into a single failure."""
+    collapsing the whole page into a single failure.
+
+    /market/dashboard answers 503 "Market snapshot not yet available" here,
+    which is CORRECT on a clone with no rows -- it is a precomputed panel
+    and there is nothing to precompute from. That specific refusal is
+    accepted and nothing else is: a 503 whose body says anything other than
+    "not yet available" is a broken market page and fails.
+
+    The stronger property -- that the panel actually returns DATA -- cannot
+    be asserted here and belongs in the post-deploy smoke, where there are
+    rows. Accepting a no-data 503 in the contract suite is only honest
+    because that smoke exists to catch it in production.
+    """
     for path in ("/api/v1/market/summary", "/api/v1/market/dashboard",
                  "/api/v1/market/movers", "/api/v1/market/sectors"):
-        _assert_not_500(_client().get(path), f"Market overview {path}")
+        r = _client().get(path)
+        if r.status_code == 503 and NO_SNAPSHOT in r.text:
+            continue
+        _assert_not_500(r, f"Market overview {path}")
 
 
 # ── 3. Company pages ────────────────────────────────────────────────────────

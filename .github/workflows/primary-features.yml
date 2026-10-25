@@ -1,0 +1,51 @@
+name: Primary features
+
+# Layer 3, external half. The local systemd timer dies with the box, so it
+# cannot tell you the site is down -- only that a feature broke while the
+# server was up. This runs outside the server and covers that blind spot.
+#
+# It hits the PUBLIC URL, so it also exercises nginx, TLS and DNS, none of
+# which the local check can see.
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub does not guarantee punctuality on scheduled
+    # workflows and will skip runs under load, which is precisely why the
+    # local timer exists alongside it: neither is sufficient on its own.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  # A backlog of monitor runs tells you nothing a single current run does not.
+  group: primary-features
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Three primary features (public URL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Smoke the primary features
+        # The SAME script deploy.sh and the systemd timer run. A second
+        # implementation of "is the screener working" would drift from the
+        # first and the two would disagree at the worst possible moment.
+        #
+        # No SMOKE_TOKEN here: Query Mode and AI Query need a Pro/Premium
+        # token, and a standing credential in CI secrets is a larger risk
+        # than the coverage is worth. The script reports them SKIPPED by
+        # name rather than counting them as passing, and the gate's contract
+        # tests cover those two modes before merge.
+        run: |
+          python3 backend/scripts/smoke_primary_features.py \
+            --base https://asxscreener.com.au
+
+      # A failed run emails the repository owner, which is how the CI
+      # failures surfaced in this project. That is the alert for this half;
+      # the local timer sends through the app's own notification path.

@@ -1,0 +1,39 @@
+[Unit]
+# Layer 3, local half. Runs the SAME smoke script deploy.sh runs, so the two
+# cannot drift and disagree about whether the screener works.
+#
+# This half catches what a deploy-time check cannot: a feature that breaks
+# with nothing deployed -- stale data, a scheduled job that corrupted the
+# universe, an expired credential. It dies with the box, so it cannot report
+# that the site is down; the GitHub Actions half covers that.
+Description=ASX Screener — primary feature monitor
+After=network-online.target asx-backend.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/asx-screener/backend
+
+# ALERT_EMAIL must be set or the monitor can see a broken site and tell
+# nobody; it says so loudly when it is missing. The app's own .env supplies
+# SMTP, since this reuses the notification path that already sends alerts
+# and announcements daily.
+EnvironmentFile=/opt/asx-screener/backend/.env
+Environment=MONITOR_BASE=http://localhost:8000
+Environment=MONITOR_STATE=/var/lib/asx-screener/primary_features.state
+
+ExecStart=/opt/asx-screener/asx-venv/bin/python \
+    /opt/asx-screener/backend/scripts/monitor_primary_features.py
+
+# A failing check is the POINT of this unit, not a fault of the unit. Without
+# this, systemd marks the service failed and the next timer run may be
+# suppressed depending on configuration -- so the monitor would go quiet
+# exactly when it matters.
+SuccessExitStatus=0 1
+
+StandardOutput=append:/opt/asx-screener/logs/primary_features_monitor.log
+StandardError=append:/opt/asx-screener/logs/primary_features_monitor.log
+
+[Install]
+WantedBy=multi-user.target

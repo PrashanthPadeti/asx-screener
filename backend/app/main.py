@@ -201,18 +201,54 @@ async def lifespan(app: FastAPI):
     # surface would then read as twenty jobs missing rather than as a process
     # that never had any.
     frozen = not settings.SCHEDULERS_ENABLED or instrument_mode()
+
+    # ── Exactly one owner ─────────────────────────────────────
+    # Since v11.2.45 the worker process registers these same jobs from this
+    # same declaration. If both processes ran them, every scheduled effect
+    # would happen twice: two alert emails per customer, two writes racing
+    # into screener.universe.
+    #
+    # SCHEDULERS_ENABLED=false on this process is how the cutover is
+    # DECLARED. It is not what makes it true -- a restored .env, a fresh
+    # host or a rollback silently gives you two owners, and the symptom
+    # surfaces far from the cause. So ownership is arbitrated by an advisory
+    # lock, and losing it freezes this process exactly as the flag would.
+    #
+    # Only attempted when not already frozen: a frozen process is not
+    # claiming to run anything, and taking the lock would mean holding
+    # ownership while running nothing, which would keep the worker out.
+    owner = None
+    if not frozen:
+        from app.core.scheduler_ownership import SchedulerOwner
+        owner = SchedulerOwner(settings.DATABASE_URL_SYNC, role="api")
+        if not owner.try_acquire():
+            frozen = True
+            logger.warning(
+                "SCHEDULERS NOT OWNED BY THIS PROCESS — another process (the "
+                "worker) holds them. The API is serving normally and running "
+                "no background jobs. This is the expected state once the "
+                "worker is deployed.")
+
     if frozen:
         scheduler.remove_all_jobs()
 
     scheduler.start()
 
-    if frozen:
+    if frozen and not settings.SCHEDULERS_ENABLED:
         logger.warning(
             "SCHEDULERS FROZEN — SCHEDULERS_ENABLED is off, so no background "
             "jobs are registered. The API is serving normally and nothing is "
             "computing. Unset the variable and restart to resume.")
-    else:
-        logger.info("Schedulers started: alerts(15m), portfolio-threshold(30m), weekly-summary(Mon 8am), announcements(10m), watchlist-digest(7:30am), asx-companies(6am), capital-raises(7:30am), index-prices(5:30pm), fund-prices(5:35pm), global-markets(5:40pm), commodities(5:45pm), asx-indices(5:50pm), market-snapshot(7:50pm), short-positions(8:05pm), anomaly-detect(8:20pm), anomaly-alerts(8:35pm), top5-strategy(2nd of month 8pm), mining-reit-metrics(Sun 7am)")
+    elif not frozen:
+        # Derived from what the scheduler HOLDS, not a hardcoded list. The
+        # previous version of this line named eighteen jobs including
+        # watchlist-digest and anomaly-alerts, both of which are flag-gated
+        # off -- so the log asserted two jobs were started that were not. A
+        # summary that cannot be wrong is worth more than one that is
+        # easier to read.
+        live = sorted(j.id for j in scheduler.get_jobs())
+        logger.info("Schedulers started in-process: %d jobs: %s",
+                    len(live), ", ".join(live))
 
     # Published on /health because the log is not a usable channel: uvicorn
     # configures its own loggers and none of this module's logger.info lines
@@ -225,6 +261,11 @@ async def lifespan(app: FastAPI):
     app.state.schedulers_frozen = frozen
     app.state.scheduler_jobs = len(scheduler.get_jobs())
 
+    # Which process owns the jobs, observable without reading a log. During
+    # and after the cutover the question "is anything running the jobs, and
+    # is it running them twice?" has to be answerable from /health.
+    app.state.scheduler_owner = bool(owner and owner.acquired)
+
     # The scheduler itself, so the admin surface can report which jobs are
     # registered rather than only how many. A count cannot be reconciled
     # against static intent: twenty registrations and twenty live jobs agree
@@ -235,6 +276,11 @@ async def lifespan(app: FastAPI):
     yield
 
     scheduler.shutdown(wait=False)
+    if owner is not None:
+        # Release explicitly rather than letting TCP teardown do it. A
+        # handover that waits on the socket makes the next start look
+        # contended, and the worker would log DECLINED for no reason.
+        owner.release()
     logger.info("Shutting down...")
 
 
@@ -286,6 +332,14 @@ async def health():
             # this; surfacing it here is what lets an operator verify that
             # after a thaw rather than take it on trust.
             "anomaly_alerts": settings.ANOMALY_ALERTS_ENABLED,
+            # True when THIS process holds the scheduler lock. After the
+            # worker cutover it should be false here and the worker should
+            # hold it. Two processes reporting true is impossible by
+            # construction -- the lock permits one -- so the value that
+            # matters operationally is BOTH reporting false, which means
+            # nothing is running the jobs at all.
+            "owned_by_this_process": getattr(
+                app.state, "scheduler_owner", None),
         },
         # Paid features that depend on an external credential. A missing key
         # turns NL Screener (Pro+) and AI Portfolio Insights (Premium+) into a

@@ -153,6 +153,39 @@ restart_backend() {
     fi
 }
 
+# ── Worker ────────────────────────────────────────────────────────────────────
+# Restarted AFTER the backend, and only if the unit is installed.
+#
+# Order matters during the cutover: restarting the API releases the scheduler
+# ownership lock, so the worker's next attempt succeeds. The reverse order
+# leaves the worker retrying for 30s against an API that still holds it --
+# correct, but it makes a normal deploy look contended in the log.
+#
+# Absent unit is not an error: the worker is installed deliberately, and a
+# host that has not had the cutover should deploy exactly as before.
+restart_worker() {
+    if ! systemctl list-unit-files asx-worker.service >/dev/null 2>&1 \
+       || ! systemctl cat asx-worker.service >/dev/null 2>&1; then
+        log "Worker unit not installed — skipping (jobs run in the API)"
+        return
+    fi
+
+    log "Restarting worker (systemd)..."
+    sudo systemctl reset-failed asx-worker 2>/dev/null || true
+    sudo systemctl restart asx-worker
+    sleep 8
+
+    if systemctl is-active --quiet asx-worker; then
+        log "Worker running ✓  (PID: $(systemctl show asx-worker -p MainPID --value))"
+    else
+        # Not fatal to the deploy: the site is serving. But it must be loud,
+        # because a dead worker means nothing is computing and the symptom
+        # (stale data) takes a day to become visible.
+        warn "Worker FAILED to start — no scheduled jobs are running."
+        warn "Check: tail -40 /opt/asx-screener/logs/worker.log"
+    fi
+}
+
 # ── Frontend ──────────────────────────────────────────────────────────────────
 build_frontend() {
     log "Building frontend..."
@@ -198,6 +231,7 @@ case "${1:-}" in
         install_backend_deps
         check_configuration
         restart_backend
+        restart_worker
         ;;
     --frontend)
         pull_code
@@ -212,6 +246,7 @@ case "${1:-}" in
         install_backend_deps
         check_configuration
         restart_backend
+        restart_worker
         build_frontend
         restart_frontend
         echo ""

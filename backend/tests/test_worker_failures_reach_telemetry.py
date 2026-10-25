@@ -46,8 +46,10 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
+from compute.engine import launch_authority as la                # noqa: E402
+
 #: The mandatory population, derived from the 20 `scheduler.add_job(...)`
-#: registrations in app/main.py -- NOT from a grep for `except Exception`,
+#: registrations under app/ -- NOT from a grep for `except Exception`,
 #: which finds 27 handlers, 10 of them inner helpers off the registration
 #: path. A scanned population is not an authoritative one.
 #:
@@ -222,14 +224,17 @@ def test_every_registered_wrapper_re_raises():
 def test_the_population_matches_the_scheduler_registrations():
     """A hardcoded list is a declaration, not a population.
 
-    Derived from app/main.py so that adding a job without a wrapper, or
-    renaming one, breaks this rather than silently narrowing coverage. The
-    three context-manager jobs are the documented difference.
+    Derived from the modules that register jobs -- discovered, not named --
+    so that adding a job without a wrapper, or renaming one, breaks this
+    rather than silently narrowing coverage. The three context-manager jobs
+    are the documented difference.
     """
-    src = (BACKEND / "app" / "main.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    nodes = []
+    for path in la.scheduler_sources():
+        nodes.extend(ast.walk(ast.parse(path.read_text(encoding="utf-8"),
+                                        str(path))))
     registered = set()
-    for n in ast.walk(tree):
+    for n in nodes:
         if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
                 and n.func.attr == "add_job" and n.args):
             first = n.args[0]

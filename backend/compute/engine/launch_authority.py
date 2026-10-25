@@ -332,8 +332,61 @@ def _classification_key(target: str) -> str:
 # category as a metric we failed to obtain: the honest answer is "unknown",
 # and unknown blocks.
 
-MAIN = cb.BACKEND / "app" / "main.py"
+# Where the registrations live is DISCOVERED, not declared.
+#
+# This used to be `MAIN = cb.BACKEND / "app" / "main.py"`, and every consumer
+# parsed that one file. On 25 Oct 2026 the add_job calls were extracted into
+# app/scheduler_registry.py with no behaviour change, and fifteen guards
+# across four suites went from watching twenty registrations to watching
+# zero. They did not report an empty population; they reported agreement
+# between two empty sets. A guard that names its own population by path
+# loses it the moment the code moves, and refactoring is exactly when you
+# most want it watching.
+#
+# So: find every module that CALLS add_job. The population follows the code.
+APP = cb.BACKEND / "app"
 _TRACE_DEPTH = 4
+
+
+def _calls_add_job(tree: ast.AST) -> bool:
+    return any(isinstance(node, ast.Call)
+               and getattr(node.func, "attr", "") == "add_job"
+               for node in ast.walk(tree))
+
+
+def scheduler_sources() -> list[Path]:
+    """Every module under app/ that actually calls add_job.
+
+    STRUCTURAL, not textual. app/api/v1/routes/admin.py carries the string
+    "add_job" in a denylist of operations the admin surface must never
+    perform; a grep would enumerate it as a registration site. An ast.Call
+    with func.attr == "add_job" is the property we mean.
+
+    A file that cannot be parsed RAISES rather than being skipped. Skipping
+    it would subtract registrations from the population and report the
+    remainder as complete -- failed-to-obtain wearing the costume of
+    cannot-exist.
+    """
+    sources: list[Path] = []
+    for path in sorted(APP.rglob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(text, str(path))
+        except SyntaxError as exc:
+            raise RuntimeError(
+                f"cannot parse {path.relative_to(cb.BACKEND)}: {exc}. The "
+                f"scheduler population is incomplete and no verdict drawn "
+                f"from it can be trusted.") from exc
+        if _calls_add_job(tree):
+            sources.append(path)
+
+    if not sources:
+        raise RuntimeError(
+            "no module under app/ calls add_job. Either every scheduled job "
+            "has been removed, or the registrations moved somewhere this "
+            "search cannot see -- and in both cases every scheduler guard "
+            "built on this population is now vacuous.")
+    return sources
 
 
 @dataclass(frozen=True)
@@ -388,9 +441,20 @@ def _module_path(dotted: str) -> Path | None:
 
 
 def scheduler_registrations() -> list[SchedulerJob]:
-    """Every add_job in app/main.py, with the module its callable comes from."""
-    source = MAIN.read_text(encoding="utf-8")
-    tree = ast.parse(source)
+    """Every add_job under app/, with the module its callable comes from.
+
+    Spans every discovered source, so registrations split across modules --
+    as they are since the registry extraction -- are one population again.
+    """
+    found: list[SchedulerJob] = []
+    for path in scheduler_sources():
+        found.extend(_registrations_in(path))
+    return found
+
+
+def _registrations_in(path: Path) -> list[SchedulerJob]:
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, str(path))
 
     imports: dict[str, str] = {}
     for node in ast.walk(tree):
@@ -507,7 +571,7 @@ def scheduler_reconciliation(live: dict,
     for job_id in sorted(set(observed_ids) - set(static)):
         found.append(
             f"UNDECLARED JOB  '{job_id}' is registered in the running "
-            f"scheduler and absent from app/main.py's add_job declarations")
+            f"scheduler and absent from every add_job declaration under app/")
 
     for job_id in sorted(set(static) - set(observed_ids)):
         if job_id not in canonical:

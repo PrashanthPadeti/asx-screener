@@ -53,6 +53,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("worker")
 
+#: How long a stopping worker waits for in-flight jobs before abandoning
+#: them. Must stay comfortably under the unit's TimeoutStopSec (300s), or
+#: systemd SIGKILLs the process mid-drain and the bound is meaningless.
+DRAIN_SECONDS = 120
+
 
 async def main() -> int:
     # Settings first, and in this fresh process. If configuration cannot
@@ -120,9 +125,38 @@ async def main() -> int:
     try:
         await stopping.wait()
     finally:
-        # wait=True: let a running job finish rather than tearing it off
-        # mid-write. systemd's TimeoutStopSec bounds how long that may take.
-        scheduler.shutdown(wait=True)
+        # shutdown(wait=False), then drain in-flight jobs ourselves.
+        #
+        # wait=True DEADLOCKS here, and did: AsyncIOScheduler runs jobs as
+        # coroutines on THIS event loop, and shutdown(wait=True) blocks the
+        # loop waiting for them to finish -- so the jobs it is waiting for
+        # cannot run. Measured on 25 Oct 2026: SIGTERM at 21:12:33, process
+        # still alive at 21:27:09, released only when the scheduler's next
+        # wakeup timer happened to fire 15 minutes later. Under systemd that
+        # is a five-minute hang on every worker restart followed by SIGKILL
+        # in the middle of whatever was running.
+        #
+        # wait=False stops new runs being scheduled immediately and returns.
+        # The in-flight coroutines are ordinary tasks on this loop, so they
+        # are drained by awaiting them -- which lets the loop keep turning,
+        # which is the whole difference.
+        scheduler.shutdown(wait=False)
+
+        pending = [t for t in asyncio.all_tasks()
+                   if t is not asyncio.current_task() and not t.done()]
+        if pending:
+            logger.info("draining %d in-flight job(s), up to %ds",
+                        len(pending), DRAIN_SECONDS)
+            done, still_running = await asyncio.wait(
+                pending, timeout=DRAIN_SECONDS)
+            if still_running:
+                # Named, not silently abandoned. A job cut off mid-write is
+                # something the next person needs to know happened.
+                logger.warning(
+                    "%d job(s) did not finish within %ds and are being "
+                    "abandoned: %s", len(still_running), DRAIN_SECONDS,
+                    ", ".join(sorted(t.get_name() for t in still_running)))
+
         owner.release()
         logger.info("worker stopped, ownership released")
     return 0

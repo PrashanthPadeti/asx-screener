@@ -139,6 +139,54 @@ def test_the_worker_honours_the_rollout_freeze_and_instrument_mode():
     assert "instrument_mode" in src, "the worker ignores instrument mode"
 
 
+def test_the_worker_does_not_block_its_own_shutdown():
+    """shutdown(wait=True) deadlocks an AsyncIOScheduler.
+
+    Jobs run as coroutines on the worker's event loop. wait=True blocks that
+    loop waiting for them to finish, so the jobs it waits for cannot run.
+    Measured 25 Oct 2026: SIGTERM at 21:12:33, process alive until 21:27:09,
+    released only when the scheduler's next wakeup timer fired.
+
+    Under systemd that is a five-minute hang on every worker restart, ending
+    in SIGKILL mid-job. The drain must therefore be awaited, not blocked on.
+    """
+    src = WORKER.read_text(encoding="utf-8")
+    tree = _tree(WORKER)
+
+    for call in _calls(tree, "shutdown"):
+        waits = [k for k in call.keywords if k.arg == "wait"]
+        assert waits, "scheduler.shutdown() must state wait= explicitly"
+        for keyword in waits:
+            assert isinstance(keyword.value, ast.Constant)
+            assert keyword.value.value is False, (
+                "worker.py calls scheduler.shutdown(wait=True), which "
+                "deadlocks the event loop the jobs run on")
+
+    assert "asyncio.wait(" in src, (
+        "the worker does not await its in-flight jobs; without a drain, a "
+        "restart tears a job off mid-write")
+    assert "DRAIN_SECONDS" in src, "the drain must be bounded"
+
+
+def test_the_drain_fits_inside_the_unit_s_stop_timeout():
+    """A bound longer than TimeoutStopSec is not a bound.
+
+    systemd would SIGKILL the process mid-drain, and the careful handling
+    above would never complete.
+    """
+    import re
+    from app import __file__ as _app  # noqa: F401
+
+    unit = (BACKEND / "scripts" / "systemd" / "asx-worker.service"
+            ).read_text(encoding="utf-8")
+    stop_timeout = int(re.search(r"TimeoutStopSec=(\d+)", unit).group(1))
+    drain = int(re.search(r"DRAIN_SECONDS = (\d+)",
+                          WORKER.read_text(encoding="utf-8")).group(1))
+    assert drain < stop_timeout, (
+        f"DRAIN_SECONDS={drain} is not less than TimeoutStopSec="
+        f"{stop_timeout}; systemd would kill the worker mid-drain")
+
+
 def test_the_deploy_restarts_the_worker():
     deploy = (BACKEND.parent / "deploy.sh").read_text(encoding="utf-8")
     assert "restart_worker" in deploy

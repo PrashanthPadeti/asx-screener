@@ -247,18 +247,68 @@ def test_ownership_is_released_and_can_be_retaken():
         second.release()
 
 
-def test_a_refused_owner_names_the_holder():
-    """'I am not the owner' is only useful if you can find out who is."""
+def test_the_key_is_large_enough_to_exercise_the_split():
+    """A 64-bit advisory key is stored across TWO 32-bit columns.
+
+    classid holds the high half, objid the low half. The first version of
+    holder() matched on objid alone, which compares against the low half and
+    finds nothing. With a key below 2**32 the high half is zero and the bug
+    is invisible, so this pins the condition that makes the test below mean
+    something.
+    """
+    assert SCHEDULER_OWNER_KEY > 2 ** 32, (
+        "the key no longer spans both lock columns, so the test below would "
+        "pass even with a predicate that ignores classid")
+
+
+def test_a_refused_owner_names_the_holder(caplog):
+    """'I am not the owner' is only useful if you can find out who is.
+
+    Asked from the REFUSED process, which is what production does. The
+    previous version asked the holder's own connection, and so passed on
+    25 Oct 2026 while the live worker printed "an unidentified session" --
+    a guard whose conditions differed from the path it claimed to cover.
+    """
+    import logging as _logging
+
     from app.core.config import settings
 
     first = SchedulerOwner(settings.DATABASE_URL_SYNC, role="test-holder")
     try:
         assert first.try_acquire()
+
         probe = SchedulerOwner(settings.DATABASE_URL_SYNC, role="test-probe")
-        assert not probe.try_acquire()
-        # try_acquire closed the probe's connection; ask the holder instead.
-        described = first.holder()
-        assert described and "asx-scheduler-owner" in described, (
-            f"the holder is not identifiable from the lock table: {described!r}")
+        with caplog.at_level(_logging.WARNING,
+                             logger="app.core.scheduler_ownership"):
+            assert not probe.try_acquire()
+        logged = " ".join(r.getMessage() for r in caplog.records)
+
+        assert "asx-scheduler-owner/test-holder" in logged, (
+            f"the refused process could not identify the holder: {logged!r}")
+        assert "no session holds it" not in logged, (
+            "the lock is held, but the query reported nobody holds it — the "
+            "predicate does not match the key as stored")
+        assert "could not be determined" not in logged, (
+            f"the holder query itself failed: {logged!r}")
     finally:
         first.release()
+
+
+def test_the_three_outcomes_stay_distinguishable():
+    """Held, nobody, and could-not-look are different facts.
+
+    Collapsing them is what sent 25 Oct 2026's investigation toward
+    permissions when the cause was a wrong predicate.
+    """
+    from app.core.config import settings
+
+    free = SchedulerOwner(settings.DATABASE_URL_SYNC, role="test-unheld")
+    assert free.try_acquire()
+    held = free.holder()
+    free.release()
+    assert "asx-scheduler-owner" in held, held
+
+    broken = SchedulerOwner(settings.DATABASE_URL_SYNC, role="test-broken")
+    # No connection was ever opened, so the query must fail -- and must SAY
+    # it failed rather than reporting an empty result.
+    assert "could not be determined" in broken.holder()

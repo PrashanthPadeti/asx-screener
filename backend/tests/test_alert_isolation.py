@@ -20,7 +20,7 @@ So the exclusion is executable and checked at two boundaries, because what is
 being prevented is an email arriving in a customer's inbox and there is no
 undo for that:
 
-    registration   app/main.py does not add the job unless the flag is on
+    registration   app/scheduler_registry.py does not add the job unless the flag is on
     send           send_anomaly_alerts refuses even if called directly
 
 These guards are textual because the assertion is about configuration that
@@ -41,7 +41,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 BACKEND = Path(__file__).resolve().parents[1]
 CONFIG = BACKEND / "app" / "core" / "config.py"
-MAIN = BACKEND / "app" / "main.py"
+#: Registration moved to app/scheduler_registry.py in v11.2.43 so the
+#: worker process can register the same jobs from the same declaration.
+#: This guard FOLLOWED it. A guard left pointing at main.py would parse a
+#: file with no add_job calls, find nothing to check, and pass -- which is
+#: how the alert guard spent eight releases blind after jobs were wrapped
+#: in instrumented().
+MAIN = BACKEND / "app" / "scheduler_registry.py"
 WORKER = BACKEND / "app" / "workers" / "anomaly_alert_worker.py"
 FREEZE = BACKEND / "scripts" / "p0a_freeze.sh"
 
@@ -113,7 +119,7 @@ def test_the_job_is_not_registered_unless_the_flag_is_on():
     registrations = [n for n in ast.walk(tree)
                      if is_add_job(n) and mentions_worker(n)]
     assert registrations, (
-        "no add_job call mentioning send_anomaly_alerts found in app/main.py "
+        "no add_job call mentioning send_anomaly_alerts found in app/scheduler_registry.py "
         "-- the registration has moved or been renamed, and this guard is "
         "watching nothing")
 
@@ -121,7 +127,7 @@ def test_the_job_is_not_registered_unless_the_flag_is_on():
         inside = any(start <= call.lineno <= end
                      for start, end in guarded_spans)
         assert inside, (
-            f"app/main.py:{call.lineno} registers send_anomaly_alerts "
+            f"app/scheduler_registry.py:{call.lineno} registers send_anomaly_alerts "
             f"outside any `if ...{FLAG}` block; the job would be registered "
             f"on any restart")
 

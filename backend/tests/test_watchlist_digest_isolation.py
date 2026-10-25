@@ -15,7 +15,7 @@ launch it; it would have arrived as a side effect of fixing a typo.
 Fixing a dead feature is not the same act as launching it. So the digest
 is gated at the same two boundaries as the anomaly alerts:
 
-    registration   app/main.py does not add the job unless the flag is on
+    registration   app/scheduler_registry.py does not add the job unless the flag is on
     send           send_watchlist_digests refuses even if called directly
 
 Both are checked structurally. The alert-isolation guard was textual, and
@@ -36,7 +36,13 @@ from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
 CONFIG = BACKEND / "app" / "core" / "config.py"
-MAIN = BACKEND / "app" / "main.py"
+#: Registration moved to app/scheduler_registry.py in v11.2.43 so the
+#: worker process can register the same jobs from the same declaration.
+#: This guard FOLLOWED it. A guard left pointing at main.py would parse a
+#: file with no add_job calls, find nothing to check, and pass -- which is
+#: how the alert guard spent eight releases blind after jobs were wrapped
+#: in instrumented().
+MAIN = BACKEND / "app" / "scheduler_registry.py"
 WORKER = BACKEND / "app" / "workers" / "watchlist_digest_worker.py"
 
 FLAG = "WATCHLIST_DIGEST_ENABLED"
@@ -78,13 +84,13 @@ def test_the_job_is_not_registered_unless_the_flag_is_on():
                 for x in ast.walk(n))]
 
     assert registrations, (
-        f"no add_job call mentioning {ENTRY} found in app/main.py — the "
+        f"no add_job call mentioning {ENTRY} found in app/scheduler_registry.py — the "
         f"registration has moved or been renamed, and this guard is "
         f"watching nothing")
     for call in registrations:
         assert any(start <= call.lineno <= end
                    for start, end in guarded_spans), (
-            f"app/main.py:{call.lineno} registers {ENTRY} outside any "
+            f"app/scheduler_registry.py:{call.lineno} registers {ENTRY} outside any "
             f"`if ...{FLAG}` block; the digest would send on any restart")
 
 

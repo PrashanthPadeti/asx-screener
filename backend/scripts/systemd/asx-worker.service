@@ -1,0 +1,38 @@
+[Unit]
+# The scheduled jobs, in their own process.
+#
+# Deliberately NOT ordered After=asx-backend.service. The whole point is that
+# the jobs do not depend on the API: if the API cannot start, the data should
+# still be maintained, and if the worker dies the site should keep serving.
+# Coupling them in the unit file would reintroduce exactly what this split
+# removes.
+Description=ASX Screener — scheduled jobs worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/asx-screener/backend
+EnvironmentFile=/opt/asx-screener/backend/.env
+
+ExecStart=/opt/asx-screener/asx-venv/bin/python /opt/asx-screener/backend/worker.py
+
+# Exit 1 means another process already owns the schedulers. Restarting into
+# that is correct: during a deploy the API releases ownership a moment after
+# the worker tries for it, and the retry then succeeds. The backoff keeps a
+# genuinely contended state from becoming a spin.
+Restart=on-failure
+RestartSec=30s
+
+# A clean stop lets a running job finish rather than tearing it off
+# mid-write. Longer than the default 90s because several jobs legitimately
+# run for minutes; SIGKILL after that is the backstop, not the plan.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+StandardOutput=append:/opt/asx-screener/logs/worker.log
+StandardError=append:/opt/asx-screener/logs/worker.log
+
+[Install]
+WantedBy=multi-user.target

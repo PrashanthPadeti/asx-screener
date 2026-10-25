@@ -30,6 +30,32 @@ log()  { echo -e "${GREEN}[DEPLOY]${NC} $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 err()  { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
+
+# ── Post-deploy smoke — the three primary features ──────────────────────────
+# A deploy that leaves the screener, the market page or the company pages
+# broken must FAIL here, not succeed quietly and wait for a customer.
+#
+# This is why it exists: Query Mode was dark from v11.2.29 to v11.2.36 --
+# six releases, each deployed with a green "Deploy complete" -- and surfaced
+# only when a customer sent a screenshot.
+#
+# The contract tests in the gate prove a request compiles against a
+# schema-only clone. They cannot prove the answer contains anything. This
+# proves the rest, against real data, in the process customers hit.
+smoke_primary_features() {
+    log "Smoke testing the three primary features..."
+    if "$REPO_DIR/asx-venv/bin/python"             "$REPO_DIR/backend/scripts/smoke_primary_features.py"; then
+        log "Primary features OK ✓"
+        return 0
+    fi
+    # warn(), not err(): err() exits, and the caller needs to print the
+    # status block and set the exit code itself.
+    warn "A PRIMARY FEATURE IS BROKEN IN PRODUCTION."
+    warn "The code is deployed. Fix forward or roll back to the previous"
+    warn "tag; do not leave it in this state."
+    return 1
+}
+
 # ── Status ────────────────────────────────────────────────────────────────────
 show_status() {
     echo ""
@@ -158,10 +184,20 @@ case "${1:-}" in
         build_frontend
         restart_frontend
         echo ""
-        log "============================================"
-        log " Deploy complete ✓"
-        log "============================================"
-        show_status
+        # Smoke BEFORE declaring success: "Deploy complete" printed over a
+        # broken screener is the message that let six releases ship dark.
+        if smoke_primary_features; then
+            log "============================================"
+            log " Deploy complete ✓"
+            log "============================================"
+            show_status
+        else
+            log "============================================"
+            warn " Deploy finished — PRIMARY FEATURES FAILING"
+            log "============================================"
+            show_status
+            exit 1
+        fi
         ;;
     *)
         echo "Usage: $0 [--backend|--frontend|--status]"

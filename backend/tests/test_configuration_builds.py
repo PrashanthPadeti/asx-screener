@@ -44,8 +44,6 @@ import ast
 import re
 from pathlib import Path
 
-import pytest
-
 BACKEND = Path(__file__).resolve().parents[1]
 ENV_EXAMPLE = BACKEND / ".env.example"
 CONFIG_PY = BACKEND / "app" / "core" / "config.py"
@@ -113,8 +111,7 @@ def test_every_documented_key_is_declared_on_settings():
     )
 
 
-@pytest.mark.parametrize("key", ["RESEND_API_KEY", "EMAIL_FROM", "ALERT_EMAIL"])
-def test_the_monitor_s_keys_are_declared(key):
+def test_the_monitor_s_keys_are_declared():
     """Named individually so that removing one from .env.example cannot
     quietly retire the case along with it.
 
@@ -122,8 +119,39 @@ def test_the_monitor_s_keys_are_declared(key):
     -- deliberately, so it does not share fate with the app it watches. But
     they live in the same .env, so the APP still has to tolerate them.
     ALERT_EMAIL is the one that was latent on 25 Oct 2026.
+
+    A plain loop rather than pytest.mark.parametrize: the gate executes
+    these files as standalone scripts, where a pytest decorator is a hard
+    dependency and a fixture simply does not exist. A test that behaves
+    differently under the gate than under pytest is a test whose result
+    depends on how you asked.
     """
-    assert key in _declared_fields(), (
-        f"{key} is set in the deployed backend/.env for the primary-feature "
-        f"monitor. Undeclared, it stops the API starting."
-    )
+    missing = [k for k in ("RESEND_API_KEY", "EMAIL_FROM", "ALERT_EMAIL")
+               if k not in _declared_fields()]
+    assert not missing, (
+        f"{', '.join(missing)} set in the deployed backend/.env for the "
+        f"primary-feature monitor. Undeclared, they stop the API starting.")
+
+
+if __name__ == "__main__":
+    # The gate runs suites as standalone scripts and reads this summary. A
+    # file without this block defines its functions, runs nothing, exits 0,
+    # and is counted as passing -- which is what happened to this suite from
+    # v11.2.43 until v11.2.47.
+    import sys as _sys
+
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    failures = []
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"  PASS  {name}")
+        except AssertionError as e:
+            failures.append(name)
+            print(f"  FAIL  {name}  - {e}")
+        except Exception as e:                                # noqa: BLE001
+            failures.append(name)
+            print(f"  ERROR {name}  - {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
+    _sys.exit(1 if failures else 0)

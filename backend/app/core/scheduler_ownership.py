@@ -136,6 +136,18 @@ class SchedulerOwner:
                     "SELECT a.application_name, a.pid, a.backend_start "
                     "FROM pg_locks l JOIN pg_stat_activity a USING (pid) "
                     "WHERE l.locktype = 'advisory' "
+                    # pg_locks is CLUSTER-wide; advisory locks are acquired
+                    # per DATABASE. Without this the query matches the same
+                    # key held in another database and LIMIT 1 returns a
+                    # session that has nothing to do with this one.
+                    #
+                    # Caught on 25 Oct 2026 the first time this suite
+                    # actually ran: a test holding the lock in an isolated
+                    # probe database was told the holder was the production
+                    # API. In production it had been right by luck, because
+                    # only one database held the key.
+                    "  AND l.database = (SELECT oid FROM pg_database "
+                    "                    WHERE datname = current_database()) "
                     "  AND l.objsubid = 1 "
                     "  AND l.classid::bigint * 4294967296 "
                     "      + l.objid::bigint = %s "

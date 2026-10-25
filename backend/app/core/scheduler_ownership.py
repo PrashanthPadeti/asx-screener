@@ -96,7 +96,7 @@ class SchedulerOwner:
             self.acquired = bool(cur.fetchone()[0])
 
         if not self.acquired:
-            held_by = self.holder() or "an unidentified session"
+            held_by = self.holder()
             logger.warning(
                 "scheduler ownership DECLINED — held by %s. This process "
                 "will serve normally and register no background jobs.",
@@ -104,24 +104,54 @@ class SchedulerOwner:
             self._close()
         return self.acquired
 
-    def holder(self) -> str | None:
-        """Who holds the lock, for the log. Never raises: this runs on the
-        path where something has already gone sideways, and an exception
-        here would replace a useful diagnostic with a stack trace."""
+    def holder(self) -> str:
+        """Who holds the lock, for the log.
+
+        Always returns a sentence. Three outcomes, and they are DIFFERENT
+        facts that must not collapse into one:
+
+            "<name> (pid N, since ...)"   someone holds it
+            "no session holds it"         nobody does
+            "could not be determined: X"  the query failed
+
+        The first version returned None for all three and the caller printed
+        "an unidentified session" over every one. On 25 Oct 2026 that is
+        exactly what happened, and it read as a permissions problem when the
+        real cause was a wrong predicate. A diagnostic that cannot
+        distinguish "nobody" from "I could not look" sends the next person
+        to the wrong place -- the same cannot-exist versus failed-to-obtain
+        distinction this codebase keeps having to relearn.
+
+        A 64-bit advisory key is stored SPLIT across two 32-bit columns:
+        classid holds the high half, objid the low half, and objsubid is 1
+        for the bigint form (2 for the two-int form, which is a different
+        lock space entirely). Matching on objid alone compares against the
+        low half and silently finds nothing:
+
+            8090251045  ->  classid 1, objid 3795283749
+        """
         try:
             with self._conn.cursor() as cur:
                 cur.execute(
                     "SELECT a.application_name, a.pid, a.backend_start "
                     "FROM pg_locks l JOIN pg_stat_activity a USING (pid) "
-                    "WHERE l.locktype = 'advisory' AND l.objid = %s "
-                    "AND l.granted LIMIT 1",
+                    "WHERE l.locktype = 'advisory' "
+                    "  AND l.objsubid = 1 "
+                    "  AND l.classid::bigint * 4294967296 "
+                    "      + l.objid::bigint = %s "
+                    "  AND l.granted "
+                    "LIMIT 1",
                     (SCHEDULER_OWNER_KEY,))
                 row = cur.fetchone()
-            if not row:
-                return None
-            return f"{row[0]} (pid {row[1]}, since {row[2]:%Y-%m-%d %H:%M:%S})"
-        except Exception:                                      # noqa: BLE001
-            return None
+        except Exception as exc:                               # noqa: BLE001
+            return f"could not be determined: {type(exc).__name__}: {exc}"
+
+        if not row:
+            return "no session holds it"
+
+        name = row[0] or "<no application_name>"
+        since = f"{row[2]:%Y-%m-%d %H:%M:%S}" if row[2] else "unknown"
+        return f"{name} (pid {row[1]}, since {since})"
 
     def release(self) -> None:
         """Explicit release on a clean shutdown.

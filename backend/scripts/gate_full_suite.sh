@@ -107,6 +107,39 @@ fi
 # user:pass@host[:port]/db  ->  user:pass@/db?host=<socket dir>
 DATABASE_URL_NS="$(printf '%s' "$DATABASE_URL" | sed -E 's#@[^/@]*/#@/#')?host=$PGSOCKET_DIR"
 export DATABASE_URL_NS
+
+# The SYNC DSN must be isolated too.
+#
+# Overriding DATABASE_URL alone left DATABASE_URL_SYNC pointing at production
+# -- and the .env is SYMLINKED from the real one, so every suite reading the
+# sync DSN connected to the live database from inside a gate whose entire
+# premise is that it cannot. On 25 Oct 2026 one of them acquired the
+# canonical execution lease on production and never released it; a scheduled
+# canonical run would have waited 90 minutes and then skipped, silently.
+#
+# Derived from the same credentials with the database name replaced, exactly
+# as DATABASE_URL is, and exported so it takes precedence over the .env.
+PROD_SYNC="$(grep -E '^DATABASE_URL_SYNC=' "$SRC/backend/.env" 2>/dev/null \
+             | head -1 | cut -d= -f2- | tr -d '"'"'"'')"
+if [ -z "$PROD_SYNC" ]; then
+    echo "gate: no DATABASE_URL_SYNC in $SRC/backend/.env -- refusing to run"
+    echo "gate: suites that use it would reach production unisolated."
+    exit 2
+fi
+export DATABASE_URL_SYNC="${PROD_SYNC%/*}/$DB"
+DATABASE_URL_SYNC_NS="$(printf '%s' "$DATABASE_URL_SYNC" \
+                        | sed -E 's#@[^/@]*/#@/#')?host=$PGSOCKET_DIR"
+export DATABASE_URL_SYNC_NS
+
+# Both must name the isolated database. Checked rather than assumed: a sed
+# that silently failed to substitute would send the whole suite at
+# production, and the symptom would be a gate that passes while writing to
+# the system it certifies.
+case "$DATABASE_URL_SYNC" in
+    *"/$DB") : ;;
+    *) echo "gate: DATABASE_URL_SYNC does not end in the isolated database"
+       exit 2 ;;
+esac
 echo "gate: namespace database URL uses the unix socket at $PGSOCKET_DIR"
 case "$DATABASE_URL" in
     *"/$DB") : ;;
@@ -191,7 +224,7 @@ run_at() {
         # Loopback up so the unix socket and localhost still work; nothing
         # else is reachable. DATABASE_URL re-exported inside the namespace.
         unshare -n -- bash -c \
-            "ip link set lo up 2>/dev/null; export DATABASE_URL='$DATABASE_URL_NS'; cd '$dir/backend' && '$PY' '$t'" \
+            "ip link set lo up 2>/dev/null; export DATABASE_URL='$DATABASE_URL_NS'; export DATABASE_URL_SYNC='$DATABASE_URL_SYNC_NS'; cd '$dir/backend' && '$PY' '$t'" \
             > "$out" 2>&1
         local rc=$?
 
@@ -200,6 +233,55 @@ run_at() {
         # they handle, so scanning output before checking the exit status
         # would mark healthy suites inconclusive.
         if [ $rc -eq 0 ]; then
+            # Exit 0 is absence of failure, not evidence of execution.
+            #
+            # Suites here are standalone scripts: `python tests/foo.py` runs
+            # an `if __name__ == "__main__"` block that executes the test
+            # functions and prints "N/M passed". A file WITHOUT that block
+            # defines its functions, runs nothing, and exits 0 -- identical
+            # to a file that ran fifty assertions and passed them all.
+            #
+            # Four files were in exactly that state on 25 Oct 2026, and two
+            # of them were the suites certifying the release being gated:
+            # test_configuration_builds.py and test_scheduler_ownership.py.
+            # The gate reported 101/101 while the behavioural exclusion
+            # tests had never run. test_multibagger_contract.py and
+            # test_multibagger_score.py had been vacuous far longer.
+            #
+            # So require the positive signal, and treat its absence as
+            # INCONCLUSIVE rather than a pass: a suite that cannot be shown
+            # to have run claims nothing either way, which is precisely the
+            # state this gate already models for environment faults.
+            # Two shapes are accepted, because the suite has two honest
+            # conventions:
+            #
+            #   "N/M passed"             a __main__ runner enumerating tests
+            #   "ALL ... CHECKS PASSED"  a script-style suite asserting at
+            #                            module level (the multibagger pair)
+            #
+            # Both prove the file RAN to its end. A file that defines
+            # functions and never calls them prints neither.
+            if ! grep -qE '^[0-9]+/[0-9]+ passed|ALL [A-Z ]*CHECKS PASSED' "$out"; then
+                incon=$((incon + 1))
+                echo "$name" >> "$WORK/$label.inconclusive"
+                printf '  INCONCL %-50s %s\n' "$name" \
+                       "exited 0 without evidence it ran — no test count and no completion marker"
+                continue
+            fi
+
+            # And the count must be non-zero. A runner that enumerates its
+            # tests from globals() and finds none also prints "0/0 passed".
+            local ran
+            ran="$(grep -oE '^[0-9]+/[0-9]+ passed' "$out" | head -1 \
+                   | cut -d/ -f2 | cut -d' ' -f1)"
+            if [ -n "$ran" ] && [ "$ran" -eq 0 ]; then
+                incon=$((incon + 1))
+                echo "$name" >> "$WORK/$label.inconclusive"
+                printf '  INCONCL %-50s %s\n' "$name" \
+                       "reported 0 tests — the suite has lost its population"
+                continue
+            fi
+
             ok=$((ok + 1))
             continue
         fi

@@ -22,6 +22,7 @@ that a second owner is actually refused.
 """
 
 import ast
+import logging
 import sys
 from pathlib import Path
 
@@ -261,7 +262,40 @@ def test_the_key_is_large_enough_to_exercise_the_split():
         "pass even with a predicate that ignores classid")
 
 
-def test_a_refused_owner_names_the_holder(caplog):
+class _Capture(logging.Handler):
+    """Collects records from the ownership logger.
+
+    Not pytest's caplog: the gate executes these files as standalone
+    scripts, where fixtures do not exist. A test that only works under
+    pytest is a test the gate silently skips -- which is the defect this
+    whole release is about.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+    def __enter__(self):
+        self._logger = logging.getLogger("app.core.scheduler_ownership")
+        self._previous = self._logger.level
+        self._logger.setLevel(logging.WARNING)
+        self._logger.addHandler(self)
+        return self
+
+    def __exit__(self, *_exc):
+        self._logger.removeHandler(self)
+        self._logger.setLevel(self._previous)
+        return False
+
+    @property
+    def text(self) -> str:
+        return " ".join(self.messages)
+
+
+def test_a_refused_owner_names_the_holder():
     """'I am not the owner' is only useful if you can find out who is.
 
     Asked from the REFUSED process, which is what production does. The
@@ -269,8 +303,6 @@ def test_a_refused_owner_names_the_holder(caplog):
     25 Oct 2026 while the live worker printed "an unidentified session" --
     a guard whose conditions differed from the path it claimed to cover.
     """
-    import logging as _logging
-
     from app.core.config import settings
 
     first = SchedulerOwner(settings.DATABASE_URL_SYNC, role="test-holder")
@@ -278,10 +310,9 @@ def test_a_refused_owner_names_the_holder(caplog):
         assert first.try_acquire()
 
         probe = SchedulerOwner(settings.DATABASE_URL_SYNC, role="test-probe")
-        with caplog.at_level(_logging.WARNING,
-                             logger="app.core.scheduler_ownership"):
+        with _Capture() as captured:
             assert not probe.try_acquire()
-        logged = " ".join(r.getMessage() for r in caplog.records)
+        logged = captured.text
 
         assert "asx-scheduler-owner/test-holder" in logged, (
             f"the refused process could not identify the holder: {logged!r}")
@@ -312,3 +343,26 @@ def test_the_three_outcomes_stay_distinguishable():
     # No connection was ever opened, so the query must fail -- and must SAY
     # it failed rather than reporting an empty result.
     assert "could not be determined" in broken.holder()
+
+
+if __name__ == "__main__":
+    # The gate runs suites as standalone scripts and reads this summary. A
+    # file without this block defines its functions, runs nothing, exits 0,
+    # and is counted as passing -- which is exactly what happened to this
+    # suite from v11.2.45 until v11.2.47, while it was being cited as
+    # behavioural proof that two owners cannot coexist.
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    failures = []
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"  PASS  {name}")
+        except AssertionError as e:
+            failures.append(name)
+            print(f"  FAIL  {name}  - {e}")
+        except Exception as e:                                # noqa: BLE001
+            failures.append(name)
+            print(f"  ERROR {name}  - {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
+    sys.exit(1 if failures else 0)

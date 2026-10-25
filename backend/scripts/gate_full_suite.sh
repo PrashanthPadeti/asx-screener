@@ -447,6 +447,44 @@ if [ -n "$p0_failures" ]; then
     exit 1
 fi
 
+# ── Failing at the candidate, with no baseline to compare against ──────────
+# Attribution asks whether a failure is NEW. That is the right question when
+# both commits could be measured. When the baseline could NOT run the suite,
+# the honest attribution is "unverifiable" -- but shipping is not an
+# attribution question. The candidate is the thing being released, and a test
+# that fails there fails there.
+#
+# Without this, every suite that starts executing for the first time gets a
+# free pass on its first gate run: it is inconclusive at the baseline by
+# definition, so any failure it finds is filed UNVERIFIABLE and nothing
+# blocks. v11.2.47 hit exactly that -- test_scheduler_ownership.py ran for
+# the first time, failed, and the gate reported "INTRODUCED: none".
+#
+# Excludes anything the CANDIDATE could not run: that is INCONCLUSIVE, a
+# different state, and it is reported separately above.
+blocking_unverifiable="$(while read -r id; do
+    [ -z "$id" ] && continue
+    grep -qxF "${id%%::*}" "$WORK/candidate.inconclusive" 2>/dev/null \
+        || echo "$id"
+done < "$WORK/unverif.i")"
+
+if [ -n "$blocking_unverifiable" ]; then
+    echo
+    echo "════ failing at the candidate, baseline unmeasurable ════"
+    echo "These tests FAIL at the commit being released. The baseline could"
+    echo "not run them, so the failure cannot be attributed -- but a test"
+    echo "that fails at the candidate blocks regardless of what the baseline"
+    echo "was able to say. A suite running for the first time is the usual"
+    echo "cause, and its first finding is still a finding."
+    echo "$blocking_unverifiable" | sed 's/^/    /'
+    echo "$blocking_unverifiable" | cut -d: -f1 | sort -u | while read -r f; do
+        [ -z "$f" ] && continue
+        echo "──── $f"
+        cat "$WORK/candidate.$f.out" 2>/dev/null | tail -40
+    done
+    exit 1
+fi
+
 if [ -n "$introduced" ]; then
     echo
     echo "════ output of introduced failures ════"

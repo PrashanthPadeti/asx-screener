@@ -45,12 +45,12 @@ import json
 import os
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BACKEND = HERE.parent
-sys.path.insert(0, str(BACKEND))
 
 SMOKE = HERE / "smoke_primary_features.py"
 STATE = Path(os.environ.get(
@@ -81,22 +81,70 @@ def _write_state(state: dict) -> None:
         print(f"monitor: WARNING could not write {STATE}: {exc}")
 
 
+def _redact(text: str) -> str:
+    """Never let a credential reach the monitor log.
+
+    The first version called the app's notification service, which
+    constructs Settings. When that failed, pydantic's ValidationError
+    included input_value -- and a fragment of a live API key was printed
+    into this script's own log file. Pydantic puts values in its errors.
+
+    So: report the exception TYPE and a redacted message, never the raw
+    text of anything that touched configuration.
+    """
+    out = text
+    for key in ("RESEND_API_KEY", "ANTHROPIC_API_KEY", "JWT_SECRET",
+                "DATABASE_URL", "DATABASE_URL_SYNC", "EODHD_API_KEY"):
+        val = os.environ.get(key)
+        if val and len(val) > 6:
+            out = out.replace(val, f"<{key}>")
+    return out[:400]
+
+
 def _send(subject: str, body: str) -> bool:
+    """Alert through Resend's HTTP API directly — no app import.
+
+    DELIBERATELY does not use app.services.notification_service. That
+    imports Settings, which requires DATABASE_URL, so the alerting path
+    would share fate with the application: if the app's configuration is
+    broken, the monitor detects the outage and cannot tell anyone. A
+    monitor must not depend on the thing it monitors.
+
+    This needs only RESEND_API_KEY and EMAIL_FROM from the environment,
+    which the systemd unit supplies via EnvironmentFile.
+    """
     to = os.environ.get("ALERT_EMAIL", "").strip()
     if not to:
-        print("monitor: ALERT_EMAIL is not set — nothing was sent. "
-              "This monitor can see a broken site and tell nobody.")
+        print("monitor: ALERT_EMAIL is not set — nothing was sent. This "
+              "monitor can see a broken site and tell nobody.")
         return False
+
+    api_key = os.environ.get("RESEND_API_KEY", "").strip()
+    if not api_key:
+        print("monitor: RESEND_API_KEY is not set — nothing was sent. The "
+              "outage was detected and not reported.")
+        return False
+
+    sender = os.environ.get("EMAIL_FROM", "noreply@asxscreener.com.au")
+    html = ("<pre style='font:13px ui-monospace,monospace;white-space:pre-wrap'>"
+            + body.replace("&", "&amp;").replace("<", "&lt;") + "</pre>")
+    payload = json.dumps({"from": sender, "to": [to],
+                          "subject": subject, "html": html}).encode()
+
+    req = urllib.request.Request("https://api.resend.com/emails",
+                                 data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("Authorization", f"Bearer {api_key}")
     try:
-        from app.services.notification_service import _send_raw_email
-        html = ("<pre style='font:13px ui-monospace,monospace'>"
-                + body.replace("&", "&amp;").replace("<", "&lt;")
-                + "</pre>")
-        ok = _send_raw_email(to, subject, html)
-        print(f"monitor: alert {'sent' if ok else 'FAILED to send'} to {to}")
-        return bool(ok)
+        with urllib.request.urlopen(req, timeout=30) as r:
+            ok = 200 <= r.status < 300
+        print(f"monitor: alert {'sent' if ok else 'rejected'} to {to}")
+        return ok
     except Exception as exc:                                   # noqa: BLE001
-        print(f"monitor: could not send alert: {type(exc).__name__}: {exc}")
+        # Type and a redacted message only. The exception body can echo the
+        # request, and the request carries the key.
+        print(f"monitor: could not send alert: {type(exc).__name__}: "
+              f"{_redact(str(exc))}")
         return False
 
 

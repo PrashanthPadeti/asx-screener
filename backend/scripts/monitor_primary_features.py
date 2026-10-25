@@ -140,8 +140,20 @@ def _send(subject: str, body: str) -> bool:
             ok = 200 <= r.status < 300
         print(f"monitor: alert {'sent' if ok else 'rejected'} to {to}")
         return ok
+    except urllib.error.HTTPError as exc:
+        # Read the RESPONSE BODY. "403 Forbidden" alone sent me guessing at
+        # the cause; Resend states the reason in JSON -- an unverified
+        # sending domain, a restricted recipient, a key without send
+        # permission are all 403 and all need different fixes.
+        try:
+            detail = exc.read().decode("utf-8", "replace")
+        except Exception:                                      # noqa: BLE001
+            detail = ""
+        print(f"monitor: could not send alert: HTTP {exc.code}: "
+              f"{_redact(detail) or _redact(str(exc))}")
+        return False
     except Exception as exc:                                   # noqa: BLE001
-        # Type and a redacted message only. The exception body can echo the
+        # Type and a redacted message only. The exception text can echo the
         # request, and the request carries the key.
         print(f"monitor: could not send alert: {type(exc).__name__}: "
               f"{_redact(str(exc))}")

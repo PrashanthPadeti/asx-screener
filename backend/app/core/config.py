@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "11.2.43"
+    APP_VERSION: str = "11.2.44"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
@@ -105,6 +105,21 @@ class Settings(BaseSettings):
     # Email (Resend)
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "noreply@asxscreener.com.au"
+
+    # Where the primary-feature monitor sends an outage alert. The monitor
+    # itself reads this from the environment and never constructs Settings --
+    # it must not share fate with the app it watches -- but the key lives in
+    # the same .env, and extra="forbid" means an undeclared key there is fatal
+    # to EVERY process that does construct Settings.
+    #
+    # Adding it to .env without this field left the API unable to start on
+    # 25 Oct 2026. Nothing broke at the time: the running process had already
+    # read its configuration, so the site stayed up and the post-deploy smoke
+    # passed against it. The failure was latent and total, waiting on the next
+    # restart -- a deploy, a reboot, an OOM kill. The gate found it because the
+    # test suite builds Settings in a fresh process, which is the only thing
+    # that distinguishes a working config from a working process.
+    ALERT_EMAIL: str = ""
     SUPPORT_EMAIL: str = "asxscreener@gmail.com"
     ADMIN_EMAILS: str = "asxscreener@gmail.com"   # comma-separated list
 

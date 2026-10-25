@@ -135,6 +135,13 @@ def _send(subject: str, body: str) -> bool:
                                  data=payload, method="POST")
     req.add_header("Content-Type", "application/json")
     req.add_header("Authorization", f"Bearer {api_key}")
+    # Cloudflare sits in front of the Resend API and blocks urllib's default
+    # signature outright: the first attempt came back
+    #     HTTP 403: error code: 1010
+    # which is Cloudflare ("banned based on your browser's signature"), not
+    # Resend. Without reading the response body it looks like an unverified
+    # domain or a bad key, and the hours go into the wrong place.
+    req.add_header("User-Agent", "asx-screener-monitor/1.0")
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             ok = 200 <= r.status < 300

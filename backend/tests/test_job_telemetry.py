@@ -26,13 +26,13 @@ from pathlib import Path
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
+from compute.engine import launch_authority as la                # noqa: E402
 from compute.engine.job_telemetry import (                       # noqa: E402
     DEFAULT_CEILING_SECONDS, Execution, FAILED, MAX_FAILURE_CHARS, RUNNING,
     DECLARED_JOB_IDS, MISSED_GRACE_SECONDS, SUCCESS, UNOBSERVABLE,
     bound_failure, ceiling_for, classify, first_run_state, health_view,
 )
 
-MAIN = BACKEND / "app/main.py"
 NOW = datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc)
 
 
@@ -53,10 +53,18 @@ def _registrations() -> dict[str, ast.expr]:
 
     Read from the AST, not by name matching: a function called
     `instrumented_fetch` must not satisfy a check for instrumentation.
+
+    Spans every module that registers jobs, discovered rather than named.
+    This used to parse app/main.py alone; when the registrations moved to
+    app/scheduler_registry.py on 25 Oct 2026 this returned {} and the
+    coverage tests below compared two empty sets and passed.
     """
-    tree = ast.parse(MAIN.read_text(encoding="utf-8"))
     out: dict[str, ast.expr] = {}
-    for node in ast.walk(tree):
+    nodes = []
+    for path in la.scheduler_sources():
+        nodes.extend(ast.walk(ast.parse(path.read_text(encoding="utf-8"),
+                                        str(path))))
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         fn = node.func
@@ -125,11 +133,20 @@ def test_declared_registrations_may_exceed_live_ones():
     assert "anomaly_alerts" in declared, (
         "the conditionally-registered job is gone; this rule needs rechecking")
 
-    src = MAIN.read_text(encoding="utf-8")
-    call = src[src.index('id="anomaly_alerts"') - 400:src.index('id="anomaly_alerts"')]
-    assert "if " in call, (
-        "anomaly_alerts is no longer conditional, so declared and live should "
-        "now agree — update the deployment acceptance accordingly")
+    # Structural, not textual. This used to slice 400 characters before the
+    # call site and look for the substring "if " -- which would be satisfied
+    # by an unrelated `if` nearby, by a comment, or by the word inside a
+    # docstring, and which broke outright when the call moved to a file the
+    # slice no longer read. The launch authority already resolves the guard
+    # from the AST, including the condition text.
+    jobs = {j.job_id: j for j in la.scheduler_registrations()}
+    anomaly = jobs["anomaly_alerts"]
+    assert anomaly.conditional, (
+        "anomaly_alerts is no longer conditionally registered, so declared "
+        "and live should now agree — update the deployment acceptance")
+    assert "ANOMALY_ALERTS_ENABLED" in anomaly.guard, (
+        f"anomaly_alerts is guarded by {anomaly.guard!r}, not by the feature "
+        f"flag this rule is written about")
 
 
 def test_the_runtime_manifest_equals_the_declared_registrations():

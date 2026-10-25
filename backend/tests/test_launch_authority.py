@@ -154,6 +154,82 @@ def test_every_add_job_is_enumerated():
     assert all(j.job_id for j in jobs), [j for j in jobs if not j.job_id]
 
 
+def test_the_population_is_discovered_rather_than_named():
+    """The registrations must be found wherever they live.
+
+    On 25 Oct 2026 the add_job calls moved from app/main.py into
+    app/scheduler_registry.py with no behaviour change. Fifteen guards across
+    four suites had named app/main.py by path, so their population silently
+    went to zero -- and several of them kept passing, because two empty sets
+    agree. Refactoring is precisely when a guard is most needed and most
+    likely to be quietly disarmed.
+    """
+    sources = la.scheduler_sources()
+    assert sources, "no module under app/ registers scheduler jobs"
+    assert all(p.exists() for p in sources), [str(p) for p in sources]
+    # The jobs must be reachable through the discovered set, whatever file
+    # they presently sit in. Asserting a particular filename here would
+    # reintroduce exactly the coupling this test exists to remove.
+    assert len(la.scheduler_registrations()) >= 18
+
+
+def test_the_discovery_finds_every_add_job_in_the_tree():
+    """Completeness, counted independently of the mechanism under test.
+
+    la.scheduler_sources() decides which files to parse; this walks the whole
+    app/ tree itself and counts add_job call sites directly. If discovery
+    ever misses a module -- a new package, a nested registry, a conditional
+    import -- the two counts diverge and this fails. A mechanism that both
+    selects the population and reports on it can agree with its own bug.
+    """
+    import ast as _ast
+
+    everywhere = 0
+    holding = []
+    for path in sorted((la.APP).rglob("*.py")):
+        tree = _ast.parse(path.read_text(encoding="utf-8"), str(path))
+        here = sum(1 for n in _ast.walk(tree)
+                   if isinstance(n, _ast.Call)
+                   and getattr(n.func, "attr", "") == "add_job")
+        if here:
+            holding.append(path)
+            everywhere += here
+
+    discovered = sum(
+        1 for path in la.scheduler_sources()
+        for n in _ast.walk(_ast.parse(path.read_text(encoding="utf-8"),
+                                      str(path)))
+        if isinstance(n, _ast.Call)
+        and getattr(n.func, "attr", "") == "add_job")
+
+    assert discovered == everywhere, (
+        f"discovery parses {discovered} add_job calls but the tree holds "
+        f"{everywhere}, in: {[str(p) for p in holding]}")
+    assert everywhere >= 18, (
+        f"only {everywhere} add_job calls in the whole app/ tree; the "
+        f"registration shape has changed and every scheduler guard built on "
+        f"this population is now narrower than it reads")
+
+
+def test_a_string_mentioning_add_job_is_not_a_registration():
+    """Structural, not textual.
+
+    app/api/v1/routes/admin.py carries "add_job" in a denylist of operations
+    the admin surface must never perform. A grep-based discovery would
+    enumerate that file as a registration site and then fail to find any job
+    in it -- or worse, quietly widen the population with a file that
+    registers nothing.
+    """
+    admin = la.APP / "api" / "v1" / "routes" / "admin.py"
+    assert admin.exists(), "the admin surface moved; this case needs repointing"
+    assert "add_job" in admin.read_text(encoding="utf-8"), (
+        "admin.py no longer mentions add_job, so this case no longer "
+        "exercises the textual-versus-structural distinction")
+    assert admin not in la.scheduler_sources(), (
+        "discovery picked up a file that only MENTIONS add_job; it is "
+        "matching text rather than call sites")
+
+
 def test_conditional_registration_is_recognised():
     """Registration is guarded — anomaly_alerts only registers when
     ANOMALY_ALERTS_ENABLED is on. If this stops being detected, the argument

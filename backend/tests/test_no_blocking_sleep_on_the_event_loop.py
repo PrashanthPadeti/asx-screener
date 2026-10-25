@@ -34,6 +34,10 @@ import sys
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND))
+
+from compute.engine import launch_authority as la                # noqa: E402
+
 SCANNED = ("app/workers", "compute/engine", "app/api")
 
 #: Calls that block the thread they run on. In a coroutine that thread is the
@@ -242,11 +246,18 @@ def test_every_scheduled_job_lives_inside_the_scanned_population():
     A scan is only as complete as its population, and a population chosen by
     hand is a guess wearing an instrument's clothes.
     """
-    main = ast.parse((BACKEND / "app" / "main.py").read_text(encoding="utf-8"))
+    # Every module that registers jobs, discovered rather than named. This
+    # used to parse app/main.py alone, and when the registrations moved to
+    # app/scheduler_registry.py it found zero targets -- the assertion below
+    # is the only reason that surfaced instead of passing over nothing.
+    nodes = []
+    for path in la.scheduler_sources():
+        nodes.extend(ast.walk(ast.parse(path.read_text(encoding="utf-8"),
+                                        str(path))))
 
     # instrumented("job_id", target) -> target name
     targets = set()
-    for node in ast.walk(main):
+    for node in nodes:
         if (isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
                 and node.func.id == "instrumented"
@@ -255,13 +266,13 @@ def test_every_scheduled_job_lives_inside_the_scanned_population():
             targets.add(node.args[1].id)
 
     assert len(targets) >= 15, (
-        f"only {len(targets)} scheduled targets parsed from app/main.py; the "
-        f"registration shape has changed and this check has stopped covering "
-        f"the scheduler")
+        f"only {len(targets)} scheduled targets parsed from the modules that "
+        f"register jobs; the registration shape has changed and this check "
+        f"has stopped covering the scheduler")
 
     # Resolve each to the module that defines it.
     module_of = {}
-    for node in ast.walk(main):
+    for node in nodes:
         if isinstance(node, ast.ImportFrom) and node.module:
             for alias in node.names:
                 if (alias.asname or alias.name) in targets:

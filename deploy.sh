@@ -109,6 +109,35 @@ install_backend_deps() {
     log "Python dependencies updated ✓"
 }
 
+# ── Configuration ─────────────────────────────────────────────────────────────
+# Build Settings in a FRESH process before anything is restarted.
+#
+# The running backend read its configuration at startup and keeps serving on
+# it. So a .env that can no longer construct Settings breaks nothing visible:
+# the site is up, /health answers 200, the post-deploy smoke passes. The
+# failure is latent and total, and it lands on the next restart -- which may
+# be this deploy, or a reboot at 3am with nobody watching.
+#
+# That happened twice: SCHEDULERS_ENABLED on 11 Sep 2026 (eight minutes down)
+# and ALERT_EMAIL on 25 Oct 2026 (caught by the gate before it fired).
+# py_compile does not catch it; importing the app does, because
+# pydantic-settings validates .env against the declared fields at import time.
+#
+# Run BEFORE restart_backend so a bad config costs a refused deploy instead of
+# an outage: the old process is still serving when this fails.
+check_configuration() {
+    log "Checking configuration builds in a fresh process..."
+    if ! (cd "$REPO_DIR/backend" && \
+          /opt/asx-screener/asx-venv/bin/python -c \
+          "from app.core.config import Settings; Settings()" 2>&1); then
+        err "Configuration does not build — NOT restarting. The running
+     backend is still serving on its old configuration. Every process that
+     constructs Settings would fail to start, including this one. Usually an
+     undeclared key in backend/.env: declare it in app/core/config.py."
+    fi
+    log "Configuration builds ✓"
+}
+
 # ── Backend ───────────────────────────────────────────────────────────────────
 restart_backend() {
     log "Restarting backend (systemd)..."
@@ -167,6 +196,7 @@ case "${1:-}" in
     --backend)
         pull_code
         install_backend_deps
+        check_configuration
         restart_backend
         ;;
     --frontend)
@@ -180,6 +210,7 @@ case "${1:-}" in
     "")
         pull_code
         install_backend_deps
+        check_configuration
         restart_backend
         build_frontend
         restart_frontend

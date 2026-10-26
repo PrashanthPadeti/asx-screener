@@ -28,7 +28,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from scripts.eodhd.v2.raw_selection import (                   # noqa: E402
-    code_of, latest_files_by_code,
+    all_payloads_oldest_first, code_of, latest_files_by_code,
 )
 
 
@@ -95,6 +95,42 @@ def test_the_result_is_stable_in_name_order():
               "B.AU_2026-01-01.json.gz")
     assert ([p.name for p in latest_files_by_code(files)]
             == [p.name for p in latest_files_by_code(list(reversed(files)))])
+
+
+# ── The union rule: every payload, because none is complete ────────────────
+
+def test_every_payload_is_loaded_not_one_per_code():
+    """Both single-file rules lose data, and we shipped both in one day.
+
+    oldest-wins lost EVR's 2026-09-08 consolidation.
+    newest-wins lost EVR's 2008 and 2017 consolidations, because EODHD's
+    response for 2026-10-04 contained only the September record even though
+    it was requested with from=2000-01-01. Across the exchange that cost 104
+    split records.
+    """
+    files = P("EVR.AU_2026-04-28.json.gz", "EVR.AU_2026-10-04.json.gz")
+    picked = [p.name for p in all_payloads_oldest_first(files)]
+    assert picked == ["EVR.AU_2026-04-28.json.gz", "EVR.AU_2026-10-04.json.gz"], (
+        "payloads were filtered; a payload omitting a split is not evidence "
+        "that the split did not happen")
+
+
+def test_payloads_are_applied_oldest_first():
+    """So that ON CONFLICT DO UPDATE leaves the NEWEST description of a
+    given split date in place: later writes win."""
+    files = P("X.AU_2026-10-04.json.gz", "X.AU_2026-01-01.json.gz",
+              "X.AU_2026-04-28.json.gz")
+    assert [p.name for p in all_payloads_oldest_first(files)] == [
+        "X.AU_2026-01-01.json.gz",
+        "X.AU_2026-04-28.json.gz",
+        "X.AU_2026-10-04.json.gz",
+    ]
+
+
+def test_the_union_keeps_every_code():
+    files = P("A.AU_2026-01-01.json.gz", "A.AU_2026-06-01.json.gz",
+              "B.AU_2026-01-01.json.gz")
+    assert len(all_payloads_oldest_first(files)) == 3
 
 
 if __name__ == "__main__":

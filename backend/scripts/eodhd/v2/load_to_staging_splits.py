@@ -38,7 +38,7 @@ BATCH_COMMIT = 100
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
-from scripts.eodhd.v2.raw_selection import latest_files_by_code  # noqa: E402
+from scripts.eodhd.v2.raw_selection import all_payloads_oldest_first  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -103,16 +103,19 @@ def main():
     if args.codes:
         files = []
         for c in args.codes:
-            f = latest_file_for(c.upper())
-            if f:
-                files.append(f)
+            matched = all_payloads_oldest_first(
+                SPLITS_DIR.glob(f"{c.upper()}.AU_*.json.gz"))
+            if matched:
+                files.extend(matched)
             else:
                 log.warning(f"  No splits file found for {c}")
     else:
-        # One payload per code — the NEWEST. See raw_selection: this was an
-        # ascending sort until 26 Oct 2026, which kept the OLDEST file and
-        # discarded every split recorded after a code's first download.
-        files = latest_files_by_code(SPLITS_DIR.glob("*.json.gz"))
+        # EVERY payload, oldest first. A payload is evidence of the splits
+        # it contains and of nothing about those it omits: EODHD's splits
+        # endpoint does not reliably return the full series, so neither the
+        # oldest nor the newest file alone is complete. ON CONFLICT
+        # reconciles them — see raw_selection.
+        files = all_payloads_oldest_first(SPLITS_DIR.glob("*.json.gz"))
 
     if args.from_code:
         files = [f for f in files if f.name >= f"{args.from_code.upper()}.AU"]

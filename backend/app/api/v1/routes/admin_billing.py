@@ -47,8 +47,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_db
 from app.core.deps import require_admin
+from app.db.session import get_db
 
 log = logging.getLogger(__name__)
 router = APIRouter()

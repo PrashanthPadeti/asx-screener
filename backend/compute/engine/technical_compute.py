@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.split_adjustment import (  # noqa: E402
     apply_split_adjustment, withhold_contaminated_metrics,
+    withhold_unrepresentable,
 )
 from compute.engine.serving_population import (  # noqa: E402
     excluded_types_predicate,
@@ -178,6 +179,23 @@ def fetch_codes(cur, codes=None, limit=None) -> list:
                           f"ORDER BY p.asx_code LIMIT {limit}")
     cur.execute(sql)
     return [r[0] for r in cur.fetchall()]
+
+
+def fetch_numeric_limits(cur) -> dict:
+    """{column: smallest absolute value the column CANNOT hold}.
+
+    NUMERIC(p, s) admits values strictly below 10**(p-s). Read from the
+    catalogue rather than hardcoded, so widening or narrowing a column in a
+    migration is picked up without anyone remembering to update a list here.
+    """
+    cur.execute("""
+        SELECT column_name, numeric_precision, numeric_scale
+          FROM information_schema.columns
+         WHERE table_schema = 'market' AND table_name = 'daily_metrics'
+           AND numeric_precision IS NOT NULL AND numeric_scale IS NOT NULL
+    """)
+    return {name: 10 ** (precision - scale)
+            for name, precision, scale in cur.fetchall()}
 
 
 def fetch_splits(cur, asx_code: str) -> list:
@@ -845,6 +863,10 @@ def main():
     # their window. Counted and reported: a repair that silently removes
     # numbers is as hard to audit as one that silently invents them.
     total_withheld = 0
+    # What each NUMERIC column can physically hold. A deeply
+    # consolidated stock restates to prices beyond it; those values
+    # are withheld rather than aborting the batch.
+    numeric_limits = fetch_numeric_limits(cur)
 
     for idx, asx_code in enumerate(codes, 1):
         try:
@@ -869,6 +891,14 @@ def main():
             # source to correct them with (market.corporate_events is empty).
             # An absent number sends someone to check; a wrong one does not.
             df, withheld = withhold_contaminated_metrics(df, splits)
+
+            # And anything the column cannot store. JAV's five consolidations
+            # compound to ~4.88 million, restating its high to ~441 million
+            # against a NUMERIC(12,4) ceiling of 10^8. Raising here aborted
+            # the whole execute_values batch and discarded thirteen correct
+            # stocks with it.
+            df, unrepresentable = withhold_unrepresentable(df, numeric_limits)
+            withheld += unrepresentable
             if withheld:
                 total_withheld += withheld
                 log.info(f"  {asx_code}: {withheld} metric value(s) withheld "

@@ -195,6 +195,40 @@ def withhold_contaminated_metrics(df: pd.DataFrame, splits) -> tuple:
     return df, withheld
 
 
+def withhold_unrepresentable(df: pd.DataFrame, limits: dict) -> tuple:
+    """NULL values a column cannot physically hold, rather than failing the insert.
+
+    A deeply consolidated stock restates to astronomical historical prices.
+    JAV has five consolidations — 1-for-35, 1-for-15, 1-for-30, 1-for-10 and
+    1-for-31 — compounding to a factor of ~4.88 million, so its 90.42 high
+    becomes ~441 million against a NUMERIC(12,4) ceiling of 10^8.
+
+    The arithmetic is right and the column is too small. Both facts are
+    permanent, so the honest value is "unknown":
+
+      - a wider column would only move the ceiling, and the next stock with
+        six consolidations would hit it
+      - clamping would publish a number that is definitely wrong
+      - raising is what it did before, and psycopg2 aborts the whole
+        execute_values batch — one JAV silently discarded thirteen correct
+        stocks and left their old, wrong returns in place
+
+    `limits` is read from information_schema rather than hardcoded, so a
+    column widened or narrowed in a migration changes this automatically.
+    """
+    withheld = 0
+    for column, max_abs in limits.items():
+        if column not in df.columns:
+            continue
+        values = pd.to_numeric(df[column], errors="coerce")
+        # >= because NUMERIC(p,s) admits strictly less than 10**(p-s).
+        too_big = values.abs() >= max_abs
+        if too_big.any():
+            withheld += int(too_big.sum())
+            df.loc[too_big, column] = np.nan
+    return df, withheld
+
+
 def withhold_spanning_windows(values: pd.Series, flags: pd.Series,
                               periods: int) -> pd.Series:
     """NaN out any value whose lookback window contains an unexplained event.

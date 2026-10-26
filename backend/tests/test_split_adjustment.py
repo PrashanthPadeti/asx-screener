@@ -38,7 +38,7 @@ sys.path.insert(0, str(BACKEND))
 from compute.engine.split_adjustment import (                  # noqa: E402
     apply_split_adjustment, cumulative_adjustment,
     unexplained_discontinuities, withhold_contaminated_metrics,
-    withhold_spanning_windows,
+    withhold_spanning_windows, withhold_unrepresentable,
 )
 
 
@@ -216,6 +216,53 @@ def test_a_clean_series_withholds_nothing():
     df, withheld = withhold_contaminated_metrics(df, [])
     assert withheld == 0
     assert df["return_1m"].notna().all()
+
+
+# ── Values a column cannot hold ─────────────────────────────────────────────
+
+def test_an_unrepresentable_value_is_withheld_not_raised():
+    """JAV: five consolidations (1-for-35, 15, 30, 10, 31) compound to a
+    factor of ~4.88 million, restating its 90.42 high to ~441 million
+    against a NUMERIC(12,4) ceiling of 10^8.
+
+    Raising is what it did before, and psycopg2 aborts the whole
+    execute_values batch — one JAV discarded thirteen correct stocks and
+    left their old, wrong returns in place.
+    """
+    df = pd.DataFrame({"sma_200": [1.0, 441_000_000.0, 2.0]})
+    df, withheld = withhold_unrepresentable(df, {"sma_200": 10 ** 8})
+    assert withheld == 1
+    assert pd.isna(df["sma_200"].iloc[1])
+    assert df["sma_200"].iloc[0] == 1.0, "a representable value was removed"
+
+
+def test_the_boundary_is_exclusive():
+    """NUMERIC(p,s) admits values strictly below 10**(p-s)."""
+    df = pd.DataFrame({"x": [10 ** 8 - 1, 10 ** 8]})
+    df, withheld = withhold_unrepresentable(df, {"x": 10 ** 8})
+    assert withheld == 1
+    assert not pd.isna(df["x"].iloc[0])
+    assert pd.isna(df["x"].iloc[1])
+
+
+def test_negatives_are_judged_on_magnitude():
+    df = pd.DataFrame({"macd_line": [-(10 ** 7), -(10 ** 6)]})
+    df, withheld = withhold_unrepresentable(df, {"macd_line": 10 ** 6})
+    assert withheld == 1
+    assert pd.isna(df["macd_line"].iloc[0])
+
+
+def test_columns_absent_from_the_frame_are_ignored():
+    df = pd.DataFrame({"a": [1.0]})
+    df, withheld = withhold_unrepresentable(df, {"a": 10, "not_here": 10})
+    assert withheld == 0
+
+
+def test_a_representable_frame_is_untouched():
+    df = pd.DataFrame({"close": [1.0, 2.0, 3.0]})
+    df, withheld = withhold_unrepresentable(df, {"close": 10 ** 8})
+    assert withheld == 0
+    assert df["close"].notna().all()
 
 
 if __name__ == "__main__":

@@ -38,6 +38,8 @@ BATCH_COMMIT = 100
 
 logging.basicConfig(level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s", datefmt="%H:%M:%S")
+from scripts.eodhd.v2.raw_selection import latest_files_by_code  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 
@@ -107,13 +109,10 @@ def main():
             else:
                 log.warning(f"  No splits file found for {c}")
     else:
-        # Deduplicate: one (latest) file per code
-        seen = {}
-        for f in sorted(SPLITS_DIR.glob("*.json.gz")):
-            code = f.name.split("_")[0].replace(".AU", "")
-            if code not in seen:
-                seen[code] = f
-        files = sorted(seen.values(), key=lambda p: p.name)
+        # One payload per code — the NEWEST. See raw_selection: this was an
+        # ascending sort until 26 Oct 2026, which kept the OLDEST file and
+        # discarded every split recorded after a code's first download.
+        files = latest_files_by_code(SPLITS_DIR.glob("*.json.gz"))
 
     if args.from_code:
         files = [f for f in files if f.name >= f"{args.from_code.upper()}.AU"]

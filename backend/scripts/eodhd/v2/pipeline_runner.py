@@ -44,6 +44,13 @@ STAGING_SCRIPTS = [
     ("fundamentals",    V2_DIR / "load_to_staging_fundamentals.py"),
     ("prices",          V2_DIR / "load_to_staging_prices.py"),
     ("dividends",       V2_DIR / "load_to_staging_dividends.py"),
+    # Splits was absent here while transform_splits sat in TRANSFORM_SCRIPTS
+    # below — so the transform ran against a staging table nothing filled.
+    # market.splits stopped at 2026-04-28 and nobody noticed for 181 days,
+    # while the weekly download kept writing fresh payloads to the raw zone.
+    # Every return on the site is computed on unadjusted close, so a missing
+    # split shows a customer a ~-50% return that never happened.
+    ("splits",          V2_DIR / "load_to_staging_splits.py"),
 ]
 
 TRANSFORM_SCRIPTS = [

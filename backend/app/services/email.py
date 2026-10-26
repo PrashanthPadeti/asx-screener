@@ -393,13 +393,53 @@ def send_verification_reminder_email(to_email: str, verify_url: str, name: Optio
         return False
 
 
-def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
+def send_welcome_email(to_email: str, name: Optional[str] = None,
+                       verify_url: Optional[str] = None) -> bool:
     """
     Welcome a new user, and copy the same email to the support inbox so signups
     are visible without checking the database.
+
+    With `verify_url`, this becomes the ONE email a new signup receives.
+
+    Before 27 Oct 2026 a new account got two messages seconds apart: a welcome
+    saying "thanks for joining, start screening" and a separate verification
+    link. They contradicted each other — the account could not be used until
+    the link was clicked, so the welcome invited them to do something that
+    would have failed. Merged, with the verification step leading and the
+    product description kept underneath, so the first thing they read is the
+    thing they must do.
     """
     resend = _client()
     greeting = f"Hi {html_escape(name)}," if name else "Hi,"
+
+    # Leads the email when verification is pending; empty otherwise.
+    verify_block = "" if not verify_url else f"""
+      <div style="margin:18px 0;padding:18px;border:1px solid #bfdbfe;
+                  border-radius:10px;background:#eff6ff">
+        <h3 style="margin:0 0 6px;font-size:16px;color:#1e3a8a">
+          One quick step: confirm your email
+        </h3>
+        <p style="margin:0 0 14px;font-size:14px;color:#1e40af">
+          We need to check this address is yours before you can sign in.
+          It takes a second and you only do it once.
+        </p>
+        <a href="{verify_url}"
+           style="display:inline-block;padding:11px 22px;background:#2563eb;
+                  color:white;border-radius:8px;text-decoration:none;
+                  font-weight:600">
+          Confirm my email address
+        </a>
+        <p style="margin:14px 0 0;font-size:12px;color:#1e40af">
+          Or paste this into your browser:<br/>
+          <span style="color:#1d4ed8;word-break:break-all">{verify_url}</span>
+        </p>
+      </div>
+      <p style="margin:0 0 18px;font-size:13px;color:#6b7280">
+        Can't see it later? This email sometimes lands in the
+        <strong>spam or junk folder</strong> &mdash; worth a look before
+        requesting another. You can resend the link from the sign-in page.
+      </p>
+    """
 
     def _section(title: str, blurb: str, items: list[str]) -> str:
         lis = "".join(
@@ -413,14 +453,26 @@ def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
         </div>
         """
 
+    if verify_url:
+        intro_line = "Once that's done, here's what's waiting for you."
+        cta_url    = verify_url
+        cta_label  = "Confirm my email address"
+        subject    = "Confirm your email to start using ASX Screener"
+    else:
+        intro_line = "Thanks for joining."
+        cta_url    = "https://asxscreener.com.au/screener"
+        cta_label  = "Start screening"
+        subject    = "Welcome to ASX Screener"
+
     html = f"""
     <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
       <h2 style="color:#1d4ed8;margin-bottom:4px">Welcome to ASX Screener</h2>
       <p style="color:#374151">{greeting}</p>
+      {verify_block}
       <p style="color:#374151">
-        Thanks for joining. ASX Screener is built specifically for the Australian
-        market &mdash; franking credits, mining and A-REIT metrics, and ASIC short
-        data you won't find in a tool adapted from the US. Here's what you can do.
+        {intro_line} ASX Screener is built specifically for the
+        Australian market &mdash; franking credits, mining and A-REIT metrics,
+        and ASIC short data you won't find in a tool adapted from the US.
       </p>
 
       {_section(
@@ -453,11 +505,11 @@ def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
           "AlphaFive &mdash; our weekly algo-ranked top 5 from the ASX 200",
         ])}
 
-      <a href="https://asxscreener.com.au/screener"
+      <a href="{cta_url}"
          style="display:inline-block;margin-top:8px;padding:11px 22px;
                 background:#2563eb;color:white;border-radius:8px;
                 text-decoration:none;font-weight:600">
-        Start screening
+        {cta_label}
       </a>
 
       <p style="margin-top:24px;font-size:13px;color:#6b7280">
@@ -486,7 +538,7 @@ def send_welcome_email(to_email: str, name: Optional[str] = None) -> bool:
         resend.Emails.send({
             "from":    settings.EMAIL_FROM,
             "to":      [to_email],
-            "subject": "Welcome to ASX Screener",
+            "subject": subject,
             "html":    html,
         })
         log.info(f"Welcome email sent to {to_email}")

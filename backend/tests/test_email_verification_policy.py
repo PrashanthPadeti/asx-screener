@@ -196,6 +196,61 @@ def test_resend_is_rate_limited_and_cooled_down():
     assert "timedelta(minutes=" in fn, "no per-address cooldown"
 
 
+def test_a_new_signup_receives_one_email_not_two():
+    """Two emails seconds apart contradicted each other.
+
+    The welcome said "thanks for joining, start screening" while the account
+    could not be used until the verification link was clicked — inviting the
+    new user to do something that would have failed. Registration now sends
+    ONE verification-led email with the welcome content underneath.
+    """
+    src = _auth_src()
+    reg = src[src.index('@router.post("/register"'):src.index('# ── Login')]
+    # The verification branch must not ALSO send a bare welcome.
+    # The verification branch runs from the guard to its own `return`; the
+    # exempt path follows it and SHOULD send a plain welcome, so slicing to
+    # the end of the function cannot tell them apart.
+    guard = reg.index("_verification_required_for")
+    branch_end = reg.index("return {", guard)
+    verification_branch = reg[guard:branch_end]
+
+    assert "welcome=True" in verification_branch, (
+        "the verification path does not send the combined welcome+verify "
+        "email")
+    assert "send_welcome_email(body.email" not in verification_branch, (
+        "the verification path still sends a separate welcome email; a new "
+        "signup would receive two contradicting messages")
+    # And the welcome that remains must belong to the exempt path, below.
+    assert reg.index("send_welcome_email(body.email") > branch_end, (
+        "a bare welcome is sent before the verification branch, so every "
+        "new signup gets it regardless")
+
+
+def test_an_exempt_signup_still_gets_a_welcome():
+    """Verification off, or an account created before the cutoff — the plain
+    welcome stands alone and 'start screening' is true advice."""
+    src = _auth_src()
+    reg = src[src.index('@router.post("/register"'):src.index('# ── Login')]
+    assert "send_welcome_email(body.email" in reg, (
+        "an exempt signup receives no welcome email at all")
+
+
+def test_the_combined_email_leads_with_verification():
+    """The first thing a new user reads should be the thing they must do."""
+    email_src = (BACKEND / "app" / "services" / "email.py").read_text(
+        encoding="utf-8")
+    start = email_src.index("def send_welcome_email")
+    nxt = email_src.find("\ndef ", start + 10)
+    fn = email_src[start:nxt if nxt != -1 else len(email_src)]
+    assert "verify_url" in fn, "send_welcome_email cannot carry a verify link"
+    assert "spam" in fn.lower(), (
+        "the combined email does not mention the spam folder, which is where "
+        "it most often is")
+    # The verification panel must come before the feature sections.
+    assert fn.index("verify_block") < fn.index("Start screening"), (
+        "the verification step is not the first thing in the email")
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

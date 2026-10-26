@@ -246,10 +246,20 @@ def test_the_boundary_is_exclusive():
 
 
 def test_negatives_are_judged_on_magnitude():
-    df = pd.DataFrame({"macd_line": [-(10 ** 7), -(10 ** 6)]})
-    df, withheld = withhold_unrepresentable(df, {"macd_line": 10 ** 6})
-    assert withheld == 1
-    assert pd.isna(df["macd_line"].iloc[0])
+    """A large negative is as unstorable as a large positive.
+
+    The representable value here is -(10**6 - 1), not -(10**6): the
+    boundary is exclusive, so -(10**6) would be withheld too. The first
+    version of this test asserted one withholding and got two — the code was
+    right and the expectation was not.
+    """
+    limit = 10 ** 6
+    df = pd.DataFrame({"macd_line": [-(10 ** 7), -(limit - 1)]})
+    df, withheld = withhold_unrepresentable(df, {"macd_line": limit})
+    assert withheld == 1, f"expected 1 value withheld, got {withheld}"
+    assert pd.isna(df["macd_line"].iloc[0]), "-10^7 should not be storable"
+    assert not pd.isna(df["macd_line"].iloc[1]), (
+        "-(10^6 - 1) is representable and was removed anyway")
 
 
 def test_columns_absent_from_the_frame_are_ignored():

@@ -7,7 +7,8 @@ from app.api.v1.routes import (
     companies, screener, market, auth, watchlist, alerts,
     stripe_routes, ai, portfolio, indices_funds,
     notifications, announcements, global_markets, commodities,
-    saved_screens, support, admin, top5, users, research, predictions,
+    saved_screens, support, admin, admin_billing, top5, users, research,
+    predictions,
 )
 
 api_router = APIRouter()
@@ -29,6 +30,8 @@ api_router.include_router(commodities.router,     prefix="/commodities",     tag
 api_router.include_router(saved_screens.router,   prefix="/screens",         tags=["Saved Screens"])
 api_router.include_router(support.router,         prefix="/support",          tags=["Support"])
 api_router.include_router(admin.router,           prefix="/admin",            tags=["Admin"])
+# Billing truth lives in Stripe, not here; this reads both and reports drift.
+api_router.include_router(admin_billing.router,   prefix="/admin/billing",    tags=["Admin Billing"])
 api_router.include_router(top5.router,            prefix="/top5",             tags=["Top 5 Strategy"])
 api_router.include_router(users.router,           prefix="/users",            tags=["Users"])
 api_router.include_router(research.router,        prefix="/research",         tags=["Research"])

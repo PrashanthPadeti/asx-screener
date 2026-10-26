@@ -6,12 +6,13 @@ import { useAuth } from '@/lib/auth'
 import { cn } from '@/lib/utils'
 import {
   LayoutDashboard, Users, Activity, LifeBuoy,
-  ChevronRight, Shield, Menu, X, Mail, FlaskConical, BrainCircuit, History, BarChart3, BookOpen, TrendingUp,
+  ChevronRight, Shield, Menu, X, Mail, FlaskConical, BrainCircuit, History, BarChart3, BookOpen, TrendingUp, CreditCard,
 } from 'lucide-react'
 
 const NAV = [
   { href: '/admin',                     label: 'Dashboard',          icon: LayoutDashboard },
   { href: '/admin/users',               label: 'User Management',    icon: Users },
+  { href: '/admin/billing',             label: 'Paying Customers',   icon: CreditCard },
   { href: '/admin/pipeline',            label: 'Pipeline Monitor',   icon: Activity },
   { href: '/admin/system-health',       label: 'System Health',      icon: BarChart3 },
   { href: '/admin/movers',              label: 'Top Movers',         icon: TrendingUp },

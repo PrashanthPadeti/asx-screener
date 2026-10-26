@@ -44,6 +44,9 @@ from pathlib import Path
 # The database credential lives in the environment, never in source.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
+from compute.engine.split_adjustment import (  # noqa: E402
+    apply_split_adjustment, withhold_contaminated_metrics,
+)
 from compute.engine.serving_population import (  # noqa: E402
     excluded_types_predicate,
 )
@@ -175,6 +178,24 @@ def fetch_codes(cur, codes=None, limit=None) -> list:
                           f"ORDER BY p.asx_code LIMIT {limit}")
     cur.execute(sql)
     return [r[0] for r in cur.fetchall()]
+
+
+def fetch_splits(cur, asx_code: str) -> list:
+    """Recorded splits for one stock, as (date, ratio).
+
+    market.splits went 181 days without an update because nothing ran its
+    loader; repaired in v11.2.52/53. If it ever goes stale again, the
+    consequence lands here: an unrecorded split is not adjusted, and the
+    discontinuity detector withholds the affected windows rather than
+    publishing a price change that is really a share-count change.
+    """
+    cur.execute("""
+        SELECT split_date, ratio
+          FROM market.splits
+         WHERE asx_code = %s AND ratio IS NOT NULL AND ratio > 0
+         ORDER BY split_date
+    """, [asx_code])
+    return [(r[0], float(r[1])) for r in cur.fetchall()]
 
 
 def fetch_ohlcv(cur, asx_code: str) -> pd.DataFrame:
@@ -353,16 +374,32 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     if df.empty or len(df) < 2:
         return df
 
-    o = df["open"]
-    h = df["high"]
-    l = df["low"]
-    c = df["close"]
-    # NOTE: adj_close is selected, cast and written to the output row, but
-    # used in NO calculation -- this binding was the only attempt. Every
-    # indicator here, daily_return included, is computed on the UNADJUSTED
-    # close. Flagged rather than changed: switching the basis moves many
-    # downstream metrics and is a methodology decision.
-    v = df["volume"].astype(float)
+    # SPLIT-ADJUSTED series where available, raw otherwise.
+    #
+    # Until 26 Oct 2026 every indicator here was computed from the raw close.
+    # A 1-for-10 consolidation multiplies the raw price by ten, so a stock
+    # that had lost 72% of its value showed a +999% one-year return — Metro
+    # Performance Glass, with 104 other stocks wrong on the same day. Because
+    # companies consolidate after collapsing, the defect put the exchange's
+    # worst performers at the top of "best 1-year return".
+    #
+    # open/high/low/close are adjusted TOGETHER, so ATR, the Bollinger bands
+    # and the 52-week range stay coherent; adjusting close alone would leave
+    # an adjusted close beside raw highs.
+    #
+    # `adj_close` is still not used: it is a TOTAL-RETURN series kept in mixed
+    # vintages, so substituting it would convert a price return into a total
+    # return and inject fake steps where ingestion vintages meet. See
+    # docs/finding_2026-10-24_returns_are_computed_on_unadjusted_close.md.
+    def _series(name: str) -> pd.Series:
+        adj = f"{name}_adj"
+        return df[adj] if adj in df.columns else df[name]
+
+    o = _series("open")
+    h = _series("high")
+    l = _series("low")
+    c = _series("close")
+    v = _series("volume").astype(float)
 
     # ── Returns ───────────────────────────────────────────────────────────────
     df["daily_return"] = c.pct_change().round(6)
@@ -804,6 +841,10 @@ def main():
     # stage evidence shows them rather than hiding them among
     # the successes.
     uncomputable = 0
+    # Metric values blanked because an unadjustable corporate action sits in
+    # their window. Counted and reported: a repair that silently removes
+    # numbers is as hard to audit as one that silently invents them.
+    total_withheld = 0
 
     for idx, asx_code in enumerate(codes, 1):
         try:
@@ -812,8 +853,26 @@ def main():
                 skipped += 1
                 continue
 
+            # Restate the series in post-split terms BEFORE computing, so
+            # returns measure price change rather than share-count change.
+            # Raw open/high/low/close are left intact for display; only the
+            # *_adj columns feed the indicators.
+            splits = fetch_splits(cur, asx_code)
+            if splits:
+                df = apply_split_adjustment(df, splits)
+
             shares = fetch_shares(cur, asx_code)
             df     = compute_indicators(df, shares)
+
+            # And blank what we cannot adjust: capital returns, rights issues
+            # and special dividends leave the same discontinuity and have no
+            # source to correct them with (market.corporate_events is empty).
+            # An absent number sends someone to check; a wrong one does not.
+            df, withheld = withhold_contaminated_metrics(df, splits)
+            if withheld:
+                total_withheld += withheld
+                log.info(f"  {asx_code}: {withheld} metric value(s) withheld "
+                         f"— unadjustable corporate action in window")
 
             if not args.full and not args.days:
                 # Latest date only. keep_uncomputable, so a company whose
@@ -843,7 +902,7 @@ def main():
                 pending.clear()
                 log.info(f"  [{idx:4d}/{total}] {processed} done | "
                          f"{skipped} skipped | {errors} errors | "
-                         f"{total_rows:,} rows so far")
+                         f"{total_rows:,} rows | {total_withheld:,} withheld")
 
         except Exception as e:
             errors += 1

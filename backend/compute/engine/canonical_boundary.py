@@ -700,6 +700,11 @@ CLASSIFICATIONS: dict[str, str] = {
     "scripts/eodhd/v2/transforms/transform_valuation.py": PRE_INGESTION,
     "scripts/eodhd/v2/transforms/transform_analyst_ratings.py": PRE_INGESTION,
     "scripts/eodhd/v2/transforms/transform_dividends.py": PRE_INGESTION,
+    # Added to weekly_pipeline in v11.2.52 after market.splits went 181 days
+    # without an update. Writes a canonical INPUT: technical_compute READS
+    # market.splits to restate prices into post-split terms, and never
+    # writes it.
+    "scripts/eodhd/v2/transforms/transform_splits.py": PRE_INGESTION,
     "scripts/assert_feed_health.py": PRE_INGESTION,
     "scripts/asic/transforms/transform_short.py": PRE_INGESTION,
     "compute/engine/weekly_compute.py": PRE_INGESTION,

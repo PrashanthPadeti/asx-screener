@@ -98,22 +98,41 @@ def _fetch_all_subscriptions() -> dict:
     if stripe is None:
         raise RuntimeError("STRIPE_SECRET_KEY is not configured")
 
-    by_customer: dict = {}
+    grouped: dict[str, list] = {}
     subs = stripe.Subscription.list(status="all", limit=100)
     for s in subs.auto_paging_iter():
-        cid = s.get("customer")
-        existing = by_customer.get(cid)
-        # A customer can hold more than one subscription object (a failed
-        # checkout that was retried leaves a dead one behind). Prefer the
-        # live one; otherwise keep the most recently created.
-        if existing is None:
-            by_customer[cid] = s
-        elif s.get("status") == "active" and existing.get("status") != "active":
-            by_customer[cid] = s
-        elif (s.get("created") or 0) > (existing.get("created") or 0) \
-                and existing.get("status") != "active":
-            by_customer[cid] = s
-    return by_customer
+        grouped.setdefault(s.get("customer"), []).append(s)
+
+    # The count travels with the representative. A customer holding several
+    # subscription objects is worth seeing -- it is how a double-charge, a
+    # stranded checkout or a comped trial beside a cancelled original shows
+    # up -- and showing only one of them silently hides the rest.
+    return {cid: (_pick_representative(items), len(items))
+            for cid, items in grouped.items()}
+
+
+#: Which subscription represents a customer who holds several, most live
+#: first. A duplicate checkout, a comped year implemented as a trial, or a
+#: plan change all leave more than one object behind.
+#:
+#: "active" alone is not enough, and the gap was not theoretical: a customer
+#: who had been granted a year of Premium as a TRIAL (running to Sep 2027)
+#: alongside the CANCELLED duplicate from his double-charge was displayed as
+#: "Ended" on 26 Oct 2026, with the cancelled subscription's price and a
+#: billing date in the past. A kept promise rendered as churn.
+_LIVENESS = {
+    "active": 0, "trialing": 1, "past_due": 2, "unpaid": 3,
+    "incomplete": 4, "paused": 5, "canceled": 6, "incomplete_expired": 7,
+}
+
+
+def _pick_representative(items: list) -> dict:
+    """Most-live first; among equals, most recently created."""
+    return sorted(
+        items,
+        key=lambda s: (_LIVENESS.get(s.get("status"), 9),
+                       -(s.get("created") or 0)),
+    )[0]
 
 
 def _shape_subscription(s: dict) -> dict:
@@ -171,7 +190,10 @@ def _mrr_minor(sub: dict | None) -> int:
     and an MRR figure that includes it overstates the business by exactly
     the amount you would most want to know about.
     """
-    if not sub or sub.get("status") not in ("active", "trialing"):
+    # Trials are excluded: no cash arrives until they convert, and the ones
+    # in this account are comped years granted as trials -- counting them
+    # would book goodwill as revenue.
+    if not sub or sub.get("status") != "active":
         return 0
     if sub.get("cancel_at_period_end"):
         return 0
@@ -262,8 +284,11 @@ async def list_subscribers(
     out = []
     mrr_total = 0
     for r in rows:
-        raw = subs_by_customer.get(r["stripe_customer_id"])
+        entry = subs_by_customer.get(r["stripe_customer_id"])
+        raw, held = entry if entry else (None, 0)
         sub = _shape_subscription(raw) if raw else None
+        if sub is not None:
+            sub["subscriptions_held"] = held
         lifecycle = _lifecycle(dict(r), sub) if stripe_error is None else "unknown"
         mrr = _mrr_minor(sub)
         mrr_total += mrr

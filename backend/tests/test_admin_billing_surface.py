@@ -174,6 +174,69 @@ def test_the_router_registers_the_billing_surface():
     assert "/admin/billing" in src, "unexpected prefix for the billing router"
 
 
+# ── Which subscription represents a customer who holds several ──────────────
+
+def test_a_trialing_subscription_outranks_a_cancelled_one():
+    """The case that made a kept promise look like churn.
+
+    A customer double-charged in Sep 2026 was given a year of Premium,
+    implemented as a Stripe TRIAL running to Sep 2027, with the duplicate
+    subscription cancelled. The page preferred only status == "active";
+    neither object was active, so it fell through to "most recently
+    created" and displayed the CANCELLED one -- "Ended", the old price, and
+    a billing date in the past.
+    """
+    sys.path.insert(0, str(BACKEND))
+    from app.api.v1.routes.admin_billing import _pick_representative
+
+    cancelled = {"id": "sub_old", "status": "canceled", "created": 2000}
+    trialing = {"id": "sub_new", "status": "trialing", "created": 1000}
+    # Note the cancelled one is NEWER, so recency alone picks it.
+    picked = _pick_representative([cancelled, trialing])
+    assert picked["id"] == "sub_new", (
+        "a cancelled subscription was preferred over a live trial")
+
+
+def test_active_outranks_everything():
+    sys.path.insert(0, str(BACKEND))
+    from app.api.v1.routes.admin_billing import _pick_representative
+
+    for other in ("trialing", "past_due", "canceled", "incomplete"):
+        picked = _pick_representative([
+            {"id": "x", "status": other, "created": 9999},
+            {"id": "live", "status": "active", "created": 1},
+        ])
+        assert picked["id"] == "live", f"{other} was preferred over active"
+
+
+def test_among_equals_the_most_recent_wins():
+    sys.path.insert(0, str(BACKEND))
+    from app.api.v1.routes.admin_billing import _pick_representative
+
+    picked = _pick_representative([
+        {"id": "older", "status": "canceled", "created": 100},
+        {"id": "newer", "status": "canceled", "created": 200},
+    ])
+    assert picked["id"] == "newer"
+
+
+def test_a_trial_is_not_counted_as_recurring_revenue():
+    """No cash arrives until it converts, and the trials in this account are
+    comped years. Counting them books goodwill as revenue."""
+    sys.path.insert(0, str(BACKEND))
+    from app.api.v1.routes.admin_billing import _mrr_minor
+
+    trial = {"status": "trialing", "amount_minor": 1999,
+             "interval": "year", "interval_count": 1,
+             "cancel_at_period_end": False}
+    assert _mrr_minor(trial) == 0, "a trial was counted as recurring revenue"
+
+    paying = {"status": "active", "amount_minor": 2999,
+              "interval": "month", "interval_count": 1,
+              "cancel_at_period_end": False}
+    assert _mrr_minor(paying) == 2999
+
+
 if __name__ == "__main__":
     # The gate runs suites as standalone scripts and reads this summary.
     # Without it the file would exit 0 having executed nothing and be

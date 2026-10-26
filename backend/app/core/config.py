@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "11.2.50"
+    APP_VERSION: str = "11.2.51"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
@@ -120,6 +120,19 @@ class Settings(BaseSettings):
     # test suite builds Settings in a fresh process, which is the only thing
     # that distinguishes a working config from a working process.
     ALERT_EMAIL: str = ""
+
+    # Email verification became mandatory for accounts created ON OR AFTER
+    # this date. Everyone who registered earlier is exempt, permanently.
+    #
+    # A cutoff rather than a flag, because the rule must not reach backwards.
+    # On 26 Oct 2026 registration did not send a verification email at all --
+    # only an admin could trigger one by hand -- so every existing unverified
+    # account is unverified because nobody ever asked them, including paying
+    # subscribers. Blocking them would be punishing customers for our gap.
+    #
+    # Empty disables the requirement entirely, which is the behaviour that
+    # existed before. Changing the policy is a deliberate edit here.
+    EMAIL_VERIFICATION_REQUIRED_FROM: str = "2026-10-27"
     SUPPORT_EMAIL: str = "asxscreener@gmail.com"
     ADMIN_EMAILS: str = "asxscreener@gmail.com"   # comma-separated list
 

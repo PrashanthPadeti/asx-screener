@@ -15,20 +15,47 @@ function LoginForm() {
   const [showPw,   setShowPw]   = useState(false)
   const [loading,  setLoading]  = useState(false)
   const [error,    setError]    = useState<string | null>(null)
+  // The credentials were right; the account just isn't verified. A different
+  // state from `error`, because the answer is "check your inbox", not
+  // "try again".
+  const [unverified, setUnverified] = useState<string | null>(null)
+  const [resend, setResend] = useState<'idle' | 'sending' | 'sent'>('idle')
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
+    setUnverified(null)
+    setResend('idle')
     setLoading(true)
     try {
       await login(email, password)
       const redirect = searchParams.get('redirect')
       router.push(redirect && redirect.startsWith('/') ? redirect : '/')
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Login failed')
+      const e = err as { code?: string; message?: string }
+      if (e?.code === 'email_not_verified') {
+        setUnverified(e.message || 'Your email address has not been verified yet.')
+      } else {
+        setError(err instanceof Error ? err.message : 'Login failed')
+      }
     } finally {
       setLoading(false)
     }
+  }
+
+  async function handleResend() {
+    setResend('sending')
+    try {
+      await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL || ''}/api/v1/auth/resend-verification`,
+        { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }) })
+    } catch { /* the endpoint answers the same either way; never block the UI */ }
+    // Always reports sent: the endpoint deliberately gives the same answer
+    // whether or not the address exists, so claiming anything more specific
+    // here would leak what it is designed not to.
+    setResend('sent')
   }
 
   return (
@@ -53,6 +80,33 @@ function LoginForm() {
           {error && (
             <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
               {error}
+            </div>
+          )}
+
+          {unverified && (
+            <div className="mb-4 px-4 py-3 bg-amber-50 border border-amber-300 rounded-lg">
+              <p className="text-sm font-semibold text-amber-900">
+                Please verify your email address
+              </p>
+              <p className="mt-1 text-sm text-amber-900">{unverified}</p>
+              <p className="mt-2 text-xs text-amber-800">
+                Tip: search your inbox <em>and</em> your spam or junk folder
+                for an email from ASX Screener.
+              </p>
+
+              {resend === 'sent' ? (
+                <p className="mt-3 text-sm text-emerald-700">
+                  Verification link sent to <strong>{email}</strong>. It can
+                  take a minute to arrive — remember to check spam.
+                </p>
+              ) : (
+                <button type="button" onClick={handleResend}
+                        disabled={resend === 'sending' || !email}
+                        className="mt-3 text-sm font-medium text-blue-700 hover:underline
+                                   disabled:opacity-50">
+                  {resend === 'sending' ? 'Sending…' : 'Resend verification email'}
+                </button>
+              )}
             </div>
           )}
 

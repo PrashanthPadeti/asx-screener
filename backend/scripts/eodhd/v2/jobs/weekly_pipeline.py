@@ -284,6 +284,31 @@ def main():
         PYTHON, str(BASE_DIR / "scripts" / "assert_feed_health.py"),
     ])
 
+    # ── Step 3c: Splits ───────────────────────────────────────────────────────
+    #
+    # Added 26 Oct 2026. The weekly download had been writing split payloads to
+    # the raw zone the whole time; nothing loaded them. market.splits last
+    # changed on 2026-04-28 and the gap went unnoticed for 181 days because no
+    # scheduled job wrote the table, which also kept it out of
+    # freshness_relevant_tables() — a table nothing writes cannot be stale by
+    # that definition, and so the one check that would have caught it was
+    # correctly excluding it.
+    #
+    # It matters because every return on the site is computed from unadjusted
+    # close. A 1-for-10 consolidation that market.splits does not know about
+    # shows as a ~-90% move in every return window spanning it. Three such
+    # consolidations were found in September alone.
+    #
+    # transform_splits truncates and rebuilds from staging when given no
+    # --codes, so the load MUST succeed first; run() exits on a non-zero step,
+    # which is what keeps a partial load from rebuilding a smaller table.
+    run("Step 3c-i: Load splits → staging_au.splits", [
+        PYTHON, str(SCRIPTS / "load_to_staging_splits.py"),
+    ])
+    run("Step 3c-ii: Transform → market.splits", [
+        PYTHON, str(SCRIPTS / "transforms" / "transform_splits.py"),
+    ])
+
     # ── Step 6: Weekly compute ────────────────────────────────────────────────
     #
     # Moved ahead of the barrier with step 7. Both write canonical INPUTS —

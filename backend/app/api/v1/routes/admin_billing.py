@@ -344,6 +344,84 @@ async def list_subscribers(
     }
 
 
+@router.get("/transactions")
+async def all_transactions(
+    limit: int = Query(100, ge=1, le=100),
+    starting_after: str | None = Query(
+        None, description="Stripe invoice id to page from"),
+    db: AsyncSession = Depends(get_db),
+    admin: dict = Depends(require_admin),
+):
+    """Every invoice across every customer — the ledger.
+
+    Stripe is the source: an invoice that exists there but whose webhook
+    never landed would be missing from any local table, and a payment this
+    business received must not depend on our own ingestion having worked.
+
+    Customer emails come from the database because Stripe's customer object
+    may carry a different one; the local record is what the account is.
+    """
+    def _pull(after: str | None) -> dict:
+        stripe = _stripe_client()
+        if stripe is None:
+            raise RuntimeError("STRIPE_SECRET_KEY is not configured")
+        kwargs = {"limit": limit}
+        if after:
+            kwargs["starting_after"] = after
+        page = stripe.Invoice.list(**kwargs)
+        return {"data": list(page.data), "has_more": page.has_more}
+
+    try:
+        page = await asyncio.to_thread(_pull, starting_after)
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("admin/billing: ledger unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not read Stripe: {type(exc).__name__}. The "
+                   f"transactions exist; they could not be retrieved.")
+
+    rows = (await db.execute(text("""
+        SELECT stripe_customer_id, email, name
+          FROM users.users WHERE stripe_customer_id IS NOT NULL
+    """))).mappings().all()
+    who = {r["stripe_customer_id"]: (r["email"], r["name"]) for r in rows}
+
+    out, gross, refunded = [], 0, 0
+    for inv in page["data"]:
+        cid = inv.get("customer")
+        email, name = who.get(cid, (None, None))
+        paid = inv.get("amount_paid") or 0
+        gross += paid
+        lines = (inv.get("lines", {}).get("data") or [{}])
+        out.append({
+            "invoice_id":   inv.get("id"),
+            "number":       inv.get("number"),
+            "created":      _ts(inv.get("created")),
+            "status":       inv.get("status"),
+            # Named explicitly when the customer is not one of ours: a blank
+            # here would read as a missing value rather than as a Stripe
+            # customer with no local account.
+            "email":        email or f"(no local account: {cid})",
+            "name":         name,
+            "description":  lines[0].get("description") if lines else None,
+            "amount_due":   inv.get("amount_due"),
+            "amount_paid":  paid,
+            "currency":     (inv.get("currency") or "").upper(),
+            "hosted_url":   inv.get("hosted_invoice_url"),
+            "pdf_url":      inv.get("invoice_pdf"),
+        })
+
+    return {
+        "transactions": out,
+        "has_more":     page["has_more"],
+        "next_cursor":  out[-1]["invoice_id"] if out and page["has_more"] else None,
+        # Scoped to THIS page, and said so. A total labelled without its
+        # scope gets read as the lifetime figure.
+        "page_total_minor": gross,
+        "page_size": len(out),
+    }
+
+
 @router.get("/subscribers/{user_id}/transactions")
 async def subscriber_transactions(
     user_id: str,

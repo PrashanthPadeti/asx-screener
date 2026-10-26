@@ -44,7 +44,11 @@ from compute.engine.split_adjustment import (                  # noqa: E402
 
 def _frame(prices, dates=None, adj=None):
     n = len(prices)
-    dates = dates or pd.date_range("2026-01-01", periods=n, freq="D")
+    # `dates or ...` raises on a DatetimeIndex — its truth value is
+    # ambiguous — so every case passing explicit dates errored rather than
+    # ran. An `is None` check is the only safe form here.
+    if dates is None:
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
     df = pd.DataFrame({
         "date": pd.to_datetime(dates),
         "open": prices, "high": prices, "low": prices, "close": prices,

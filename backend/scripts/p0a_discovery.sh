@@ -379,6 +379,11 @@ CRITICAL = [
     "financials.annual_cashflow", "financials.earnings_quarterly",
     "market.companies", "market.companies_current", "market.daily_prices",
     "market.dividends", "market.yearly_metrics", "market.computed_metrics",
+    # technical_compute READS this from v11.2.54 to restate prices into
+    # post-split terms. A clone that lost it would be accepted and the run
+    # would compute every return on the raw close again — the defect this
+    # dependency exists to fix — without anything saying so.
+    "market.splits",
     "market.daily_metrics", "market.valuation_snapshot",
     "market.halfyearly_metrics", "market.weekly_metrics",
     "market.short_positions", "market.analyst_ratings",

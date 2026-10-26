@@ -26,6 +26,7 @@ from app.core.security import (
     verify_password,
 )
 from app.core.config import settings
+from app.core.verification_policy import verification_required_for
 from app.db.session import get_db
 from app.schemas.auth import (
     LoginRequest,
@@ -37,6 +38,7 @@ from app.schemas.auth import (
 from app.services.email import (
     send_login_failure_alert,
     send_password_reset_email,
+    send_verification_reminder_email,
     send_welcome_email,
 )
 
@@ -45,6 +47,39 @@ router = APIRouter()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _verification_required_for(created_at) -> bool:
+    """See app/core/verification_policy — the rule lives there so it can be
+    tested without importing the application."""
+    return verification_required_for(created_at)
+
+
+async def _issue_verification_email(db: AsyncSession, user_id: str,
+                                    email: str, name: str | None) -> bool:
+    """Mint a verification token, store it, and send the email.
+
+    Best-effort on the SEND, deliberate on the TOKEN: the row is updated
+    first, so a mail failure leaves an account that can be resent to rather
+    than one with no token at all. Returns whether the email went out.
+    """
+    tok = secrets.token_urlsafe(48)
+    await db.execute(text("""
+        UPDATE users.users
+           SET email_verification_token   = :tok,
+               email_verification_sent_at = NOW()
+         WHERE id = :uid
+    """), {"tok": tok, "uid": user_id})
+    await db.commit()
+
+    frontend_url = getattr(settings, "FRONTEND_URL", "https://asxscreener.com.au")
+    verify_url = f"{frontend_url}/auth/verify-email?token={tok}"
+    try:
+        send_verification_reminder_email(email, verify_url, name)
+        return True
+    except Exception as exc:                                   # noqa: BLE001
+        log.warning("Could not send verification email to %s: %s", email, exc)
+        return False
+
 
 def _token_response(
     user_id: str,
@@ -85,7 +120,7 @@ async def _store_session(
 # ── Register ─────────────────────────────────────────────────────────────────
 
 @limiter.limit("3/minute")
-@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
     request: Request,
@@ -108,7 +143,7 @@ async def register(
         text("""
             INSERT INTO users.users (email, name, password_hash)
             VALUES (:email, :name, :pw)
-            RETURNING id, plan, subscription_status
+            RETURNING id, plan, subscription_status, created_at
         """),
         {"email": body.email.lower(), "name": body.name, "pw": hashed},
     )
@@ -118,9 +153,7 @@ async def register(
     user_id             = str(row.id)
     plan                = row.plan
     subscription_status = row.subscription_status or "inactive"
-
-    token_resp, refresh = _token_response(user_id, body.email.lower(), plan, subscription_status)
-    await _store_session(db, user_id, refresh, request)
+    created_at          = row.created_at
 
     log.info(f"New user registered: {body.email}")
 
@@ -131,6 +164,35 @@ async def register(
     except Exception as exc:
         log.warning(f"Could not send welcome email to {body.email}: {exc}")
 
+    # ── Mandatory verification ────────────────────────────────────────────
+    # Until 26 Oct 2026 registration sent a welcome email and no verification
+    # email at all; the only way an account ever got one was an admin
+    # triggering it by hand. So the verification mail is sent HERE, and the
+    # login gate added alongside it is only honest because of this line.
+    #
+    # No tokens are returned when verification is required. Returning them
+    # would hand the new user a working session and make the login gate
+    # decorative — they would simply never hit it.
+    if _verification_required_for(created_at):
+        sent = await _issue_verification_email(
+            db, user_id, body.email.lower(), body.name)
+        return {
+            "verification_required": True,
+            "email": body.email.lower(),
+            "email_sent": sent,
+            "message": (
+                "Account created. Check your email for a verification link "
+                "to activate your account — it can take a minute to arrive, "
+                "and it sometimes lands in the spam or junk folder."
+                if sent else
+                "Account created, but the verification email could not be "
+                "sent just now. Use 'Resend verification email' on the "
+                "sign-in page, or contact support."
+            ),
+        }
+
+    token_resp, refresh = _token_response(user_id, body.email.lower(), plan, subscription_status)
+    await _store_session(db, user_id, refresh, request)
     return token_resp
 
 
@@ -149,7 +211,8 @@ async def login(
     try:
         result = await db.execute(
             text("""
-                SELECT id, email, password_hash, plan, email_verified, subscription_status
+                SELECT id, email, password_hash, plan, email_verified,
+                       subscription_status, name, created_at
                 FROM users.users
                 WHERE email = :email
             """),
@@ -176,6 +239,37 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
+        )
+
+    # ── Mandatory email verification ──────────────────────────────────────
+    # Credentials are correct; the account simply is not activated yet.
+    #
+    # Checked AFTER the password so an attacker cannot learn which addresses
+    # exist by watching which ones answer 403 instead of 401.
+    #
+    # Only applies to accounts created on or after the cutoff. Everyone who
+    # registered before it is exempt permanently — until 26 Oct 2026
+    # registration never sent a verification email, so existing unverified
+    # accounts, paying subscribers among them, are unverified because nobody
+    # ever asked them.
+    if not user.email_verified and _verification_required_for(user.created_at):
+        log.info("Login refused — email not verified: %s", email_lc)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                # A code the frontend can branch on, so the sign-in page can
+                # offer "resend" instead of showing a credentials error.
+                "code": "email_not_verified",
+                "email": email_lc,
+                "message": (
+                    "Your email address hasn't been verified yet. We sent a "
+                    "verification link when you signed up — please click it "
+                    "to activate your account. It can take a minute to "
+                    "arrive, and it often lands in the spam or junk folder, "
+                    "so check there too. If you can't find it, use 'Resend "
+                    "verification email' below."
+                ),
+            },
         )
 
     # Credentials are valid from here on, so anything that fails below is a site
@@ -370,6 +464,62 @@ async def reset_password(
 
 
 # ── Verify Email ─────────────────────────────────────────────────────────────
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+
+@limiter.limit("3/minute")
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+async def resend_verification(
+    body: ResendVerificationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Send the verification email again.
+
+    Mandatory verification without this would be a trap: an email that went
+    to spam and was deleted, or a mistyped-but-valid address, would lock the
+    account permanently with no way back except support.
+
+    ALWAYS answers 200 with the same message, whether or not the address
+    exists or is already verified. Anything else turns this into an account
+    enumeration oracle — a 404 here would let anyone test which emails are
+    registered, and this endpoint needs no authentication by definition.
+
+    Rate limited to 3/minute, and a 2-minute cooldown per address, so it
+    cannot be used to mailbomb someone.
+    """
+    email_lc = body.email.lower()
+    same_answer = {
+        "message": (
+            "If that address has an unverified account, we've sent the "
+            "verification link again. It can take a minute to arrive, and it "
+            "often lands in the spam or junk folder — please check there too."
+        )
+    }
+
+    row = (await db.execute(text("""
+        SELECT id, email, name, email_verified, email_verification_sent_at
+          FROM users.users WHERE email = :email
+    """), {"email": email_lc})).fetchone()
+
+    if row is None or row.email_verified:
+        return same_answer
+
+    last = row.email_verification_sent_at
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - last < timedelta(minutes=2):
+            # Silently honoured: telling the caller they are too early would
+            # confirm the account exists, which is the thing being protected.
+            log.info("resend-verification within cooldown for %s", email_lc)
+            return same_answer
+
+    await _issue_verification_email(db, str(row.id), row.email, row.name)
+    return same_answer
+
 
 @router.get("/verify-email", status_code=status.HTTP_200_OK)
 async def verify_email(

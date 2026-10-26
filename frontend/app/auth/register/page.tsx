@@ -23,19 +23,52 @@ export default function RegisterPage() {
   const [showPw,    setShowPw]    = useState(false)
   const [loading,   setLoading]   = useState(false)
   const [error,     setError]     = useState<string | null>(null)
+  // Set when the account was created but must be verified before signing in.
+  const [notice,    setNotice]    = useState<{ email: string; email_sent: boolean;
+                                               message: string } | null>(null)
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     setError(null)
     setLoading(true)
     try {
-      await register(email, password, name || undefined)
-      router.push('/')
+      const pending = await register(email, password, name || undefined)
+      // No tokens are issued when verification is required, so there is no
+      // session to land in — show what to do next instead of redirecting to
+      // a page that would bounce them straight back to sign-in.
+      if (pending) setNotice(pending)
+      else router.push('/')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Registration failed')
     } finally {
       setLoading(false)
     }
+  }
+
+  if (notice) {
+    return (
+      <div className="min-h-[80vh] flex items-center justify-center px-4 py-8">
+        <div className="w-full max-w-md bg-white border border-slate-200 rounded-xl p-8 text-center">
+          <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200
+                          flex items-center justify-center mx-auto mb-4">
+            <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+          </div>
+          <h1 className="text-xl font-bold text-slate-800">Check your email</h1>
+          <p className="mt-2 text-sm text-slate-600">{notice.message}</p>
+          <p className="mt-3 text-sm text-slate-700 font-medium break-all">{notice.email}</p>
+          <div className="mt-5 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 text-left">
+            <strong>Not arrived?</strong> It can take a minute, and it often
+            lands in the <strong>spam or junk folder</strong> — please check
+            there before trying again. You can resend the link from the
+            sign-in page.
+          </div>
+          <Link href="/auth/login"
+                className="mt-5 inline-block text-sm text-blue-600 hover:underline">
+            Go to sign in
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   return (

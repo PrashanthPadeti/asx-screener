@@ -50,11 +50,20 @@ interface TokenPair {
   expires_in:    number   // seconds
 }
 
+/** Registration's response when the new account must verify its email
+ *  before it can sign in. Carries no tokens, by design. */
+export interface VerificationNotice {
+  verification_required: true
+  email:      string
+  email_sent: boolean
+  message:    string
+}
+
 interface AuthContextValue {
   user:          AuthUser | null
   loading:       boolean
   login:         (email: string, password: string) => Promise<void>
-  register:      (email: string, password: string, name?: string) => Promise<void>
+  register:      (email: string, password: string, name?: string) => Promise<VerificationNotice | null>
   logout:        () => Promise<void>
   refreshTokens: () => Promise<boolean>
 }
@@ -89,21 +98,41 @@ async function apiPost<T>(path: string, body: unknown, token?: string): Promise<
     headers,
     body:    JSON.stringify(body),
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || 'Request failed')
-  }
+  if (!res.ok) throw await apiError(res)
   return res.json() as Promise<T>
+}
+
+/** An Error that keeps the structured detail.
+ *
+ *  FastAPI's `detail` can be a string or an object. `new Error(detail)` on an
+ *  object renders as "[object Object]", which is what the sign-in page would
+ *  have shown an unverified user instead of telling them to check their spam
+ *  folder. String details behave exactly as before.
+ */
+export type ApiError = Error & {
+  status?: number
+  code?: string
+  detail?: unknown
+}
+
+async function apiError(res: Response): Promise<ApiError> {
+  const body = await res.json().catch(() => ({ detail: res.statusText }))
+  const detail = body?.detail
+  const message = typeof detail === 'string'
+    ? detail
+    : (detail?.message || 'Request failed')
+  const err = new Error(message) as ApiError
+  err.status = res.status
+  err.detail = detail
+  if (detail && typeof detail === 'object' && detail.code) err.code = detail.code
+  return err
 }
 
 async function apiGet<T>(path: string, token: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   })
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || 'Request failed')
-  }
+  if (!res.ok) throw await apiError(res)
   return res.json() as Promise<T>
 }
 
@@ -198,13 +227,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // ── register ───────────────────────────────────────────────────────────────
 
-  const register = useCallback(async (email: string, password: string, name?: string) => {
-    const pair = await apiPost<TokenPair>('/api/v1/auth/register', { email, password, name })
+  /** Returns a verification notice when the account must be verified before
+   *  it can sign in; otherwise signs the new user straight in.
+   *
+   *  Since mandatory verification, registration deliberately returns NO
+   *  tokens for new accounts — handing them a session would let them walk
+   *  straight past the login gate, making it decorative.
+   */
+  const register = useCallback(async (email: string, password: string, name?: string)
+    : Promise<VerificationNotice | null> => {
+    const res = await apiPost<TokenPair & Partial<VerificationNotice>>(
+      '/api/v1/auth/register', { email, password, name })
+
+    if (res && (res as VerificationNotice).verification_required) {
+      return res as VerificationNotice
+    }
+
+    const pair = res as TokenPair
     storeTokens(pair)
     const profile = await fetchMe(pair.access_token)
     if (!profile) throw new Error('Failed to fetch user profile')
     setUser(profile)
     scheduleRefresh(pair.expires_in)
+    return null
   }, [fetchMe, scheduleRefresh])
 
   // ── logout ─────────────────────────────────────────────────────────────────

@@ -58,6 +58,124 @@ DISCONTINUITY = 0.10
 SPLIT_WINDOW_DAYS = 5
 
 
+#: A recorded ratio this close to 1.0 changes the share count by less than
+#: this fraction. Bonus issues and DRP adjustments land here. Applying one is
+#: within the noise; withholding a year of returns over one would be wildly
+#: disproportionate, so these are skipped and nothing is withheld for them.
+IMMATERIAL_FACTOR = 0.10
+
+#: How far the observed price step may differ from the recorded ratio and
+#: still count as explained by it.
+#:
+#: Deliberately loose. The boundary prices sit days apart, so ordinary price
+#: movement is inside this number, and most of these companies are micro-caps
+#: consolidating alongside a capital raise -- a 30% move across the event is
+#: routine. The population measured on 27 Oct 2026 separates cleanly at a
+#: factor of two: genuine noise sat between 0.48 and 1.25, while every real
+#: fault was beyond 2x or below 0.5x (MPP at 39, VTA at 0.0003, LIB at 0.03,
+#: ROG at 2.5). A tighter band would flag volatility as corruption and
+#: withhold hundreds of correct returns.
+RECONCILE_BAND = 2.0
+
+
+def _boundary_prices(df: pd.DataFrame, split_date,
+                     window: int = SPLIT_WINDOW_DAYS) -> tuple:
+    """Last close before the split window, and first close after it.
+
+    The window is the same one the detector uses: ex-dates, announcement
+    dates and the date the provider restates the series do not always
+    coincide, so a price taken on the recorded date itself may already be
+    the post-event one. MPP is exactly that case -- its price stepped the
+    day BEFORE the recorded split_date, which is how a reconciliation keyed
+    to the exact date missed it entirely.
+    """
+    if "date" not in df.columns or "close" not in df.columns or df.empty:
+        return None, None
+
+    dates = pd.to_datetime(df["date"])
+    sd = pd.Timestamp(split_date)
+    close = pd.to_numeric(df["close"], errors="coerce")
+
+    before = close[(dates < sd - pd.Timedelta(days=window)) & close.notna()]
+    after = close[(dates > sd + pd.Timedelta(days=window)) & close.notna()]
+    if before.empty or after.empty:
+        return None, None
+
+    b, a = float(before.iloc[-1]), float(after.iloc[0])
+    return (b, a) if b > 0 and a > 0 else (None, None)
+
+
+def reconcile_splits(df: pd.DataFrame, splits) -> tuple:
+    """Decide, per split, whether the record explains what the prices did.
+
+    Returns (adjustable, unreconciled, skipped). Each entry is
+    (split_date, ratio, residual).
+
+    THE DEFECT THIS EXISTS FOR
+    --------------------------
+    Until v11.2.58 a recorded split suppressed the discontinuity detector
+    merely by existing: any step within SPLIT_WINDOW_DAYS of one was marked
+    explained, without ever checking that the ratio accounted for it.
+
+    MPP showed what that costs. A 1-for-40 was recorded, so the detector
+    stayed silent -- but the price went from 0.0011 to 1.72, a factor of
+    1,564. The recorded ratio explained 40 of it. The remaining 39x flowed
+    into return_1y as +2150%, on a stock that had collapsed, and sat at the
+    top of "best 1-year return" because consolidations inflate returns and
+    companies consolidate when they have collapsed.
+
+    So the rule is no longer "is there a record" but "does the record
+    reconcile", with three outcomes:
+
+      ADJUST       the step matches the ratio
+      SKIP         there is no step to explain -- the series is already
+                   continuous, so the record is a duplicate or was applied
+                   upstream. Adjusting would CREATE a discontinuity in clean
+                   data, which is worse than the bug being fixed. NTM has
+                   two 1-for-15 records six days apart; applying both would
+                   multiply by 225.
+      WITHHOLD     there is a step and the ratio does not account for it.
+                   We cannot correct it -- deriving a factor from the price
+                   move would be inventing a corporate action out of a price
+                   change -- so the affected windows publish as unknown.
+
+    A note on what is NOT attempted: no attempt is made to decide whether
+    the price series or the split record is the wrong one. For MPP either
+    could be. The honest output is the same either way.
+    """
+    adjustable, unreconciled, skipped = [], [], []
+
+    for split_date, ratio in splits:
+        if not ratio or ratio <= 0:
+            skipped.append((split_date, ratio, None))
+            continue
+
+        factor = 1.0 / float(ratio)
+        if abs(factor - 1.0) < IMMATERIAL_FACTOR:
+            skipped.append((split_date, ratio, None))
+            continue
+
+        before, after = _boundary_prices(df, split_date)
+        if before is None:
+            # No price either side -- the event is outside the series, so it
+            # cannot corrupt a window inside it. Adjusting is harmless and
+            # keeps older history consistent.
+            adjustable.append((split_date, ratio, None))
+            continue
+
+        observed = after / before
+        residual = observed / factor
+
+        if 1.0 / RECONCILE_BAND <= residual <= RECONCILE_BAND:
+            adjustable.append((split_date, ratio, residual))
+        elif 1.0 / RECONCILE_BAND <= observed <= RECONCILE_BAND:
+            skipped.append((split_date, ratio, residual))
+        else:
+            unreconciled.append((split_date, ratio, residual))
+
+    return adjustable, unreconciled, skipped
+
+
 def cumulative_adjustment(dates: pd.Series, splits) -> np.ndarray:
     """Factor to multiply each row's price by, to restate it in today's terms.
 
@@ -73,7 +191,7 @@ def cumulative_adjustment(dates: pd.Series, splits) -> np.ndarray:
         return factor
 
     d = pd.to_datetime(pd.Series(dates).reset_index(drop=True))
-    for split_date, ratio in splits:
+    for split_date, ratio in ((s[0], s[1]) for s in splits):
         # A ratio of zero or None cannot be inverted. Skipping it leaves the
         # series unadjusted across that event, which the withholding pass
         # below then catches as an unexplained discontinuity — so a bad
@@ -109,7 +227,8 @@ def apply_split_adjustment(df: pd.DataFrame, splits) -> pd.DataFrame:
     return out
 
 
-def unexplained_discontinuities(df: pd.DataFrame, splits) -> pd.Series:
+def unexplained_discontinuities(df: pd.DataFrame, splits,
+                                unreconciled=()) -> pd.Series:
     """Boolean per row: a corporate action happened here that we cannot adjust.
 
     Detected from close/adjusted_close — a step in that ratio means the
@@ -124,7 +243,25 @@ def unexplained_discontinuities(df: pd.DataFrame, splits) -> pd.Series:
     """
     n = len(df)
     flags = pd.Series(np.zeros(n, dtype=bool), index=df.index)
-    if n < 2 or "adj_close" not in df.columns or "close" not in df.columns:
+    if n < 2:
+        return flags
+
+    # A split whose ratio does not reconcile with the price step is an
+    # unexplained event regardless of what the close/adj_close ratio shows.
+    # This runs BEFORE the early return below, because the detector's own
+    # evidence is the provider's adjustment -- and for MPP the provider
+    # adjusted by 39 when the series moved by 1,564, so its series looked
+    # perfectly consistent while being wrong. An explanation that does not
+    # reconcile must flag the event even when the detector cannot see it.
+    if len(unreconciled):
+        dates_all = pd.to_datetime(df["date"])
+        for split_date, _ratio in ((s[0], s[1]) for s in unreconciled):
+            sd = pd.Timestamp(split_date)
+            near = (dates_all >= sd - pd.Timedelta(days=SPLIT_WINDOW_DAYS)) & \
+                   (dates_all <= sd + pd.Timedelta(days=SPLIT_WINDOW_DAYS))
+            flags |= near.to_numpy()
+
+    if "adj_close" not in df.columns or "close" not in df.columns:
         return flags
 
     close = df["close"].astype(float)
@@ -140,7 +277,7 @@ def unexplained_discontinuities(df: pd.DataFrame, splits) -> pd.Series:
 
     dates = pd.to_datetime(df["date"])
     explained = pd.Series(np.zeros(n, dtype=bool), index=df.index)
-    for split_date, ratio_value in splits:
+    for split_date, ratio_value in ((s[0], s[1]) for s in splits):
         if not ratio_value or ratio_value <= 0:
             continue
         sd = pd.Timestamp(split_date)
@@ -148,7 +285,10 @@ def unexplained_discontinuities(df: pd.DataFrame, splits) -> pd.Series:
                (dates <= sd + pd.Timedelta(days=SPLIT_WINDOW_DAYS))
         explained |= near.to_numpy()
 
-    return broke & ~explained
+    # `flags` already carries the unreconciled events. They must survive the
+    # mask below: an unreconciled split is itself a recorded split, so it
+    # appears in `explained` and would otherwise erase its own flag.
+    return flags | (broke & ~explained)
 
 
 #: Metric -> lookback in rows. A metric is wrong for its whole window after
@@ -160,14 +300,15 @@ CONTAMINATED_BY_WINDOW = {
 }
 
 
-def withhold_contaminated_metrics(df: pd.DataFrame, splits) -> tuple:
+def withhold_contaminated_metrics(df: pd.DataFrame, splits,
+                                  unreconciled=()) -> tuple:
     """Blank the metrics whose window spans an event we cannot adjust.
 
     Returns (df, n_withheld). The count is returned rather than logged here
     so the caller can report it as a run statistic — a repair that silently
     removes numbers is as hard to audit as one that silently invents them.
     """
-    flags = unexplained_discontinuities(df, splits)
+    flags = unexplained_discontinuities(df, splits, unreconciled)
     if not flags.any():
         return df, 0
 

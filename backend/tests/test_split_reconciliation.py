@@ -33,7 +33,7 @@ sys.path.insert(0, str(BACKEND))
 from compute.engine.split_adjustment import (                  # noqa: E402
     reconcile_splits, unexplained_discontinuities, _is_flat,
     withhold_contaminated_metrics, apply_split_adjustment,
-    RECONCILE_BAND, IMMATERIAL_FACTOR,
+    RECONCILE_BAND, IMMATERIAL_FACTOR, DISCONTINUITY,
 )
 
 START = date(2025, 1, 1)
@@ -104,16 +104,30 @@ def test_the_mpp_case_withholds_the_year_of_returns():
         "a return spanning the unreconciled event is still published")
 
 
-def test_the_detector_cannot_see_it_on_its_own():
+def test_the_provider_series_shows_nothing():
     """Why the reconciliation had to be added rather than the threshold
-    tuned. The detector reads close/adj_close; MPP's provider series was
-    self-consistent, so that ratio never steps and `broke` is empty."""
+    tuned.
+
+    The pre-v11.2.60 detector read close/adjusted_close. MPP's provider
+    series was self-consistent -- EODHD adjusted by 39 and the series moved
+    by 1,564, so the RATIO never steps and there is nothing for that
+    detector to find.
+
+    Note what this test no longer claims. Since v11.2.60 the raw-price
+    detector sits inside unexplained_discontinuities and would catch MPP's
+    step on size alone, because 1,564x is far beyond 5x. Reconciliation
+    still earns its place: it stops a wrong ratio being APPLIED, which the
+    raw detector cannot do, and it catches mismatches far below 5x that the
+    raw detector is deliberately blind to.
+    """
     df = _series(0.0011, 1.7200)
-    splits = [(_split_on(df), 0.025)]
-    seen_alone = unexplained_discontinuities(df, splits)
-    assert not seen_alone.any(), (
-        "this test's premise is wrong -- if the detector CAN see it, the "
-        "reconciliation is solving a problem that does not exist")
+    close = df["close"].astype(float)
+    adj = df["adj_close"].astype(float)
+    ratio = close / adj
+    step = (ratio / ratio.shift(1) - 1.0).abs().fillna(0)
+    assert float(step.max()) < DISCONTINUITY, (
+        "adj_close steps in this fixture, so it does not reproduce the "
+        "condition MPP was in and the test proves nothing")
 
 
 # ── Clean data must not be corrupted ────────────────────────────────────────

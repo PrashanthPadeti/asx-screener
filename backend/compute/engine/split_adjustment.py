@@ -314,6 +314,10 @@ def unexplained_discontinuities(df: pd.DataFrame, splits,
                    (dates_all <= sd + pd.Timedelta(days=SPLIT_WINDOW_DAYS))
             flags |= near.to_numpy()
 
+    # A step in the series we actually compute from, which no split
+    # explains. See raw_price_discontinuities.
+    flags |= raw_price_discontinuities(df)
+
     if "adj_close" not in df.columns or "close" not in df.columns:
         return flags
 
@@ -342,6 +346,90 @@ def unexplained_discontinuities(df: pd.DataFrame, splits,
     # mask below: an unreconciled split is itself a recorded split, so it
     # appears in `explained` and would otherwise erase its own flag.
     return flags | (broke & ~explained)
+
+
+#: A single-day move beyond this factor, in the series we compute from, is
+#: treated as a corporate action we have no record of.
+#:
+#: Set from the measured population on 27 Oct 2026. Excluding steps near a
+#: recorded split, the unexplained events in 400 days were:
+#:
+#:     2-5x    59 events across 57 stocks
+#:     5-8x     5 events across  5 stocks
+#:     8-11x    3 events across  2 stocks
+#:    14-17x    1 event
+#:     >=20x   10 events across  5 stocks
+#:
+#: The shape is what sets the threshold. Below 5x, 57 distinct stocks with
+#: one event each -- scattered, no repeats, which is what news-driven moves
+#: look like. A takeover bid or a drill result can double a micro-cap in a
+#: day, and that is a real return, the most interesting one on the screener.
+#: Withholding those to catch share-count changes would destroy correct
+#: numbers wholesale.
+#:
+#: Above 5x the population collapses to ~13 stocks, and they look like
+#: share-count changes: ID8 at 159x, IS3 at 15x, ACS at 7.1x, none with a
+#: split on record.
+#:
+#: The cost of the choice, stated plainly: a genuine five-bagger in ONE DAY
+#: is withheld. That is rare enough, and conspicuous enough when it happens,
+#: to be the better error than publishing a consolidation as a 15,000%
+#: return.
+UNEXPLAINED_STEP = 5.0
+
+
+def _computed_series(df: pd.DataFrame) -> pd.Series:
+    """The closes the indicators are actually built from.
+
+    `close_adj` when split adjustment has run, raw `close` otherwise. Using
+    the computed series is what makes the detector below need no exclusion
+    list: a reconciled split has already been removed from it, so anything
+    still stepping is unexplained BY CONSTRUCTION rather than by a date
+    comparison that could drift out of step with the adjustment.
+    """
+    col = "close_adj" if "close_adj" in df.columns else "close"
+    return pd.to_numeric(df[col], errors="coerce")
+
+
+def raw_price_discontinuities(df: pd.DataFrame) -> pd.Series:
+    """Steps in the price series itself, with no corporate action to explain them.
+
+    WHY THIS EXISTS
+    ---------------
+    Both earlier detectors need a document. `unexplained_discontinuities`
+    reads the provider's close/adjusted_close ratio -- it sees only what
+    EODHD chose to adjust. `reconcile_splits` needs a split record to check.
+    Where there is no record AND the provider did nothing, both are blind,
+    and the share-count change flows into return_1y untouched.
+
+    ID8 is the case: its price stepped 159x on 2026-09-24, with no split in
+    market.splits and adjusted_close moving exactly in step with close. It
+    published a +10,455% one-year return, at the top of the screener, after
+    v11.2.58 had already run over it.
+
+    So this detector reads the only evidence left -- the price series.
+
+    WHAT IT DELIBERATELY DOES NOT DO
+    --------------------------------
+    It does not try to work out the factor and correct the series. The step
+    size is not a ratio: it is the corporate action and the day's trading
+    mixed together, and no amount of arithmetic separates them. Deriving a
+    factor from it would be inventing a corporate action out of a price
+    move. The windows are withheld, exactly as for an unreconciled split.
+    """
+    n = len(df)
+    flags = pd.Series(np.zeros(n, dtype=bool), index=df.index)
+    if n < 2:
+        return flags
+
+    close = _computed_series(df)
+    step = close / close.shift(1)
+    broke = ((step > UNEXPLAINED_STEP) |
+             (step < 1.0 / UNEXPLAINED_STEP)).fillna(False)
+    # A zero or missing price is absence of a quote, not a 100% collapse.
+    broke &= close.notna() & (close > 0) & \
+        close.shift(1).notna() & (close.shift(1) > 0)
+    return flags | broke.to_numpy()
 
 
 #: Metric -> lookback in rows. A metric is wrong for its whole window after

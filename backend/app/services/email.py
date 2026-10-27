@@ -455,20 +455,40 @@ def send_welcome_email(to_email: str, name: Optional[str] = None,
 
     if verify_url:
         intro_line = "Once that's done, here's what's waiting for you."
-        cta_url    = verify_url
-        cta_label  = "Confirm my email address"
         subject    = "Confirm your email to start using ASX Screener"
+        # No second button. The panel above already carries the one action,
+        # and a foot button repeating it verbatim gave a single-step email
+        # two identical CTAs.
+        bottom_cta = ""
+        # The support-inbox copy must NOT carry a live verification token.
+        # It is the same HTML as the customer's email, so merging the two
+        # emails silently put a working confirm-this-address link into a
+        # second mailbox. Whoever reads that inbox could verify a stranger's
+        # address. The notice says what was removed, so the copy stays an
+        # honest record of what was sent.
+        admin_panel = (
+            '<p style="margin:18px 0;padding:12px;border:1px solid #e5e7eb;'
+            'border-radius:8px;background:#f9fafb;font-size:13px;'
+            'color:#6b7280">Verification panel and link removed from this '
+            'copy. The customer received a working link.</p>'
+        )
     else:
         intro_line = "Thanks for joining."
-        cta_url    = "https://asxscreener.com.au/screener"
-        cta_label  = "Start screening"
         subject    = "Welcome to ASX Screener"
+        bottom_cta = (
+            '<a href="https://asxscreener.com.au/screener"'
+            ' style="display:inline-block;margin-top:8px;padding:11px 22px;'
+            'background:#2563eb;color:white;border-radius:8px;'
+            'text-decoration:none;font-weight:600">Start screening</a>'
+        )
+        admin_panel = ""
 
-    html = f"""
+    def _page(panel: str, cta: str) -> str:
+        return f"""
     <div style="font-family:sans-serif;max-width:560px;margin:auto;padding:24px">
       <h2 style="color:#1d4ed8;margin-bottom:4px">Welcome to ASX Screener</h2>
       <p style="color:#374151">{greeting}</p>
-      {verify_block}
+      {panel}
       <p style="color:#374151">
         {intro_line} ASX Screener is built specifically for the
         Australian market &mdash; franking credits, mining and A-REIT metrics,
@@ -505,12 +525,7 @@ def send_welcome_email(to_email: str, name: Optional[str] = None,
           "AlphaFive &mdash; our weekly algo-ranked top 5 from the ASX 200",
         ])}
 
-      <a href="{cta_url}"
-         style="display:inline-block;margin-top:8px;padding:11px 22px;
-                background:#2563eb;color:white;border-radius:8px;
-                text-decoration:none;font-weight:600">
-        {cta_label}
-      </a>
+      {cta}
 
       <p style="margin-top:24px;font-size:13px;color:#6b7280">
         Not sure where to begin? Open the screener and pick a Quick Screen &mdash;
@@ -527,7 +542,10 @@ def send_welcome_email(to_email: str, name: Optional[str] = None,
         <a href="https://asxscreener.com.au" style="color:#9ca3af">asxscreener.com.au</a>
       </p>
     </div>
-    """
+        """
+
+    html       = _page(verify_block, bottom_cta)
+    admin_html = _page(admin_panel, bottom_cta)
 
     if resend is None:
         log.info(f"[email no-op] Welcome email for {to_email}")
@@ -556,7 +574,7 @@ def send_welcome_email(to_email: str, name: Optional[str] = None,
                 f'<p style="font-family:sans-serif;font-size:13px;color:#6b7280">'
                 f'New account created &mdash; <strong>{html_escape(name or "(no name)")}'
                 f'</strong> &lt;{html_escape(to_email)}&gt;. '
-                f'Copy of the welcome email below.</p><hr/>' + html
+                f'Copy of the welcome email below.</p><hr/>' + admin_html
             ),
         })
     except Exception as e:

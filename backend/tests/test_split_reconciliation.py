@@ -62,8 +62,10 @@ def _trading_series(before_close: float, after_close: float,
                     split_day: int = 300, n: int = 600) -> pd.DataFrame:
     """Like _series, but the price moves day to day.
 
-    Needed because a FLAT series and a continuous one are different things,
-    and conflating them is what produced PGL's and HXL's 0.000000 returns.
+    Needed because a FLAT series and a continuous one are different things.
+    A still price shows no step because it never moved, not because a split
+    was already applied to it, and `reconcile_splits` must be able to tell
+    those apart.
     """
     df = _series(before_close, after_close, split_day, n)
     wobble = 1.0 + 0.25 * np.sin(np.arange(n) / 9.0)
@@ -148,15 +150,19 @@ def test_a_split_with_no_price_step_is_not_applied():
 
 
 def test_a_flat_series_is_not_evidence_of_continuity():
-    """PGL and HXL, which v11.2.58 got wrong.
+    """Stillness is the absence of evidence, not evidence of continuity.
 
-    Both sat on one unchanged price for a year. No step could appear in a
-    series that never moves, so the split was skipped as "already applied",
-    and today over a year-ago gave a return of exactly 0.000000 -- a number
-    that is certainly wrong, replacing -0.93 and -0.90 which may well have
-    been right.
+    `reconcile_splits` reads `observed == 1.0` as "the split is already in
+    this series". That inference is sound for a price that TRADED across the
+    event and did not step. It is unsound for one that never moved at all,
+    which cannot step whatever happened to the share count.
 
-    Stillness is the absence of evidence, not evidence of continuity.
+    v11.2.59 shipped this citing PGL and HXL. **That was a misdiagnosis and
+    is retracted.** Both of their splits reconcile exactly, so neither is an
+    instance of this case, and their 0.000000 returns were correct. This test
+    asserts the property instead, over a fixture built to exercise it --
+    which is the only honest footing it has, because no production case is
+    currently known to reach this branch.
     """
     df = _series(0.0010, 0.0010)                # never moves, all year
     splits = [(_split_on(df), 0.066667)]        # a material 1-for-15

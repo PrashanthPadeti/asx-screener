@@ -213,12 +213,26 @@ def reconcile_splits(df: pd.DataFrame, splits) -> tuple:
             # cannot show a step, so its stillness is the absence of
             # evidence rather than evidence of continuity.
             #
-            # PGL and HXL were exactly this. Both sat on one unchanged price
-            # for a year, so observed came out at 1.0, their splits were
-            # skipped as "already continuous", and today over a year-ago
-            # gave a return of exactly 0.000000 -- replacing -0.93 and -0.90
-            # with a number that is certainly wrong. An exact zero return
-            # over a year is almost never a measurement.
+            # v11.2.59 shipped this rule citing PGL and HXL. That citation
+            # was wrong and is retracted here. Both of their splits RECONCILE
+            # exactly -- HXL's 1-for-4 gives 0.0130 x 4 = 0.0520, today's
+            # price -- so they never reach this branch, and their 0.000000
+            # returns are correct rather than the defect they were presented
+            # as. The -0.9333 and -0.9000 those replaced were the wrong
+            # numbers.
+            #
+            # The rule stands on its own terms, which is why it was kept:
+            # `observed == 1.0` means "no step was seen", and a series that
+            # never moves cannot show one. Reading that as "the split is
+            # already in the series" infers continuity from an instrument
+            # that produced no evidence either way.
+            #
+            # Honest about its population: no production case is currently
+            # known to take this branch. It is a conservative default, not a
+            # repair of an observed defect, and if it still has no population
+            # at the next review it should be reconsidered rather than kept
+            # on the strength of sounding right. See the memory rule on
+            # guards losing their population.
             if _is_flat(df, split_date):
                 unreconciled.append((split_date, ratio, residual))
             else:

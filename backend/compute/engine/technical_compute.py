@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from app.core.db import get_database_url_sync  # noqa: E402
 from compute.engine.split_adjustment import (  # noqa: E402
     apply_split_adjustment, withhold_contaminated_metrics,
-    withhold_unrepresentable,
+    withhold_unrepresentable, reconcile_splits,
 )
 from compute.engine.serving_population import (  # noqa: E402
     excluded_types_predicate,
@@ -863,6 +863,7 @@ def main():
     # their window. Counted and reported: a repair that silently removes
     # numbers is as hard to audit as one that silently invents them.
     total_withheld = 0
+    unreconciled_events = 0
     # What each NUMERIC column can physically hold. A deeply
     # consolidated stock restates to prices beyond it; those values
     # are withheld rather than aborting the batch.
@@ -879,9 +880,24 @@ def main():
             # returns measure price change rather than share-count change.
             # Raw open/high/low/close are left intact for display; only the
             # *_adj columns feed the indicators.
+            # A recorded split is not an explanation until it reconciles with
+            # what the prices actually did. MPP had a 1-for-40 on record and
+            # a price step of 1,564x; the record silenced the detector and
+            # +2150% reached the screener. See reconcile_splits.
             splits = fetch_splits(cur, asx_code)
+            unreconciled = []
             if splits:
-                df = apply_split_adjustment(df, splits)
+                splits, unreconciled, _skipped = reconcile_splits(df, splits)
+                if unreconciled:
+                    unreconciled_events += len(unreconciled)
+                    log.warning(
+                        "%s: %d split(s) do not reconcile with the price "
+                        "series; affected windows withheld: %s",
+                        asx_code, len(unreconciled),
+                        ", ".join(f"{d} ratio={r} residual={res:.3g}"
+                                  for d, r, res in unreconciled))
+                if splits:
+                    df = apply_split_adjustment(df, splits)
 
             shares = fetch_shares(cur, asx_code)
             df     = compute_indicators(df, shares)
@@ -890,7 +906,8 @@ def main():
             # and special dividends leave the same discontinuity and have no
             # source to correct them with (market.corporate_events is empty).
             # An absent number sends someone to check; a wrong one does not.
-            df, withheld = withhold_contaminated_metrics(df, splits)
+            df, withheld = withhold_contaminated_metrics(
+                df, splits, unreconciled)
 
             # And anything the column cannot store. JAV's five consolidations
             # compound to ~4.88 million, restating its high to ~441 million
@@ -932,7 +949,8 @@ def main():
                 pending.clear()
                 log.info(f"  [{idx:4d}/{total}] {processed} done | "
                          f"{skipped} skipped | {errors} errors | "
-                         f"{total_rows:,} rows | {total_withheld:,} withheld")
+                         f"{total_rows:,} rows | {total_withheld:,} withheld | "
+                         f"{unreconciled_events:,} unreconciled split(s)")
 
         except Exception as e:
             errors += 1

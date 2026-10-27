@@ -55,7 +55,8 @@ def _verification_required_for(created_at) -> bool:
 
 
 async def _issue_verification_email(db: AsyncSession, user_id: str,
-                                    email: str, name: str | None) -> bool:
+                                    email: str, name: str | None,
+                                    welcome: bool = False) -> bool:
     """Mint a verification token, store it, and send the email.
 
     Best-effort on the SEND, deliberate on the TOKEN: the row is updated
@@ -74,7 +75,15 @@ async def _issue_verification_email(db: AsyncSession, user_id: str,
     frontend_url = getattr(settings, "FRONTEND_URL", "https://asxscreener.com.au")
     verify_url = f"{frontend_url}/auth/verify-email?token={tok}"
     try:
-        send_verification_reminder_email(email, verify_url, name)
+        if welcome:
+            # ONE email for a new signup. Two arriving seconds apart
+            # contradicted each other: the welcome said "start screening"
+            # while the account could not be used until the link was
+            # clicked. The combined mail leads with the verification step
+            # and keeps the product description underneath.
+            send_welcome_email(email, name, verify_url=verify_url)
+        else:
+            send_verification_reminder_email(email, verify_url, name)
         return True
     except Exception as exc:                                   # noqa: BLE001
         log.warning("Could not send verification email to %s: %s", email, exc)
@@ -157,13 +166,6 @@ async def register(
 
     log.info(f"New user registered: {body.email}")
 
-    # Welcome email (and a copy to the support inbox).  Best-effort — a mail
-    # failure must never stop someone from creating an account.
-    try:
-        send_welcome_email(body.email.lower(), body.name)
-    except Exception as exc:
-        log.warning(f"Could not send welcome email to {body.email}: {exc}")
-
     # ── Mandatory verification ────────────────────────────────────────────
     # Until 26 Oct 2026 registration sent a welcome email and no verification
     # email at all; the only way an account ever got one was an admin
@@ -174,8 +176,10 @@ async def register(
     # would hand the new user a working session and make the login gate
     # decorative — they would simply never hit it.
     if _verification_required_for(created_at):
+        # welcome=True: one email, verification-led, with the welcome content
+        # underneath. The support-inbox copy rides along with it as before.
         sent = await _issue_verification_email(
-            db, user_id, body.email.lower(), body.name)
+            db, user_id, body.email.lower(), body.name, welcome=True)
         return {
             "verification_required": True,
             "email": body.email.lower(),
@@ -190,6 +194,13 @@ async def register(
                 "sign-in page, or contact support."
             ),
         }
+
+    # Exempt account: no verification needed, so the plain welcome stands on
+    # its own and "start screening" is true advice.
+    try:
+        send_welcome_email(body.email.lower(), body.name)
+    except Exception as exc:
+        log.warning(f"Could not send welcome email to {body.email}: {exc}")
 
     token_resp, refresh = _token_response(user_id, body.email.lower(), plan, subscription_status)
     await _store_session(db, user_id, refresh, request)

@@ -31,7 +31,7 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from compute.engine.split_adjustment import (                  # noqa: E402
-    reconcile_splits, unexplained_discontinuities,
+    reconcile_splits, unexplained_discontinuities, _is_flat,
     withhold_contaminated_metrics, apply_split_adjustment,
     RECONCILE_BAND, IMMATERIAL_FACTOR,
 )
@@ -56,6 +56,20 @@ def _series(before_close: float, after_close: float, split_day: int = 300,
         "adj_close": close,
         "volume": np.full(n, 1000.0),
     })
+
+
+def _trading_series(before_close: float, after_close: float,
+                    split_day: int = 300, n: int = 600) -> pd.DataFrame:
+    """Like _series, but the price moves day to day.
+
+    Needed because a FLAT series and a continuous one are different things,
+    and conflating them is what produced PGL's and HXL's 0.000000 returns.
+    """
+    df = _series(before_close, after_close, split_day, n)
+    wobble = 1.0 + 0.25 * np.sin(np.arange(n) / 9.0)
+    for col in ("open", "high", "low", "close", "adj_close"):
+        df[col] = df[col].to_numpy() * wobble
+    return df
 
 
 def _split_on(df: pd.DataFrame, day: int = 300):
@@ -108,7 +122,7 @@ def test_a_split_with_no_price_step_is_not_applied():
     """NTM has two 1-for-15 records six days apart. The series steps once.
     Applying both would multiply by 225 -- the repair creating a far larger
     error than the defect."""
-    df = _series(0.0030, 0.0030)                # no step at all
+    df = _trading_series(0.0030, 0.0030)        # trades, but no net step
     splits = [(_split_on(df), 0.066667)]
     adjustable, unreconciled, skipped = reconcile_splits(df, splits)
     assert not adjustable, (
@@ -117,6 +131,27 @@ def test_a_split_with_no_price_step_is_not_applied():
     assert len(skipped) == 1
     assert not unreconciled, (
         "a continuous series was withheld; there is nothing wrong with it")
+
+
+def test_a_flat_series_is_not_evidence_of_continuity():
+    """PGL and HXL, which v11.2.58 got wrong.
+
+    Both sat on one unchanged price for a year. No step could appear in a
+    series that never moves, so the split was skipped as "already applied",
+    and today over a year-ago gave a return of exactly 0.000000 -- a number
+    that is certainly wrong, replacing -0.93 and -0.90 which may well have
+    been right.
+
+    Stillness is the absence of evidence, not evidence of continuity.
+    """
+    df = _series(0.0010, 0.0010)                # never moves, all year
+    splits = [(_split_on(df), 0.066667)]        # a material 1-for-15
+    adjustable, unreconciled, skipped = reconcile_splits(df, splits)
+    assert not adjustable, "a flat series was adjusted"
+    assert len(unreconciled) == 1, (
+        "a split against an untraded series was skipped as already "
+        "continuous; the return comes out as exactly 0.000000")
+    assert not skipped
 
 
 def test_an_immaterial_ratio_is_skipped_without_withholding():

@@ -105,6 +105,45 @@ def _boundary_prices(df: pd.DataFrame, split_date,
     return (b, a) if b > 0 and a > 0 else (None, None)
 
 
+#: A series whose whole span around an event moves less than this has not
+#: really traded. Deliberately tiny: this is meant to catch a price that is
+#: literally unchanged, not a quiet one. A genuinely dull stock still prints
+#: more variation than 1% across two months.
+FLAT_TOLERANCE = 0.01
+
+#: Rows either side of the event to judge trading by. Wide enough that a
+#: suspension around the event does not look like a flat series, narrow
+#: enough to describe the event's own neighbourhood.
+FLAT_WINDOW_DAYS = 60
+
+
+def _is_flat(df: pd.DataFrame, split_date,
+             window: int = FLAT_WINDOW_DAYS) -> bool:
+    """Did the price fail to move at all around this event?
+
+    Used to tell "the split was already applied, so there is no step" from
+    "nothing traded, so there could not have been a step". Only the first is
+    a reason to skip a split; the second is a reason to withhold.
+    """
+    if "date" not in df.columns or "close" not in df.columns or df.empty:
+        return False
+
+    dates = pd.to_datetime(df["date"])
+    sd = pd.Timestamp(split_date)
+    near = (dates >= sd - pd.Timedelta(days=window)) & \
+           (dates <= sd + pd.Timedelta(days=window))
+
+    close = pd.to_numeric(df["close"], errors="coerce")[near.to_numpy()]
+    close = close[close.notna() & (close > 0)]
+    if len(close) < 2:
+        # Too few prices to judge. Treat as flat: an event we cannot see the
+        # neighbourhood of is not one we can declare already handled.
+        return True
+
+    return bool(float(close.max()) / float(close.min()) - 1.0
+                < FLAT_TOLERANCE)
+
+
 def reconcile_splits(df: pd.DataFrame, splits) -> tuple:
     """Decide, per split, whether the record explains what the prices did.
 
@@ -169,7 +208,21 @@ def reconcile_splits(df: pd.DataFrame, splits) -> tuple:
         if 1.0 / RECONCILE_BAND <= residual <= RECONCILE_BAND:
             adjustable.append((split_date, ratio, residual))
         elif 1.0 / RECONCILE_BAND <= observed <= RECONCILE_BAND:
-            skipped.append((split_date, ratio, residual))
+            # No step -- but that only means the split was already applied
+            # if the series was TRADING. A price that has not moved at all
+            # cannot show a step, so its stillness is the absence of
+            # evidence rather than evidence of continuity.
+            #
+            # PGL and HXL were exactly this. Both sat on one unchanged price
+            # for a year, so observed came out at 1.0, their splits were
+            # skipped as "already continuous", and today over a year-ago
+            # gave a return of exactly 0.000000 -- replacing -0.93 and -0.90
+            # with a number that is certainly wrong. An exact zero return
+            # over a year is almost never a measurement.
+            if _is_flat(df, split_date):
+                unreconciled.append((split_date, ratio, residual))
+            else:
+                skipped.append((split_date, ratio, residual))
         else:
             unreconciled.append((split_date, ratio, residual))
 

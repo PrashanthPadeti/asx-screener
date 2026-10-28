@@ -179,6 +179,39 @@ def test_every_missing_column_can_name_its_migration():
     assert not missing, f"no migration recorded for: {sorted(missing)}"
 
 
+# ── The retired producer ────────────────────────────────────────────────────
+
+def test_the_old_multi_year_producer_refuses():
+    """price_return() is retired, not deleted.
+
+    It is the obvious function for a future reader to reach for, and it was
+    wrong in three independent ways: an anchor with no grace bound (a
+    three-year return could measure eight), a window ending at the fiscal
+    period end rather than today, and no corporate-action withholding -- it
+    published return_3y = 1449.0 for JNS. A silent reintroduction of any of
+    those is worse than an exception.
+    """
+    import pandas as pd
+    from compute.engine.yearly_compute import (
+        price_return, price_at, UnsupportedComputation)
+
+    prices = pd.Series(
+        [1.0, 2.0],
+        index=pd.to_datetime(["2020-01-01", "2026-01-01"]))
+
+    try:
+        price_return(prices, date(2026, 6, 30), 3)
+    except UnsupportedComputation as e:
+        assert "technical_compute" in str(e), (
+            "the refusal does not say where the computation moved to")
+    else:
+        raise AssertionError("price_return computed a multi-year return")
+
+    # price_at is NOT retired: price_at_compute still asks it "the close at
+    # or before the fiscal year end", which claims no window length.
+    assert price_at(prices, date(2026, 6, 30)) == 2.0
+
+
 if __name__ == "__main__":
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]

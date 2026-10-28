@@ -55,8 +55,13 @@ above by the fiscal year end:
 
     price_at(prices, ped)            close at or before period_end_date
     price_window(prices, ped)        the 12 months ENDING at period_end_date
-    price_return(prices, ped, n)     n years ENDING at period_end_date
     price_at_compute                 the price AT period_end_date, not today's
+
+(price_return(prices, ped, n) was a fourth consumer and is retired as of
+v11.2.63 — the multi-year returns are computed in technical_compute against
+today rather than against the fiscal year end. Its removal only narrows the
+projection, so the bound below still holds; it is noted rather than deleted
+because an argument that lists its evidence has to keep that list true.)
 
 So the projection is prices up to each company's latest `period_end_date`.
 Today's bar cannot change any yearly metric, and a backfill of historical

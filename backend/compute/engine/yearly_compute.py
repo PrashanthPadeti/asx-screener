@@ -347,15 +347,40 @@ def price_window(prices: pd.Series, period_end) -> pd.Series:
 
 
 def price_return(prices: pd.Series, end_date, years: int) -> Optional[float]:
-    """Total price return over N years ending at end_date.
-    Uses pre-fetched prices Series — no DB query."""
-    p_end   = price_at(prices, end_date)
-    start   = pd.Timestamp(end_date) - pd.DateOffset(years=years)
-    p_start = price_at(prices, start)
-    if p_end is None or p_start is None or p_start == 0:
-        return None
-    result = (p_end - p_start) / abs(p_start)
-    return round(result, 6) if np.isfinite(result) else None
+    """Refuses. Retired in v11.2.63; the implementation below it was wrong in
+    three independent ways and the replacement lives in return_windows.
+
+    1. **The anchor had no bound.** price_at() returns the last close at or
+       before the target, which is the right rule, but with nothing limiting
+       how far before. A stock whose nearest earlier quote was four years off
+       still got a number, so return_3y could measure eight years and be
+       labelled three. return_windows.anchor_positions() applies the same
+       rule with a declared grace and yields None outside it.
+
+    2. **It ended at the wrong date.** end_date is period_end_date, the
+       fiscal year end, so "Return 3Y %" in the screener could be a year
+       stale before anyone read it. A trailing return ends today.
+
+    3. **It had no corporate-action withholding.** technical_compute blanks
+       any window spanning an unreconciled split; this did not. On
+       28 Oct 2026 the served screener published return_3y = 1449.0 for JNS
+       -- +144,900% -- beside a return_1y of +247%.
+
+    Kept as a refusal rather than deleted, following piotroski_f_score above:
+    the function name is the obvious thing for a future reader to reach for,
+    and a silent reintroduction of any of the three defects is worse than an
+    exception. A method that cannot be executed faithfully must not be
+    executed.
+
+    price_at() itself is NOT retired -- price_at_compute still uses it, where
+    "the close at or before the fiscal year end" is exactly the right
+    question and no window length is being claimed.
+    """
+    raise UnsupportedComputation(
+        "price_return() is retired. Multi-year returns are computed in "
+        "compute.engine.technical_compute from ALL_WINDOWS, with a bounded "
+        "anchor, a window ending today, and corporate-action withholding. "
+        "This implementation had none of those.")
 
 
 # ── Quality Scores ────────────────────────────────────────────────────────────
@@ -919,12 +944,22 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         pw      = price_window(prices, ped)
         sharpe, max_dd, vol_1y = sharpe_drawdown_vol(pw)
 
-        # ── Multi-year price returns (in-memory lookups) ──────────────────
-        ret_3y  = price_return(prices, ped, 3)
-        ret_5y  = price_return(prices, ped, 5)
-        ret_7y  = price_return(prices, ped, 7)
-        ret_10y = price_return(prices, ped, 10)
-        ret_15y = price_return(prices, ped, 15)
+        # ── Multi-year price returns: retired here, computed elsewhere ────
+        #
+        # These moved to technical_compute in v11.2.63, where they are
+        # anchored with a grace bound, measured to today rather than to the
+        # fiscal period end, and withheld across corporate actions we cannot
+        # adjust out. See price_return() below for what was wrong with this
+        # implementation.
+        #
+        # Written as NULL rather than simply dropped from the write. The
+        # columns still exist in market.yearly_metrics, and leaving them
+        # unwritten would freeze the last values this engine produced -- the
+        # exact mechanism that kept return_2y/4y/6y/8y/9y alive in
+        # screener.universe after their producer was removed. Nothing reads
+        # them now; emptying them means nothing CAN read them and get a
+        # number that was true in 2026.
+        ret_3y = ret_5y = ret_7y = ret_10y = ret_15y = None
 
         # ── Raw financial values (denormalised for history queries) ───────
         wc = round(tca - tcl, 2) if (tca is not None and tcl is not None) else None

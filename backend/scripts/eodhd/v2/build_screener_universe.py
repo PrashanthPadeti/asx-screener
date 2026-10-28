@@ -636,8 +636,12 @@ SELECT
     -- yearly_compute.price_return(), whose anchor had no grace bound (a
     -- three-year return could measure eight), whose window ended at the
     -- fiscal PERIOD END rather than today, and which had no corporate-action
-    -- withholding -- which is how return_3y = 1449.0, +144,900%, was served
-    -- for JNS on 28 Oct 2026 beside a return_1y of +247%.
+    -- withholding -- which is how return_3y = 1449.0, +144,900%%, was served
+    -- for JNS on 28 Oct 2026 beside a return_1y of +247%%.
+    --
+    -- The doubled percent signs above are not a typo. This is a parameterised
+    -- query, and psycopg2 scans the WHOLE string, SQL comments included. A
+    -- single percent sign here consumes a bind parameter.
     --
     -- return_2y/4y/6y/8y/9y came from nowhere. No producer wrote them. This
     -- table is upserted, so a column absent from the SET list keeps whatever

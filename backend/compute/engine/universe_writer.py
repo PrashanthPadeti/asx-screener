@@ -83,6 +83,17 @@ STORAGE_COLUMN: dict[str, str] = {
     # prevent, performed deliberately.
     "dividend_per_share": "dps_ttm",
     "free_cash_flow": "fcf_fy0",
+
+    # The 52-week extremes, governed from V3. The registry names them
+    # week_52_high / week_52_low; the universe stores them as high_52w /
+    # low_52w. Nothing aliases one to the other, so without these two entries
+    # column_for() would return the registry spelling, no such column exists,
+    # and both metrics would resolve as governed-with-no-column -- withholding
+    # universally while looking entirely correct. That is the ev_to_ebitda
+    # failure above, and it is listed here because it was found by checking
+    # rather than by it going wrong a second time.
+    "week_52_high": "high_52w",
+    "week_52_low": "low_52w",
 }
 
 

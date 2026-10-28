@@ -165,7 +165,9 @@ INSERT INTO screener.universe (
     avg_eps_growth_3y, avg_eps_growth_5y,
     dividend_cagr_3y, dividend_consecutive_yrs,
     dividend_cagr_5y, bvps_cagr_3y, bvps_cagr_5y,
-    return_3y, return_5y, return_7y, return_10y, return_15y,
+    return_2y, return_3y, return_4y, return_5y, return_6y,
+    return_7y, return_8y, return_9y, return_10y, return_15y,
+    window_states,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     revenue_growth_yoy_q, eps_growth_yoy_q, net_income_growth_yoy_q,
@@ -623,11 +625,60 @@ SELECT
     ym.dividend_cagr_5y,
     ym.bvps_cagr_3y,
     ym.bvps_cagr_5y,
-    ym.return_3y,
-    ym.return_5y,
-    ym.return_7y,
-    ym.return_10y,
-    ym.return_15y,
+    -- ── Multi-year returns, from daily_metrics as of v11.2.63 ───────────────
+    --
+    -- Positioned exactly where ym.return_3y/5y/7y/10y/15y were, because this
+    -- is a positional INSERT ... SELECT: moving a column here without moving
+    -- it in the insert list writes every subsequent value into its
+    -- neighbour's column.
+    --
+    -- return_3y/5y/7y/10y/15y came from market.yearly_metrics via
+    -- yearly_compute.price_return(), whose anchor had no grace bound (a
+    -- three-year return could measure eight), whose window ended at the
+    -- fiscal PERIOD END rather than today, and which had no corporate-action
+    -- withholding -- which is how return_3y = 1449.0, +144,900%, was served
+    -- for JNS on 28 Oct 2026 beside a return_1y of +247%.
+    --
+    -- return_2y/4y/6y/8y/9y came from nowhere. No producer wrote them. This
+    -- table is upserted, so a column absent from the SET list keeps whatever
+    -- was last written to it by code that no longer exists -- which is why
+    -- four-year coverage (1,708) exceeded three-year (1,458), an inversion a
+    -- single producer cannot create.
+    dm.return_2y      AS return_2y,
+    dm.return_3y      AS return_3y,
+    dm.return_4y      AS return_4y,
+    dm.return_5y      AS return_5y,
+    dm.return_6y      AS return_6y,
+    dm.return_7y      AS return_7y,
+    dm.return_8y      AS return_8y,
+    dm.return_9y      AS return_9y,
+    dm.return_10y     AS return_10y,
+    dm.return_15y     AS return_15y,
+
+    -- Why any of the sixteen windows above is empty, carried from the row
+    -- the values came from. technical_compute knows the reason -- no close
+    -- near the window's start, too little history, an unreconciled corporate
+    -- action inside the window, or a value past the column's ceiling -- and
+    -- before v11.2.63 it logged all four and wrote the same NaN.
+    --
+    -- Carried rather than re-derived here: deriving it would mean a second
+    -- implementation of the anchor rule, free to disagree with the one that
+    -- produced the number it explains.
+    --
+    -- Carried as window_states, NOT as metric_states, and the distinction is
+    -- the orchestration contract rather than a naming preference.
+    --
+    -- metric_states is canonical state: this builder may revoke a canonical
+    -- claim but may never make one, because it has assessed nothing. Writing
+    -- the sidecar here would be the builder claiming an attribution it did
+    -- not compute. test_the_universe_builder_revokes_canonical_state_and_
+    -- never_claims_it caught exactly that, and it was right to.
+    --
+    -- window_states is provisional input, with the same standing as
+    -- return_1y beside it: produced upstream, carried here unassessed, and
+    -- turned into contract state by the canonical writer, which reads it and
+    -- emits the real sidecar in one statement.
+    dm.metric_states  AS window_states,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     qm.revenue_growth_yoy    AS revenue_growth_yoy_q,
@@ -1326,6 +1377,13 @@ LEFT JOIN LATERAL (
            bb_upper, bb_lower, atr_14, adx_14, obv,
            hv_20d, hv_60d, pct_from_ath,
            return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y,
+           -- The multi-year horizons, and why any window is empty. Both are
+           -- read by the outer SELECT, so both must be selected here: a
+           -- lateral exposes only what it lists, and a column referenced but
+           -- not selected is a planner error rather than a silent NULL.
+           return_2y, return_3y, return_4y, return_5y, return_6y,
+           return_7y, return_8y, return_9y, return_10y, return_15y,
+           metric_states,
            above_vwap, dollar_volume_avg_20d,
            -- Tier 2 signals
            dma50_ratio, dma200_ratio,
@@ -1374,7 +1432,14 @@ LEFT JOIN LATERAL (
            sharpe_1y, max_drawdown_1y,
            beta_1y,
            dividend_cagr_3y, dividend_consecutive_yrs,
-           return_3y, return_5y, return_7y, return_10y, return_15y,
+           -- return_3y/5y/7y/10y/15y were selected here and are not any
+           -- more: the outer query now takes every multi-year return from
+           -- market.daily_metrics. Left as a note rather than silently
+           -- dropped, because the yearly_metrics columns still exist and
+           -- yearly_compute still writes them until step 3 of this release
+           -- retires the producer. A column written and unread is inert; one
+           -- read and unwritten serves stale values, which is the defect
+           -- being fixed, so the read goes first.
            -- Quick-win metrics
            ocf_to_net_profit, fcf_payout_ratio, shares_dilution_3y,
            eps_volatility_5y, fcf_positive_years,
@@ -1711,11 +1776,25 @@ ON CONFLICT (asx_code) DO UPDATE SET
     dividend_cagr_5y        = EXCLUDED.dividend_cagr_5y,
     bvps_cagr_3y            = EXCLUDED.bvps_cagr_3y,
     bvps_cagr_5y            = EXCLUDED.bvps_cagr_5y,
+    -- Every multi-year horizon is updated, including the five that were
+    -- missing from this list. A column absent here keeps its previous value
+    -- forever: that is the whole mechanism by which return_2y/4y/6y/8y/9y
+    -- went on serving numbers after their producer was removed.
+    return_2y               = EXCLUDED.return_2y,
     return_3y               = EXCLUDED.return_3y,
+    return_4y               = EXCLUDED.return_4y,
     return_5y               = EXCLUDED.return_5y,
+    return_6y               = EXCLUDED.return_6y,
     return_7y               = EXCLUDED.return_7y,
+    return_8y               = EXCLUDED.return_8y,
+    return_9y               = EXCLUDED.return_9y,
     return_10y              = EXCLUDED.return_10y,
     return_15y              = EXCLUDED.return_15y,
+    -- Rewritten every build, never merged. A merge would keep an entry from
+    -- a previous run beside a value that is now present -- a stale reason
+    -- next to a good number, which the sidecar's own rule forbids as firmly
+    -- as it forbids a NULL with no entry.
+    window_states           = EXCLUDED.window_states,
     -- Latest-quarter growth
     revenue_growth_yoy_q    = EXCLUDED.revenue_growth_yoy_q,
     eps_growth_yoy_q        = EXCLUDED.eps_growth_yoy_q,

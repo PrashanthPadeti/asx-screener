@@ -186,6 +186,32 @@ if [ "$TABLES" -lt 1 ]; then
     exit 2
 fi
 
+# ── One published run ────────────────────────────────────────────────────────
+#
+# A governed request is answerable only against a validated compute run. With
+# no runs at all, every governed query returns 503 -- correctly -- so no
+# primary-feature test can exercise a governed path, and the ones that pass
+# do so by querying ungoverned fields only.
+#
+# That blind spot was invisible while return_1y was ungoverned: the documented
+# Query Mode syntax happened to be answerable without a contract. v11.2.63
+# governs the price windows, the same query became a governed query, and this
+# gate reported a primary feature broken. It was right -- on a database with
+# no runs, it is -- and the gap was the gate's.
+#
+# The seed does not loosen anything: the run it writes must satisfy
+# VALIDATED_RUNS_SQL, the statement the API itself runs, and the script asks
+# the resolver afterwards and fails if the answer does not include it.
+echo "gate: seeding one published compute run"
+if ! "$PY" "$SRC/backend/scripts/gate_seed_run.py" >>"$WORK/load.out" 2>&1; then
+    echo "gate: could not seed a published run. Every governed request would"
+    echo "gate: return 503 and every primary-feature result would be"
+    echo "gate: meaningless. Refusing to report a gate on that."
+    tail -8 "$WORK/load.out"
+    exit 2
+fi
+tail -1 "$WORK/load.out"
+
 #: Output markers meaning "this suite could not run", as distinct from "this
 #: suite ran and found a defect". Classified INCONCLUSIVE, never pre-existing.
 ENV_MARKERS='could not connect|OperationalError|UndefinedTable|ConnectionRefused|Connection refused|Temporary failure in name resolution|nodename nor servname|ModuleNotFoundError|ImportError|getaddrinfo|Network is unreachable|psycopg|asyncpg\.exceptions'

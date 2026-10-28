@@ -34,7 +34,7 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extensions
-from psycopg2.extras import execute_values
+from psycopg2.extras import execute_values, Json
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -52,8 +52,9 @@ from compute.engine.serving_population import (  # noqa: E402
     excluded_types_predicate,
 )
 from compute.engine.return_windows import (  # noqa: E402
-    WINDOWS, window_return, rolling_extreme,
+    ALL_WINDOWS, window_return, rolling_extreme,
 )
+from compute.engine.window_states import assess_latest, presence  # noqa: E402
 
 
 # Cast NUMERIC → Python float automatically
@@ -585,8 +586,12 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     # trades intermittently that is not a year -- MRD's was 467 days. Where
     # no quote exists near the start of the window the return is None, not
     # the nearest price we happen to hold.
-    for col, (length_days, grace_days) in WINDOWS.items():
-        df[col] = window_return(c, df["date"], length_days, grace_days).round(4)
+    # Every horizon, short and long, through one implementation. The
+    # multi-year ones previously came from yearly_compute.price_return(),
+    # which anchored without a grace bound, ended at the fiscal period end
+    # rather than today, and had no corporate-action withholding.
+    for col, (offset, grace_days) in ALL_WINDOWS.items():
+        df[col] = window_return(c, df["date"], offset, grace_days).round(4)
 
     # YTD: return from last close of previous calendar year
     df["_year"] = df["date"].dt.year
@@ -602,6 +607,20 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
 
 
 # ── Column → DB mapping ───────────────────────────────────────────────────────
+
+#: The return columns this engine writes, derived from the windows it
+#: computes rather than listed again here.
+#:
+#: The column list and the value tuple below were two hand-maintained
+#: sequences that had to stay in the same order, and the window set was a
+#: third. Three declarations of one fact is how return_2y/4y/6y/8y/9y came to
+#: be served by a producer that no longer exists: the lists stopped agreeing
+#: and nothing failed when they did.
+#:
+#: return_1d and return_ytd are named explicitly because neither is a window:
+#: the first compares a close with its predecessor, the second runs from the
+#: last close of the previous calendar year.
+RETURN_COLS = ["return_1d", "return_ytd", *ALL_WINDOWS]
 
 INSERT_COLS = [
     "asx_code", "date",
@@ -643,8 +662,11 @@ INSERT_COLS = [
     # Signals
     "above_sma20", "above_sma50", "above_sma100", "above_sma200",
     "golden_cross", "death_cross", "new_52w_high", "new_52w_low", "new_ath",
-    # Returns
-    "return_1d", "return_1w", "return_1m", "return_3m", "return_6m", "return_ytd", "return_1y",
+    # Returns — spliced in from RETURN_COLS, below, so the written columns
+    # and the computed windows cannot disagree.
+    *RETURN_COLS,
+    # Why a window is empty, for the latest row only — see window_states.
+    "metric_states",
     # Metadata
     "compute_version", "computed_at",
 ]
@@ -653,6 +675,50 @@ INSERT_COLS = [
 #: silent off-by-one the day a column is inserted above rsi_14, and the only
 #: symptom would be a miscounted diagnostic.
 INDEX_RSI_14 = INSERT_COLS.index("rsi_14")
+
+#: Which migration introduces which column, so a refusal can name the file
+#: instead of leaving the reader to find it.
+COLUMN_MIGRATION = {
+    **{f"return_{n}y": "add_multi_year_returns_to_daily_metrics.sql"
+       for n in (2, 3, 4, 5, 6, 7, 8, 9, 10, 15)},
+    "metric_states": "add_metric_states_to_daily_metrics.sql",
+}
+
+
+def verify_columns(cur) -> None:
+    """Every column this engine writes must exist before it writes any.
+
+    deploy.sh does not apply migrations; they are applied by hand. So a
+    deploy can land code that writes columns the database does not have, and
+    without this the first symptom is an exception partway through a run,
+    after some companies have been committed and others have not.
+
+    It refuses and names the file, which is the pattern p0a_preflight.py
+    already uses for the universe sidecar. A missing column is our own defect
+    and must never be allowed to present as missing data.
+    """
+    cur.execute("""
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'market' AND table_name = 'daily_metrics';""")
+    present = {row[0] for row in cur.fetchall()}
+
+    absent = [c for c in INSERT_COLS if c not in present]
+    if not absent:
+        return
+
+    files = sorted({COLUMN_MIGRATION[c] for c in absent if c in COLUMN_MIGRATION})
+    unknown = [c for c in absent if c not in COLUMN_MIGRATION]
+
+    detail = f"market.daily_metrics is missing {len(absent)} column(s) this " \
+             f"engine writes: {', '.join(absent)}."
+    if files:
+        detail += " Apply " + " and ".join(f"migrations/{f}" for f in files) \
+                  + " first."
+    if unknown:
+        detail += (f" No migration is recorded for {', '.join(unknown)}, "
+                   f"which means the column list and the schema have drifted "
+                   f"for a reason this check cannot explain.")
+    raise SystemExit(f"REFUSED: {detail}")
 
 INSERT_SQL = f"""
     INSERT INTO market.daily_metrics ({", ".join(INSERT_COLS)})
@@ -663,7 +729,9 @@ INSERT_SQL = f"""
 
 
 def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
-               keep_uncomputable: bool = False) -> list:
+               keep_uncomputable: bool = False,
+               states: Optional[dict] = None,
+               states_date: Optional[date] = None) -> list:
     """Convert the indicator DataFrame to a list of tuples for execute_values.
 
     ``keep_uncomputable`` keeps rows whose indicators are all NaN. It is set for
@@ -695,6 +763,24 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
         # Warm-up rows: RSI does not exist for the first thirteen days.
         df = df[df["rsi_14"].notna()]
 
+    def _states_for(row_date):
+        """The sidecar, on the one row it describes.
+
+        Only the latest row is assessed -- see window_states for why -- and
+        it is matched by DATE rather than by position. Position would be
+        wrong here twice over: `since` and the warm-up filter both reshape
+        the frame, so "the last row of df" is not reliably the row the
+        assessment was computed for, and attaching a reason to the wrong day
+        is worse than attaching none.
+
+        Every other row gets NULL, which the migration defines as "never
+        assessed" -- distinct from '{}', which would claim the row was
+        examined and found clean.
+        """
+        if states is None or states_date is None or row_date != states_date:
+            return None
+        return Json(states)
+
     rows = []
     for _, row in df.iterrows():
         def g(col, row=row):
@@ -715,9 +801,11 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
         # NUMERIC(8,4) and can blow up for near-zero-price penny stocks.
         c = lambda col, row=row: _vc(row.get(col)) if col in row.index else None  # noqa: E731
 
+        row_date = row["date"].date()
+
         rows.append((
             asx_code,
-            row["date"].date(),
+            row_date,
             g("close"), g("adj_close"), gi("volume"),
             g("market_cap"),
             g("daily_return"), g("log_return"), c("gap_pct"),
@@ -745,8 +833,8 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
             g("above_sma20"), g("above_sma50"), g("above_sma100"), g("above_sma200"),
             g("golden_cross"), g("death_cross"),
             g("new_52w_high"), g("new_52w_low"), g("new_ath"),
-            c("return_1d"), c("return_1w"), c("return_1m"), c("return_3m"),
-            c("return_6m"), c("return_ytd"), c("return_1y"),
+            *[c(name) for name in RETURN_COLS],
+            _states_for(row_date),
             COMPUTE_VERSION, now,
         ))
     return rows
@@ -833,6 +921,11 @@ def main():
     _prove_envelope("technical_compute", conn)
     cur  = conn.cursor()
 
+    # Before any mutation: the schema must be able to hold what this run
+    # intends to write. Refusing here costs a second; discovering it mid-run
+    # leaves some companies written and others not.
+    verify_columns(cur)
+
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)
 
@@ -912,12 +1005,22 @@ def main():
             shares = fetch_shares(cur, asx_code)
             df     = compute_indicators(df, shares)
 
+            # Three snapshots of "which windows hold a value", taken before
+            # each thing that can empty one. The finished frame cannot tell
+            # the four causes apart -- no anchor, too little history,
+            # withheld over a corporate action, or past the column's ceiling
+            # -- because by then every one of them is the same NaN. Diffing
+            # the snapshots is what recovers the reason.
+            _last = len(df) - 1
+            present_computed = presence(df, _last) if _last >= 0 else {}
+
             # And blank what we cannot adjust: capital returns, rights issues
             # and special dividends leave the same discontinuity and have no
             # source to correct them with (market.corporate_events is empty).
             # An absent number sends someone to check; a wrong one does not.
             df, withheld = withhold_contaminated_metrics(
                 df, splits, unreconciled)
+            present_after_withhold = presence(df, _last) if _last >= 0 else {}
 
             # And anything the column cannot store. JAV's five consolidations
             # compound to ~4.88 million, restating its high to ~441 million
@@ -931,6 +1034,13 @@ def main():
                 log.info(f"  {asx_code}: {withheld} metric value(s) withheld "
                          f"— unadjustable corporate action in window")
 
+            # Why each absent window is absent, for the row the universe
+            # will read. Built from the three presence snapshots taken above,
+            # because the finished frame cannot tell the causes apart -- by
+            # then all four are the same NaN.
+            states = assess_latest(df, present_computed, present_after_withhold)
+            states_date = df["date"].max().date() if len(df) else None
+
             if not args.full and not args.days:
                 # Latest date only. keep_uncomputable, so a company whose
                 # indicators cannot be formed still gets a row at its latest
@@ -938,11 +1048,13 @@ def main():
                 last_date = df["date"].max().date()
                 since_latest = last_date - timedelta(days=0)
                 rows = build_rows(asx_code, df, since=since_latest,
-                                  keep_uncomputable=True)
+                                  keep_uncomputable=True,
+                                  states=states, states_date=states_date)
                 if rows and rows[0][INDEX_RSI_14] is None:
                     uncomputable += 1
             else:
-                rows = build_rows(asx_code, df, since=since)
+                rows = build_rows(asx_code, df, since=since,
+                                  states=states, states_date=states_date)
 
             if not rows:
                 skipped += 1

@@ -46,6 +46,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+# One definition of a window, shared by the metric and by the guard that
+# withholds it. return_windows imports nothing from this module, so the
+# dependency runs one way only.
+from compute.engine.return_windows import ALL_WINDOWS, anchor_positions
+
 #: A day-over-day move in close/adjusted_close beyond this is a corporate
 #: action, not a price move. Ordinary ex-dividend steps on the ASX sit far
 #: below it; the measured population of 222 discontinuities over 18 months
@@ -448,11 +453,34 @@ def raw_price_discontinuities(df: pd.DataFrame) -> pd.Series:
 
 #: Metric -> lookback in rows. A metric is wrong for its whole window after
 #: an unadjustable event, not merely on the day of it.
-CONTAMINATED_BY_WINDOW = {
-    "daily_return": 1, "log_return": 1, "gap_pct": 1,
-    "return_1d": 1, "return_1w": 5, "return_1m": 21,
-    "return_3m": 63, "return_6m": 126, "return_1y": 252,
+#: Metrics whose lookback really is a row count, and for which a row count is
+#: the correct unit: each compares a close with its immediate predecessor.
+CONTAMINATED_BY_ROWS = {
+    "daily_return": 1, "log_return": 1, "gap_pct": 1, "return_1d": 1,
 }
+
+#: The period returns are withheld over their OWN window, read from
+#: ALL_WINDOWS rather than restated here.
+#:
+#: This was previously a second declaration in rows -- return_1y: 252,
+#: return_6m: 126 and so on -- and it stopped matching the thing it guards
+#: the moment v11.2.62 anchored the returns on the calendar. A return
+#: measured over 365 days was being withheld over 252 rows: for a stock
+#: trading every weekday those are nearly the same span, and for anything
+#: thinner they are not. A guard that defines the window differently from the
+#: metric it protects will disagree with it on exactly the stocks the metric
+#: was hardest to get right for.
+#:
+#: Worse, a hand-maintained list cannot acquire a new window. The ten
+#: multi-year horizons added in this release would have computed with no
+#: withholding at all, which is how yearly_compute came to publish
+#: return_3y = 1449.0 for JNS.
+#:
+#: So the window comes from one place. Adding a horizon to ALL_WINDOWS gives
+#: it withholding automatically, and removing one cannot leave an orphaned
+#: guard behind.
+CONTAMINATED_BY_WINDOW = {name: offset_grace
+                          for name, offset_grace in ALL_WINDOWS.items()}
 
 
 def withhold_contaminated_metrics(df: pd.DataFrame, splits,
@@ -468,11 +496,20 @@ def withhold_contaminated_metrics(df: pd.DataFrame, splits,
         return df, 0
 
     withheld = 0
-    for column, periods in CONTAMINATED_BY_WINDOW.items():
+
+    for column, periods in CONTAMINATED_BY_ROWS.items():
         if column not in df.columns:
             continue
         before = df[column].notna().sum()
         df[column] = withhold_spanning_windows(df[column], flags, periods)
+        withheld += int(before - df[column].notna().sum())
+
+    for column, (offset, grace_days) in CONTAMINATED_BY_WINDOW.items():
+        if column not in df.columns:
+            continue
+        before = df[column].notna().sum()
+        df[column] = withhold_spanning_calendar_windows(
+            df[column], flags, df["date"], offset, grace_days)
         withheld += int(before - df[column].notna().sum())
 
     # YTD has no fixed window: it runs from the last close of the previous
@@ -523,6 +560,53 @@ def withhold_unrepresentable(df: pd.DataFrame, limits: dict) -> tuple:
             withheld += int(too_big.sum())
             df.loc[too_big, column] = np.nan
     return df, withheld
+
+
+def withhold_spanning_calendar_windows(values: pd.Series, flags: pd.Series,
+                                       dates: pd.Series, offset,
+                                       grace_days: int) -> pd.Series:
+    """NaN out any value whose CALENDAR window contains an unexplained event.
+
+    The window is the one the return itself used -- same anchor_positions(),
+    same offset, same grace -- so the guard cannot disagree with the metric
+    about which prices were compared.
+
+    The contaminated interval is (anchor, row]: an event ON the anchor day is
+    not contamination, because the anchor close and every close after it are
+    already on the post-event basis and the ratio between them is sound. An
+    event after the anchor mixes two bases and the ratio is not a return.
+
+    A row with NO anchor is not clean, it is unestablishable: the window
+    reaches past the start of the series, so the whole series up to that row
+    is the window. Contamination there is any flag at or before the row --
+    "at or before", never after, because a future event cannot retroactively
+    contaminate a past comparison and treating it as if it could is how a
+    guard acquires lookahead.
+
+    Under the real producer such a row is already NaN, so this costs nothing
+    in production. It matters because the column can be populated by
+    something other than this window definition, and then silence would be a
+    contaminated number kept by a guard that declined to look at it.
+    """
+    if not flags.any():
+        return values
+
+    pos = anchor_positions(dates, offset, grace_days)
+    f = pd.Series(flags).reset_index(drop=True).astype(bool).to_numpy()
+
+    # cum[k] = number of flagged rows strictly before k, so the count inside
+    # (pos, i] is cum[i + 1] - cum[pos + 1].
+    cum = np.concatenate([[0], np.cumsum(f)])
+    i = np.arange(len(f))
+
+    contaminated = np.zeros(len(f), dtype=bool)
+    anchored = pos >= 0
+    contaminated[anchored] = (
+        cum[i[anchored] + 1] - cum[pos[anchored] + 1]) > 0
+    # No anchor: the window is everything up to this row.
+    contaminated[~anchored] = cum[i[~anchored] + 1] > 0
+
+    return values.where(~pd.Series(contaminated, index=values.index))
 
 
 def withhold_spanning_windows(values: pd.Series, flags: pd.Series,

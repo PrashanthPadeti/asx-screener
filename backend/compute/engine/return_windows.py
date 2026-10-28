@@ -69,12 +69,65 @@ import pandas as pd
 #: 1w's 4 and 1m's 7 are unchanged. Four is the exchange calendar itself --
 #: Good Friday through Easter Monday -- and 1w is tightest because a 7-day
 #: grace on a 7-day window would double it.
-WINDOWS: dict[str, tuple[int, int]] = {
-    "return_1w": (7, 4),
-    "return_1m": (30, 7),
-    "return_3m": (91, 14),
-    "return_6m": (182, 14),
-    "return_1y": (365, 7),
+#: A window reaches back by a CALENDAR offset, not a day count.
+#:
+#: v11.2.62 replaced row counts with day counts, which fixed the defect that
+#: mattered. Day counts are still an approximation of what the names claim: 30
+#: days is not a month, 91 is not a quarter, and 365 is not a year in 2028.
+#: Over the long horizons added here the drift compounds -- 15 x 365 misses by
+#: four days -- and the approximation stops being invisible.
+#:
+#: pd.DateOffset(years=n) lands on the same calendar date n years earlier and
+#: handles 29 February by clamping to the 28th. MRD's verified anchor is
+#: unchanged by this: 2026-10-27 minus one year is 2025-10-27 either way.
+WINDOWS: dict[str, tuple[pd.offsets.BaseOffset | pd.Timedelta, int]] = {
+    "return_1w": (pd.Timedelta(days=7),    4),
+    "return_1m": (pd.DateOffset(months=1), 7),
+    "return_3m": (pd.DateOffset(months=3), 14),
+    "return_6m": (pd.DateOffset(months=6), 14),
+    "return_1y": (pd.DateOffset(years=1),  7),
+}
+
+#: The multi-year horizons, which until now had a second implementation.
+#:
+#: yearly_compute.price_return() computed return_3y/5y/7y/10y/15y from
+#: market.yearly_metrics with three defects this path does not have:
+#:
+#:   1. price_at() took the last close at or before the target with NO grace
+#:      bound, so a stock whose nearest earlier quote was four years off still
+#:      got a number. return_3y could measure eight years and say three.
+#:   2. The window ended at the fiscal PERIOD END, not today, so a column
+#:      labelled "Return 3Y %" could be a year stale before it was read.
+#:   3. No corporate-action withholding. On 28 Oct 2026 the served screener
+#:      published return_3y = 1449.0 for JNS -- +144,900% -- beside a
+#:      return_1y of +247%.
+#:
+#: return_2y/4y/6y/8y/9y had no producer at all. They are read on the company
+#: page, filterable and sortable, and written by nothing in the codebase; the
+#: universe is upserted, so a column absent from the SET list keeps whatever
+#: was last written to it. 376 served stocks carried a two-year return while
+#: having no one-year return -- impossible, since a two-year window needs
+#: strictly more history.
+#:
+#: Both groups move here so that every horizon is one implementation with one
+#: anchor rule, one grace bound and one withholding path.
+#:
+#: GRACE IS PROVISIONAL at 14 for every horizon beyond a year. The 1y measure
+#: (1,554 of 1,567 served stocks anchored within three days) does not transfer:
+#: the further back the target, the thinner the exchange's history and the
+#: likelier a genuine gap. 14 days against a ten-year window is 0.4% of it, so
+#: the risk of overstating a period is small -- but it is an estimate, and the
+#: distribution at each horizon is what should decide it.
+LONG_WINDOWS: dict[str, tuple[pd.offsets.BaseOffset, int]] = {
+    f"return_{n}y": (pd.DateOffset(years=n), 14)
+    for n in (2, 3, 4, 5, 6, 7, 8, 9, 10, 15)
+}
+
+#: Every horizon this module produces. Read by technical_compute for the
+#: compute loop and by the governed-metric contract, so the two cannot
+#: disagree about which windows exist.
+ALL_WINDOWS: dict[str, tuple[pd.offsets.BaseOffset | pd.Timedelta, int]] = {
+    **WINDOWS, **LONG_WINDOWS,
 }
 
 #: The high/low windows. Same length, but the grace does a DIFFERENT job and
@@ -89,21 +142,29 @@ HIGH_LOW_DAYS = 365
 HIGH_LOW_GRACE = 14
 
 
-def anchor_positions(dates: pd.Series, length_days: int,
-                     grace_days: int) -> np.ndarray:
+def anchor_positions(dates: pd.Series, offset, grace_days: int) -> np.ndarray:
     """Row index of each row's opening price, or -1 where there is none.
 
-    The anchor is the LAST row at or before `date - length_days`. Taking the
-    last one rather than the nearest matters: the nearest could sit after the
+    The anchor is the LAST row at or before `date - offset`. Taking the last
+    one rather than the nearest matters: the nearest could sit after the
     target, shortening the window instead of lengthening it, and a return
     that silently measures less than it claims is no better than one that
     measures more.
+
+    `offset` is a pandas offset -- Timedelta for day-counted windows,
+    DateOffset for calendar ones. The grace is always in days, because what
+    it absorbs is exchange closures, which are counted in days whatever the
+    window is measured in.
+
+    The grace is what separates this from yearly_compute.price_at(), which
+    applies the same "last close at or before" rule with no bound at all and
+    will happily anchor a three-year return four years early.
     """
     idx = pd.DatetimeIndex(pd.to_datetime(pd.Series(dates).reset_index(drop=True)))
     if len(idx) == 0:
         return np.zeros(0, dtype=int)
 
-    targets = idx - pd.Timedelta(days=length_days)
+    targets = idx - offset
     # searchsorted on the right, minus one: the last position whose date is
     # <= target. -1 means every row is newer than the target, i.e. the series
     # does not reach back far enough.
@@ -117,10 +178,10 @@ def anchor_positions(dates: pd.Series, length_days: int,
     return np.where(found & close_enough, pos, -1)
 
 
-def window_return(close: pd.Series, dates: pd.Series, length_days: int,
+def window_return(close: pd.Series, dates: pd.Series, offset,
                   grace_days: int) -> pd.Series:
     """`close / close_at_anchor - 1`, or NaN where no anchor qualifies."""
-    pos = anchor_positions(dates, length_days, grace_days)
+    pos = anchor_positions(dates, offset, grace_days)
     c = pd.Series(close).reset_index(drop=True).astype(float).to_numpy()
 
     base = np.where(pos >= 0, c[np.clip(pos, 0, None)], np.nan)

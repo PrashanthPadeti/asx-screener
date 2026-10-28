@@ -52,7 +52,7 @@ from compute.engine.serving_population import (  # noqa: E402
     excluded_types_predicate,
 )
 from compute.engine.return_windows import (  # noqa: E402
-    WINDOWS, window_return, rolling_extreme,
+    ALL_WINDOWS, window_return, rolling_extreme,
 )
 
 
@@ -585,8 +585,12 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     # trades intermittently that is not a year -- MRD's was 467 days. Where
     # no quote exists near the start of the window the return is None, not
     # the nearest price we happen to hold.
-    for col, (length_days, grace_days) in WINDOWS.items():
-        df[col] = window_return(c, df["date"], length_days, grace_days).round(4)
+    # Every horizon, short and long, through one implementation. The
+    # multi-year ones previously came from yearly_compute.price_return(),
+    # which anchored without a grace bound, ended at the fiscal period end
+    # rather than today, and had no corporate-action withholding.
+    for col, (offset, grace_days) in ALL_WINDOWS.items():
+        df[col] = window_return(c, df["date"], offset, grace_days).round(4)
 
     # YTD: return from last close of previous calendar year
     df["_year"] = df["date"].dt.year

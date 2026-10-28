@@ -607,6 +607,20 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
 
 # ── Column → DB mapping ───────────────────────────────────────────────────────
 
+#: The return columns this engine writes, derived from the windows it
+#: computes rather than listed again here.
+#:
+#: The column list and the value tuple below were two hand-maintained
+#: sequences that had to stay in the same order, and the window set was a
+#: third. Three declarations of one fact is how return_2y/4y/6y/8y/9y came to
+#: be served by a producer that no longer exists: the lists stopped agreeing
+#: and nothing failed when they did.
+#:
+#: return_1d and return_ytd are named explicitly because neither is a window:
+#: the first compares a close with its predecessor, the second runs from the
+#: last close of the previous calendar year.
+RETURN_COLS = ["return_1d", "return_ytd", *ALL_WINDOWS]
+
 INSERT_COLS = [
     "asx_code", "date",
     "close", "adj_close", "volume",
@@ -647,8 +661,9 @@ INSERT_COLS = [
     # Signals
     "above_sma20", "above_sma50", "above_sma100", "above_sma200",
     "golden_cross", "death_cross", "new_52w_high", "new_52w_low", "new_ath",
-    # Returns
-    "return_1d", "return_1w", "return_1m", "return_3m", "return_6m", "return_ytd", "return_1y",
+    # Returns — spliced in from RETURN_COLS, below, so the written columns
+    # and the computed windows cannot disagree.
+    *RETURN_COLS,
     # Metadata
     "compute_version", "computed_at",
 ]
@@ -657,6 +672,50 @@ INSERT_COLS = [
 #: silent off-by-one the day a column is inserted above rsi_14, and the only
 #: symptom would be a miscounted diagnostic.
 INDEX_RSI_14 = INSERT_COLS.index("rsi_14")
+
+#: Which migration introduces which column, so a refusal can name the file
+#: instead of leaving the reader to find it.
+COLUMN_MIGRATION = {
+    **{f"return_{n}y": "add_multi_year_returns_to_daily_metrics.sql"
+       for n in (2, 3, 4, 5, 6, 7, 8, 9, 10, 15)},
+    "metric_states": "add_metric_states_to_daily_metrics.sql",
+}
+
+
+def verify_columns(cur) -> None:
+    """Every column this engine writes must exist before it writes any.
+
+    deploy.sh does not apply migrations; they are applied by hand. So a
+    deploy can land code that writes columns the database does not have, and
+    without this the first symptom is an exception partway through a run,
+    after some companies have been committed and others have not.
+
+    It refuses and names the file, which is the pattern p0a_preflight.py
+    already uses for the universe sidecar. A missing column is our own defect
+    and must never be allowed to present as missing data.
+    """
+    cur.execute("""
+        SELECT column_name FROM information_schema.columns
+         WHERE table_schema = 'market' AND table_name = 'daily_metrics';""")
+    present = {row[0] for row in cur.fetchall()}
+
+    absent = [c for c in INSERT_COLS if c not in present]
+    if not absent:
+        return
+
+    files = sorted({COLUMN_MIGRATION[c] for c in absent if c in COLUMN_MIGRATION})
+    unknown = [c for c in absent if c not in COLUMN_MIGRATION]
+
+    detail = f"market.daily_metrics is missing {len(absent)} column(s) this " \
+             f"engine writes: {', '.join(absent)}."
+    if files:
+        detail += " Apply " + " and ".join(f"migrations/{f}" for f in files) \
+                  + " first."
+    if unknown:
+        detail += (f" No migration is recorded for {', '.join(unknown)}, "
+                   f"which means the column list and the schema have drifted "
+                   f"for a reason this check cannot explain.")
+    raise SystemExit(f"REFUSED: {detail}")
 
 INSERT_SQL = f"""
     INSERT INTO market.daily_metrics ({", ".join(INSERT_COLS)})
@@ -749,8 +808,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
             g("above_sma20"), g("above_sma50"), g("above_sma100"), g("above_sma200"),
             g("golden_cross"), g("death_cross"),
             g("new_52w_high"), g("new_52w_low"), g("new_ath"),
-            c("return_1d"), c("return_1w"), c("return_1m"), c("return_3m"),
-            c("return_6m"), c("return_ytd"), c("return_1y"),
+            *[c(name) for name in RETURN_COLS],
             COMPUTE_VERSION, now,
         ))
     return rows
@@ -836,6 +894,11 @@ def main():
     from compute.engine.runtime_envelope import prove as _prove_envelope
     _prove_envelope("technical_compute", conn)
     cur  = conn.cursor()
+
+    # Before any mutation: the schema must be able to hold what this run
+    # intends to write. Refusing here costs a second; discovering it mid-run
+    # leaves some companies written and others not.
+    verify_columns(cur)
 
     codes = fetch_codes(cur, args.codes, args.limit)
     total = len(codes)

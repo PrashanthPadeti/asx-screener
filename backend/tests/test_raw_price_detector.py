@@ -7,10 +7,21 @@ Two detectors came before this one, and both need a document.
                                what the provider chose to adjust
   reconcile_splits             needs a split record to check against
 
-Where there is no record AND the provider did nothing, both are blind. ID8
-stepped 159x on 2026-09-24 with no split on record and adjusted_close moving
-exactly in step with close, and published a +10,455% one-year return at the
-top of the screener -- after v11.2.58 had already run over it.
+Where there is no record AND the provider did nothing, both are blind.
+
+The served case is **ACS**: active, carried by the screener, a 7.1x step with
+nothing in market.splits, publishing +3,233% as a one-year return after
+v11.2.58 had already run over it. That is what this detector exists for, and
+why the threshold below sits where it does.
+
+ID8 is the larger example -- a 159x step on 2026-09-24, same shape, same
+blindness in both earlier detectors -- and the fixtures here use its numbers
+because they make the arithmetic obvious. It is NOT a customer-facing case:
+ID8 is delisted, and the serving population is `status = 'active' AND price
+IS NOT NULL`, so no customer could ever see the +10,455% it published. An
+earlier version of this docstring claimed it sat "at the top of the
+screener". It did not. The defect was real; its reach was not what was
+written here.
 
 This detector reads the only evidence left. It cannot correct anything: the
 step size is the corporate action and the day's trading mixed together, and
@@ -96,6 +107,32 @@ def test_it_runs_through_the_main_detector():
     assert unexplained_discontinuities(df, [], []).any(), (
         "raw_price_discontinuities is not reached by the detector the "
         "compute path actually calls")
+
+
+def test_the_served_case_is_caught():
+    """ACS -- the one that reached customers.
+
+    7.1x is the step size observed in production; the prices here are
+    constructed to produce it rather than copied, because the ratio is what
+    the detector reads. It sits only 1.4x above the threshold, so this is
+    also the case that would be lost first if UNEXPLAINED_STEP were raised.
+    """
+    df = _series(0.10, 0.71)
+    flags = raw_price_discontinuities(df)
+    assert flags.any(), (
+        "a 7.1x step with no record went undetected on a stock the screener "
+        "actually serves")
+    assert int(flags.sum()) == 1
+
+
+def test_the_served_case_withholds_its_returns():
+    df = _series(0.10, 0.71)
+    df["return_1y"] = 32.3333
+    df, withheld = withhold_contaminated_metrics(df, [], [])
+    assert withheld > 0
+    after = df.iloc[300:300 + 252]
+    assert after["return_1y"].notna().sum() == 0, (
+        "+3,233% is still published on a served stock")
 
 
 # ── What it must not do ─────────────────────────────────────────────────────

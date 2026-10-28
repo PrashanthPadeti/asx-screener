@@ -117,24 +117,52 @@ def test_no_two_price_metrics_claim_one_column():
 
 # ── Sequencing ──────────────────────────────────────────────────────────────
 
-def test_v3_is_not_live_until_its_producer_exists():
+def test_v3_is_live_and_its_producer_exists():
     """The order of operations, as a test rather than as a note.
 
-    Flipping LATEST_MODEL_VERSION to V3 before technical_compute emits
+    This asserted the opposite until step 5: that LATEST_MODEL_VERSION was
+    still V2, because flipping it before technical_compute emitted
     assessments would make every absent return a contract violation on the
-    next canonical run: violations() would flag all 608, the read-back would
-    fail, and the publish would refuse. The daily pipeline would stop.
+    next canonical run -- violations() flags them, the read-back fails, the
+    publish refuses, and the daily pipeline stops.
 
-    So governance lands LAST. This test is the guard against landing it
-    first, and it is expected to be rewritten -- not deleted -- in the commit
-    that flips the constant, to assert the producer instead.
+    Rewritten rather than deleted, per its own instruction. The guard is now
+    the other half of the same rule: V3 is live, so every governed price
+    metric must have a producer that can assess it.
     """
-    assert LATEST_MODEL_VERSION == V2, (
-        "LATEST_MODEL_VERSION moved to V3. That is only safe once "
-        "technical_compute produces an Assessment for every metric in "
-        "PRICE_WINDOWS | PRICE_EXTREMES and the states reach "
-        "screener.universe.metric_states. Rewrite this test to assert that, "
-        "do not just delete it.")
+    assert LATEST_MODEL_VERSION == V3
+
+    from compute.engine.window_states import (
+        EXTREME_COLUMNS, window_assessment)
+    from compute.engine.return_windows import ALL_WINDOWS
+
+    # return_ytd has no fixed window and so is not in ALL_WINDOWS, but it is
+    # governed and window_states assesses it with its own branch.
+    producible = set(ALL_WINDOWS) | set(EXTREME_COLUMNS) | {"return_ytd"}
+    ungoverned = (PRICE_WINDOWS | PRICE_EXTREMES) - producible
+    assert not ungoverned, (
+        f"governed under the live contract with no producer: "
+        f"{sorted(ungoverned)} — these would be written as NULL with no "
+        f"sidecar entry, which is the defect V3 exists to close")
+
+    # And the rebuild path the canonical writer depends on actually works,
+    # rather than merely existing.
+    a = window_assessment("return_1y", None, {
+        "return_1y": {"state": "insufficient_data",
+                      "cause": "insufficient_history",
+                      "reason": "no close within 7 days of 2025-10-27"}})
+    assert not a.ok and a.value is None
+
+
+def test_the_live_contract_can_store_every_metric_it_governs():
+    """Every governed metric resolves to a real column under the version
+    that is actually running. persisted_governed() raises on a collision;
+    this names what it protects, now that the version it checks is live."""
+    mapping = persisted_governed(LATEST_MODEL_VERSION)
+    for metric in PRICE_WINDOWS | PRICE_EXTREMES:
+        assert metric in mapping, (
+            f"{metric} is governed by the live contract but has no storage "
+            f"column, so no UPDATE would ever write it")
 
 
 if __name__ == "__main__":

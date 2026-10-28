@@ -847,9 +847,67 @@ V1_PINNED = frozenset({
 #: What V2 must resolve to. Not derived from the code it is checking.
 V2_PERSISTED_COUNT = 72
 
+#: V2's governed set, frozen by eight finalised production runs (ids 23-30).
+#: Equal to its persisted count because nothing V2 governs is unpersistable.
+V2_GOVERNED_COUNT = 72
 
-def test_v2_is_the_canonical_candidate():
-    assert LATEST_MODEL_VERSION == "FACTOR_MODEL_V2"
+#: V3 = V2 plus six calendar price windows and two 52-week extremes.
+V3_GOVERNED_COUNT = 80
+
+
+def test_v3_is_the_canonical_contract():
+    """Was test_v2_is_the_canonical_candidate until v11.2.63.
+
+    Updated rather than deleted. This assertion is how the codebase states
+    which contract production actually runs under, and a flip that silently
+    removed it would make the next flip unremarkable.
+    """
+    assert LATEST_MODEL_VERSION == "FACTOR_MODEL_V3"
+
+
+def test_activating_v3_did_not_move_v2():
+    """V2 is frozen by production, not by convention.
+
+    Eight finalised runs reference it -- ids 23 to 30, 21 to 28 Oct 2026 --
+    and screener.compute_runs carries an immutable trigger, so what those
+    runs claimed cannot be revised. Rows still attributed to V2 are validated
+    against this set; changing it would retroactively alter the contract they
+    were written under, which is the precise thing the freeze rule exists to
+    prevent and the reason V3 exists at all.
+
+    Pinned by size and by the boundary that moved: V2 must not have acquired
+    the price windows, which are exactly what V3 added.
+    """
+    v2 = GOVERNED_METRICS["FACTOR_MODEL_V2"]
+    from compute.engine.metric_states import PRICE_WINDOWS, PRICE_EXTREMES
+
+    assert len(v2) == V2_GOVERNED_COUNT
+    leaked = v2 & (PRICE_WINDOWS | PRICE_EXTREMES)
+    assert not leaked, (
+        f"V2 gained metrics it never governed: {sorted(leaked)}; eight "
+        f"published runs are validated against this set")
+
+
+def test_v3_adds_the_price_windows_and_nothing_else():
+    """What the version bump is FOR, asserted as a difference rather than a
+    count. A version that quietly carried other changes would be impossible
+    to reason about from the rows that reference it."""
+    from compute.engine.metric_states import PRICE_WINDOWS, PRICE_EXTREMES
+
+    added = GOVERNED_METRICS["FACTOR_MODEL_V3"] - GOVERNED_METRICS["FACTOR_MODEL_V2"]
+    assert added == (PRICE_WINDOWS | PRICE_EXTREMES), (
+        f"V3 differs from V2 by more than the price windows: "
+        f"unexpected {sorted(added - (PRICE_WINDOWS | PRICE_EXTREMES))}")
+
+
+def test_v3_scores_identically_to_v2():
+    """The version constant names two things: the governed set and the factor
+    semantics. V3 changes only the first, so model_for() must resolve it to
+    exactly V2's specs -- aliased, not copied, so a future weight edit cannot
+    apply to one and not the other."""
+    from compute.engine.factor_model import model_for
+
+    assert model_for("FACTOR_MODEL_V3") is model_for("FACTOR_MODEL_V2")
 
 
 def test_activating_v2_did_not_move_v1():

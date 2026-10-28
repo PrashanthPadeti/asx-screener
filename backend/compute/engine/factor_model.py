@@ -307,9 +307,26 @@ FACTOR_MODEL_V2["growth"] = _spec("growth", [
     ("eps_growth_3y_cagr", +1), ("revenue_growth_hoh", +1),
     ("revenue_cagr_5y", +1)])
 
+#: V3 scores identically to V2 and is bound to the same specs, deliberately.
+#:
+#: The version constant names two things that have drifted apart: the factor
+#: SEMANTICS declared here, and the governed-metric set in metric_states. V3
+#: exists for the second -- it adds the calendar price windows and the
+#: 52-week extremes to what the contract covers -- and changes nothing about
+#: how any factor is scored. Binding it to FACTOR_MODEL_V2's specs is the
+#: statement that the scoring is unchanged.
+#:
+#: Aliased rather than copied: a duplicate dict would be two declarations of
+#: one model, free to diverge the first time a weight is edited, and the
+#: whole point of this registry is that scoring semantics are declared once
+#: per version.
+#:
+#: If the factors themselves ever change, that is a new version and a new
+#: entry, not an edit to this line.
 FACTOR_MODELS: dict[str, dict[str, FactorSpec]] = {
     "FACTOR_MODEL_V1": FACTOR_MODEL_V1,
     "FACTOR_MODEL_V2": FACTOR_MODEL_V2,
+    "FACTOR_MODEL_V3": FACTOR_MODEL_V2,
 }
 
 #: The headline composite, declared with the same machinery as a factor.

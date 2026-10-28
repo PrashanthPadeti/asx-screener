@@ -107,6 +107,7 @@ def assess_row(dates: pd.Series,
     signal, and that is what keeps the payload proportional to the problem.
     """
     out: dict[str, dict] = {}
+    idx = pd.DatetimeIndex(pd.to_datetime(pd.Series(dates).reset_index(drop=True)))
 
     for metric, (offset, grace) in ALL_WINDOWS.items():
         if final.get(metric, False):
@@ -157,6 +158,50 @@ def assess_row(dates: pd.Series,
                 "reason": f"the close on {anchor.date().isoformat()} is zero "
                           f"or unusable as a denominator",
             }
+
+    # return_ytd. Governed, and NOT in ALL_WINDOWS: it has no fixed window,
+    # running from the last close of the previous calendar year. It was
+    # already date-anchored before v11.2.62 and so was never wrong -- but its
+    # absence is the same kind of fact and reaches the customer through the
+    # same blank cell, so it needs the same explanation.
+    #
+    # Found by test_v3_is_live_and_its_producer_exists, which compares the
+    # governed set against what this module can actually assess. Without that
+    # comparison it would have been written as NULL with no entry under the
+    # live contract -- the exact defect V3 closes.
+    if not final.get("return_ytd", True):
+        if after_withholding.get("return_ytd", False):
+            out["return_ytd"] = {
+                "state": Applicability.UNAVAILABLE.value,
+                "cause": Cause.COMPUTATION_UNSUPPORTED.value,
+                "reason": "the computed return exceeds what the column can "
+                          "store; a consolidation compounded past its ceiling",
+            }
+        elif computed.get("return_ytd", False):
+            out["return_ytd"] = {
+                "state": Applicability.UNAVAILABLE.value,
+                "cause": Cause.SOURCE_MISSING.value,
+                "reason": "an unreconciled corporate action falls inside the "
+                          "year to date; the prices either side are not "
+                          "comparable",
+            }
+        else:
+            year_start = pd.Timestamp(year=idx[row].year, month=1, day=1)
+            if len(idx[idx < year_start]) == 0:
+                out["return_ytd"] = {
+                    "state": Applicability.INSUFFICIENT_DATA.value,
+                    "cause": Cause.INSUFFICIENT_HISTORY.value,
+                    "reason": f"no close before "
+                              f"{year_start.date().isoformat()}; the series "
+                              f"begins inside the current year",
+                }
+            else:
+                out["return_ytd"] = {
+                    "state": Applicability.UNAVAILABLE.value,
+                    "cause": Cause.OBSERVATION.value,
+                    "reason": "the last close of the previous year is zero "
+                              "or unusable as a denominator",
+                }
 
     # The 52-week extremes. Absent for one reason only: the series does not
     # span the window yet. rolling_extreme() blanks those rows deliberately,
@@ -244,6 +289,8 @@ def presence(df: pd.DataFrame, row: int) -> dict[str, bool]:
     """
     out = {metric: (metric in df.columns and pd.notna(df[metric].iloc[row]))
            for metric in ALL_WINDOWS}
+    out["return_ytd"] = ("return_ytd" in df.columns
+                         and pd.notna(df["return_ytd"].iloc[row]))
     for metric, column in EXTREME_COLUMNS.items():
         out[metric] = column in df.columns and pd.notna(df[column].iloc[row])
     return out

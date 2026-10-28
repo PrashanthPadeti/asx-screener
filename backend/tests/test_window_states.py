@@ -37,7 +37,7 @@ from compute.engine.window_states import (                      # noqa: E402
 )
 
 START = date(2020, 1, 1)
-METRICS = list(ALL_WINDOWS) + list(EXTREME_COLUMNS)
+METRICS = list(ALL_WINDOWS) + ["return_ytd"] + list(EXTREME_COLUMNS)
 
 
 def _dates(n: int, start: date = START) -> pd.Series:
@@ -145,6 +145,46 @@ def test_the_four_causes_are_actually_different():
     seen = {name: (p["return_1y"]["state"], p["return_1y"]["cause"])
             for name, p in payloads.items()}
     assert len(set(seen.values())) == 3, f"causes collapsed: {seen}"
+
+
+# ── return_ytd, which has no fixed window ───────────────────────────────────
+
+def test_a_series_starting_this_year_explains_its_missing_ytd():
+    """return_ytd runs from the last close of the PREVIOUS calendar year, so
+    a series that begins inside the current one has no anchor at all.
+
+    This metric is governed and is not in ALL_WINDOWS, so it needs its own
+    branch. It was missed on the first pass and caught by the test comparing
+    the governed set against what the producer can assess -- under the live
+    contract it would have been written as NULL with no entry.
+    """
+    dates = pd.Series([pd.Timestamp(date(2026, 3, 1) + timedelta(days=i))
+                       for i in range(60)])
+    out = assess_row(dates, len(dates) - 1, _all(False), _all(False), _all(False))
+
+    entry = out["return_ytd"]
+    assert entry["state"] == Applicability.INSUFFICIENT_DATA.value
+    assert entry["cause"] == Cause.INSUFFICIENT_HISTORY.value
+    assert "2026-01-01" in entry["reason"], entry["reason"]
+
+
+def test_a_ytd_spanning_a_corporate_action_says_so():
+    dates = pd.Series([pd.Timestamp(date(2025, 1, 1) + timedelta(days=i))
+                       for i in range(500)])
+    out = assess_row(dates, len(dates) - 1,
+                     computed=_all(True),
+                     after_withholding=_all(False),
+                     final=_all(False))
+
+    entry = out["return_ytd"]
+    assert entry["cause"] == Cause.SOURCE_MISSING.value
+    assert "year to date" in entry["reason"]
+
+
+def test_an_applicable_ytd_gets_no_entry():
+    dates = _dates(4000)
+    out = assess_row(dates, len(dates) - 1, _all(True), _all(True), _all(True))
+    assert "return_ytd" not in out
 
 
 # ── The 52-week extremes ────────────────────────────────────────────────────

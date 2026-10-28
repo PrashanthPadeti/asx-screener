@@ -380,13 +380,21 @@ PRICE_WINDOWS: frozenset[str] = frozenset({
 #: universally while looking entirely normal -- the ev_to_ebitda failure,
 #: repeated. universe_writer carries the mapping and a test pins it.
 #:
-#: pct_from_52w_high, pct_from_52w_low, new_52w_high and new_52w_low are
-#: derived from these and are NOT governed here. Their absence is implied by
-#: the extreme's entry rather than stated in their own, which is a weaker
+#: Four derived columns are NOT governed here, for two different reasons,
+#: and an earlier version of this comment merged them and named two columns
+#: that do not exist. The universe's actual spellings are:
+#:
+#:   price_to_52w_high / price_to_52w_low   numeric, present
+#:   new_52w_high      / new_52w_low        boolean, present
+#:
+#: All four are functions of the extremes above, so their absence is implied
+#: by the extreme's entry rather than stated in their own -- a weaker
 #: guarantee than this module is meant to give. Governing them needs a
 #: producer that assesses a derived metric from its input's assessment, which
-#: does not exist yet. Recorded as a known remaining gap rather than left to
-#: be discovered as another unexplained blank.
+#: does not exist; the booleans would additionally need declaring in
+#: BOOLEAN_METRICS, or storage_value would write True/False into a numeric
+#: column. Recorded as a known remaining gap rather than left to be
+#: discovered as another unexplained blank.
 PRICE_EXTREMES: frozenset[str] = frozenset({
     "week_52_high", "week_52_low",
 })
@@ -432,7 +440,32 @@ GOVERNED_METRICS["FACTOR_MODEL_V3"] = (
 #
 #     no production row or finalisation references V2  -> still amendable
 #     the first production V2 run is finalised         -> frozen; changes go to V3
-LATEST_MODEL_VERSION = "FACTOR_MODEL_V2"
+#
+# ── V3 becomes the canonical contract (v11.2.63) ─────────────────────────────
+#
+# V2 is frozen, and the test above is the one that decided it: eight finalised
+# production runs reference it -- ids 23 to 30, 21 to 28 Oct 2026 -- and
+# screener.compute_runs carries an immutable trigger, so what those runs
+# claimed cannot be revised. Amending V2 to cover the price windows would
+# retroactively change the contract eight published runs were written under.
+#
+# This flip is LAST in its release, deliberately, and the order is not a
+# preference. The moment this constant moves, canonical_assessments demands an
+# assessment for all sixteen price-window metrics on every served row, and the
+# writer refuses any row it cannot complete. Flipping it before
+# technical_compute produced those assessments would have made every absent
+# return a contract violation on the next nightly run: violations() flags
+# them, the read-back fails, the publish refuses, and the daily pipeline
+# stops. The producer landed in step 4; this is step 5.
+#
+# One consequence to sequence around at deploy time rather than discover: a
+# served row whose market.daily_metrics.metric_states is still NULL has no
+# recorded reason for any absent window, so window_assessment() rebuilds each
+# one as UNAVAILABLE / SOURCE_MISSING with a reason saying exactly that. It is
+# honest and it is not a defect -- but it is the state of every row until the
+# backfill has run, so the backfill comes before the first canonical run under
+# V3, not after.
+LATEST_MODEL_VERSION = "FACTOR_MODEL_V3"
 
 #: Sentinel for "this caller is not validating a version at all" — the
 #: in-memory, pre-write check, where no version has been assigned yet.

@@ -61,8 +61,13 @@ from compute.engine.factor_model import (  # noqa: E402
     FactorSpec, composite_for, effective_weights, model_for,
 )
 from compute.engine.metric_states import (  # noqa: E402
-    LATEST_MODEL_VERSION, SourceHealth,
+    LATEST_MODEL_VERSION, SourceHealth, PRICE_WINDOWS, PRICE_EXTREMES,
 )
+from compute.engine.window_states import window_assessment  # noqa: E402
+
+#: The governed metrics whose assessment is produced by technical_compute and
+#: carried here, rather than derived from the value in this frame.
+PRICE_WINDOW_METRICS = PRICE_WINDOWS | PRICE_EXTREMES
 from compute.engine.universe_writer import (  # noqa: E402
     ComputeRun,
     WriteRefused,
@@ -645,6 +650,16 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     canonical_columns = persisted_governed(LATEST_MODEL_VERSION)
     select_cols += [c for c in canonical_columns.values()
                     if c not in select_cols]
+
+    # The sidecar itself, not a governed column. Under V3 the price windows
+    # are governed, and their reasons are produced by technical_compute and
+    # carried here by the universe build -- this statement is the only place
+    # they can be read back. Omitting it would have the canonical writer
+    # re-emit a complete sidecar with every window entry missing, which is
+    # the unexplained-null defect recreated by the statement written to
+    # prevent it.
+    if "metric_states" not in select_cols:
+        select_cols.append("metric_states")
     col_list = ", ".join(select_cols)
     # The serving population, from the one definition all three components
     # share. The canonical writer must cover exactly what the API can return:
@@ -1024,6 +1039,20 @@ def canonical_assessments(df, masked, factor_states,
                 assessed[metric] = _score_assessment(
                     metric, row.get(metric), code, factor_states,
                     bool(failed.loc[idx]))
+            elif metric in PRICE_WINDOW_METRICS:
+                # Rebuilt from the row rather than assessed here. The reason
+                # a window is empty is known only where the window was
+                # computed -- no close near its start, too little history, an
+                # unreconciled corporate action inside it, or a value past
+                # the column's ceiling -- and re-deriving it would be a
+                # second implementation of the anchor rule, free to disagree
+                # with the one that produced the number.
+                #
+                # Set unconditionally, overriding anything applicability
+                # inferred from the bare value: the producer's reason is the
+                # authoritative one.
+                assessed[metric] = window_assessment(
+                    metric, row.get(mapping[metric]), row.get("metric_states"))
             elif metric not in assessed:
                 # The frame carries every governed column, so applicability
                 # should have assessed it. Reaching here means a column was

@@ -167,6 +167,7 @@ INSERT INTO screener.universe (
     dividend_cagr_5y, bvps_cagr_3y, bvps_cagr_5y,
     return_2y, return_3y, return_4y, return_5y, return_6y,
     return_7y, return_8y, return_9y, return_10y, return_15y,
+    metric_states,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     revenue_growth_yoy_q, eps_growth_yoy_q, net_income_growth_yoy_q,
@@ -653,6 +654,22 @@ SELECT
     dm.return_9y      AS return_9y,
     dm.return_10y     AS return_10y,
     dm.return_15y     AS return_15y,
+
+    -- Why any of the sixteen windows above is empty, carried from the row
+    -- the values came from. technical_compute knows the reason -- no close
+    -- near the window's start, too little history, an unreconciled corporate
+    -- action inside the window, or a value past the column's ceiling -- and
+    -- before v11.2.63 it logged all four and wrote the same NaN.
+    --
+    -- Carried rather than re-derived here: deriving it would mean a second
+    -- implementation of the anchor rule, free to disagree with the one that
+    -- produced the number it explains.
+    --
+    -- The canonical writer later rewrites this column with the complete
+    -- sidecar for the model version, window entries included. It is written
+    -- here so that the entries exist before that statement runs and are not
+    -- lost between the two producers.
+    dm.metric_states  AS metric_states,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     qm.revenue_growth_yoy    AS revenue_growth_yoy_q,
@@ -1757,6 +1774,11 @@ ON CONFLICT (asx_code) DO UPDATE SET
     return_9y               = EXCLUDED.return_9y,
     return_10y              = EXCLUDED.return_10y,
     return_15y              = EXCLUDED.return_15y,
+    -- Rewritten every build, never merged. A merge would keep an entry from
+    -- a previous run beside a value that is now present -- a stale reason
+    -- next to a good number, which the sidecar's own rule forbids as firmly
+    -- as it forbids a NULL with no entry.
+    metric_states           = EXCLUDED.metric_states,
     -- Latest-quarter growth
     revenue_growth_yoy_q    = EXCLUDED.revenue_growth_yoy_q,
     eps_growth_yoy_q        = EXCLUDED.eps_growth_yoy_q,

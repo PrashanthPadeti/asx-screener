@@ -34,7 +34,7 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extensions
-from psycopg2.extras import execute_values
+from psycopg2.extras import execute_values, Json
 import pandas as pd
 import numpy as np
 from dotenv import load_dotenv
@@ -54,6 +54,7 @@ from compute.engine.serving_population import (  # noqa: E402
 from compute.engine.return_windows import (  # noqa: E402
     ALL_WINDOWS, window_return, rolling_extreme,
 )
+from compute.engine.window_states import assess_latest, presence  # noqa: E402
 
 
 # Cast NUMERIC → Python float automatically
@@ -664,6 +665,8 @@ INSERT_COLS = [
     # Returns — spliced in from RETURN_COLS, below, so the written columns
     # and the computed windows cannot disagree.
     *RETURN_COLS,
+    # Why a window is empty, for the latest row only — see window_states.
+    "metric_states",
     # Metadata
     "compute_version", "computed_at",
 ]
@@ -726,7 +729,9 @@ INSERT_SQL = f"""
 
 
 def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
-               keep_uncomputable: bool = False) -> list:
+               keep_uncomputable: bool = False,
+               states: Optional[dict] = None,
+               states_date: Optional[date] = None) -> list:
     """Convert the indicator DataFrame to a list of tuples for execute_values.
 
     ``keep_uncomputable`` keeps rows whose indicators are all NaN. It is set for
@@ -758,6 +763,24 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
         # Warm-up rows: RSI does not exist for the first thirteen days.
         df = df[df["rsi_14"].notna()]
 
+    def _states_for(row_date):
+        """The sidecar, on the one row it describes.
+
+        Only the latest row is assessed -- see window_states for why -- and
+        it is matched by DATE rather than by position. Position would be
+        wrong here twice over: `since` and the warm-up filter both reshape
+        the frame, so "the last row of df" is not reliably the row the
+        assessment was computed for, and attaching a reason to the wrong day
+        is worse than attaching none.
+
+        Every other row gets NULL, which the migration defines as "never
+        assessed" -- distinct from '{}', which would claim the row was
+        examined and found clean.
+        """
+        if states is None or states_date is None or row_date != states_date:
+            return None
+        return Json(states)
+
     rows = []
     for _, row in df.iterrows():
         def g(col, row=row):
@@ -778,9 +801,11 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
         # NUMERIC(8,4) and can blow up for near-zero-price penny stocks.
         c = lambda col, row=row: _vc(row.get(col)) if col in row.index else None  # noqa: E731
 
+        row_date = row["date"].date()
+
         rows.append((
             asx_code,
-            row["date"].date(),
+            row_date,
             g("close"), g("adj_close"), gi("volume"),
             g("market_cap"),
             g("daily_return"), g("log_return"), c("gap_pct"),
@@ -809,6 +834,7 @@ def build_rows(asx_code: str, df: pd.DataFrame, since: Optional[date] = None,
             g("golden_cross"), g("death_cross"),
             g("new_52w_high"), g("new_52w_low"), g("new_ath"),
             *[c(name) for name in RETURN_COLS],
+            _states_for(row_date),
             COMPUTE_VERSION, now,
         ))
     return rows
@@ -979,12 +1005,22 @@ def main():
             shares = fetch_shares(cur, asx_code)
             df     = compute_indicators(df, shares)
 
+            # Three snapshots of "which windows hold a value", taken before
+            # each thing that can empty one. The finished frame cannot tell
+            # the four causes apart -- no anchor, too little history,
+            # withheld over a corporate action, or past the column's ceiling
+            # -- because by then every one of them is the same NaN. Diffing
+            # the snapshots is what recovers the reason.
+            _last = len(df) - 1
+            present_computed = presence(df, _last) if _last >= 0 else {}
+
             # And blank what we cannot adjust: capital returns, rights issues
             # and special dividends leave the same discontinuity and have no
             # source to correct them with (market.corporate_events is empty).
             # An absent number sends someone to check; a wrong one does not.
             df, withheld = withhold_contaminated_metrics(
                 df, splits, unreconciled)
+            present_after_withhold = presence(df, _last) if _last >= 0 else {}
 
             # And anything the column cannot store. JAV's five consolidations
             # compound to ~4.88 million, restating its high to ~441 million
@@ -998,6 +1034,13 @@ def main():
                 log.info(f"  {asx_code}: {withheld} metric value(s) withheld "
                          f"— unadjustable corporate action in window")
 
+            # Why each absent window is absent, for the row the universe
+            # will read. Built from the three presence snapshots taken above,
+            # because the finished frame cannot tell the causes apart -- by
+            # then all four are the same NaN.
+            states = assess_latest(df, present_computed, present_after_withhold)
+            states_date = df["date"].max().date() if len(df) else None
+
             if not args.full and not args.days:
                 # Latest date only. keep_uncomputable, so a company whose
                 # indicators cannot be formed still gets a row at its latest
@@ -1005,11 +1048,13 @@ def main():
                 last_date = df["date"].max().date()
                 since_latest = last_date - timedelta(days=0)
                 rows = build_rows(asx_code, df, since=since_latest,
-                                  keep_uncomputable=True)
+                                  keep_uncomputable=True,
+                                  states=states, states_date=states_date)
                 if rows and rows[0][INDEX_RSI_14] is None:
                     uncomputable += 1
             else:
-                rows = build_rows(asx_code, df, since=since)
+                rows = build_rows(asx_code, df, since=since,
+                                  states=states, states_date=states_date)
 
             if not rows:
                 skipped += 1

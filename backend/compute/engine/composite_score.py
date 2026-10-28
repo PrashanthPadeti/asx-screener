@@ -651,15 +651,17 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     select_cols += [c for c in canonical_columns.values()
                     if c not in select_cols]
 
-    # The sidecar itself, not a governed column. Under V3 the price windows
-    # are governed, and their reasons are produced by technical_compute and
-    # carried here by the universe build -- this statement is the only place
-    # they can be read back. Omitting it would have the canonical writer
-    # re-emit a complete sidecar with every window entry missing, which is
-    # the unexplained-null defect recreated by the statement written to
-    # prevent it.
-    if "metric_states" not in select_cols:
-        select_cols.append("metric_states")
+    # The provisional window reasons, not the canonical sidecar.
+    #
+    # Under V3 the price windows are governed, and their reasons are produced
+    # by technical_compute. The builder carries them into window_states --
+    # it may not write metric_states, which is canonical state it has not
+    # assessed -- and this statement is the only place they can be read back.
+    # Omitting it would have this writer emit a complete sidecar with every
+    # window entry missing: the unexplained-null defect recreated by the
+    # statement written to prevent it.
+    if "window_states" not in select_cols:
+        select_cols.append("window_states")
     col_list = ", ".join(select_cols)
     # The serving population, from the one definition all three components
     # share. The canonical writer must cover exactly what the API can return:
@@ -1052,7 +1054,7 @@ def canonical_assessments(df, masked, factor_states,
                 # inferred from the bare value: the producer's reason is the
                 # authoritative one.
                 assessed[metric] = window_assessment(
-                    metric, row.get(mapping[metric]), row.get("metric_states"))
+                    metric, row.get(mapping[metric]), row.get("window_states"))
             elif metric not in assessed:
                 # The frame carries every governed column, so applicability
                 # should have assessed it. Reaching here means a column was

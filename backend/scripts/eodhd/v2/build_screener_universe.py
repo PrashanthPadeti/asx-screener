@@ -167,7 +167,7 @@ INSERT INTO screener.universe (
     dividend_cagr_5y, bvps_cagr_3y, bvps_cagr_5y,
     return_2y, return_3y, return_4y, return_5y, return_6y,
     return_7y, return_8y, return_9y, return_10y, return_15y,
-    metric_states,
+    window_states,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     revenue_growth_yoy_q, eps_growth_yoy_q, net_income_growth_yoy_q,
@@ -665,11 +665,20 @@ SELECT
     -- implementation of the anchor rule, free to disagree with the one that
     -- produced the number it explains.
     --
-    -- The canonical writer later rewrites this column with the complete
-    -- sidecar for the model version, window entries included. It is written
-    -- here so that the entries exist before that statement runs and are not
-    -- lost between the two producers.
-    dm.metric_states  AS metric_states,
+    -- Carried as window_states, NOT as metric_states, and the distinction is
+    -- the orchestration contract rather than a naming preference.
+    --
+    -- metric_states is canonical state: this builder may revoke a canonical
+    -- claim but may never make one, because it has assessed nothing. Writing
+    -- the sidecar here would be the builder claiming an attribution it did
+    -- not compute. test_the_universe_builder_revokes_canonical_state_and_
+    -- never_claims_it caught exactly that, and it was right to.
+    --
+    -- window_states is provisional input, with the same standing as
+    -- return_1y beside it: produced upstream, carried here unassessed, and
+    -- turned into contract state by the canonical writer, which reads it and
+    -- emits the real sidecar in one statement.
+    dm.metric_states  AS window_states,
 
     -- ── Latest-quarter YoY growth (from quarterly_metrics) ───────────────────
     qm.revenue_growth_yoy    AS revenue_growth_yoy_q,
@@ -1368,6 +1377,13 @@ LEFT JOIN LATERAL (
            bb_upper, bb_lower, atr_14, adx_14, obv,
            hv_20d, hv_60d, pct_from_ath,
            return_1w, return_1m, return_3m, return_6m, return_ytd, return_1y,
+           -- The multi-year horizons, and why any window is empty. Both are
+           -- read by the outer SELECT, so both must be selected here: a
+           -- lateral exposes only what it lists, and a column referenced but
+           -- not selected is a planner error rather than a silent NULL.
+           return_2y, return_3y, return_4y, return_5y, return_6y,
+           return_7y, return_8y, return_9y, return_10y, return_15y,
+           metric_states,
            above_vwap, dollar_volume_avg_20d,
            -- Tier 2 signals
            dma50_ratio, dma200_ratio,
@@ -1778,7 +1794,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     -- a previous run beside a value that is now present -- a stale reason
     -- next to a good number, which the sidecar's own rule forbids as firmly
     -- as it forbids a NULL with no entry.
-    metric_states           = EXCLUDED.metric_states,
+    window_states           = EXCLUDED.window_states,
     -- Latest-quarter growth
     revenue_growth_yoy_q    = EXCLUDED.revenue_growth_yoy_q,
     eps_growth_yoy_q        = EXCLUDED.eps_growth_yoy_q,

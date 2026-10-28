@@ -51,6 +51,9 @@ from compute.engine.split_adjustment import (  # noqa: E402
 from compute.engine.serving_population import (  # noqa: E402
     excluded_types_predicate,
 )
+from compute.engine.return_windows import (  # noqa: E402
+    WINDOWS, window_return, rolling_extreme,
+)
 
 
 # Cast NUMERIC → Python float automatically
@@ -522,8 +525,11 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["dollar_volume_avg_20d"] = (c * avg20 / 1_000_000).round(2)
 
     # ── 52-week & ATH/ATL ─────────────────────────────────────────────────────
-    df["high_52w"]          = h.rolling(252).max().round(4)
-    df["low_52w"]           = l.rolling(252).min().round(4)
+    # "52-week" is a calendar claim; rolling(252) counted rows, so a thin
+    # stock's 52-week high was drawn from 15 months and a suspended one never
+    # got a value at all. Blank until the series genuinely spans the window.
+    df["high_52w"]          = rolling_extreme(h, df["date"], "max").round(4)
+    df["low_52w"]           = rolling_extreme(l, df["date"], "min").round(4)
     df["ath_price"]         = h.expanding().max().round(4)
     df["atl_price"]         = l.expanding().min().round(4)
     df["pct_from_52w_high"] = ((c - df["high_52w"]) / df["high_52w"].replace(0, np.nan)).round(4)
@@ -571,12 +577,16 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     df["new_ath"]       = (h >= df["ath_price"]) & (h > h.shift(1))
 
     # ── Returns ───────────────────────────────────────────────────────────────
+    # The previous close is the previous close, whenever it was: no window.
     df["return_1d"]  = (c / c.shift(1).replace(0, np.nan)   - 1).round(4)
-    df["return_1w"]  = (c / c.shift(5).replace(0, np.nan)   - 1).round(4)
-    df["return_1m"]  = (c / c.shift(21).replace(0, np.nan)  - 1).round(4)
-    df["return_3m"]  = (c / c.shift(63).replace(0, np.nan)  - 1).round(4)
-    df["return_6m"]  = (c / c.shift(126).replace(0, np.nan) - 1).round(4)
-    df["return_1y"]  = (c / c.shift(252).replace(0, np.nan) - 1).round(4)
+
+    # Everything below names a PERIOD, so it is anchored on dates rather than
+    # on row counts. `c.shift(252)` counts trading days, and for a stock that
+    # trades intermittently that is not a year -- MRD's was 467 days. Where
+    # no quote exists near the start of the window the return is None, not
+    # the nearest price we happen to hold.
+    for col, (length_days, grace_days) in WINDOWS.items():
+        df[col] = window_return(c, df["date"], length_days, grace_days).round(4)
 
     # YTD: return from last close of previous calendar year
     df["_year"] = df["date"].dt.year

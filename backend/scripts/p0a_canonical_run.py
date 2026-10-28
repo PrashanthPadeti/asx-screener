@@ -182,8 +182,14 @@ def verify_schema(cur) -> None:
 #: What the driver must be running under. Stated here rather than derived from
 #: the constant it is checking, so a change to that constant fails this rather
 #: than silently redefining what "correct" means.
-EXPECTED_MODEL = "FACTOR_MODEL_V2"
-EXPECTED_GOVERNED = 72
+#:
+#: Re-pinned for FACTOR_MODEL_V3 (v11.2.64). V3 adds the six price windows and
+#: both 52-week extremes to V2's 72, so the contract this driver executes under
+#: is now 80 governed metrics. The refusal that forced this edit is the design
+#: working: v11.2.63 moved LATEST_MODEL_VERSION and the driver declined to
+#: publish under a contract nobody had confirmed.
+EXPECTED_MODEL = "FACTOR_MODEL_V3"
+EXPECTED_GOVERNED = 80
 #: The static REQUIRED_STAGES tuple is no longer what publication uses -- each
 #: plan carries its own required set -- so asserting equality against it would
 #: be a tripwire on something the driver has stopped consulting.

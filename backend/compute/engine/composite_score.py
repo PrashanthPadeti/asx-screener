@@ -97,7 +97,33 @@ log = logging.getLogger(__name__)
 #: Every field the applicability layer reads as text belongs here. The failure
 #: is silent: a non-numeric column left out becomes a column of NaN, and the
 #: gate that needed it sees a value that was never missing in the database.
-NON_NUMERIC = {"asx_code", "sector", "industry", "reporting_currency"}
+#: Selected columns that must never be coerced numerically.
+#:
+#: This is the DECLARATION. It is no longer the enforcement: the coercion
+#: below classifies each column by the type the database actually returned,
+#: because this list is maintained by hand and was twice wrong in the same
+#: way -- reporting_currency in run 7, window_states in run 33, each added to
+#: the SELECT in one place and forgotten here.
+NON_NUMERIC = {"asx_code", "sector", "industry", "reporting_currency",
+               "window_states"}
+
+#: PostgreSQL type codes that hold a quantity: smallint, bigint, integer,
+#: real, double precision, numeric.
+#:
+#: Spelled out rather than taken from psycopg2.NUMBER because that set is the
+#: driver's answer to a DB-API question about Python conversion, not a
+#: statement about which columns this scorer may coerce, and the two are free
+#: to differ in a future release of either.
+NUMERIC_TYPE_CODES = frozenset({21, 20, 23, 700, 701, 1700})
+
+
+def _is_numeric_type(type_code) -> bool:
+    """Did the database return this column as a quantity?
+
+    Anything else -- text, jsonb, date, boolean, an enum, an array -- is a
+    value `pd.to_numeric(errors="coerce")` would silently replace with NaN.
+    """
+    return type_code in NUMERIC_TYPE_CODES
 
 _DEC2FLOAT = psycopg2.extensions.new_type(
     psycopg2.extensions.DECIMAL.values, "DEC2FLOAT",
@@ -673,6 +699,10 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
         WHERE {serving_predicate()}
     """)
     rows = cur.fetchall()
+    # What the database said each column is, captured here because
+    # cur.description is gone once the cursor closes. This is the authority
+    # the numeric coercion below uses.
+    result_types = {d.name: d.type_code for d in cur.description}
 
     # One watermark for the run. The income factor cannot be scored over a
     # window the dividend feed has not observed, and that has to be decided
@@ -699,7 +729,39 @@ def run(conn, dry_run: bool = False, run_id: Optional[int] = None,
     # published from USD earnings against an AUD price -- the exact defect the
     # gate exists to stop, undone by a coercion two layers above it. Run 7,
     # 30 Sep 2026.
-    numeric_cols = [c for c in select_cols if c not in NON_NUMERIC]
+    # The database decides what is numeric, not the list above.
+    #
+    # NON_NUMERIC alone has now failed twice in the same shape: a column is
+    # added to the SELECT and not added here, and `errors="coerce"` turns
+    # every value in it into NaN without a word. Run 7 destroyed
+    # reporting_currency that way; run 33 destroyed window_states, the
+    # sidecar carrying the reasons the price windows are empty -- the
+    # unexplained-null defect this release exists to remove, recreated by the
+    # statement that reads it.
+    #
+    # `result_types` is the type each column came back as, taken from the
+    # cursor that fetched it. A column the driver did not return as a number
+    # is not coerced, whether or not anyone remembered to declare it. The
+    # declaration is still checked, and a disagreement refuses the run: a
+    # column arriving as text when the list says it is numeric is either a
+    # schema change or a defect, and both deserve a stop rather than a frame
+    # of NaN. Nothing is mutated at this point, so refusing here costs a run
+    # and no data.
+    undeclared = sorted(c for c in select_cols
+                        if c not in NON_NUMERIC
+                        and c in result_types
+                        and not _is_numeric_type(result_types[c]))
+    if undeclared:
+        raise WriteRefused(
+            f"these columns were selected and are not numeric in the "
+            f"database, but are not declared in NON_NUMERIC: "
+            f"{', '.join(f'{c} (type {result_types[c]})' for c in undeclared)}. "
+            f"Coercing them would replace every value with NaN silently. Add "
+            f"them to NON_NUMERIC if they belong in the frame as they are.")
+
+    numeric_cols = [c for c in select_cols
+                    if c not in NON_NUMERIC
+                    and _is_numeric_type(result_types.get(c))]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 

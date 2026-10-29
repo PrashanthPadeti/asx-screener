@@ -791,6 +791,48 @@ const NL_EXAMPLES = [
   'Healthcare companies with no debt',
 ]
 
+// ── Query Mode errors ───────────────────────────────────────────────────────
+// A typo and an unsupported capability are both 422s and used to share one
+// heading. "Parse Error" sent a customer hunting for a mistake in
+// `roe > net_margin`, where both field names are valid and the query parsed
+// perfectly -- the build simply cannot compare two governed metrics yet. The
+// Field Reference hint was wrong in that case for the same reason, so it is
+// shown only where a field name could actually be at fault.
+//
+// Keyed on a code the API sets at the raising site. Matching the message
+// prose would break the first time the wording is improved.
+interface QueryError { code: string; message: string }
+
+const QUERY_ERROR_PRESENTATION: Record<string,
+  { title: string; checkFields: boolean }> = {
+  parse_error:              { title: 'Parse Error',   checkFields: true  },
+  comparison_unsupported:   { title: 'Not Supported Yet', checkFields: false },
+}
+
+const DEFAULT_QUERY_ERROR = { title: 'Query Error', checkFields: false }
+
+/**
+ * Normalise whatever a failed screener call carries into {code, message}.
+ *
+ * `detail` is now an object for Query Mode and AI Query refusals and a bare
+ * string everywhere else, including transport failures. Rendering an object
+ * as a React child THROWS, so a caller that reaches for `detail` directly
+ * turns a handled 422 into a blank page -- which is what AI Query would have
+ * done, since it shares these raise sites and displays `detail` as text.
+ */
+function toQueryError(e: unknown): QueryError {
+  const detail = (e as { response?: { data?: { detail?: unknown } } })
+    ?.response?.data?.detail
+  if (detail && typeof detail === 'object') {
+    const d = detail as { code?: string; message?: string }
+    if (typeof d.message === 'string') {
+      return { code: d.code ?? '', message: d.message }
+    }
+  }
+  if (typeof detail === 'string') return { code: '', message: detail }
+  return { code: '', message: (e as Error)?.message || 'Request failed' }
+}
+
 export default function ScreenerPage() {
   const { user } = useAuth()
   const userPlan  = user?.plan ?? 'free'
@@ -846,7 +888,7 @@ export default function ScreenerPage() {
   const queryTextareaRef                              = useRef<HTMLTextAreaElement>(null)
   const [queryText, setQueryText]                     = useState('')
   const [queryLoading, setQueryLoading]               = useState(false)
-  const [queryError, setQueryError]                   = useState<string | null>(null)
+  const [queryError, setQueryError]                   = useState<QueryError | null>(null)
   const [upgradeNotice, setUpgradeNotice]             = useState<string | null>(null)
   const [queryFields, setQueryFields]                 = useState<QueryFieldRef[]>([])
   const [queryFieldSearch, setQueryFieldSearch]       = useState('')
@@ -1353,10 +1395,10 @@ export default function ScreenerPage() {
       setNlTotalPages(res.total_pages)
       setNlPage(page)
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        || (e as Error).message
-        || 'Failed to run AI screen'
-      setNlError(msg)
+      // Through the normaliser: AI Query shares the Query Mode raise sites,
+      // whose detail is now an object. Assigning that to a string state and
+      // rendering it throws.
+      setNlError(toQueryError(e).message || 'Failed to run AI screen')
     } finally {
       setNlLoading(false)
     }
@@ -1382,10 +1424,7 @@ export default function ScreenerPage() {
       setTotalPages(res.total_pages)
       setIsCapped(res.is_capped ?? false)
     } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-        || (e as Error).message
-        || 'Query failed'
-      setQueryError(msg)
+      setQueryError(toQueryError(e))
     } finally {
       setQueryLoading(false)
     }
@@ -1419,15 +1458,32 @@ export default function ScreenerPage() {
     }
     const start = ta.selectionStart
     const end   = ta.selectionEnd
-    const before = queryText.slice(0, start)
+    let before   = queryText.slice(0, start)
     const after  = queryText.slice(end)
+
+    // Replace the partial field name being typed instead of appending beside
+    // it. Typing "net" to narrow the Field Reference panel and then clicking
+    // net_margin produced "roe > net net_margin" -- a parse error naming a
+    // field nobody meant to write, with the panel telling the customer to go
+    // and check their field names.
+    //
+    // Only when the clicked key actually continues what was typed, so
+    // "roe > " followed by a click still appends, an operator is never eaten,
+    // and a non-empty selection keeps its existing replace behaviour.
+    if (start === end) {
+      const partial = before.match(/[A-Za-z_][A-Za-z0-9_]*$/)
+      if (partial && fieldKey.toLowerCase().startsWith(partial[0].toLowerCase())) {
+        before = before.slice(0, before.length - partial[0].length)
+      }
+    }
+
     const sep    = before && !before.endsWith(' ') && !before.endsWith('\n') ? ' ' : ''
     const newText = before + sep + fieldKey + after
     setQueryText(newText)
     // Restore cursor after the inserted text
     setTimeout(() => {
       ta.focus()
-      const newPos = start + sep.length + fieldKey.length
+      const newPos = before.length + sep.length + fieldKey.length
       ta.setSelectionRange(newPos, newPos)
     }, 0)
   }
@@ -2101,18 +2157,24 @@ export default function ScreenerPage() {
               )}
 
               {/* Error banner */}
-              {queryError && (
-                <div className="flex items-start gap-2 mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-semibold text-red-700">Parse Error</p>
-                    <p className="text-sm text-red-600 mt-0.5">{queryError}</p>
-                    <p className="text-xs text-red-400 mt-1">
-                      Check the Field Reference panel on the right for valid field names.
-                    </p>
+              {queryError && (() => {
+                const presentation =
+                  QUERY_ERROR_PRESENTATION[queryError.code] ?? DEFAULT_QUERY_ERROR
+                return (
+                  <div className="flex items-start gap-2 mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <AlertCircle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-red-700">{presentation.title}</p>
+                      <p className="text-sm text-red-600 mt-0.5">{queryError.message}</p>
+                      {presentation.checkFields && (
+                        <p className="text-xs text-red-400 mt-1">
+                          Check the Field Reference panel on the right for valid field names.
+                        </p>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                )
+              })()}
             </div>
           </div>
 

@@ -217,13 +217,37 @@ def test_the_type_classifier_answers_correctly():
         from compute.engine.composite_score import _is_numeric_type
     except ImportError as e:
         raise Skipped(f"composite_score's dependencies ({e.name})")
-    # smallint, bigint, integer, real, double precision, numeric
-    for oid in (21, 20, 23, 700, 701, 1700):
-        assert _is_numeric_type(oid), f"type {oid} should be numeric"
-    # text, varchar, jsonb, json, date, timestamptz, boolean, text[]
-    for oid in (25, 1043, 3802, 114, 1082, 1184, 16, 1009):
+    # smallint, bigint, integer, real, double precision, numeric, boolean
+    for oid in (21, 20, 23, 700, 701, 1700, 16):
+        assert _is_numeric_type(oid), f"type {oid} survives coercion intact"
+    # text, varchar, jsonb, json, date, timestamptz, text[]
+    for oid in (25, 1043, 3802, 114, 1082, 1184, 1009):
         assert not _is_numeric_type(oid), f"type {oid} must not be coerced"
     assert not _is_numeric_type(None)
+
+
+def test_the_classifier_admits_booleans_for_the_stated_reason():
+    """Boolean is admitted on a claim about pandas, so check the claim.
+
+    The dry-run of v11.2.66 refused four boolean columns -- is_reit,
+    is_miner and the two margin-expansion flags -- which the scorer has
+    always coerced. Admitting them is only correct if coercion really is
+    lossless for them; if that ever stops being true, four flags silently
+    become NaN and this test is what says so.
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise Skipped("pandas — run this on the server, where scoring runs")
+    out = pd.to_numeric(pd.Series([True, False, None], dtype=object),
+                        errors="coerce")
+    assert out[0] == 1 and out[1] == 0 and pd.isna(out[2]), (
+        f"boolean coercion is no longer lossless: {list(out)}. Remove 16 "
+        f"from NUMERIC_TYPE_CODES and declare the boolean columns instead.")
+    # And the types the classifier rejects really are destroyed.
+    for val in ("USD", {"return_1y": {"state": "x"}}, pd.Timestamp("2026-10-29")):
+        assert pd.isna(pd.to_numeric(pd.Series([val], dtype=object),
+                                     errors="coerce")[0])
 
 
 def test_a_mangled_sidecar_stops_the_run_rather_than_emptying_it():

@@ -107,21 +107,29 @@ log = logging.getLogger(__name__)
 NON_NUMERIC = {"asx_code", "sector", "industry", "reporting_currency",
                "window_states"}
 
-#: PostgreSQL type codes that hold a quantity: smallint, bigint, integer,
-#: real, double precision, numeric.
+#: PostgreSQL type codes that survive `pd.to_numeric(errors="coerce")` with
+#: nothing lost: smallint, bigint, integer, real, double precision, numeric,
+#: and boolean.
+#:
+#: The test is what coercion DESTROYS, not what counts as a quantity. Those
+#: are different questions and the first one is the one that matters here. A
+#: boolean is not a quantity, but True/False/NULL come through as 1.0/0.0/NaN
+#: -- three states in, three states out -- so coercing it loses nothing and
+#: this is what the scorer has always done with is_reit, is_miner and the two
+#: margin flags. Text, jsonb, date and arrays all collapse to NaN.
 #:
 #: Spelled out rather than taken from psycopg2.NUMBER because that set is the
 #: driver's answer to a DB-API question about Python conversion, not a
 #: statement about which columns this scorer may coerce, and the two are free
 #: to differ in a future release of either.
-NUMERIC_TYPE_CODES = frozenset({21, 20, 23, 700, 701, 1700})
+NUMERIC_TYPE_CODES = frozenset({21, 20, 23, 700, 701, 1700, 16})
 
 
 def _is_numeric_type(type_code) -> bool:
-    """Did the database return this column as a quantity?
+    """Can this column go through numeric coercion without losing anything?
 
-    Anything else -- text, jsonb, date, boolean, an enum, an array -- is a
-    value `pd.to_numeric(errors="coerce")` would silently replace with NaN.
+    False for text, jsonb, date, timestamps, enums and arrays -- every value
+    in such a column is silently replaced with NaN.
     """
     return type_code in NUMERIC_TYPE_CODES
 

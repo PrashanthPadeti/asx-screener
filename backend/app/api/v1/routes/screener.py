@@ -126,6 +126,25 @@ def _log_parse_error(query: str, exc: Exception) -> None:
     log.warning("query parse refused: %s | query=%r", exc, text)
 
 
+# ── What a 422 from Query Mode actually means ────────────────────────────────
+# Two unrelated refusals shared one label. `roe > net net_margin` is a typo;
+# `roe > net_margin` is a capability this build does not have. Both returned
+# 422 with prose, and the panel headed both "Parse Error" and told the
+# customer to check the Field Reference for valid field names -- advice that
+# is actively wrong in the second case, where both field names are valid.
+#
+# The code is set by the raising site and never inferred from the message.
+# A client that classified by matching the prose would break the first time
+# the wording was improved, and the wording is meant to be improved.
+ERROR_PARSE                  = "parse_error"
+ERROR_COMPARISON_UNSUPPORTED = "comparison_unsupported"
+
+
+def _query_error(code: str, exc: Exception) -> dict:
+    """The body of a 422 the Query Mode panel can head correctly."""
+    return {"code": code, "message": str(exc)}
+
+
 # ── Field registry ────────────────────────────────────────────────────────────
 # col   : SQL column name or expression in screener.universe (alias: u)
 # scale : multiply user-supplied filter value by this before comparing
@@ -997,7 +1016,9 @@ def _plan_for(req, scope):
         # A capability this build does not have, not a transient failure.
         # 503 would invite a retry for something no amount of waiting
         # supplies.
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(
+            status_code=422,
+            detail=_query_error(ERROR_COMPARISON_UNSUPPORTED, exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2301,7 +2322,8 @@ async def query_screener(
         parsed = parse_query_typed(req.query, ALLOWED_FIELDS)
     except QueryParseError as exc:
         _log_parse_error(req.query, exc)
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422,
+                            detail=_query_error(ERROR_PARSE, exc))
 
     # AI Query interprets language and then stops. From here the path is
     # identical to the ordinary screener: canonical identity, the same
@@ -2335,7 +2357,10 @@ async def query_screener(
         raise HTTPException(status_code=400, detail=str(exc))
     except ComparisonUnsupported as exc:
         # A capability this build does not have, not a transient failure.
-        raise HTTPException(status_code=422, detail=str(exc))
+        _log_parse_error(req.query, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=_query_error(ERROR_COMPARISON_UNSUPPORTED, exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2468,7 +2493,8 @@ async def export_query_screener(
         parsed = parse_query_typed(req.query, ALLOWED_FIELDS)
     except QueryParseError as exc:
         _log_parse_error(req.query, exc)
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422,
+                            detail=_query_error(ERROR_PARSE, exc))
 
     try:
         parsed = canonicalise(
@@ -2496,7 +2522,10 @@ async def export_query_screener(
         raise HTTPException(status_code=400, detail=str(exc))
     except ComparisonUnsupported as exc:
         # A capability this build does not have, not a transient failure.
-        raise HTTPException(status_code=422, detail=str(exc))
+        _log_parse_error(req.query, exc)
+        raise HTTPException(
+            status_code=422,
+            detail=_query_error(ERROR_COMPARISON_UNSUPPORTED, exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

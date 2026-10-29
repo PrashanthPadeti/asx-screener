@@ -58,12 +58,45 @@ class Criterion:
     canonical: Optional[str] = None
     governed: bool = False
 
-    def resolved(self, definition: FieldDef) -> "Criterion":
-        return Criterion(self.field, self.role, self.operator, self.value,
-                         self.kind, definition.canonical, definition.governed)
+    #: Set when the right-hand side is another FIELD rather than a literal, as
+    #: in ``total_equity > total_debt``. ``value`` is then meaningless and is
+    #: None; ``rhs_field`` is the discriminator, not a flag beside it, so the
+    #: two states cannot disagree.
+    #:
+    #: ``fields()`` has always returned a tuple precisely so a criterion could
+    #: name more than one field. This is the first thing that does.
+    rhs_field: Optional[str] = None
+    rhs_canonical: Optional[str] = None
+    rhs_governed: bool = False
+
+    @property
+    def is_comparison(self) -> bool:
+        """True when both sides are fields."""
+        return self.rhs_field is not None
+
+    @property
+    def touches_governed(self) -> bool:
+        """Either side. A one-sided check reads a governed RHS as ungoverned."""
+        return self.governed or self.rhs_governed
+
+    def resolved(self, definition: FieldDef,
+                 rhs_definition: Optional[FieldDef] = None) -> "Criterion":
+        if self.rhs_field is not None and rhs_definition is None:
+            raise UnknownField(
+                f"criterion compares '{self.field}' against "
+                f"'{self.rhs_field}' but only the left side was resolved; "
+                f"both sides carry their own governance")
+        return Criterion(
+            self.field, self.role, self.operator, self.value, self.kind,
+            definition.canonical, definition.governed,
+            self.rhs_field,
+            rhs_definition.canonical if rhs_definition else None,
+            rhs_definition.governed if rhs_definition else False)
 
     def fields(self) -> tuple[str, ...]:
-        return (self.field,)
+        if self.rhs_field is None:
+            return (self.field,)
+        return (self.field, self.rhs_field)
 
 
 # ── The expression tree ───────────────────────────────────────────────────────
@@ -149,11 +182,15 @@ class ParsedQuery:
 
     @property
     def governed_criteria(self) -> tuple[Criterion, ...]:
-        return tuple(c for c in self.criteria if c.governed)
+        # touches_governed, not governed: a criterion whose RIGHT side is a
+        # governed metric needs the run contract just as much as one whose
+        # left side is, and reading only the left would resolve no scope for
+        # it.
+        return tuple(c for c in self.criteria if c.touches_governed)
 
     @property
     def ungoverned_criteria(self) -> tuple[Criterion, ...]:
-        return tuple(c for c in self.criteria if not c.governed)
+        return tuple(c for c in self.criteria if not c.touches_governed)
 
     @property
     def requires_run_scope(self) -> bool:
@@ -176,8 +213,12 @@ def canonicalise(parsed: ParsedQuery,
     stage has to guess whether ``ev_to_ebitda`` and ``ev_ebitda`` are the same
     concept. Unknown fields raise here rather than at the database.
     """
-    expression = map_criteria(
-        parsed.expression, lambda c: c.resolved(resolve(registry, c.field)))
+    def _resolve_both(c: Criterion) -> Criterion:
+        return c.resolved(
+            resolve(registry, c.field),
+            resolve(registry, c.rhs_field) if c.rhs_field else None)
+
+    expression = map_criteria(parsed.expression, _resolve_both)
 
     ordering = parsed.ordering
     if ordering is not None:
@@ -186,6 +227,39 @@ def canonicalise(parsed: ParsedQuery,
                             definition.canonical, definition.governed)
 
     return ParsedQuery(expression, ordering, parsed.raw)
+
+
+# ── Field-to-field comparison: what is not yet supported ─────────────────────
+
+class ComparisonUnsupported(Exception):
+    """A field-to-field comparison this build cannot answer correctly.
+
+    Raised rather than degraded. A governed metric answers three ways --
+    true, false, and "not applicable to this company, for this reason" -- and
+    a comparison of two governed metrics has two such verdicts to combine.
+    Compiling it as an ordinary SQL comparison would answer with two of the
+    three states and discard the third silently, which is the defect class
+    the applicability contract exists to prevent, reappearing in a new
+    surface.
+
+    So the capability is absent, and says so, instead of being present and
+    wrong. Removing this refusal is Stage 2: ``three_valued_sql`` carrying
+    APPLICABLE(lhs) AND APPLICABLE(rhs) AND (lhs op rhs), with the
+    withholding reason naming whichever side was unavailable.
+    """
+
+
+def assert_comparison_is_ungoverned(lhs: FieldDef, rhs: FieldDef) -> None:
+    """Refuse a comparison that names a governed metric on either side."""
+    offending = [d.key for d in (lhs, rhs) if d.governed]
+    if not offending:
+        return
+    raise ComparisonUnsupported(
+        f"comparing two fields is not yet available for governed metrics "
+        f"({', '.join(offending)}). A governed metric can be inapplicable to "
+        f"a company rather than merely above or below a threshold, and this "
+        f"build cannot combine two such verdicts. Compare against a number "
+        f"instead, or use two separate conditions.")
 
 
 # ── The one-way adapter ───────────────────────────────────────────────────────
@@ -241,7 +315,16 @@ def to_legacy_sql(parsed: ParsedQuery,
         if operator is None:
             raise UnknownField(f"unsupported operator: {node.operator!r}")
 
-        if node.kind == "boolean":
+        if node.rhs_field is not None:
+            rhs = resolve(registry, node.rhs_field)
+            # The governed exemption above covers criteria that already
+            # compiled through this adapter before P0-A existed. A capability
+            # added AFTER it does not inherit that exemption: a governed
+            # comparison has two applicability verdicts and this path can
+            # express neither, so it refuses rather than answering.
+            assert_comparison_is_ungoverned(definition, rhs)
+            clause = f"({definition.column}) {operator} ({rhs.column})"
+        elif node.kind == "boolean":
             want_true = node.value if operator == "=" else not node.value
             clause = (f"({definition.column})::int != 0" if want_true
                       else f"({definition.column})::int = 0")

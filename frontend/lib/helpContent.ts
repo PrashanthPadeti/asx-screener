@@ -241,12 +241,13 @@ export const SCREENER_SECTIONS: SectionDef[] = [
     title: 'Query Mode',
     badge: 'Pro · Premium',
     summary: 'Write SQL-like WHERE conditions directly against the ASX database. Supports AND, OR, and parenthesised grouping — letting you express complex logic that the visual filter builder cannot.',
-    howToUse: 'Type field names, an operator (>, <, >=, <=, =, !=), and a value. Use AND/OR to chain conditions. Wrap groups in parentheses. Ctrl+Enter runs the query. Use the Field Reference panel on the right to browse and insert field names.',
+    howToUse: 'Type field names, an operator (>, <, >=, <=, =, !=), and either a value or a second field name. Use AND/OR to chain conditions. Wrap groups in parentheses. Ctrl+Enter runs the query. Use the Field Reference panel on the right to browse and insert field names.',
     filters: [
       { name: 'roe > 15',                            desc: 'Single condition — Return on Equity above 15%.' },
       { name: 'roe > 15 AND roce > 12',              desc: 'AND logic — both conditions must be true.' },
       { name: 'roe > 15 AND (roce > 12 OR roic > 12)', desc: 'Parenthesised OR — ROE must be > 15, plus either ROCE or ROIC > 12.' },
       { name: 'market_cap > 1000 AND pe_ratio < 15', desc: 'Market cap above $1B AUD AND P/E ratio below 15.' },
+      { name: 'total_equity > total_debt',           desc: 'Compare two fields — equity exceeds debt. Both sides must be numbers in the same unit, so AUD M against AUD M works and a % against AUD M is refused.' },
     ],
     columns: [
       { name: 'Field Reference',  desc: 'Right sidebar listing all 195 available fields. Click any field to insert it at your cursor.' },

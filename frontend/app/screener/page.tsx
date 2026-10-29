@@ -1996,7 +1996,7 @@ export default function ScreenerPage() {
                 </span>
               </div>
               <span className="text-xs text-gray-500 hidden sm:block">
-                Field names + operators · AND / OR · ( ) grouping · Ctrl+Enter to run
+                Field names + operators · compare to a number or another field · AND / OR · ( ) grouping · Ctrl+Enter to run
               </span>
             </div>
 
@@ -2007,7 +2007,7 @@ export default function ScreenerPage() {
                 value={queryText}
                 onChange={handleQueryChange}
                 onKeyDown={handleQueryKeyDown}
-                placeholder={`market_cap > 1000 AND\nsector = 'Materials' AND\nis_reit = false AND\n(roe > 10 OR roce > 10)`}
+                placeholder={`market_cap > 1000 AND\nsector = 'Materials' AND\ntotal_equity > total_debt AND\n(roe > 10 OR roce > 10)`}
                 rows={8}
                 className="w-full flex-1 font-mono text-sm bg-gray-50 border border-gray-200 rounded-lg p-3
                            text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-2

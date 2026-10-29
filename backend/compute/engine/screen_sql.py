@@ -626,6 +626,13 @@ def plan_screen(parsed, registry, scope: Optional[RunScope] = None,
 
     assert_role_is_decidable(parsed.expression)
 
+    # Before the run-scope check, deliberately. A governed comparison makes
+    # requires_run_scope true, so an unavailable snapshot would answer it with
+    # CompileError -> 503 "come back later" -- inviting a retry for a
+    # capability no amount of waiting supplies. What the build cannot do is
+    # decided before what the data cannot currently support.
+    _refuse_unsupported_comparisons(parsed, registry)
+
     if parsed.requires_run_scope and scope is None:
         raise CompileError(
             "this query reads governed metrics and no validated run scope was "
@@ -644,6 +651,12 @@ def plan_screen(parsed, registry, scope: Optional[RunScope] = None,
                     if node.operands else "FALSE")
 
         definition = resolve_field(registry, node.field)
+
+        # Checked before a parameter key is allocated: a comparison binds
+        # nothing, so taking a key for it would leave a hole in the sequence.
+        if getattr(node, "rhs_field", None) is not None:
+            return _comparison_sql(node, definition, registry, dialect)
+
         key = f"sp{counter[0]}"
         counter[0] += 1
 
@@ -695,6 +708,44 @@ def _scaled(value, definition):
     if definition.type == "number":
         return float(value) * definition.scale
     return value
+
+
+def _refuse_unsupported_comparisons(parsed, registry) -> None:
+    """Every field-to-field leaf, checked before anything else is decided."""
+    from app.core.parsed_query import assert_comparison_is_ungoverned, walk
+
+    for node in walk(parsed.expression):
+        if getattr(node, "rhs_field", None) is None:
+            continue
+        assert_comparison_is_ungoverned(resolve_field(registry, node.field),
+                                        resolve_field(registry, node.rhs_field))
+
+
+def _comparison_sql(node, definition, registry, dialect: Dialect) -> str:
+    """``field OP field``, for two ungoverned fields.
+
+    Governed metrics are refused here rather than compiled. The applicability
+    contract answers three ways and this expression can only carry two, so a
+    governed comparison would silently drop every company the metric does not
+    apply to -- indistinguishable, in the result, from a company that was
+    evaluated and failed. Stage 2 extends three_valued_sql to combine the two
+    verdicts; until then the capability is absent and says so.
+    """
+    from app.core.parsed_query import assert_comparison_is_ungoverned
+
+    rhs = resolve_field(registry, node.rhs_field)
+    assert_comparison_is_ungoverned(definition, rhs)
+
+    operator = _sql_operator(node.operator)
+    clause = f"({definition.column}) {operator} ({rhs.column})"
+
+    if node.role is CriterionType.EXCLUDED:
+        # Same shape as the ungoverned literal path below. Without the
+        # COALESCE, NOT(NULL) is NULL and a row with either side missing
+        # fails an EXCLUDED criterion it was never evaluated against.
+        false_literal = "FALSE" if dialect == "postgres" else "0"
+        clause = f"NOT COALESCE(({clause}), {false_literal})"
+    return clause
 
 
 def _ungoverned_sql(node, definition, key: str, params: dict,

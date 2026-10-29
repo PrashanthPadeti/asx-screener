@@ -36,8 +36,8 @@ from app.core.query_parser import (
     parse_query_typed, get_field_reference, QueryParseError,
 )
 from app.core.parsed_query import (
-    AllOf, Criterion as TypedCriterion, Direction, Ordering, ParsedQuery,
-    canonicalise,
+    AllOf, ComparisonUnsupported, Criterion as TypedCriterion, Direction,
+    Ordering, ParsedQuery, canonicalise,
 )
 from app.core.row_projection import expected_outputs, governed_columns, project_row
 from app.core.screener_fields import UnknownField, build_registry
@@ -993,6 +993,11 @@ def _plan_for(req, scope):
         # would tell the client to come back later for an operator we are
         # never going to support.
         raise HTTPException(status_code=400, detail=str(exc))
+    except ComparisonUnsupported as exc:
+        # A capability this build does not have, not a transient failure.
+        # 503 would invite a retry for something no amount of waiting
+        # supplies.
+        raise HTTPException(status_code=422, detail=str(exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2328,6 +2333,9 @@ async def query_screener(
         # would tell the client to come back later for an operator we are
         # never going to support.
         raise HTTPException(status_code=400, detail=str(exc))
+    except ComparisonUnsupported as exc:
+        # A capability this build does not have, not a transient failure.
+        raise HTTPException(status_code=422, detail=str(exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -2486,6 +2494,9 @@ async def export_query_screener(
         # would tell the client to come back later for an operator we are
         # never going to support.
         raise HTTPException(status_code=400, detail=str(exc))
+    except ComparisonUnsupported as exc:
+        # A capability this build does not have, not a transient failure.
+        raise HTTPException(status_code=422, detail=str(exc))
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

@@ -21,15 +21,31 @@ Supported syntax:
 
   Value types (determined by the field):
     number   →  operators >  >=  <  <=  =  !=  <>   value: 10, 15.5, -5
+                                                    OR another number field
     text     →  operators =  !=                     value: 'Materials', "Healthcare"
     boolean  →  operators =  !=                     value: true / false (or 1 / 0)
                 bare boolean field also means "= true", e.g.  is_reit AND roe > 10
+
+  Field-to-field comparison (number fields only):
+    total_equity > total_debt
+    cash > total_current_liabilities
+
+    Both sides must share a unit AND a scale. `roe > total_debt` is a
+    percentage against a figure in millions and is refused; so is a pair that
+    both say "%" while being stored on different scales, which would compare
+    0.10 against 10. Neither check catches the other.
+
+    Governed metrics are refused on either side for now -- a governed metric
+    can be INAPPLICABLE to a company rather than merely above or below, and
+    an ordinary SQL comparison cannot carry two such verdicts. See
+    parsed_query.ComparisonUnsupported.
 
   Examples:
     roe > 10 AND (roce > 10 OR roic > 10)
     sector = 'Materials' AND market_cap > 1000
     is_reit = true AND dividend_yield > 5
     is_miner AND pe_ratio < 15 AND sector != 'Energy'
+    total_equity > total_debt AND market_cap > 1000
 
 Field names are matched case-insensitively against a combined alias map that
 includes all ALLOWED_FIELDS keys plus human-readable aliases (see EXTRA_ALIASES).
@@ -775,6 +791,46 @@ class _ConditionNode:
         return f"({self.col}) {self.op} :{key}"
 
 
+class _FieldComparisonNode:
+    """``field OP field`` — both sides are columns, neither is a parameter.
+
+    Nothing is bound here. The two columns are drawn from ALLOWED_FIELDS and
+    never from the query text, so there is no user-supplied value in the
+    fragment at all -- this shape carries strictly less injection surface
+    than the literal comparison beside it, not more.
+
+    Units and scale were checked at parse time; by the time a node exists the
+    two sides are known to be commensurable. Governance is NOT checked here:
+    the parser resolves aliases to field keys and deliberately knows nothing
+    of the registry, so the refusal for governed metrics lives where the
+    registry does, in ``to_legacy_sql`` and ``plan_screen``.
+    """
+
+    def __init__(self, left_col: str, op: str, right_col: str,
+                 left_key: str, right_key: str):
+        self.left_col  = left_col
+        self.op        = op
+        self.right_col = right_col
+        self.left_key  = left_key
+        self.right_key = right_key
+
+    def to_sql(self, params: dict, counter: list) -> str:
+        return f"({self.left_col}) {self.op} ({self.right_col})"
+
+    def to_expression(self):
+        from app.core.parsed_query import Criterion
+        from compute.engine.screen_predicates import CriterionType
+        canonical = _ConditionNode._CANONICAL.get(self.op)
+        if canonical is None:
+            raise QueryParseError(
+                f"operator '{self.op}' has no canonical form; add it to "
+                f"_ConditionNode._CANONICAL alongside _OP_SQL")
+        # value is None and rhs_field is set: rhs_field is the discriminator,
+        # so there is no second flag that could disagree with it.
+        return Criterion(self.left_key, CriterionType.REQUIRED, canonical,
+                         None, kind="number", rhs_field=self.right_key)
+
+
 class _AndNode:
     def __init__(self, left, right):
         self.left  = left
@@ -993,11 +1049,22 @@ class _Parser:
     # ── Typed value parsers ─────────────────────────────────────────────────────
 
     def _parse_number_value(self, field_info, col, sql_op, op_tok, raw_phrase):
+        # A word here is a field name, not a malformed number:
+        #   total_equity > total_debt
+        # The database has always been able to answer this; only the grammar
+        # refused it. Resolution happens before the NUMBER check so the error
+        # message below stays about values rather than about fields.
+        nxt = self._peek()
+        if (nxt is not None and nxt.type == TT_WORD
+                and nxt.value.upper() not in _KEYWORDS):
+            return self._parse_field_comparison(field_info, col, sql_op,
+                                                op_tok, raw_phrase)
+
         if self._eof() or self._peek().type != TT_NUMBER:
             got = self._peek().value if not self._eof() else "end of query"
             raise QueryParseError(
-                f"Expected a numeric value after '{raw_phrase} {op_tok.value}', "
-                f"got '{got}'."
+                f"Expected a numeric value or a field name after "
+                f"'{raw_phrase} {op_tok.value}', got '{got}'."
             )
         val_tok = self._consume()
         try:
@@ -1011,6 +1078,86 @@ class _Parser:
         return _ConditionNode(col, sql_op, db_value, kind="number",
                               field_key=field_info["_key"],
                               user_value=raw_value)
+
+    def _collect_words(self) -> list[str]:
+        """Word tokens up to the next operator, paren, number or connector."""
+        words: list[str] = []
+        while not self._eof():
+            tok = self._peek()
+            if tok.type != TT_WORD or tok.value.upper() in _KEYWORDS:
+                break
+            words.append(self._consume().value)
+        return words
+
+    def _resolve_phrase(self, words: list[str]):
+        """Greedy longest-match against the alias map, as the LHS does."""
+        for length in range(len(words), 0, -1):
+            candidate = " ".join(words[:length]).lower()
+            if candidate in self.alias_map:
+                return self.alias_map[candidate], length
+        return None, 0
+
+    def _parse_field_comparison(self, left_info, left_col, sql_op, op_tok,
+                                raw_phrase):
+        """``field OP field`` — both sides resolved, units checked."""
+        words   = self._collect_words()
+        phrase  = " ".join(words)
+        rhs_key, matched = self._resolve_phrase(words)
+
+        if rhs_key is None:
+            raise QueryParseError(
+                f"Expected a number or a field name after "
+                f"'{raw_phrase} {op_tok.value}', got '{phrase}'. "
+                "See the Field Reference panel for all available fields."
+            )
+        if matched < len(words):
+            extra = " ".join(words[matched:])
+            raise QueryParseError(
+                f"Unexpected text '{extra}' after field name "
+                f"'{' '.join(words[:matched])}'. Did you miss an AND or OR?"
+            )
+
+        right_info = dict(self.allowed_fields[rhs_key])
+        if right_info.get("type", "number") != "number":
+            raise QueryParseError(
+                f"'{rhs_key}' is a {right_info.get('type', 'number')} field, "
+                f"so it cannot be compared against the number field "
+                f"'{left_info['_key']}'. Two fields can only be compared when "
+                f"both hold numbers in the same unit."
+            )
+
+        # ── Unit compatibility ────────────────────────────────────────────
+        # Both halves, and for different reasons. UNIT is the semantic check:
+        # `roe > total_debt` is a percentage against a figure in millions, a
+        # question with no meaning whatever the numbers do. SCALE is the
+        # storage check: a literal is multiplied by its field's scale on the
+        # way in, but a column-to-column comparison never passes through that
+        # conversion, so two fields sharing a unit label while being STORED
+        # differently would compare 0.10 against 10 and answer confidently.
+        #
+        # Neither is caught by the other, and either alone is a silent wrong
+        # answer rather than an error, so both are required to match.
+        left_unit  = (left_info.get("unit") or "").strip()
+        right_unit = (right_info.get("unit") or "").strip()
+        if left_unit.lower() != right_unit.lower():
+            raise QueryParseError(
+                f"Cannot compare '{left_info['_key']}' ({left_unit or 'no unit'}) "
+                f"against '{rhs_key}' ({right_unit or 'no unit'}) — two fields "
+                f"can only be compared when they are measured in the same "
+                f"unit. Compare each against a number instead."
+            )
+        left_scale  = float(left_info.get("scale", 1.0) or 1.0)
+        right_scale = float(right_info.get("scale", 1.0) or 1.0)
+        if left_scale != right_scale:
+            raise QueryParseError(
+                f"'{left_info['_key']}' and '{rhs_key}' are both {left_unit} "
+                f"but are stored on different scales ({left_scale} vs "
+                f"{right_scale}), so comparing them directly would compare "
+                f"unlike numbers. Compare each against a number instead."
+            )
+
+        return _FieldComparisonNode(left_col, sql_op, right_info["col"],
+                                    left_info["_key"], rhs_key)
 
     def _parse_text_value(self, field_key, col, sql_op, op_tok, raw_phrase):
         if sql_op not in ("=", "!="):

@@ -249,7 +249,28 @@ def window_assessment(metric: str, value, states_payload) -> "Assessment":
     """
     from compute.engine.applicability import Assessment     # local: cycle
 
-    entry = (states_payload or {}).get(metric)
+    # `or {}` is not enough, and the way it fails is instructive: a NaN is
+    # TRUTHY, so a destroyed sidecar passes the guard and reaches .get() as a
+    # float. That is how run 33 ended -- AttributeError: 'float' object has
+    # no attribute 'get' -- after the numeric coercion in composite_score
+    # turned the whole window_states column into NaN.
+    #
+    # A SQL NULL is the one absence that means something: this row carries no
+    # sidecar. Anything else is a payload that was mangled between the
+    # database and here, and must stop the run. Reading it as "no entry"
+    # would publish every window as unexplained while looking healthy, which
+    # is the exact outcome this sidecar exists to prevent.
+    if states_payload is None:
+        entry = None
+    elif isinstance(states_payload, dict):
+        entry = states_payload.get(metric)
+    else:
+        raise TypeError(
+            f"window_states for {metric} arrived as "
+            f"{type(states_payload).__name__} ({states_payload!r}), not a "
+            f"mapping or NULL. The sidecar was destroyed between the SELECT "
+            f"and here -- check that window_states is excluded from numeric "
+            f"coercion in composite_score.")
 
     if entry is not None:
         return Assessment(

@@ -39,6 +39,7 @@ Usage:
 import argparse
 import ast
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -51,6 +52,41 @@ ROUTE = BACKEND / "app/api/v1/routes/screener.py"
 #: the route: a check run over a different population than the product uses
 #: answers a question nobody asked.
 POPULATION = "u.price IS NOT NULL AND u.status = 'active'"
+
+
+def _dsn() -> str:
+    """A psycopg2 DSN, resolved here rather than inherited.
+
+    The first version called ``get_database_url_sync()``, which requires
+    DATABASE_URL_SYNC specifically and refuses to derive one. Sourcing the
+    project's .env supplies DATABASE_URL in the asyncpg form, so the checker
+    exited 2 -- correctly reporting that it could not judge, and therefore
+    judging nothing at all.
+
+    Config is resolved at the execution boundary. This reads the .env itself
+    instead of depending on the caller's shell, and accepts either variable:
+    a checker that only runs when invoked a particular way is a checker that
+    will not be running six months from now.
+    """
+    for candidate in (BACKEND / ".env", BACKEND.parent / ".env"):
+        if not candidate.exists():
+            continue
+        for line in candidate.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+    url = (os.environ.get("DATABASE_URL_SYNC")
+           or os.environ.get("DATABASE_URL", ""))
+    if not url:
+        raise RuntimeError(
+            "neither DATABASE_URL_SYNC nor DATABASE_URL is set, and there is "
+            "no built-in default: the credential must not live in source code")
+    # psycopg2 speaks postgresql://, not the SQLAlchemy driver form.
+    return url.replace("postgresql+asyncpg://", "postgresql://", 1) \
+              .replace("postgresql+psycopg2://", "postgresql://", 1)
 
 
 def _literal(name: str):
@@ -91,8 +127,7 @@ def main() -> int:
 
     try:
         import psycopg2
-        from app.core.db import get_database_url_sync
-        conn = psycopg2.connect(get_database_url_sync())
+        conn = psycopg2.connect(_dsn())
     except Exception as exc:                                   # noqa: BLE001
         print(f"2  cannot reach the database: {exc}")
         return 2

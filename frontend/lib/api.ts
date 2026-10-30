@@ -245,6 +245,25 @@ export interface ScreenerRow {
   universe_built_at: string | null
 }
 
+/**
+ * A filter no company in the universe could be evaluated against.
+ *
+ * "0 stocks matched" is what an honest empty screen looks like and what a
+ * screen filtering on a metric nobody has looks like. `state`/`cause`/`reason`
+ * come from the governed sidecar and are absent for an ungoverned field that
+ * is simply empty for everyone.
+ */
+export interface UnevaluableCriterion {
+  field: string
+  label: string
+  metric?: string | null
+  state?: string | null
+  cause?: string | null
+  reason?: string | null
+  affected: number
+  universe: number
+}
+
 export interface ScreenerResponse {
   data: ScreenerRow[]
   total: number
@@ -254,6 +273,8 @@ export interface ScreenerResponse {
   filters_applied: number
   is_capped?: boolean   // true when free-tier 500-row limit is applied
   free_limit?: number   // 500 for free users
+  // Present only when total === 0 AND the emptiness has an explanation.
+  unevaluable_criteria?: UnevaluableCriterion[] | null
 }
 
 export interface ScreenerFieldMeta {

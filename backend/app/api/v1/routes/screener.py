@@ -39,6 +39,7 @@ from app.core.parsed_query import (
     AllOf, ComparisonUnsupported, Criterion as TypedCriterion, Direction,
     Ordering, ParsedQuery, canonicalise,
 )
+from app.core.screen_diagnosis import diagnose_empty_screen
 from app.core.row_projection import expected_outputs, governed_columns, project_row
 from app.core.screener_fields import UnknownField, build_registry
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
@@ -136,6 +137,12 @@ def _log_parse_error(query: str, exc: Exception) -> None:
 # The code is set by the raising site and never inferred from the message.
 # A client that classified by matching the prose would break the first time
 # the wording was improved, and the wording is meant to be improved.
+#: The population a screen draws from, used when explaining an empty
+#: result. Deliberately NOT the filtered set, which is empty by
+#: definition -- the question is whether anyone at all could have been
+#: evaluated against the criteria, not whether the survivors could.
+DIAGNOSIS_POPULATION = "u.price IS NOT NULL AND u.status = 'active'"
+
 ERROR_PARSE                  = "parse_error"
 ERROR_COMPARISON_UNSUPPORTED = "comparison_unsupported"
 
@@ -1378,6 +1385,17 @@ async def run_screener(
     # total answers membership; ranked_total answers participation in this
     # ordering. They are equal unless the ordering is governed and some
     # members have no valid observation for it.
+    # Nothing matched -- but is that because the screen is strict, or because
+    # a criterion nobody can be evaluated against is in it? Ten preset screens
+    # filtered on piotroski_f_score, which is computed for none of the 2,113
+    # companies, and every one rendered the same "0 stocks matched" as an
+    # honest empty result. Asked only on the empty path, over the base
+    # population rather than the filtered one, which is empty by definition.
+    unevaluable = None
+    if total == 0:
+        unevaluable = await diagnose_empty_screen(
+            db, parsed, FIELD_REGISTRY, DIAGNOSIS_POPULATION, {})
+
     ranked_total = total
     exclusions = None
     if plan.order_governed and plan.order_applicable:
@@ -1404,6 +1422,7 @@ async def run_screener(
         free_limit=FREE_STOCK_LIMIT if is_free else None,
         ranked_total=ranked_total,
         excluded_from_ordering=exclusions,
+        unevaluable_criteria=unevaluable,
         # The snapshot that governed *this response*, which for an ungoverned
         # query is not the one the plan ran under: the plan deliberately
         # carries no scope there, while the rows were still decoded under a
@@ -2456,12 +2475,22 @@ async def query_screener(
     else:
         rows = []
 
+    # Same question as the ordinary screener asks on an empty result, and for
+    # the same reason: `piotroski_f_score >= 6` typed into Query Mode returns
+    # nothing, and the customer is owed the difference between "no company
+    # qualifies" and "no company can be evaluated".
+    unevaluable = None
+    if total == 0:
+        unevaluable = await diagnose_empty_screen(
+            db, parsed, FIELD_REGISTRY, DIAGNOSIS_POPULATION, {})
+
     return ScreenerResponse(
         # Identical projection semantics to the ordinary screener, from the
         # same snapshot object. AI Query interprets language and then stops;
         # a second projection implementation here would diverge eventually,
         # and the divergence would be invisible until it served a number.
         data=snapshot.project(rows),
+        unevaluable_criteria=unevaluable,
         total=total,
         page=req.page,
         page_size=req.page_size,

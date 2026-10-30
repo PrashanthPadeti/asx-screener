@@ -323,6 +323,33 @@ class OrderingExclusion(BaseModel):
     codes:   Optional[list[str]] = None      # populated only when small
 
 
+class UnevaluableCriterion(BaseModel):
+    """A filter no company in scope could be evaluated against.
+
+    "0 stocks matched" is what an honest empty screen looks like AND what a
+    screen filtering on a metric nobody has looks like. Ten of thirty-one
+    preset screens filtered on piotroski_f_score, which is not computed for
+    any of the 2,113 companies in the universe, and each rendered the same
+    bare zero as a screen that was merely strict. The data layer knew the
+    difference -- every company carried `unavailable / computation_unsupported`
+    with a reason -- and the response had nowhere to put it.
+
+    `state`, `cause` and `reason` come from the sidecar and are null for an
+    ungoverned field, where the column is simply empty for everyone and there
+    is no explanation to give. That is itself worth saying: beta_1y and 18
+    other fields are offered for filtering and hold nothing.
+    """
+
+    field:    str                        # the field as the customer named it
+    label:    str
+    metric:   Optional[str] = None       # canonical identity, when governed
+    state:    Optional[str] = None       # unavailable | not_meaningful | ...
+    cause:    Optional[str] = None       # computation_unsupported | domain
+    reason:   Optional[str] = None       # the sidecar's own sentence
+    affected: int = 0
+    universe: int = 0
+
+
 class ScreenerResponse(BaseModel):
     data:            list[ScreenerRow]
     total:           int
@@ -342,6 +369,12 @@ class ScreenerResponse(BaseModel):
     # number forces the client to guess which question it answered.
     ranked_total:           Optional[int] = None
     excluded_from_ordering: Optional[OrderingExclusion] = None
+
+    # Populated only when total == 0 AND the emptiness has an explanation:
+    # a criterion no company in scope could be evaluated against. Absent on a
+    # screen that is merely strict, which is the common case and must stay
+    # distinguishable from this one.
+    unevaluable_criteria:   Optional[list[UnevaluableCriterion]] = None
 
     # An opaque identifier for the logical contract this result was computed
     # under — model version plus source-health state, over whatever set of

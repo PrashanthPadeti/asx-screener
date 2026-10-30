@@ -148,10 +148,16 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
           <p className="text-xs text-slate-400">Avg 1W Return</p>
           <p className={`font-semibold ${retColor(snap.avg_return_1w)}`}>{fmtPct(snap.avg_return_1w)}</p>
         </div>
+        {/* Unchanged is shown, not dropped. The API has always returned it;
+            omitting it meant 99 + 80 sat under a count of 199 and the twenty
+            flat stocks simply vanished, with nothing on the page accounting
+            for the difference. */}
         <div>
-          <p className="text-xs text-slate-400">Gainers / Losers</p>
+          <p className="text-xs text-slate-400">Gainers / Flat / Losers</p>
           <p className="font-semibold text-slate-800">
             <span className="text-emerald-600">{snap.gainers}</span>
+            {' / '}
+            <span className="text-slate-500">{snap.unchanged}</span>
             {' / '}
             <span className="text-red-500">{snap.losers}</span>
           </p>

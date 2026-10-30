@@ -190,6 +190,54 @@ def test_an_empty_run_names_every_required_stage():
     assert REQUIRED_STAGES, "no stage is required, so nothing can be incomplete"
 
 
+def test_no_stage_counter_sits_inside_a_dry_run_guard():
+    """The instrument must measure the work, not the write.
+
+    The first version of this release counted index and sector inside the
+    `if not dry_run:` block that performs the INSERT, while movers and ex-div
+    were counted outside theirs. A dry run that had just computed 2 index rows
+    and 12 sector rows therefore reported
+
+        Stage outcomes: index=0, sector=0, movers=110, exdiv=7
+
+    which reads exactly like the five-month production failure this release
+    exists to fix. An instrument that reports zero for work that happened is
+    worse than no instrument: it manufactures the alarm it was built to raise.
+    """
+    fn = _run_fn()
+
+    def _guards_dry_run(node) -> bool:
+        return isinstance(node, ast.If) and any(
+            isinstance(n, ast.Name) and n.id == "dry_run"
+            for n in ast.walk(node.test))
+
+    offenders = []
+    for node in ast.walk(fn):
+        if not _guards_dry_run(node):
+            continue
+        for inner in ast.walk(node):
+            if (isinstance(inner, ast.Assign)
+                    and any(isinstance(t, ast.Subscript)
+                            and isinstance(t.value, ast.Name)
+                            and t.value.id == "written"
+                            for t in inner.targets)):
+                offenders.append(inner.lineno)
+
+    assert not offenders, (
+        f"stage counters at line(s) {offenders} are inside a dry_run guard, "
+        f"so a dry run reports those stages as empty whatever they computed.")
+
+
+def test_every_required_stage_is_actually_counted():
+    """A stage nobody increments is permanently 'incomplete'."""
+    src = ENGINE.read_text(encoding="utf-8")
+    from compute.engine.snapshot_stages import REQUIRED_STAGES
+    for stage in REQUIRED_STAGES:
+        assert f'written["{stage}"]' in src, (
+            f"'{stage}' is required but never counted, so the run can only "
+            f"ever raise SnapshotIncomplete")
+
+
 def test_the_run_raises_rather_than_logging_a_warning():
     """A warning in a log nobody greps is how five months happen."""
     fn = _run_fn()

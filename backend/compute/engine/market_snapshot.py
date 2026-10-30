@@ -133,6 +133,15 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                      row["losers"] or 0,
                      (row["avg_return_1w"] or 0) * 100)
 
+            # Counted where the stage PRODUCES its row, not where it writes it.
+            # Nesting this inside `if not dry_run` made the outcome line report
+            # index=0, sector=0 on a dry run that had just computed 2 index
+            # rows and 12 sector rows, while movers and ex-div -- counted
+            # outside their write guards -- reported honestly. An instrument
+            # that reads zero for work that happened is the same failure the
+            # rest of this file exists to fix, one level up.
+            written["index"] = written.get("index", 0) + 1
+
             if not dry_run:
                 await session.execute(text("""
                     INSERT INTO market.index_snapshots
@@ -158,7 +167,6 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                     "r1w":  row["avg_return_1w"],
                     "mcap": row["total_market_cap_bn"],
                 })
-                written["index"] = written.get("index", 0) + 1
 
         # Committed HERE, not at the end of the run.
         #
@@ -193,6 +201,7 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
         """))).mappings().all()
 
         log.info("Sectors: %d", len(sector_rows))
+        written["sector"] = len(sector_rows)
 
         if not dry_run:
             for r in sector_rows:
@@ -217,7 +226,6 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                     "r1w":  r["avg_return_1w"],
                     "mcap": r["total_market_cap_bn"],
                 })
-                written["sector"] = written.get("sector", 0) + 1
 
         if not dry_run:
             await session.commit()

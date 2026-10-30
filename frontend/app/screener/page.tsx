@@ -6,6 +6,7 @@ import {
   nlScreener, queryScreener, getQueryFields, exportQueryScreener,
   type ScreenerFilter, type ScreenerRow, type ScreenerFieldMeta,
   type ScreenerPreset, type NLScreenerResponse, type QueryFieldRef,
+  type UnevaluableCriterion,
 } from '@/lib/api'
 import {
   formatPrice, formatVolume, formatMarketCap,
@@ -864,6 +865,7 @@ export default function ScreenerPage() {
   const [pendingIndexParam, setPendingIndexParam] = useState<string | null>(null)
 
   // Results state
+  const [unevaluable, setUnevaluable] = useState<UnevaluableCriterion[]>([])
   const [results, setResults]       = useState<ScreenerRow[]>([])
   const [total, setTotal]           = useState(0)
   const [page, setPage]             = useState(1)
@@ -1161,6 +1163,7 @@ export default function ScreenerPage() {
     setFilters([])
     setActivePreset(null)
     setResults([])
+    setUnevaluable([])
     setRan(false)
   }
 
@@ -1307,6 +1310,7 @@ export default function ScreenerPage() {
     try {
       const res = await runScreener(apiFilters, { sort_by: by, sort_dir: dir, page: p, page_size: 50 })
       setResults(res.data)
+      setUnevaluable(res.unevaluable_criteria ?? [])
       setTotal(res.total)
       setPage(res.page)
       setTotalPages(res.total_pages)
@@ -1419,6 +1423,7 @@ export default function ScreenerPage() {
         page_size: 50,
       })
       setResults(res.data)
+      setUnevaluable(res.unevaluable_criteria ?? [])
       setTotal(res.total)
       setPage(res.page)
       setTotalPages(res.total_pages)
@@ -1566,6 +1571,7 @@ export default function ScreenerPage() {
     setShowQueryMyScreens(false)
     setQueryError(null)
     setResults([])
+    setUnevaluable([])
     setTotal(0)
     setRan(false)
   }
@@ -2089,7 +2095,7 @@ export default function ScreenerPage() {
                   {queryLoading ? 'Running…' : 'Run Query'}
                 </button>
                 <button
-                  onClick={() => { setQueryText(''); setQueryError(null); setResults([]); setTotal(0); setRan(false) }}
+                  onClick={() => { setQueryText(''); setQueryError(null); setResults([]); setUnevaluable([]); setTotal(0); setRan(false) }}
                   className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-500 hover:text-gray-700
                              border border-gray-200 rounded-lg transition-colors"
                 >
@@ -2768,8 +2774,47 @@ export default function ScreenerPage() {
       {/* Empty state — manual + query modes */}
       {(screenerMode === 'manual' || screenerMode === 'query') && ran && !loading && !queryLoading && results.length === 0 && !queryError && (
         <div className="text-center py-12 bg-white border border-gray-200 rounded-xl">
-          <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>
-          <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
+          {unevaluable.length > 0 ? (
+            /* Not an empty result — an unanswerable one. The sidecar has
+               always recorded why; until now the page threw it away and
+               rendered the same "no stocks match" as an honest empty screen.
+               Ten of thirty-one preset screens looked like this. */
+            <div className="max-w-xl mx-auto px-6 text-left">
+              <p className="text-gray-700 font-semibold text-center">
+                This screen cannot be answered.
+              </p>
+              <p className="text-sm text-gray-500 mt-1 text-center">
+                {unevaluable.length === 1 ? 'One filter uses data that is' : 'Some filters use data that is'}
+                {' '}unavailable for every company, so no result is possible —
+                this is not the same as nothing matching.
+              </p>
+              <ul className="mt-4 space-y-2">
+                {unevaluable.map(u => (
+                  <li key={u.field}
+                      className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                    <p className="text-sm font-medium text-amber-900">{u.label}</p>
+                    <p className="text-xs text-amber-800 mt-0.5">
+                      {u.reason
+                        ? u.reason
+                        : 'Not computed for any company in the universe.'}
+                    </p>
+                    <p className="text-[11px] text-amber-700/80 mt-1 font-mono">
+                      {u.affected.toLocaleString()} of {u.universe.toLocaleString()} companies
+                      {u.state ? ` · ${u.state}` : ''}{u.cause ? ` · ${u.cause}` : ''}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-gray-400 mt-4 text-center">
+                Remove {unevaluable.length === 1 ? 'that filter' : 'those filters'} to run the rest of this screen.
+              </p>
+            </div>
+          ) : (
+            <>
+              <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>
+              <p className="text-sm text-gray-400 mt-1">Try relaxing the criteria.</p>
+            </>
+          )}
         </div>
       )}
 

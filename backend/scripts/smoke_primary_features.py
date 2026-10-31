@@ -47,6 +47,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 BASE = "http://localhost:8000"
@@ -124,8 +125,8 @@ def _rejected(code: int) -> str:
 def smoke_query_mode(token):
     if not token:
         return record("skip", "Query Mode",
-                      "SMOKE_TOKEN not set — requires a Pro/Premium token. "
-                      "NOT verified by this run.")
+                      "no token could be minted (JWT_SECRET unreadable) and "
+                      "none supplied. NOT verified by this run.")
     code, body = call("POST", "/api/v1/screener/query",
                       {"query": "market_cap > 0", "page": 1, "page_size": 10},
                       token=token)
@@ -140,9 +141,20 @@ def smoke_query_mode(token):
 
 
 def smoke_ai_query(token):
+    # Opt-in, unlike Query Mode. This endpoint calls the Anthropic API, so
+    # verifying it spends money on every deploy and makes the deploy depend
+    # on a third party: a rate limit or key problem would fail a release for
+    # a reason that has nothing to do with the code being released. An
+    # instrument must not consume the resources of the system it observes.
+    #
+    # Skipped loudly either way -- the run names what it did not verify.
+    if not _truthy(_env_value("SMOKE_AI")):
+        return record("skip", "AI Query",
+                      "SMOKE_AI not set — this check calls the Anthropic API "
+                      "and costs money per run. NOT verified by this run.")
     if not token:
         return record("skip", "AI Query",
-                      "SMOKE_TOKEN not set — requires a Pro/Premium token. "
+                      "no token could be minted or supplied. "
                       "NOT verified by this run.")
     code, body = call("POST", "/api/v1/ai/nl-screener",
                       {"query": "mining companies with a dividend yield "
@@ -216,29 +228,77 @@ def smoke_company(code_from_screener):
         record("ok", "Company search", f"{len(body)} matches")
 
 
-def _smoke_token():
-    """The Pro/Premium token, from the environment or the project's .env.
+#: A synthetic identity for the smoke's own token. Deliberately not a real
+#: account: _resolve_user decodes the JWT and never queries the database
+#: ("Does NOT hit the DB -- trusts the signed JWT payload"), so no user row is
+#: needed, nothing is created, and no customer's data is touched. The email is
+#: in .invalid, which RFC 2606 reserves precisely so it can never resolve.
+SMOKE_SUBJECT = "00000000-0000-0000-0000-000000000001"
+SMOKE_EMAIL   = "post-deploy-smoke@asxscreener.invalid"
+SMOKE_PLAN    = "premium"
+SMOKE_TTL_MIN = 5
 
-    deploy.sh runs this as a subprocess and does not export backend/.env into
-    its environment, so a token placed there would be invisible and the two
-    authenticated modes would keep reporting SKIPPED -- which is exactly what
-    they did through six consecutive releases, including the two that WERE
-    Query Mode.
 
-    Resolved here, at the execution boundary, rather than depending on how
-    the caller happened to set up its shell.
+def _truthy(value) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_value(key: str):
+    """A key from the environment, else from the project's .env.
+
+    deploy.sh runs this as a subprocess and does not export backend/.env, so
+    anything placed there is invisible to os.environ. Resolved here, at the
+    execution boundary, rather than depending on the caller's shell.
     """
-    token = os.environ.get("SMOKE_TOKEN", "").strip()
-    if token:
-        return token
-
+    value = os.environ.get(key, "").strip()
+    if value:
+        return value
     env = Path(__file__).resolve().parents[1] / ".env"
     if env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
             line = line.strip()
-            if line.startswith("SMOKE_TOKEN=") and not line.startswith("#"):
+            if line.startswith(f"{key}=") and not line.startswith("#"):
                 return line.partition("=")[2].strip().strip("'\"") or None
     return None
+
+
+def _smoke_token():
+    """A Pro/Premium token for this run, minted here or supplied.
+
+    Minted rather than stored, because access tokens live 15 minutes
+    (ACCESS_TOKEN_EXPIRE_MINUTES). A token pasted into .env would be rejected
+    the same afternoon and every deploy after it, and the quickest way to a
+    green deploy would be to remove it -- restoring exactly the blindness this
+    exists to remove.
+
+    Nothing new is exposed: JWT_SECRET is already on this host, and anyone
+    able to run this script can already read it.
+
+    SMOKE_TOKEN still wins when set, for a host that wants to pin a specific
+    identity.
+    """
+    supplied = _env_value("SMOKE_TOKEN")
+    if supplied:
+        return supplied
+
+    secret = _env_value("JWT_SECRET")
+    if not secret:
+        return None
+    try:
+        import jwt as pyjwt
+    except ImportError:
+        try:
+            from jose import jwt as pyjwt           # the API's own library
+        except ImportError:
+            return None
+
+    now = datetime.now(timezone.utc)
+    return pyjwt.encode(
+        {"sub": SMOKE_SUBJECT, "email": SMOKE_EMAIL, "plan": SMOKE_PLAN,
+         "status": "active", "iat": now,
+         "exp": now + timedelta(minutes=SMOKE_TTL_MIN), "type": "access"},
+        secret,
+        algorithm=_env_value("JWT_ALGORITHM") or "HS256")
 
 
 def main() -> int:
@@ -252,7 +312,8 @@ def main() -> int:
 
     print(f"smoke: {BASE}")
     print(f"smoke: authenticated modes "
-          f"{'ENABLED' if token else 'SKIPPED (no SMOKE_TOKEN)'}")
+          f"{'ENABLED' if token else 'SKIPPED (no token)'}"
+          f"{'' if _truthy(_env_value('SMOKE_AI')) else '  (AI Query opt-in: set SMOKE_AI=1)'}")
     print()
 
     code, health = call("GET", "/health")

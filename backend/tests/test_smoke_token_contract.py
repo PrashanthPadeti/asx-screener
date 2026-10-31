@@ -86,20 +86,23 @@ def test_settings_constructs_without_a_token():
         "Settings() does not build with SMOKE_TOKEN unset")
 
 
-def test_the_smoke_script_resolves_the_token_itself():
+def test_the_smoke_script_resolves_config_itself():
     """deploy.sh does not export backend/.env to the subprocess.
 
-    Structural: the script must read the .env file, not only os.environ, or a
-    token placed where the operator was told to put it is invisible.
+    The lookup must consult the environment AND the .env file, or a value
+    placed where the operator was told to put it is invisible.
+
+    Checked on _env_value, which owns the resolution. The first version
+    asserted on _smoke_token and broke the moment that delegated -- a guard
+    pointed at a function that no longer does the work reports on nothing.
     """
-    src = SMOKE.read_text(encoding="utf-8")
-    tree = ast.parse(src)
+    tree = ast.parse(SMOKE.read_text(encoding="utf-8"))
     fn = next((n for n in ast.walk(tree)
-               if isinstance(n, ast.FunctionDef) and n.name == "_smoke_token"),
+               if isinstance(n, ast.FunctionDef) and n.name == "_env_value"),
               None)
     assert fn is not None, (
-        "the smoke script has no _smoke_token(); it reads os.environ only, "
-        "and deploy.sh runs it as a subprocess without exporting .env")
+        "the smoke script has no _env_value(); nothing resolves config at "
+        "its own execution boundary")
     assert "environ" in ast.dump(fn), "the environment must still win"
 
     # String CONSTANTS in the body, with the docstring removed. ast.unparse()
@@ -113,8 +116,112 @@ def test_the_smoke_script_resolves_the_token_itself():
     literals = {n.value for stmt in body for n in ast.walk(stmt)
                 if isinstance(n, ast.Constant) and isinstance(n.value, str)}
     assert ".env" in literals, (
-        f"_smoke_token never names .env in its code (only string literals "
-        f"found: {sorted(literals)}), so a token placed there is never found")
+        f"_env_value never names .env in its code (only string literals "
+        f"found: {sorted(literals)}), so a value placed there is never found")
+
+
+def test_smoke_ai_is_declared_and_defaults_off():
+    """The opt-in flag is a .env key like any other: undeclared, it stops
+    every process from starting."""
+    fields = _settings_fields()
+    assert "SMOKE_AI" in fields, (
+        "SMOKE_AI is not declared in Settings; setting it in .env would "
+        "raise ValidationError at import time")
+    assert ast.literal_eval(fields["SMOKE_AI"].value) is False, (
+        "SMOKE_AI must default off — no deploy should spend money on a "
+        "third-party API without being asked")
+
+
+def test_the_token_is_minted_not_stored():
+    """Access tokens live 15 minutes. A token pasted into .env is rejected
+    the same afternoon and every deploy after it, and the quickest route to a
+    green deploy is to delete it — restoring the blindness."""
+    src = SMOKE.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next((n for n in ast.walk(tree)
+               if isinstance(n, ast.FunctionDef) and n.name == "_smoke_token"),
+              None)
+    assert fn is not None, "_smoke_token is gone"
+    body = fn.body[1:] if (fn.body and isinstance(fn.body[0], ast.Expr)
+                           and isinstance(fn.body[0].value, ast.Constant)) else fn.body
+    # The LAST statement must be the mint, not merely a mint somewhere in
+    # the body. Asserting "encode is called" passed a mutation that inserted
+    # `return None` above it: the call was still present and had become dead
+    # code. A guard that proves intent is not a guard that proves behaviour.
+    final = body[-1] if body else None
+    assert isinstance(final, ast.Return) and isinstance(final.value, ast.Call)         and isinstance(final.value.func, ast.Attribute)         and final.value.func.attr == "encode", (
+        "_smoke_token does not end by returning a freshly encoded JWT, so "
+        "it can only use a stored token — which expires 15 minutes after it "
+        "is created, and then every deploy reports a rejected token")
+
+
+def test_the_minted_token_is_real():
+    """Behavioural, because the structural version could not be.
+
+    A check for "encode is called in the body" passed a mutation inserting
+    `return None` above it -- the call was present and dead. A check for "the
+    last statement returns an encode" passed the same mutation, because the
+    early return leaves the last statement untouched. Reachability is not
+    something to approximate with an AST walk, so this calls the function and
+    looks at what comes back.
+
+    Skipped where no JWT library exists (this is a dev box); it runs in the
+    gate and on the server, which is where the token is actually minted.
+    """
+    import importlib.util
+    try:
+        import jwt as pyjwt                                    # noqa: F401
+    except ImportError:
+        try:
+            from jose import jwt as pyjwt                      # noqa: F401
+        except ImportError:
+            raise Skipped("a JWT library (pyjwt or python-jose)")
+
+    spec = importlib.util.spec_from_file_location("smoke_mod", SMOKE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    import os
+    before = {k: os.environ.get(k) for k in ("SMOKE_TOKEN", "JWT_SECRET")}
+    try:
+        os.environ["SMOKE_TOKEN"] = ""
+        os.environ["JWT_SECRET"] = "test-secret-not-the-real-one"
+        token = mod._smoke_token()
+        assert token, "no token was minted from a readable JWT_SECRET"
+        assert token.count(".") == 2, f"not a JWT: {token[:40]}"
+        claims = pyjwt.decode(token, "test-secret-not-the-real-one",
+                              algorithms=["HS256"])
+        assert claims["plan"] == "premium", (
+            f"the minted token is not Pro/Premium: plan={claims.get('plan')}")
+        assert claims["type"] == "access"
+        assert claims["email"].endswith(".invalid"), (
+            "the smoke identity must be unresolvable, not a real address")
+    finally:
+        for k, v in before.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
+def test_ai_query_is_opt_in_and_query_mode_is_not():
+    """The asymmetry is the point: one is free, the other spends money."""
+    src = SMOKE.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    ai = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "smoke_ai_query")
+    qm = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "smoke_query_mode")
+    ai_literals = {n.value for n in ast.walk(ai)
+                   if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    qm_literals = {n.value for n in ast.walk(qm)
+                   if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    assert "SMOKE_AI" in ai_literals, (
+        "AI Query is not gated on SMOKE_AI; every deploy would call the "
+        "Anthropic API")
+    assert "SMOKE_AI" not in qm_literals, (
+        "Query Mode is gated on the AI opt-in, so the free check nobody "
+        "objects to would be skipped along with the paid one")
 
 
 def test_a_rejected_token_is_distinguished_from_a_broken_feature():
@@ -135,7 +242,7 @@ def test_both_authenticated_modes_are_still_covered():
     src = SMOKE.read_text(encoding="utf-8")
     for mode in ("Query Mode", "AI Query"):
         assert f'"{mode}"' in src, f"{mode} is no longer smoke-tested"
-    assert "NOT VERIFIED" in src, (
+    assert "NOT verified by this run" in src, (
         "the skip path no longer announces what went unverified; a silent "
         "skip is indistinguishable from a pass")
 

@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "11.2.71"
+    APP_VERSION: str = "11.2.72"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
@@ -204,6 +204,18 @@ class Settings(BaseSettings):
     # Empty by default: a deploy on a host that has not been given a token
     # must skip loudly, never fail.
     SMOKE_TOKEN: str = ""
+
+    # Opt-in for the smoke's AI Query check. That endpoint calls the
+    # Anthropic API, so verifying it spends money on every deploy and makes a
+    # release depend on a third party -- a rate limit or key problem would
+    # fail a deploy for a reason unrelated to the code being deployed. Query
+    # Mode needs no such flag: it is a database read and costs nothing.
+    #
+    # Declared for the same reason as SMOKE_TOKEN: extra="forbid" means
+    # setting it in .env without this field stops every process from
+    # starting. Off by default, and the smoke names it as NOT VERIFIED
+    # rather than passing over it silently.
+    SMOKE_AI: bool = False
 
     class Config:
         env_file = ".env"

@@ -9,7 +9,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # App
     APP_NAME: str = "ASX Screener API"
-    APP_VERSION: str = "11.2.70"
+    APP_VERSION: str = "11.2.71"
     ENVIRONMENT: str = "development"
     DEBUG: bool = True
 
@@ -188,6 +188,22 @@ class Settings(BaseSettings):
     # process environment; os.getenv would have returned None and reported a
     # freeze that had not happened.
     SCHEDULERS_ENABLED: bool = True
+
+    # A Pro/Premium JWT the post-deploy smoke uses to exercise Query Mode and
+    # AI Query. Without it those two modes report SKIPPED, by name -- which
+    # they did through six consecutive releases, two of which WERE Query Mode.
+    # Every verification of them was a person clicking.
+    #
+    # Declared here for the same reason SCHEDULERS_ENABLED is: extra="forbid"
+    # means putting SMOKE_TOKEN in .env without this field raises
+    # ValidationError while Settings() is constructed, at import time, and no
+    # process can start. The declaration must ship BEFORE the key is set.
+    #
+    # The app itself never reads it -- the smoke script does, from .env, at
+    # its own execution boundary. The field exists so the key is legal.
+    # Empty by default: a deploy on a host that has not been given a token
+    # must skip loudly, never fail.
+    SMOKE_TOKEN: str = ""
 
     class Config:
         env_file = ".env"

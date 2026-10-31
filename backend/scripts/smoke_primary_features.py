@@ -47,6 +47,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 BASE = "http://localhost:8000"
 TIMEOUT = 30
@@ -107,6 +108,19 @@ def smoke_filter_screen():
     return rows[0]["asx_code"]
 
 
+def _rejected(code: int) -> str:
+    """A token the API refused, said plainly.
+
+    A JWT expires. Reported as a bare "HTTP 401" this reads like the feature
+    is broken, and the quickest way to make the deploy green again is to
+    delete SMOKE_TOKEN -- which silently restores the blindness it was added
+    to remove. Naming the cause is what stops that.
+    """
+    return (f"SMOKE_TOKEN was REJECTED (HTTP {code}). The token is expired, "
+            f"revoked, or belongs to an account below Pro. The feature itself "
+            f"is NOT verified either way. Re-mint the token; do not unset it.")
+
+
 def smoke_query_mode(token):
     if not token:
         return record("skip", "Query Mode",
@@ -115,6 +129,8 @@ def smoke_query_mode(token):
     code, body = call("POST", "/api/v1/screener/query",
                       {"query": "market_cap > 0", "page": 1, "page_size": 10},
                       token=token)
+    if code in (401, 403):
+        return record("fail", "Query Mode", _rejected(code))
     if code != 200:
         return record("fail", "Query Mode", f"HTTP {code}: {str(body)[:200]}")
     rows = (body or {}).get("data") or []
@@ -131,6 +147,8 @@ def smoke_ai_query(token):
     code, body = call("POST", "/api/v1/ai/nl-screener",
                       {"query": "mining companies with a dividend yield "
                                 "above 4 percent"}, token=token)
+    if code in (401, 403):
+        return record("fail", "AI Query", _rejected(code))
     if code != 200:
         return record("fail", "AI Query", f"HTTP {code}: {str(body)[:200]}")
     rows = (body or {}).get("data")
@@ -198,6 +216,31 @@ def smoke_company(code_from_screener):
         record("ok", "Company search", f"{len(body)} matches")
 
 
+def _smoke_token():
+    """The Pro/Premium token, from the environment or the project's .env.
+
+    deploy.sh runs this as a subprocess and does not export backend/.env into
+    its environment, so a token placed there would be invisible and the two
+    authenticated modes would keep reporting SKIPPED -- which is exactly what
+    they did through six consecutive releases, including the two that WERE
+    Query Mode.
+
+    Resolved here, at the execution boundary, rather than depending on how
+    the caller happened to set up its shell.
+    """
+    token = os.environ.get("SMOKE_TOKEN", "").strip()
+    if token:
+        return token
+
+    env = Path(__file__).resolve().parents[1] / ".env"
+    if env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("SMOKE_TOKEN=") and not line.startswith("#"):
+                return line.partition("=")[2].strip().strip("'\"") or None
+    return None
+
+
 def main() -> int:
     global BASE
     ap = argparse.ArgumentParser()
@@ -205,7 +248,7 @@ def main() -> int:
     args = ap.parse_args()
     BASE = args.base.rstrip("/")
 
-    token = os.environ.get("SMOKE_TOKEN", "").strip() or None
+    token = _smoke_token()
 
     print(f"smoke: {BASE}")
     print(f"smoke: authenticated modes "

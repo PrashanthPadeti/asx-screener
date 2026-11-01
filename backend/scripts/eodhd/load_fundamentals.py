@@ -223,6 +223,14 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
         te   = sm(r.get("totalStockholderEquity"))
         cash = sm(r.get("cash"))
         ltd  = sm(r.get("longTermDebt"))
+        # A SECOND, WIDER measure the payload also carries, stored under its
+        # own name and never substituted for the one above. longTermDebtTotal
+        # includes lease and similar non-current obligations: where both are
+        # reported it runs roughly double, and they disagree on 4,067 of the
+        # 6,558 balance-sheet years that carry both. Piotroski F5 compares
+        # leverage across two years, so a COALESCE between them would read a
+        # change of DEFINITION as a change in leverage.
+        ltdt = sm(r.get("longTermDebtTotal"))
         std  = sm(r.get("shortTermDebt"))
         gw   = sm(r.get("goodWill"))
         intg = sm(r.get("intangibleAssets"))
@@ -244,6 +252,12 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
         shares = si(r.get("commonStockSharesOutstanding"))
         deferred_rev = sm(r.get("deferredLongTermLiab") or r.get("otherLiab"))
 
+        # Unchanged deliberately: total_debt stays borrowings-based so that
+        # adding long_term_debt_total does not silently redefine every metric
+        # already derived from it. Note that this makes total_debt a DERIVED
+        # field -- a positive total_debt beside a NULL long_term_debt proves
+        # only that shortTermDebt was positive, and is not evidence that
+        # long-term debt exists.
         td = round((ltd or 0) + (std or 0), 4) if (ltd or std) else None
         nd = round(td - cash, 4) if (td and cash) else None
         wc = round(tca - tcl,  4) if (tca and tcl) else None
@@ -260,6 +274,7 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
             "short_term_debt":       std,
             "total_current_liab":    tcl,
             "long_term_debt":        ltd,
+            "long_term_debt_total":  ltdt,
             "total_liabilities":     tl,
             "total_equity":          te,
             "retained_earnings":     re_,
@@ -563,6 +578,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
              cash_equivalents, trade_receivables, inventory,
              total_current_assets, total_assets,
              short_term_debt, total_current_liab, long_term_debt,
+             long_term_debt_total,
              total_liabilities, total_equity, retained_earnings,
              goodwill, intangibles, total_debt, net_debt,
              working_capital, book_value_per_share, shares_outstanding,
@@ -577,6 +593,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
             short_term_debt      = EXCLUDED.short_term_debt,
             total_current_liab   = EXCLUDED.total_current_liab,
             long_term_debt       = EXCLUDED.long_term_debt,
+            long_term_debt_total = EXCLUDED.long_term_debt_total,
             total_liabilities    = EXCLUDED.total_liabilities,
             total_equity         = EXCLUDED.total_equity,
             retained_earnings    = EXCLUDED.retained_earnings,
@@ -593,6 +610,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
              r["cash_equivalents"], r["trade_receivables"], r["inventory"],
              r["total_current_assets"], r["total_assets"],
              r["short_term_debt"], r["total_current_liab"], r["long_term_debt"],
+             r["long_term_debt_total"],
              r["total_liabilities"], r["total_equity"], r["retained_earnings"],
              r["goodwill"], r["intangibles"], r["total_debt"], r["net_debt"],
              r["working_capital"], r["book_value_per_share"],

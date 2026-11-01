@@ -193,6 +193,7 @@ PROJECTIONS: dict[str, tuple[list[str], str]] = {
         "total_assets", "total_equity",
         "total_current_assets", "total_current_liab",
         "total_debt", "net_debt", "cash_equivalents", "long_term_debt",
+        "long_term_debt_total",
         "retained_earnings", "working_capital",
         "book_value_per_share", "shares_outstanding",
         "trade_receivables", "inventory",

@@ -159,7 +159,25 @@ def parse_annual_pnl(asx_code: str, data: dict) -> list[dict]:
         int_   = sm(r.get("interestExpense"))
         eps    = sf(r.get("eps") or r.get("epsActual"))
         eps_d  = sf(r.get("epsDiluted") or r.get("dilutedEps"))
-        shares = si(r.get("commonStockSharesOutstanding"))
+        # NOT read here. commonStockSharesOutstanding is a BALANCE SHEET
+        # field in EODHD's schema, confirmed against the live payload:
+        #
+        #   Balance_Sheet    share fields: ['commonStockSharesOutstanding']
+        #   Income_Statement share fields: ['netIncomeApplicableToCommonShares']
+        #
+        # This line used to ask the Income_Statement row for it and silently
+        # received None on every row of every year, leaving
+        # financials.annual_pnl.shares_used NULL for all 2,113 active
+        # companies. Nothing consumed it, so nothing failed -- it simply made
+        # the Piotroski F-Score's F7 criterion unevaluable for the entire
+        # universe, which withheld the score, which left ten preset screens
+        # returning nothing since they shipped.
+        #
+        # The per-year count now lives on annual_balance_sheet, parsed from
+        # the section that carries it. shares_used stays NULL rather than
+        # being backfilled from there: one column per fact, and the balance
+        # sheet is where this fact belongs.
+        shares = None
 
         rows.append({
             "asx_code":        asx_code,
@@ -216,6 +234,14 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
         prop = sm(r.get("propertyPlantEquipment") or r.get("netPPE"))
         nb   = sm(r.get("netTangibleAssets"))
         bvps = sf(r.get("bookValuePerShare"))
+        # Read HERE, from the balance sheet, which is where EODHD puts it.
+        # parse_annual_pnl asks the Income_Statement payload for the same key
+        # and has always received None, so financials.annual_pnl.shares_used
+        # is NULL for all 2,113 active companies -- every year, since the
+        # beginning. That single misplacement is why the Piotroski F-Score is
+        # withheld: F7 (no new shares issued) needs two years of share counts
+        # and no company anywhere had one.
+        shares = si(r.get("commonStockSharesOutstanding"))
         deferred_rev = sm(r.get("deferredLongTermLiab") or r.get("otherLiab"))
 
         td = round((ltd or 0) + (std or 0), 4) if (ltd or std) else None
@@ -243,6 +269,7 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
             "net_debt":              nd,
             "working_capital":       wc,
             "book_value_per_share":  bvps,
+            "shares_outstanding":    shares,
             "net_block":             prop,
             "net_tangible_assets":   nb,
             "data_source":           "eodhd",
@@ -538,7 +565,8 @@ def upsert_annual_bs(cur, rows: list[dict]):
              short_term_debt, total_current_liab, long_term_debt,
              total_liabilities, total_equity, retained_earnings,
              goodwill, intangibles, total_debt, net_debt,
-             working_capital, book_value_per_share, data_source)
+             working_capital, book_value_per_share, shares_outstanding,
+             data_source)
         VALUES %s
         ON CONFLICT (asx_code, fiscal_year) DO UPDATE SET
             cash_equivalents     = EXCLUDED.cash_equivalents,
@@ -558,6 +586,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
             net_debt             = EXCLUDED.net_debt,
             working_capital      = EXCLUDED.working_capital,
             book_value_per_share = EXCLUDED.book_value_per_share,
+            shares_outstanding   = EXCLUDED.shares_outstanding,
             data_source          = EXCLUDED.data_source
     """
     vals = [(r["asx_code"], r["fiscal_year"], r["period_end_date"],
@@ -566,7 +595,8 @@ def upsert_annual_bs(cur, rows: list[dict]):
              r["short_term_debt"], r["total_current_liab"], r["long_term_debt"],
              r["total_liabilities"], r["total_equity"], r["retained_earnings"],
              r["goodwill"], r["intangibles"], r["total_debt"], r["net_debt"],
-             r["working_capital"], r["book_value_per_share"], r["data_source"]) for r in rows]
+             r["working_capital"], r["book_value_per_share"],
+             r["shares_outstanding"], r["data_source"]) for r in rows]
     execute_values(cur, sql, vals, page_size=100)
 
 

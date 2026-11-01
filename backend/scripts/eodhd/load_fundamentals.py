@@ -75,11 +75,48 @@ def sf(val) -> Optional[float]:
 
 
 def sm(val) -> Optional[float]:
-    """Convert raw value to AUD millions."""
+    """Convert raw value to AUD millions. A reported zero is a VALUE.
+
+    This returned None for a reported zero until v11.2.74, which silently
+    overrode the provider on every money field the balance sheet carries:
+    zero inventory, zero goodwill, zero long-term debt all reached the table
+    as "not reported".
+
+    It cost Piotroski F5 most of its population. EODHD states no non-current
+    debt as "0.00" on 5,842 balance-sheet years -- 5,837 of them for
+    companies with real assets -- and every one became a NULL, so a company
+    that plainly discloses no long-term debt looked like a company that had
+    not told us.
+
+    The reading that justified it -- that a provider sends 0 for "missing" --
+    was tested and is false here. If EODHD did that, totalAssets would be
+    zero thousands of times across 33,201 years. It is zero 19 times. Where
+    an independent check exists, a zero longTermDebtTotal is corroborated by
+    shortLongTermDebtTotal equalling the current portion 1,429 times against
+    60 contradictions.
+
+    Those 60 are the provider contradicting itself, and they stay visible as
+    what the provider said. Discarding a whole field to hide them is not our
+    call to make silently.
+    """
     f = sf(val)
     if f is None:
         return None
-    return round(f / 1_000_000, 4) if f != 0 else None
+    return round(f / 1_000_000, 4)
+
+
+def pick(r: dict, *keys):
+    """First key PRESENT, not first key TRUTHY.
+
+    ``r.get("a") or r.get("b")`` falls through to b whenever a is a reported
+    zero -- the same erasure sm() used to perform, one layer up, and invisible
+    because the fallback usually agrees.
+    """
+    for k in keys:
+        v = r.get(k)
+        if v is not None and v not in ("", "None", "NA"):
+            return v
+    return None
 
 
 def sd(val) -> Optional[date]:
@@ -97,7 +134,12 @@ def si(val) -> Optional[int]:
 
 
 def margin(num, denom) -> Optional[float]:
-    if not num or not denom or denom == 0:
+    # `not num` rejected a numerator of zero, so a company with zero gross
+    # profit on real revenue reported no gross margin rather than a margin of
+    # 0.0 -- which is a fact about the company, and one of the more
+    # interesting ones. The DENOMINATOR must still reject zero: that ratio
+    # does not exist.
+    if num is None or not denom:
         return None
     m = num / denom
     return round(m, 6) if abs(m) < 9999 else None
@@ -157,8 +199,8 @@ def parse_annual_pnl(asx_code: str, data: dict) -> list[dict]:
         ni     = sm(r.get("netIncome"))
         tax    = sm(r.get("incomeTaxExpense"))
         int_   = sm(r.get("interestExpense"))
-        eps    = sf(r.get("eps") or r.get("epsActual"))
-        eps_d  = sf(r.get("epsDiluted") or r.get("dilutedEps"))
+        eps    = sf(pick(r, "eps", "epsActual"))
+        eps_d  = sf(pick(r, "epsDiluted", "dilutedEps"))
         # NOT read here. commonStockSharesOutstanding is a BALANCE SHEET
         # field in EODHD's schema, confirmed against the live payload:
         #
@@ -223,6 +265,14 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
         te   = sm(r.get("totalStockholderEquity"))
         cash = sm(r.get("cash"))
         ltd  = sm(r.get("longTermDebt"))
+        # A SECOND, WIDER measure the payload also carries, stored under its
+        # own name and never substituted for the one above. longTermDebtTotal
+        # includes lease and similar non-current obligations: where both are
+        # reported it runs roughly double, and they disagree on 4,067 of the
+        # 6,558 balance-sheet years that carry both. Piotroski F5 compares
+        # leverage across two years, so a COALESCE between them would read a
+        # change of DEFINITION as a change in leverage.
+        ltdt = sm(r.get("longTermDebtTotal"))
         std  = sm(r.get("shortTermDebt"))
         gw   = sm(r.get("goodWill"))
         intg = sm(r.get("intangibleAssets"))
@@ -231,7 +281,7 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
         tcl  = sm(r.get("totalCurrentLiabilities"))
         rec  = sm(r.get("netReceivables"))
         inv  = sm(r.get("inventory"))
-        prop = sm(r.get("propertyPlantEquipment") or r.get("netPPE"))
+        prop = sm(pick(r, "propertyPlantEquipment", "netPPE"))
         nb   = sm(r.get("netTangibleAssets"))
         bvps = sf(r.get("bookValuePerShare"))
         # Read HERE, from the balance sheet, which is where EODHD puts it.
@@ -242,11 +292,23 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
         # withheld: F7 (no new shares issued) needs two years of share counts
         # and no company anywhere had one.
         shares = si(r.get("commonStockSharesOutstanding"))
-        deferred_rev = sm(r.get("deferredLongTermLiab") or r.get("otherLiab"))
+        deferred_rev = sm(pick(r, "deferredLongTermLiab", "otherLiab"))
 
-        td = round((ltd or 0) + (std or 0), 4) if (ltd or std) else None
-        nd = round(td - cash, 4) if (td and cash) else None
-        wc = round(tca - tcl,  4) if (tca and tcl) else None
+        # Unchanged deliberately: total_debt stays borrowings-based so that
+        # adding long_term_debt_total does not silently redefine every metric
+        # already derived from it. Note that this makes total_debt a DERIVED
+        # field -- a positive total_debt beside a NULL long_term_debt proves
+        # only that shortTermDebt was positive, and is not evidence that
+        # long-term debt exists.
+        # Each of these tested truthiness and so erased its own zeros, which
+        # would have survived the sm() repair only to die one line later. A
+        # company with no debt has total_debt 0, not an unknown total_debt;
+        # net_debt equal to minus its cash; working capital of exactly zero
+        # when current assets and liabilities match.
+        td = (round((ltd or 0) + (std or 0), 4)
+              if (ltd is not None or std is not None) else None)
+        nd = round(td - cash, 4) if (td is not None and cash is not None) else None
+        wc = round(tca - tcl,  4) if (tca is not None and tcl is not None) else None
 
         rows.append({
             "asx_code":              asx_code,
@@ -260,6 +322,7 @@ def parse_annual_bs(asx_code: str, data: dict) -> list[dict]:
             "short_term_debt":       std,
             "total_current_liab":    tcl,
             "long_term_debt":        ltd,
+            "long_term_debt_total":  ltdt,
             "total_liabilities":     tl,
             "total_equity":          te,
             "retained_earnings":     re_,
@@ -296,12 +359,12 @@ def parse_annual_cf(asx_code: str, data: dict) -> list[dict]:
         cfi  = sm(r.get("totalCashFromInvestingActivities"))
         div  = sm(r.get("dividendsPaid"))
         cff  = sm(r.get("totalCashFromFinancingActivities"))
-        ncash = sm(r.get("changeInCash") or r.get("netChangeInCash"))
+        ncash = sm(pick(r, "changeInCash", "netChangeInCash"))
         fcf  = sm(r.get("freeCashFlow"))
-        dep  = sm(r.get("depreciation") or r.get("depreciationAndAmortization"))
-        wcc  = sm(r.get("changeToWorkingCapital") or r.get("changeInWorkingCapital"))
-        ni   = sm(r.get("netIncome") or r.get("changeToNetincome"))
-        acq  = sm(r.get("acquisitionsNet") or r.get("acquisitions"))
+        dep  = sm(pick(r, "depreciation", "depreciationAndAmortization"))
+        wcc  = sm(pick(r, "changeToWorkingCapital", "changeInWorkingCapital"))
+        ni   = sm(pick(r, "netIncome", "changeToNetincome"))
+        acq  = sm(pick(r, "acquisitionsNet", "acquisitions"))
 
         if fcf is None and cfo is not None and capex is not None:
             fcf = round(cfo + capex, 4)
@@ -563,6 +626,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
              cash_equivalents, trade_receivables, inventory,
              total_current_assets, total_assets,
              short_term_debt, total_current_liab, long_term_debt,
+             long_term_debt_total,
              total_liabilities, total_equity, retained_earnings,
              goodwill, intangibles, total_debt, net_debt,
              working_capital, book_value_per_share, shares_outstanding,
@@ -577,6 +641,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
             short_term_debt      = EXCLUDED.short_term_debt,
             total_current_liab   = EXCLUDED.total_current_liab,
             long_term_debt       = EXCLUDED.long_term_debt,
+            long_term_debt_total = EXCLUDED.long_term_debt_total,
             total_liabilities    = EXCLUDED.total_liabilities,
             total_equity         = EXCLUDED.total_equity,
             retained_earnings    = EXCLUDED.retained_earnings,
@@ -593,6 +658,7 @@ def upsert_annual_bs(cur, rows: list[dict]):
              r["cash_equivalents"], r["trade_receivables"], r["inventory"],
              r["total_current_assets"], r["total_assets"],
              r["short_term_debt"], r["total_current_liab"], r["long_term_debt"],
+             r["long_term_debt_total"],
              r["total_liabilities"], r["total_equity"], r["retained_earnings"],
              r["goodwill"], r["intangibles"], r["total_debt"], r["net_debt"],
              r["working_capital"], r["book_value_per_share"],

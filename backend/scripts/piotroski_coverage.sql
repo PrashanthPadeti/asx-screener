@@ -51,6 +51,7 @@ SELECT b.asx_code, b.is_asx200, b.is_asx300, b.market_cap, b.fy,
        cp.gross_profit AS cur_gp,   pp.gross_profit AS pri_gp,
        cb.total_assets AS cur_ta,   pb.total_assets AS pri_ta,
        cb.long_term_debt AS cur_ltd, pb.long_term_debt AS pri_ltd,
+       cb.long_term_debt_total AS cur_ltdt, pb.long_term_debt_total AS pri_ltdt,
        cb.total_current_assets AS cur_ca, pb.total_current_assets AS pri_ca,
        cb.total_current_liab   AS cur_cl, pb.total_current_liab   AS pri_cl,
        cb.shares_outstanding   AS cur_sh, pb.shares_outstanding   AS pri_sh,
@@ -79,9 +80,18 @@ SELECT *,
         AND cur_ta > 0 AND pri_ta > 0)                                AS f3,
        -- F4 accruals: CFO against net income, same year
        (cur_cfo IS NOT NULL AND cur_ni IS NOT NULL)                   AS f4,
-       -- F5 leverage fell: long-term debt over assets, both years
-       (cur_ltd IS NOT NULL AND pri_ltd IS NOT NULL
+       -- F5 leverage fell: non-current debt over assets, both years.
+       --
+       -- Two candidate definitions, reported separately rather than merged,
+       -- because they are different quantities: longTermDebtTotal includes
+       -- lease and similar obligations and runs roughly 2x longTermDebt where
+       -- both are reported. f5 is the one the scorer uses; f5_narrow exists so
+       -- the cost of that choice stays visible in this output instead of
+       -- living in a commit message.
+       (cur_ltdt IS NOT NULL AND pri_ltdt IS NOT NULL
         AND cur_ta > 0 AND pri_ta > 0)                                AS f5,
+       (cur_ltd IS NOT NULL AND pri_ltd IS NOT NULL
+        AND cur_ta > 0 AND pri_ta > 0)                                AS f5_narrow,
        -- F6 current ratio improved
        (cur_ca IS NOT NULL AND pri_ca IS NOT NULL
         AND cur_cl > 0 AND pri_cl > 0)                                AS f6,
@@ -113,7 +123,8 @@ SELECT count(*)                          AS companies,
        count(*) FILTER (WHERE f2) AS f2_cfo_positive,
        count(*) FILTER (WHERE f3) AS f3_roa_improved,
        count(*) FILTER (WHERE f4) AS f4_accruals,
-       count(*) FILTER (WHERE f5) AS f5_leverage,
+       count(*) FILTER (WHERE f5) AS f5_leverage_wide,
+       count(*) FILTER (WHERE f5_narrow) AS f5_leverage_narrow,
        count(*) FILTER (WHERE f6) AS f6_current_ratio,
        count(*) FILTER (WHERE f7) AS f7_shares,
        count(*) FILTER (WHERE f8) AS f8_gross_margin,

@@ -128,6 +128,39 @@ def _cagr(end_val, start_val, years: int) -> Optional[float]:
     return round(result, 6) if np.isfinite(result) else None
 
 
+#: No ASX security has ever traded near this. CSL, the most expensive in the
+#: market's history, peaked around $300. A per-share figure beyond $10,000 is
+#: therefore not a fact about the company: it is the arithmetic of dividing a
+#: real number by a share count the payload reports as 2 (GGE FY2000), 13, or
+#: 1,276 (PL9 FY1999). Measured over every cached year, 82 company-years across
+#: 19 codes exceed it, and the LARGEST share count among them is 3,843 -- so
+#: the bound reaches only the junk tail and no credible company-year.
+#:
+#: A floor on the share count itself was considered and rejected: 13 shares
+#: against $9.46m equity ($727,692/share) and 998,738 shares against $5m
+#: ($5.01/share) both sit under any plausible floor, so the denominator alone
+#: cannot separate the impossible from the ordinary. The ratio can.
+MAX_PER_SHARE_AUD = 10_000.0
+
+
+def _plausible_per_share(val: Optional[float], name: str = "") -> Optional[float]:
+    """A per-share figure that implies an impossible price is withheld.
+
+    Withheld, not clamped: there is no nearest sensible value to fall back to.
+    The company did not earn -$1,045,000 per share, and saying so quietly is
+    worse than saying nothing.
+    """
+    if val is None:
+        return None
+    try:
+        if abs(float(val)) > MAX_PER_SHARE_AUD:
+            log.debug("withholding implausible %s: %s", name or "per-share", val)
+            return None
+    except (TypeError, ValueError):
+        return None
+    return val
+
+
 def _clamp(val: Optional[float], max_abs: float = 9_999.0) -> Optional[float]:
     """
     Return None if |val| exceeds max_abs.
@@ -648,6 +681,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # approximate but enables EPS CAGR for most stable-cap stocks.
         if eps is None and ni is not None and shares is not None and shares > 0:
             eps = round(ni / (shares / 1_000_000), 4)
+        # Bound BEFORE the write-back: cn()/CAGR read these rows back, so an
+        # implausible value left here would propagate into eps_growth and the
+        # EPS CAGRs even once the stored eps itself is withheld.
+        eps = _plausible_per_share(eps, "eps")
         # Write back so cn("eps", N) can find derived value for prior rows
         if eps is not None:
             yearly[i]["eps"] = eps
@@ -659,7 +696,11 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             te = _f(row.get("total_equity"))
             if te is not None:
                 bvps = round(float(te) / (float(shares) / 1_000_000), 4)
-                yearly[i]["book_value_per_share"] = bvps
+        # Applies to the feed's own value too, not only the derived one: the
+        # bound is a statement about what a per-share figure can be, not about
+        # where this one came from.
+        bvps = _plausible_per_share(bvps, "bvps")
+        yearly[i]["book_value_per_share"] = bvps
 
         # Stored margins (preferred) or compute from P&L
         gross_margin  = _f(row.get("gpm"))   or _div(row.get("gross_profit"), rev)
@@ -1209,6 +1250,76 @@ INSERT_SQL = """
 """
 
 
+def _insert_columns() -> list[str]:
+    """The INSERT's column list, in order, read from the statement itself.
+
+    Parsed rather than restated. A hand-kept copy drifts from the SQL the
+    moment a column is added, and the drift is silent: every later column
+    would be range-checked against its neighbour's limit.
+    """
+    head = INSERT_SQL.split("(", 1)[1].split(")", 1)[0]
+    return [c.strip() for c in head.split(",") if c.strip()]
+
+
+def _column_limits(cur) -> list[Optional[float]]:
+    """Per-column |value| ceiling, derived from the schema, positional to the
+    INSERT.
+
+    NUMERIC(p,s) stores absolute values below 10**(p-s): a NUMERIC(10,4)
+    column overflows at 1,000,000. Reading the precision from the catalogue
+    rather than naming the columns here means a new metric, or a widened
+    one, is covered the day it ships. Three columns in this table have been
+    patched one at a time after each in turn crashed a run -- receivables_days
+    (NUMERIC(8,2)), then eps and bvps (NUMERIC(10,4)) on 1 Nov 2026 -- which
+    is what a hand-maintained list buys you.
+    """
+    cur.execute("""
+        SELECT column_name, numeric_precision, numeric_scale
+          FROM information_schema.columns
+         WHERE table_schema = 'market'
+           AND table_name   = 'yearly_metrics'
+           AND data_type    = 'numeric'
+    """)
+    spec = {name: (p, s) for name, p, s in cur.fetchall()}
+    limits: list[Optional[float]] = []
+    for col in _insert_columns():
+        p, s = spec.get(col, (None, None))
+        limits.append(float(10 ** (p - s)) if p is not None and s is not None
+                      else None)
+    return limits
+
+
+def _withhold_unrepresentable(rows: list[tuple],
+                              limits: list[Optional[float]],
+                              cols: list[str]) -> tuple[list[tuple], dict]:
+    """Replace values the column cannot hold with None, and say which.
+
+    A per-share figure of -1,045,000 is not a fact about a company; it is an
+    arithmetic artefact of dividing a real loss by a share count of 2. It
+    cannot be stored and it should not be: withholding it is the honest
+    outcome. Letting psycopg2 raise instead is what turned two companies into
+    977 unwritten rows across 57 codes on 1 Nov 2026 and blocked publication
+    for the whole universe.
+    """
+    withheld: dict[str, int] = {}
+    out: list[tuple] = []
+    for row in rows:
+        vals = list(row)
+        for i, v in enumerate(vals):
+            lim = limits[i] if i < len(limits) else None
+            if lim is None or v is None or isinstance(v, (str, bool)):
+                continue
+            try:
+                over = abs(float(v)) >= lim
+            except (TypeError, ValueError):
+                continue
+            if over:
+                withheld[cols[i]] = withheld.get(cols[i], 0) + 1
+                vals[i] = None
+        out.append(tuple(vals))
+    return out, withheld
+
+
 def upsert_rows(cur, rows: list[tuple]) -> int:
     if not rows:
         return 0
@@ -1219,8 +1330,41 @@ def upsert_rows(cur, rows: list[tuple]) -> int:
         tuple(v.item() if isinstance(v, np.generic) else v for v in row)
         for row in rows
     ]
-    execute_values(cur, INSERT_SQL, rows, page_size=200)
-    return len(rows)
+
+    cols = _insert_columns()
+    rows, withheld = _withhold_unrepresentable(rows, _column_limits(cur), cols)
+    for col, n in sorted(withheld.items(), key=lambda kv: -kv[1]):
+        log.warning("withheld %d value(s) the %s column cannot represent", n, col)
+
+    # A page is written under its own savepoint. Without one, a single
+    # out-of-range value aborts the whole transaction, and every row that
+    # shared its page of 200 goes unwritten through no fault of its own --
+    # which the coverage guard then reads as an incoherent run. The fallback
+    # narrows the loss to the offending row and names it, so a data problem
+    # belonging to one company stays one company's problem.
+    written = 0
+    for start in range(0, len(rows), 200):
+        page = rows[start:start + 200]
+        cur.execute("SAVEPOINT yearly_page")
+        try:
+            execute_values(cur, INSERT_SQL, page, page_size=len(page))
+            cur.execute("RELEASE SAVEPOINT yearly_page")
+            written += len(page)
+        except psycopg2.Error as exc:
+            cur.execute("ROLLBACK TO SAVEPOINT yearly_page")
+            log.warning("page of %d rejected (%s); retrying row by row",
+                        len(page), str(exc).splitlines()[0])
+            for row in page:
+                cur.execute("SAVEPOINT yearly_row")
+                try:
+                    execute_values(cur, INSERT_SQL, [row], page_size=1)
+                    cur.execute("RELEASE SAVEPOINT yearly_row")
+                    written += 1
+                except psycopg2.Error as row_exc:
+                    cur.execute("ROLLBACK TO SAVEPOINT yearly_row")
+                    log.error("row rejected: %s %s — %s",
+                              row[0], row[1], str(row_exc).splitlines()[0])
+    return written
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────

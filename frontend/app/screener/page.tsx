@@ -7,6 +7,7 @@ import {
   type ScreenerFilter, type ScreenerRow, type ScreenerFieldMeta,
   type ScreenerPreset, type NLScreenerResponse, type QueryFieldRef,
   type UnevaluableCriterion,
+  type OrderingExclusion,
 } from '@/lib/api'
 import {
   formatPrice, formatVolume, formatMarketCap,
@@ -16,7 +17,7 @@ import {
   Plus, Trash2, Play, ChevronUp, ChevronDown, RefreshCw,
   ChevronLeft, ChevronRight, SlidersHorizontal, Zap, X, Download,
   Sparkles, Search, Lock, Bookmark, Globe, Eye, EyeOff, Pencil,
-  Code2, AlertCircle, FileText,
+  Code2, AlertCircle, FileText, Info,
 } from 'lucide-react'
 import Link from 'next/link'
 import WatchlistButton from '@/components/WatchlistButton'
@@ -866,6 +867,11 @@ export default function ScreenerPage() {
 
   // Results state
   const [unevaluable, setUnevaluable] = useState<UnevaluableCriterion[]>([])
+  // How many members the current sort could actually rank, and who it could
+  // not. The API has always sent both; nothing read them, so a screen sorted
+  // by a metric nobody can be ranked on looked like a screen that matched
+  // nothing.
+  const [excluded, setExcluded] = useState<OrderingExclusion | null>(null)
   const [results, setResults]       = useState<ScreenerRow[]>([])
   const [total, setTotal]           = useState(0)
   const [page, setPage]             = useState(1)
@@ -1311,6 +1317,7 @@ export default function ScreenerPage() {
       const res = await runScreener(apiFilters, { sort_by: by, sort_dir: dir, page: p, page_size: 50 })
       setResults(res.data)
       setUnevaluable(res.unevaluable_criteria ?? [])
+      setExcluded(res.excluded_from_ordering ?? null)
       setTotal(res.total)
       setPage(res.page)
       setTotalPages(res.total_pages)
@@ -1424,6 +1431,7 @@ export default function ScreenerPage() {
       })
       setResults(res.data)
       setUnevaluable(res.unevaluable_criteria ?? [])
+      setExcluded(res.excluded_from_ordering ?? null)
       setTotal(res.total)
       setPage(res.page)
       setTotalPages(res.total_pages)
@@ -2678,6 +2686,40 @@ export default function ScreenerPage() {
             </div>
           )}
 
+          {/* Some members cannot be placed in this ordering. They are still
+              here — after every ranked company — and saying so is the whole
+              point: the API has reported this since the ordering contract
+              shipped and the page read neither field, so a screen sorted by
+              a metric nobody has rendered as "No stocks match your filters"
+              over a non-zero count. */}
+          {excluded && excluded.count > 0 && (
+            <div className="flex items-start gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+              <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-slate-600">
+                {excluded.count >= total ? (
+                  <>
+                    <span className="font-semibold text-slate-700">
+                      None of these {total.toLocaleString()} companies can be ranked by{' '}
+                      {allFields.find(f => f.key === excluded.metric)?.label ?? excluded.metric}.
+                    </span>{' '}
+                    That metric is unavailable for every one of them, so the rows below are
+                    in code order rather than ranked. They still match your filters — choose
+                    another sort column to rank them.
+                  </>
+                ) : (
+                  <>
+                    <span className="font-semibold text-slate-700">
+                      {excluded.count.toLocaleString()} of {total.toLocaleString()} companies
+                      cannot be ranked by{' '}
+                      {allFields.find(f => f.key === excluded.metric)?.label ?? excluded.metric}.
+                    </span>{' '}
+                    They match your filters and are listed after the ranked ones, not dropped.
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-200 bg-gray-50">
             <span className="text-sm font-semibold text-gray-700">
               {total.toLocaleString()} results
@@ -2809,6 +2851,22 @@ export default function ScreenerPage() {
                 Remove {unevaluable.length === 1 ? 'that filter' : 'those filters'} to run the rest of this screen.
               </p>
             </div>
+          ) : total > 0 ? (
+            /* Members exist and none of them came back. That is never "no
+               stocks match" — it is this page failing to show what the count
+               above it is counting, and it is exactly how the unrankable-sort
+               defect presented: "9 stocks matched" over "No stocks match your
+               filters". The cause is fixed upstream; this branch exists so
+               the two numbers can never again contradict each other silently. */
+            <>
+              <p className="text-gray-700 font-semibold">
+                {total.toLocaleString()} {total === 1 ? 'company matches' : 'companies match'}, but
+                none could be shown on this page.
+              </p>
+              <p className="text-sm text-gray-500 mt-1">
+                This is a display fault, not an empty result. Try page 1, or a different sort column.
+              </p>
+            </>
           ) : (
             <>
               <p className="text-gray-500 font-medium">No stocks match your {screenerMode === 'query' ? 'query' : 'filters'}.</p>

@@ -231,8 +231,13 @@ def test_cheapest_first_does_not_put_the_bank_at_the_top():
     page = codes(conn, p.page_sql("u", "asx_code", limit=5), p.params)
 
     assert page[0] != "CBA", "a suppressed zero must not rank as cheapest"
-    assert "CBA" not in page
-    assert page == ["IND1", "IND2", "IND3", "IND4"]
+    assert page == ["IND1", "IND2", "IND3", "IND4", "CBA"], (
+        "the bank must appear after every ranked company, not be dropped: "
+        "page membership answers the screen, ordering answers the ranking")
+    # The sharpest form of the property. 0.0 is the lowest value in the
+    # table, so an ordering that consulted the column at all would put CBA
+    # first on an ASC sort. It is last because it does not participate.
+    assert page[-1] == "CBA"
 
 
 def test_the_bank_is_excluded_from_the_ranking_but_not_from_the_universe():

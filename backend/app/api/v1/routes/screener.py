@@ -143,6 +143,36 @@ def _log_parse_error(query: str, exc: Exception) -> None:
 #: evaluated against the criteria, not whether the survivors could.
 DIAGNOSIS_POPULATION = "u.price IS NOT NULL AND u.status = 'active'"
 
+
+def _membership_where(plan) -> str:
+    """Who is IN this screen — one definition, used by every statement.
+
+    The count, the page and the ranked count must all draw from the same set.
+    They did not: the ranked count was built from ``plan.where`` alone, which
+    omits the price and status conditions the other two carry.
+    """
+    return f"{DIAGNOSIS_POPULATION} AND ({plan.where})"
+
+
+def _order_by(plan, sort_expr: str, sort_dir: str,
+              tiebreak: str = "u.asx_code") -> str:
+    """Where each member sits in this ordering — never whether it is here.
+
+    Participation leads the sort when the ordering is governed, so a member
+    the metric cannot be evaluated for lands after every ranked company
+    instead of being dropped from the result set. NULLS LAST alone would not
+    do it: a sidecar-withheld metric can still have a value in its column,
+    and ordering on that value would position a company by a number we have
+    declared unusable.
+    """
+    keys = []
+    if plan.order_governed and plan.order_applicable:
+        keys.append(f"CASE WHEN {plan.order_applicable} THEN 0 ELSE 1 END ASC")
+    keys.append(f"{sort_expr} {sort_dir} NULLS LAST")
+    keys.append(f"{tiebreak} ASC")
+    return ", ".join(keys)
+
+
 ERROR_PARSE                  = "parse_error"
 ERROR_COMPARISON_UNSUPPORTED = "comparison_unsupported"
 
@@ -1044,21 +1074,25 @@ def build_screener_sql(req: ScreenerRequest, scope=None,
     """
     plan = _plan_for(req, scope)
     contract_cols = ", u.metric_states, u.compute_run_id" if sidecar else ""
-    where = f"u.price IS NOT NULL AND u.status = 'active' AND ({plan.where})"
+    where = _membership_where(plan)
     params = dict(plan.params)
 
     sort_expr = plan.order_column or "u.market_cap"
     sort_dir  = plan.order_direction
 
-    # Ranking participation lives in the WHERE, so a non-participant never
-    # reaches the ORDER BY and cannot spend a pagination slot.
-    # This endpoint DOES apply it: the data query below selects on
-    # {data_where}, so a governed sort restricts the rows to those the
-    # metric can actually be evaluated for. The sibling endpoint built the
-    # same value and never used it; see the note there.
-    data_where = where
-    if plan.order_governed and plan.order_applicable:
-        data_where = f"{where} AND {plan.order_applicable}"
+    # Ranking participation decides a member's POSITION, never its presence.
+    # The count below answers membership; the data query must answer the same
+    # question or the page contradicts its own header.
+    #
+    # This clause used to read `{where} AND {plan.order_applicable}`, which
+    # made the two disagree. Sorting by a metric no member can be evaluated
+    # for returned an empty page under a non-zero count — the customer saw
+    # "9 stocks matched" directly above "No stocks match your filters", and
+    # four presets sorting on piotroski_f_score returned nothing whatever
+    # their filters said. Non-participants now stay in the result set and
+    # sort after every ranked company; see ScreenPlan.page_sql.
+    #
+    order_by = _order_by(plan, sort_expr, sort_dir)
 
     count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
 
@@ -1158,8 +1192,8 @@ def build_screener_sql(req: ScreenerRequest, scope=None,
             u.price_date, u.universe_built_at{contract_cols}
 
         FROM screener.universe u
-        WHERE {data_where}
-        ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
+        WHERE {where}
+        ORDER BY {order_by}
         LIMIT :_limit OFFSET :_offset
     """
 
@@ -1399,8 +1433,14 @@ async def run_screener(
     ranked_total = total
     exclusions = None
     if plan.order_governed and plan.order_applicable:
+        # The SAME membership predicate the count used, narrowed by
+        # participation. It read `plan.where` alone, which omits the price and
+        # status conditions, so it counted delisted and unpriced companies as
+        # ranked members; min() against total hid the overcount by capping it,
+        # and the exclusion was reported smaller than it was -- or as zero.
         ranked_sql = (f"SELECT COUNT(*) FROM screener.universe u "
-                      f"WHERE {plan.where} AND {plan.order_applicable}")
+                      f"WHERE {_membership_where(plan)} "
+                      f"AND {plan.order_applicable}")
         ranked_raw = (await db.execute(text(ranked_sql), params)).scalar() or 0
         ranked_total = min(ranked_raw, total)
 
@@ -2383,22 +2423,18 @@ async def query_screener(
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
-    base_where = "u.price IS NOT NULL AND u.status = 'active'"
-    where      = f"{base_where} AND ({plan.where})"
-    params     = dict(plan.params)
+    where  = _membership_where(plan)
+    params = dict(plan.params)
 
     sort_expr = plan.order_column or "u.market_cap"
     sort_dir  = plan.order_direction
 
-    # NOTE: a `data_where` was built here as
-    #     where AND plan.order_applicable   (when the sort is governed)
-    # and then never used -- the data query below runs plain {where}. So a
-    # screen sorted by a governed metric still returns rows the metric
-    # cannot be evaluated for; they sort to the bottom under NULLS LAST.
-    # Removed rather than wired in: count_sql uses {where} too, so applying
-    # it to the data query alone would make the pagination count disagree
-    # with the rows returned. Restoring the intent is a deliberate change
-    # to screen results and belongs in its own candidate.
+    # This path already kept non-participants in the result set — the
+    # restriction was built here once and never used. It is now the rule
+    # everywhere rather than an accident here, and the ordering states it:
+    # participation first, so a withheld metric's residual column value can
+    # never position a row.
+    order_by  = _order_by(plan, sort_expr, sort_dir)
     count_sql = f"SELECT COUNT(*) FROM screener.universe u WHERE {where}"
 
     data_sql = f"""
@@ -2457,7 +2493,7 @@ async def query_screener(
             u.price_date, u.universe_built_at{contract_cols}
         FROM screener.universe u
         WHERE {where}
-        ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
+        ORDER BY {order_by}
         LIMIT :_limit OFFSET :_offset
     """
 
@@ -2558,22 +2594,24 @@ async def export_query_screener(
     except CompileError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
-    base_where = "u.price IS NOT NULL AND u.status = 'active'"
-    where      = f"{base_where} AND ({plan.where})"
+    where      = _membership_where(plan)
     params     = dict(plan.params)
     sort_expr  = plan.order_column or "u.market_cap"
     sort_dir   = plan.order_direction
 
     # Export membership must match the interactive route exactly; only the
-    # row limit differs.
-    if plan.order_governed and plan.order_applicable:
-        where = f"{where} AND {plan.order_applicable}"
+    # row limit differs. It did not: the participation clause was appended to
+    # {where} here, so an export sorted by a governed metric silently omitted
+    # every member the metric could not rank — the comment above claimed the
+    # agreement while the line below it broke the agreement. Membership and
+    # ordering are now separated here as they are on the interactive route.
+    order_by = _order_by(plan, sort_expr, sort_dir)
 
     export_sql = f"""
         SELECT {', '.join(f'u.{c}' for c in _EXPORT_COLS)}{contract_cols}
         FROM screener.universe u
         WHERE {where}
-        ORDER BY {sort_expr} {sort_dir} NULLS LAST, u.asx_code ASC
+        ORDER BY {order_by}
         LIMIT {_EXPORT_MAX_ROWS}
     """
     result = await db.execute(text(export_sql), params)

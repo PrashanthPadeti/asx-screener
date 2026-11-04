@@ -8,7 +8,16 @@ sqlite table and assert the response-level invariants:
     ungoverned ordering   ranked_total == total, no exclusions
     governed ordering     ranked_total + excluded == total
                           exclusions drawn only from screen members
+                          every member is still ON the page, ranked last
     one resolved scope    every statement carries the same snapshot
+
+That fourth line reversed a contract on 5 November 2026. page_sql carried
+``AND order_applicable``, so a member the sort metric could not rank was
+absent from the page while count_sql still counted it. The justification --
+"a non-participant must not spend a pagination slot" -- does not survive
+NULLS LAST, which already puts it last; what the clause did instead was
+empty the page outright when NO member could be ranked. Participation now
+leads the ORDER BY and the WHERE answers membership alone.
 
 The last one is not observable from a single query. It is a property of the
 request, and it is asserted by checking that all four statements are built
@@ -195,13 +204,84 @@ def test_exclusions_are_drawn_only_from_screen_members():
     assert scalar(conn, p.ranked_count_sql("u"), p.params) + len(excluded) == total
 
 
-def test_the_page_never_spends_a_slot_on_a_non_participant():
+def test_a_non_participant_stays_in_the_result_set_and_sorts_last():
+    """Participation decides POSITION, not presence.
+
+    This asserted the opposite until 5 Nov 2026 -- the page carried
+    ``AND order_applicable`` so a non-participant could not spend a slot.
+    Under NULLS LAST it never could: it is already last. What the clause
+    actually did was empty the page whenever NO member could be ranked, while
+    count_sql went on reporting the members, so the product showed "9 stocks
+    matched" above "No stocks match your filters" and four presets sorting by
+    piotroski_f_score returned nothing whatever their filters said.
+    """
+    conn = build_db()
+    p = plan(order="grossed_up_yield")
+    page = codes(conn, p.page_sql("u", "asx_code", limit=5), p.params)
+
+    assert page == ["IND1", "CBA", "IND2", "FEED", "QAN"], (
+        "the ranked three must lead and the two non-participants must follow")
+    assert len(page) == scalar(conn, p.count_sql("u"), p.params), (
+        "the page no longer accounts for every screen member, so the count "
+        "above the table and the table itself answer different questions")
+
+
+def test_a_ranked_company_is_never_displaced_by_a_non_participant():
+    """The reason the old clause existed. It must still hold without it."""
     conn = build_db()
     p = plan(order="grossed_up_yield")
     page = codes(conn, p.page_sql("u", "asx_code", limit=3), p.params)
 
     assert page == ["IND1", "CBA", "IND2"]
-    assert not set(page) & {"FEED", "QAN"}
+    assert not set(page) & {"FEED", "QAN"}, (
+        "an unrankable company took a slot ahead of a rankable one")
+
+
+def test_every_member_survives_a_sort_nobody_can_participate_in():
+    """The live defect, in its most complete form.
+
+    piotroski_f_score is computed for none of the 2,113 companies, so EVERY
+    member is a non-participant. The old page returned zero rows; the count
+    returned the members. A screen must not disappear because of how it was
+    sorted.
+    """
+    conn = build_db()
+    conn.execute("UPDATE u SET metric_states = ?",
+                 (json.dumps({"grossed_up_yield": {"state": "unavailable"}}),))
+    conn.commit()
+
+    p = plan(order="grossed_up_yield")
+    total = scalar(conn, p.count_sql("u"), p.params)
+    page  = codes(conn, p.page_sql("u", "asx_code", limit=50), p.params)
+
+    assert total == 5
+    assert scalar(conn, p.ranked_count_sql("u"), p.params) == 0, (
+        "the fixture no longer withholds the metric from everyone, so this "
+        "test is not exercising the case it was written for")
+    assert len(page) == 5, (
+        f"a sort nobody can participate in returned {len(page)} of {total} "
+        f"members; the result set vanished because of its ordering")
+
+
+def test_a_withheld_value_cannot_position_a_row():
+    """A metric is withheld by the SIDECAR. The column underneath may still
+    hold the forensic value, and NULLS LAST would then rank the company on a
+    number we have declared unusable -- placing it above companies whose
+    value we trust."""
+    conn = build_db()
+    # FEED is withheld, but give its column the highest value in the table.
+    conn.execute("UPDATE u SET grossed_up_yield = 0.99 WHERE asx_code = 'FEED'")
+    conn.commit()
+
+    p = plan(order="grossed_up_yield")
+    page = codes(conn, p.page_sql("u", "asx_code", limit=5), p.params)
+
+    assert page[0] == "IND1", (
+        f"a withheld metric's residual value put {page[0]} at the top of the "
+        f"ranking")
+    assert page.index("FEED") >= 3, (
+        "FEED is excluded from this ordering and must sit after every ranked "
+        "company regardless of what its column holds")
 
 
 def test_a_governed_filter_and_a_governed_order_reconcile_together():
@@ -269,9 +349,14 @@ def test_pagination_is_stable_across_pages():
     p = plan(order="grossed_up_yield")
     page1 = codes(conn, p.page_sql("u", "asx_code", 2, 0), p.params)
     page2 = codes(conn, p.page_sql("u", "asx_code", 2, 2), p.params)
+    page3 = codes(conn, p.page_sql("u", "asx_code", 2, 4), p.params)
 
-    assert page1 == ["IND1", "CBA"] and page2 == ["IND2"]
-    assert not set(page1) & set(page2), "no row appears on two pages"
+    assert page1 == ["IND1", "CBA"] and page2 == ["IND2", "FEED"]
+    assert page3 == ["QAN"], (
+        "the non-participants now occupy the tail of the pagination instead "
+        "of being absent from it")
+    assert len(set(page1 + page2 + page3)) == 5, (
+        "no row appears on two pages, and none is lost between them")
 
 
 # ── The placeholder style matches the driver that will bind it ───────────────

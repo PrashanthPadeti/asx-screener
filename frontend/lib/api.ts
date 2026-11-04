@@ -264,6 +264,21 @@ export interface UnevaluableCriterion {
   universe: number
 }
 
+/**
+ * Why some screen members are absent from this ordering.
+ *
+ * `total` answers membership; `ranked_total` answers how many of those
+ * members the sort metric could actually rank. They diverge when the sort is
+ * governed and some members have no usable observation of it — those rows are
+ * still returned, after every ranked one.
+ */
+export interface OrderingExclusion {
+  metric: string
+  count: number
+  reasons?: Record<string, number>
+  codes?: string[] | null
+}
+
 export interface ScreenerResponse {
   data: ScreenerRow[]
   total: number
@@ -275,6 +290,12 @@ export interface ScreenerResponse {
   free_limit?: number   // 500 for free users
   // Present only when total === 0 AND the emptiness has an explanation.
   unevaluable_criteria?: UnevaluableCriterion[] | null
+  // The backend has reported both of these since the ordering contract
+  // shipped, and this file did not declare them, so the page could not read
+  // them. A screen sorted by a metric nobody can be ranked on rendered as
+  // though nothing matched.
+  ranked_total?: number | null
+  excluded_from_ordering?: OrderingExclusion | null
 }
 
 export interface ScreenerFieldMeta {

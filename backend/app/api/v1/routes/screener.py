@@ -1879,6 +1879,12 @@ async def get_screener_presets():
                     {"field": "piotroski_f_score", "operator": "gte", "value": 7},
                     {"field": "market_cap",        "operator": "gte", "value": 100},
                 ],
+                # Deliberately NOT repointed. This screen is the F-Score: it
+                # is named for it and filters on it, so it cannot return a
+                # row until the metric is computed, and sorting it by
+                # something else would dress up an unanswerable screen as a
+                # working one. The satisfiability checker reports it under
+                # both headings, which is the truth about it.
                 "sort_by": "piotroski_f_score", "sort_dir": "desc",
             },
             {
@@ -1924,7 +1930,14 @@ async def get_screener_presets():
                     {"field": "debt_to_equity",    "operator": "lte", "value": 0.5},
                     {"field": "net_margin",        "operator": "gt",  "value": 5},
                 ],
-                "sort_by": "piotroski_f_score", "sort_dir": "desc",
+                # Was piotroski_f_score, which is computed for none of the
+                # 2,113 companies: the preset promised an ordering it could
+                # not deliver, and until 5 Nov 2026 that ordering also emptied
+                # the page. ROE is this screen's other quality criterion and
+                # is measurably populated. The Piotroski FILTER stays — it is
+                # what the screen is for, and the page now says plainly that
+                # it cannot be answered yet.
+                "sort_by": "roe", "sort_dir": "desc",
             },
             {
                 "id":          "high_growth",
@@ -2158,7 +2171,12 @@ async def get_screener_presets():
                     {"field": "above_sma200",       "operator": "eq",  "value": True},
                     {"field": "market_cap",         "operator": "gte", "value": 500},
                 ],
-                "sort_by": "piotroski_f_score", "sort_dir": "desc",
+                # Was piotroski_f_score (barren). composite_score would match
+                # the description better, but no preset references it, so the
+                # satisfiability checker has never measured its coverage and
+                # this would be swapping one unmeasured sort for another. ROE
+                # is the quality side of the model and is populated.
+                "sort_by": "roe", "sort_dir": "desc",
             },
             {
                 "id":          "mining_value",
@@ -2234,7 +2252,12 @@ async def get_screener_presets():
                     {"field": "return_3m",          "operator": "gte", "value": 5},
                     {"field": "above_sma200",       "operator": "eq",  "value": True},
                 ],
-                "sort_by": "piotroski_f_score", "sort_dir": "desc",
+                # Was piotroski_f_score (barren). This is the screen the
+                # defect was reported on: with the Piotroski filter removed
+                # it matched 9 companies and showed none of them, because the
+                # preset's SORT survived the filter's deletion. Momentum is
+                # half the screen's name and return_3m is populated.
+                "sort_by": "return_3m", "sort_dir": "desc",
             },
 
             # ── New Premium Screens ──────────────────────────────────────────────

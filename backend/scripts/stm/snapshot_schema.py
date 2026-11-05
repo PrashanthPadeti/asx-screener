@@ -47,8 +47,16 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-BACKEND = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(BACKEND))
+#: Where the checkout is, when this file is still inside one. It is run from
+#: /tmp on the server -- deliberately, so the production checkout never has to
+#: move -- and there parents[2] does not exist. Computing it unguarded raised
+#: IndexError at import, before argparse could offer the --env-file that
+#: exists precisely for that case: the fallback has to be in the line that
+#: runs first, not only in the flag that handles the consequence.
+_HERE = Path(__file__).resolve()
+BACKEND = _HERE.parents[2] if len(_HERE.parents) > 2 else _HERE.parent
+if (BACKEND / "app").is_dir():
+    sys.path.insert(0, str(BACKEND))
 
 #: The layers the mapping documents describe. Schemas outside this set exist
 #: (users, ai, meta, support, strategy) and are deliberately not part of the

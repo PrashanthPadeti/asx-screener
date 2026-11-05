@@ -123,6 +123,29 @@ def test_the_satisfiability_check_exists_and_fails_loudly():
             f"that could not judge anything would report success")
 
 
+def test_the_checker_separates_an_unrankable_sort_from_an_empty_screen():
+    """These used to be one verdict, and since 5 Nov 2026 they are not the
+    same failure.
+
+    A barren FILTER field still means the preset cannot return a row. A
+    barren SORT field no longer does: the members come back, unranked, with
+    the exclusion reported. Both still fail the run — a screen promising an
+    ordering it cannot deliver is broken — but reporting "cannot return a
+    row" about a screen the customer can watch returning rows is how a
+    checker earns being ignored.
+    """
+    src = SCRIPT.read_text(encoding="utf-8")
+    assert "unrankable" in src, (
+        "the checker has no separate outcome for a preset that returns rows "
+        "it cannot order")
+    tree = ast.parse(src)
+    returns = {ast.dump(n.value) for n in ast.walk(tree)
+               if isinstance(n, ast.Return) and n.value is not None}
+    assert any("unrankable" in r for r in returns), (
+        "an unrankable sort does not affect the exit code, so a preset that "
+        "cannot deliver its ordering would report success")
+
+
 def test_the_checker_screens_the_same_population_as_the_product():
     """A verdict over a different population answers a different question."""
     route_pop  = _literal("DIAGNOSIS_POPULATION")

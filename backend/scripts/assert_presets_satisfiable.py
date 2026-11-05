@@ -27,8 +27,10 @@ So this runs where the data is. The companion unit test
 (test_preset_satisfiability.py) asserts the part that IS static: that every
 preset names fields the registry actually knows.
 
-Exit codes:  0 every preset is satisfiable
-             1 at least one cannot return a row
+Exit codes:  0 every preset can return a row AND can deliver its ordering
+             1 at least one cannot do one of those -- reported separately,
+               because since 5 Nov 2026 an unrankable SORT no longer empties
+               a screen the way an unsatisfiable FILTER does
              2 could not run (no DB, no presets) -- never silent success
 
 Usage:
@@ -153,24 +155,39 @@ def main() -> int:
         return 2
 
     barren = {f for f, n in zip(cols, counts) if not n}
+    useless = barren | set(unknown)
 
-    broken = []
+    # Two different failures, and they used to be one.
+    #
+    # A barren FILTER field means the preset cannot return a row: nobody can
+    # satisfy a condition on a column nobody has.
+    #
+    # A barren SORT field used to mean the same thing, because the route put
+    # the participation clause in the data query's WHERE and an unrankable
+    # member was dropped. As of 5 Nov 2026 it does not: the members come back,
+    # ordered by the tiebreak, with the exclusion reported alongside. That is
+    # still a preset promising an ordering it cannot deliver -- it is reported
+    # and it still fails the run -- but calling it "cannot return a row" would
+    # now be false, and a checker that says something false about a screen a
+    # customer can see working is a checker that gets ignored.
+    empty, unrankable = [], []
     for p in presets:
-        used = {f["field"] for f in p.get("filters", [])}
-        if p.get("sort_by"):
-            used.add(p["sort_by"])
-        offending = sorted(used & (barren | set(unknown)))
-        if offending:
-            broken.append({"id": p.get("id"), "name": p.get("name"),
-                           "premium": bool(p.get("premium")),
-                           "unsatisfiable_on": offending})
+        meta = {"id": p.get("id"), "name": p.get("name"),
+                "premium": bool(p.get("premium"))}
+        filtered_on = sorted({f["field"] for f in p.get("filters", [])} & useless)
+        if filtered_on:
+            empty.append({**meta, "unsatisfiable_on": filtered_on})
+        sort_by = p.get("sort_by")
+        if sort_by and sort_by in useless:
+            unrankable.append({**meta, "unrankable_on": sort_by})
 
     if args.json:
         print(json.dumps({"population": population,
                           "presets": len(presets),
                           "empty_columns": sorted(barren),
                           "unknown_fields": unknown,
-                          "broken": broken}, indent=2))
+                          "broken": empty,            # historical key name
+                          "unrankable": unrankable}, indent=2))
     else:
         print(f"population: {population} active companies")
         print(f"presets:    {len(presets)}")
@@ -178,15 +195,21 @@ def main() -> int:
             print(f"columns empty for the whole population: {sorted(barren)}")
         if unknown:
             print(f"fields unknown to ALLOWED_FIELDS:       {unknown}")
-        if broken:
-            print(f"\n{len(broken)} preset(s) cannot return a row:")
-            for b in broken:
+        if empty:
+            print(f"\n{len(empty)} preset(s) cannot return a row:")
+            for b in empty:
                 tag = "PREMIUM" if b["premium"] else "free"
                 print(f"  [{tag:7}] {b['id']:28} {b['unsatisfiable_on']}")
-        else:
-            print("\nall presets are satisfiable")
+        if unrankable:
+            print(f"\n{len(unrankable)} preset(s) return rows but cannot "
+                  f"deliver their ordering:")
+            for b in unrankable:
+                tag = "PREMIUM" if b["premium"] else "free"
+                print(f"  [{tag:7}] {b['id']:28} sort_by {b['unrankable_on']}")
+        if not empty and not unrankable:
+            print("\nall presets are satisfiable and rankable")
 
-    return 1 if broken else 0
+    return 1 if (empty or unrankable) else 0
 
 
 if __name__ == "__main__":

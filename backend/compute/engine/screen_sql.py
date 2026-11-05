@@ -563,21 +563,47 @@ class ScreenPlan:
 
     def page_sql(self, table: str, select: str, limit: int,
                  offset: int = 0, tiebreak: str = "asx_code") -> str:
-        """One page of ranked results.
+        """One page of the result set, in the requested order.
 
-        The participation clause is in the WHERE, so non-participants never
-        reach the ORDER BY and cannot spend a slot. The tiebreak keeps
-        pagination stable across pages when the sort metric ties.
+        The page is drawn from screen MEMBERS, not from the ranked subset.
+        Participation decides a member's POSITION, never its presence:
+        NULLS LAST puts every non-participant after every ranked company, so
+        it cannot displace one, and the tiebreak keeps pagination stable
+        across pages when the sort metric ties.
+
+        This used to carry ``AND {order_applicable}`` in the WHERE, on the
+        reasoning that a non-participant should not spend a pagination slot.
+        Under NULLS LAST it never does -- it is already last -- and the cost
+        was severe: a sort on a metric NO member can be evaluated for emptied
+        the page entirely while count_sql kept reporting the members. The
+        customer saw "9 stocks matched" above "No stocks match your filters",
+        and the four presets that sorted by piotroski_f_score returned nothing
+        whatever their filters said. compile_screen has always stated the
+        intended rule -- "stays in the result set and is absent from the
+        ordering. Neither dropped nor zeroed" -- and this is the statement
+        that disagreed with it.
+
+        ranked_count_sql and exclusion_sql are unchanged: they still answer
+        who can participate, and the response reports both numbers so a client
+        can say that the last N rows are present but unranked.
+
+        NULLS LAST alone would not be enough. A withheld metric is withheld by
+        the SIDECAR, and the column underneath it may still hold the forensic
+        value; sorting on that column would place a company by a number we
+        have declared unusable. So the participation flag is the FIRST sort
+        key when the ordering is governed, and the column only breaks ties
+        inside the participating set.
         """
-        clauses = self.where
-        if self.order_governed and self.order_applicable:
-            clauses = f"{clauses} AND {self.order_applicable}"
+        keys = []
+        if self.order_column and self.order_governed and self.order_applicable:
+            keys.append(f"CASE WHEN {self.order_applicable} THEN 0 ELSE 1 END ASC")
+        if self.order_column:
+            keys.append(f"{self.order_column} {self.order_direction} NULLS LAST")
+        keys.append(f"{tiebreak} ASC")
 
-        order = (f"{self.order_column} {self.order_direction} NULLS LAST, "
-                 f"{tiebreak} ASC") if self.order_column else f"{tiebreak} ASC"
-
-        return (f"SELECT {select} FROM {table} WHERE {clauses} "
-                f"ORDER BY {order} LIMIT {int(limit)} OFFSET {int(offset)}")
+        return (f"SELECT {select} FROM {table} WHERE {self.where} "
+                f"ORDER BY {', '.join(keys)} "
+                f"LIMIT {int(limit)} OFFSET {int(offset)}")
 
     def exclusion_sql(self, table: str, select: str) -> Optional[str]:
         """Members excluded from the ordering, and why.

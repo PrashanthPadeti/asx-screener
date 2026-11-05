@@ -1,0 +1,262 @@
+# Source-to-target mapping — authored half
+# =========================================
+# financials.annual_pnl  (Silver)
+#
+# The generator supplies everything structural from the schema snapshot and
+# the lineage graph: data type, precision, nullability, key membership, CHECK
+# values, writer job, load strategy, join conditions. None of that belongs
+# here, and anything written here OVERRIDES the generated value -- so only
+# override when the generated value is wrong, and say why.
+#
+# What belongs here is what no column definition can tell you: which source
+# field it came from, what was done to it, and what a reader would otherwise
+# assume incorrectly.
+#
+# Authored from the code that runs, not from the column names:
+#   backend/scripts/eodhd/v2/transforms/transform_financials.py:62-156
+# Verified against that file on 6 November 2026.
+
+table: financials.annual_pnl
+layer: Silver
+source_layer: Bronze
+grain: one row per (asx_code, fiscal_year)
+
+# ── Facts that apply to every column in this table ───────────────────────────
+defaults:
+  source_system: EODHD
+  source_table: staging_au.income_statement
+  source_filter: "period_type = 'yearly'"
+  writer_job: scripts/eodhd/v2/transforms/transform_financials.py
+
+# UNITS — the single most misreadable thing about this table.
+#
+# Every monetary column passes through _m(), which is
+#     round(float(v) / 1_000_000, 2)
+# so the income statement is expressed in AUD MILLIONS to 2 decimal places.
+#
+# eps and eps_diluted pass through _f(), which does NOT divide. They are in
+# AUD PER SHARE. Reading revenue and eps as the same unit is wrong by a factor
+# of a million, and nothing in the column types distinguishes them -- both are
+# NUMERIC. This is why the unit field exists.
+
+# DEDUPLICATION — EODHD can return more than one yearly row whose period end
+# date falls in the same calendar year (a year-end change, a restatement filed
+# under a new date). The transform keeps the row with the LATEST
+# period_end_date per (asx_code, fiscal_year) before loading. Earlier rows are
+# discarded and are not recoverable from this table; they remain in
+# staging_au.income_statement until the next truncating reload.
+
+# LOAD — ON CONFLICT (asx_code, fiscal_year) DO UPDATE, i.e. an upsert, on
+# every incremental run. TRUNCATE ... RESTART IDENTITY CASCADE happens only on
+# a full run (--full), at transform_financials.py:425-430. The generator's
+# load_strategy reports both operations because both exist in the module; the
+# incremental path is the one that runs daily.
+
+columns:
+  financials.annual_pnl:
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy, no normalisation
+      business_rule: >
+        ASX ticker without the .AU exchange suffix. The suffix is stripped
+        upstream, at the staging load, not here.
+      grain: part of the business key
+      unit: n/a
+
+    fiscal_year:
+      source_column: date
+      derivation_formula: "fiscal_year = EXTRACT(YEAR FROM period_end_date)"
+      transformation_rule: calendar year of the period end date
+      business_rule: >
+        NOT the Australian fiscal-year convention. A company with a 30 June
+        2025 year end is fiscal_year 2025, which matches FY25 by coincidence;
+        a company with a 31 December 2025 year end is ALSO fiscal_year 2025,
+        and that is CY2025, not FY26. Two companies in the same fiscal_year
+        can therefore be reporting periods six months apart. Any comparison
+        across companies within a fiscal_year carries that risk, and
+        period_end_date is the column that resolves it.
+      grain: part of the business key
+      unit: year
+
+    period_end_date:
+      source_column: date
+      transformation_rule: direct copy
+      business_rule: >
+        The authoritative period boundary. Where fiscal_year is ambiguous
+        across companies, this is not. Downstream price-window calculations
+        bound themselves by this date rather than by fiscal_year.
+      unit: date
+
+    revenue:
+      source_column: total_revenue
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      derivation_formula: "revenue = total_revenue / 1e6"
+      business_rule: >
+        Total revenue as reported. Not adjusted, not normalised for
+        discontinued operations. NULL where EODHD omits the field, which is
+        distinct from a reported zero -- see v11.2.74: a loader that mapped
+        0 to NULL erased every disclosed zero, and totalAssets was genuinely
+        zero 19 times in 33,201 company-years.
+      unit: AUD millions
+
+    cost_of_sales:
+      source_column: cost_of_revenue
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: renamed from the EODHD field name; no other change.
+      unit: AUD millions
+
+    gross_profit:
+      source_column: gross_profit
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: >
+        Taken as reported rather than recomputed as revenue - cost_of_sales.
+        The two can disagree when a filer classifies an item outside cost of
+        revenue, and the reported figure is the one the market quotes.
+      unit: AUD millions
+
+    operating_expenses:
+      source_column: total_operating_expenses
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      unit: AUD millions
+
+    ebit:
+      source_column: operating_income
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: >
+        EODHD's operating_income is stored as ebit. They are treated as
+        synonymous here. For filers who report significant non-operating
+        items inside operating income, that equivalence is approximate.
+      unit: AUD millions
+
+    ebitda:
+      source_column: ebitda
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: >
+        As reported by EODHD, NOT derived as ebit + depreciation. Where EODHD
+        omits it the column is NULL even though ebit and depreciation are
+        both present.
+      unit: AUD millions
+
+    depreciation:
+      source_column: depreciation_amortization
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: depreciation and amortisation combined, as the source supplies them.
+      unit: AUD millions
+
+    interest_expense:
+      source_column: interest_expense
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: >
+        Sign convention follows EODHD, which reports it as a positive
+        magnitude. Consumers computing interest cover must not negate it.
+      unit: AUD millions
+
+    pbt:
+      source_column: income_before_tax
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      unit: AUD millions
+
+    tax:
+      source_column: income_tax_expense
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: >
+        Expense as a positive number. A tax benefit appears negative.
+      unit: AUD millions
+
+    pat:
+      source_column: net_income
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      unit: AUD millions
+
+    net_profit:
+      source_column: net_income
+      transformation_rule: "_m(): round(value / 1000000, 2)"
+      business_rule: >
+        DUPLICATE OF pat. Both columns are loaded from the same EODHD field,
+        with the source comment "net_profit same as net_income from EODHD"
+        (transform_financials.py:108). They cannot disagree today. Two
+        columns holding one fact is a latent defect: any future writer that
+        sets one and not the other creates a disagreement no constraint
+        prevents, and downstream code picks whichever it happened to use.
+        Flagged rather than silently documented as two measures.
+      unit: AUD millions
+
+    opm:
+      source_column: derived
+      tables_involved: staging_au.income_statement
+      derivation_formula: "opm = round(operating_income / total_revenue, 6)"
+      transformation_rule: >
+        Computed in the transform, from the UNCONVERTED staging values, so
+        the million-scaling cancels and the ratio is unaffected.
+      business_rule: >
+        NULL when revenue is NULL or zero -- the guard is `if rev and ...`,
+        which also treats 0.0 as absent. Correct here: a margin on zero
+        revenue is undefined, not zero. Expressed as a RATIO (0.0834), not a
+        percentage, and the API multiplies by 100 at the presentation edge.
+      unit: ratio (0-1), 6 dp
+
+    npm:
+      source_column: derived
+      derivation_formula: "npm = round(net_income / total_revenue, 6)"
+      business_rule: >
+        Same zero-revenue guard as opm. Can legitimately be negative.
+      unit: ratio (0-1), 6 dp
+
+    gpm:
+      source_column: derived
+      derivation_formula: "gpm = round(gross_profit / total_revenue, 6)"
+      business_rule: >
+        Same zero-revenue guard as opm. NULL for filers who report no gross
+        profit line -- banks and most REITs, where cost of revenue is not a
+        meaningful concept.
+      unit: ratio (0-1), 6 dp
+
+    ebitda_margin:
+      source_column: derived
+      derivation_formula: "ebitda_margin = round(ebitda / total_revenue, 6)"
+      business_rule: >
+        Same zero-revenue guard as opm. NULL wherever EODHD omits ebitda,
+        which is more often than it omits ebit.
+      unit: ratio (0-1), 6 dp
+
+    eps:
+      source_column: eps
+      transformation_rule: "_f(): float(value) — NO million conversion"
+      business_rule: >
+        AUD PER SHARE, unlike every monetary column in this table. The
+        distinction is invisible in the column type: both are NUMERIC. Basic
+        EPS as reported; not restated for later share-count changes, so a
+        historical row reflects the share count at the time of reporting.
+      unit: AUD per share
+
+    eps_diluted:
+      source_column: eps_diluted
+      transformation_rule: "_f(): float(value) — NO million conversion"
+      business_rule: >
+        AUD per share. Equals eps for companies with no dilutive instruments;
+        NULL where the source does not report a diluted figure, which is not
+        the same as "no dilution".
+      unit: AUD per share
+
+    data_source:
+      source_column: literal
+      derivation_formula: "data_source = 'eodhd'"
+      transformation_rule: constant, set by the transform
+      business_rule: >
+        Provenance marker. Constant today because EODHD is the only writer of
+        this table through this path; the column exists so a second source
+        can be distinguished rather than merged silently.
+      unit: n/a
+
+    data_as_of:
+      source_column: NOW()
+      transformation_rule: "set to NOW() on UPDATE only, not on INSERT"
+      business_rule: >
+        NOT a lineage marker, and must not be used as one. It moves on every
+        upsert whether or not a single value changed, and three of the four
+        writers that touch financials.annual_* leave it untouched entirely.
+        So an unchanged source reads as changed AND a real change can read as
+        unchanged. source_fingerprint.py rejected this column for exactly
+        that reason and fingerprints content instead.
+      unit: timestamptz

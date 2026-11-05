@@ -58,14 +58,24 @@ DEFAULT_SCHEMAS = ("staging_au", "financials", "market", "screener")
 SNAPSHOT_VERSION = 1
 
 
-def _dsn() -> str:
+def _dsn(env_file: str | None = None) -> str:
     """A psycopg2 DSN resolved at the execution boundary.
 
     Reads the project's .env directly rather than depending on the caller's
     shell: three jobs once died in 1ms because DATABASE_URL arrived only via
     another module's import-time load_dotenv.
+
+    ``--env-file`` exists because this script is deliberately run from outside
+    the checkout. Switching the production checkout to a feature branch to
+    make a path resolve would put unreleased code where systemd and every cron
+    job will load it; copying the one file out and pointing it at the .env is
+    the version that changes nothing.
     """
-    for candidate in (BACKEND / ".env", BACKEND.parent / ".env"):
+    candidates = ([Path(env_file)] if env_file
+                  else [BACKEND / ".env", BACKEND.parent / ".env"])
+    if env_file and not Path(env_file).exists():
+        raise RuntimeError(f"--env-file {env_file} does not exist")
+    for candidate in candidates:
         if not candidate.exists():
             continue
         for line in candidate.read_text(encoding="utf-8").splitlines():
@@ -183,6 +193,9 @@ def main() -> int:
                     help="path to write the snapshot JSON to")
     ap.add_argument("--schemas", default=",".join(DEFAULT_SCHEMAS),
                     help="comma-separated schemas to snapshot")
+    ap.add_argument("--env-file",
+                    help="path to the .env holding DATABASE_URL, for when this "
+                         "script is run from outside the checkout")
     args = ap.parse_args()
 
     schemas = [s.strip() for s in args.schemas.split(",") if s.strip()]
@@ -192,7 +205,7 @@ def main() -> int:
 
     try:
         import psycopg2
-        conn = psycopg2.connect(_dsn())
+        conn = psycopg2.connect(_dsn(args.env_file))
     except Exception as exc:                                   # noqa: BLE001
         print(f"2  cannot reach the database: {exc}")
         return 2

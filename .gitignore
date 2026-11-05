@@ -81,6 +81,12 @@ data/
 *.parquet
 *.pkl
 
+# The source-to-target mapping documents are generated, and versioned on
+# purpose. They are specifications, not data: a schema change that nobody
+# reflected in a mapping row shows up as a diff in review, which is the only
+# mechanism that keeps a mapping document true after the week it was written.
+!database/stm/*.csv
+
 # Airflow
 airflow/logs/
 airflow/plugins/__pycache__/

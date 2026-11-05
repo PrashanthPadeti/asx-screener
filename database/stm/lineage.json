@@ -1,0 +1,1824 @@
+{
+  "modules_scanned": 108,
+  "modules_touching_tables": 68,
+  "tables_written": 62,
+  "by_table": {
+    "financials.annual_balance_sheet": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_financials.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "financials.annual_cashflow": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_financials.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "financials.annual_pnl": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_dividends.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_financials.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "financials.earnings_quarterly": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_earnings.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.analyst_ratings": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_analyst_ratings.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.anomalies": {
+      "written_by": [
+        {
+          "module": "compute/engine/anomaly_detect.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.capital_raises": {
+      "written_by": [
+        {
+          "module": "compute/engine/capital_raise_tracker.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.commodity_prices": {
+      "written_by": [
+        {
+          "module": "compute/engine/commodities.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.companies": {
+      "written_by": [
+        {
+          "module": "compute/engine/asx_companies.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/asx_indices.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/sync_companies_from_exchange.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_companies.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.computed_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/daily_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.daily_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/technical_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.daily_prices": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_prices.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_prices.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.dividends": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_dividends.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_dividends.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.exchange_list": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_exchange.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.exdiv_snapshots": {
+      "written_by": [
+        {
+          "module": "compute/engine/market_snapshot.py",
+          "operations": [
+            "delete",
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.fund_prices": {
+      "written_by": [
+        {
+          "module": "compute/engine/fund_prices.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.funds": {
+      "written_by": [
+        {
+          "module": "compute/engine/fund_prices.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.fx_rates": {
+      "written_by": [
+        {
+          "module": "compute/engine/global_markets.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.global_index_prices": {
+      "written_by": [
+        {
+          "module": "compute/engine/global_markets.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.global_indices": {
+      "written_by": [
+        {
+          "module": "compute/engine/global_markets.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.halfyearly_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/halfyearly_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.heatmap_cache": {
+      "written_by": [
+        {
+          "module": "compute/engine/heatmap_compute.py",
+          "operations": [
+            "delete",
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.heatmap_labels": {
+      "written_by": [
+        {
+          "module": "compute/engine/heatmap_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.index_prices": {
+      "written_by": [
+        {
+          "module": "compute/engine/index_prices.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.index_snapshots": {
+      "written_by": [
+        {
+          "module": "compute/engine/market_snapshot.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.mining_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/mining_metrics.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.monthly_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/monthly_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.mover_snapshots": {
+      "written_by": [
+        {
+          "module": "compute/engine/market_snapshot.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.period_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/period_metrics_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.pipeline_runs": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/jobs/daily_pipeline.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.pipeline_step_runs": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/jobs/daily_pipeline.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.price_predictions": {
+      "written_by": [
+        {
+          "module": "compute/engine/price_predictions.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.quarterly_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/quarterly_compute.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.reit_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/reit_metrics.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.sector_benchmarks": {
+      "written_by": [
+        {
+          "module": "compute/engine/sector_benchmarks.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.sector_snapshots": {
+      "written_by": [
+        {
+          "module": "compute/engine/market_snapshot.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.shares_history": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_shares_history.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.short_positions": {
+      "written_by": [
+        {
+          "module": "compute/engine/short_positions.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.splits": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/load_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_splits.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Silver"
+    },
+    "market.valuation_snapshot": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/transforms/transform_valuation.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.weekly_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/weekly_compute.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "market.yearly_metrics": {
+      "written_by": [
+        {
+          "module": "compute/engine/yearly_compute.py",
+          "operations": [
+            "delete",
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
+    "screener.compute_run_finalizations": {
+      "written_by": [
+        {
+          "module": "compute/engine/run_stages.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Universe"
+    },
+    "screener.compute_run_stages": {
+      "written_by": [
+        {
+          "module": "compute/engine/run_stages.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Universe"
+    },
+    "screener.compute_runs": {
+      "written_by": [
+        {
+          "module": "compute/engine/universe_writer.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "Universe"
+    },
+    "screener.universe": {
+      "written_by": [
+        {
+          "module": "compute/engine/asx_indices.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/composite_score.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/dilution_metrics.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/metric_states.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/pros_cons.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/short_positions.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "compute/engine/universe_writer.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/build_screener_universe.py",
+          "operations": [
+            "delete",
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/eodhd/v2/jobs/incremental_daily.py",
+          "operations": [
+            "update"
+          ]
+        }
+      ],
+      "layer": "Universe"
+    },
+    "staging_au.analyst_ratings": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.balance_sheet": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.cash_flow": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.company_profile": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.dividends": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_dividends.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.earnings": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.eod_prices": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_prices.py",
+          "operations": [
+            "delete",
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.exchange_symbols": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_exchange_symbols.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.fundamentals": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.highlights": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.income_statement": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.shares_stats": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.short_positions": {
+      "written_by": [
+        {
+          "module": "compute/engine/short_positions.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.splits": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_splits.py",
+          "operations": [
+            "insert",
+            "truncate"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "staging_au.valuation": {
+      "written_by": [
+        {
+          "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Bronze"
+    },
+    "strategy.monthly_picks": {
+      "written_by": [
+        {
+          "module": "compute/engine/top5_strategy.py",
+          "operations": [
+            "delete",
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope"
+    }
+  },
+  "by_module": {
+    "compute/engine/anomaly_detect.py": {
+      "writes": {
+        "market.anomalies": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/asx_companies.py": {
+      "writes": {
+        "market.companies": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/asx_indices.py": {
+      "writes": {
+        "market.companies": [
+          "update"
+        ],
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/canonical_readback.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/capital_raise_tracker.py": {
+      "writes": {
+        "market.capital_raises": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.asx_announcements"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/commodities.py": {
+      "writes": {
+        "market.commodity_prices": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/composite_score.py": {
+      "writes": {
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [
+        "screener.compute_runs"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/daily_compute.py": {
+      "writes": {
+        "market.computed_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "financials.annual_balance_sheet",
+        "financials.annual_cashflow",
+        "financials.annual_pnl",
+        "market.companies_current",
+        "market.daily_prices",
+        "market.dividends"
+      ],
+      "joins": [
+        {
+          "table": "financials.annual_pnl",
+          "alias": "f",
+          "on": "f.asx_code = p.asx_code",
+          "line": 574
+        }
+      ],
+      "dynamic": []
+    },
+    "compute/engine/dilution_metrics.py": {
+      "writes": {
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [
+        "market.shares_history"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/dividends.py": {
+      "writes": {},
+      "reads": [
+        "market.dividends"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/fund_population.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns",
+        "market.fund_prices",
+        "market.funds"
+      ],
+      "joins": [
+        {
+          "table": "market.fund_prices",
+          "alias": "p",
+          "on": "p.asx_code = f.asx_code",
+          "line": 81
+        }
+      ],
+      "dynamic": []
+    },
+    "compute/engine/fund_prices.py": {
+      "writes": {
+        "market.fund_prices": [
+          "insert"
+        ],
+        "market.funds": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/global_markets.py": {
+      "writes": {
+        "market.fx_rates": [
+          "insert"
+        ],
+        "market.global_index_prices": [
+          "insert"
+        ],
+        "market.global_indices": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/halfyearly_compute.py": {
+      "writes": {
+        "market.halfyearly_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.quarterly_metrics"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/heatmap_compute.py": {
+      "writes": {
+        "market.heatmap_cache": [
+          "delete",
+          "insert"
+        ],
+        "market.heatmap_labels": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.daily_prices",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/index_prices.py": {
+      "writes": {
+        "market.index_prices": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/market_snapshot.py": {
+      "writes": {
+        "market.exdiv_snapshots": [
+          "delete",
+          "insert"
+        ],
+        "market.index_snapshots": [
+          "insert"
+        ],
+        "market.mover_snapshots": [
+          "insert"
+        ],
+        "market.sector_snapshots": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "information_schema.columns",
+        "market.period_metrics",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/metric_states.py": {
+      "writes": {
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/mining_metrics.py": {
+      "writes": {
+        "market.mining_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/monthly_compute.py": {
+      "writes": {
+        "market.monthly_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies_current",
+        "market.daily_prices"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code",
+          "line": 87
+        }
+      ],
+      "dynamic": []
+    },
+    "compute/engine/output_freshness.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/period_metrics_compute.py": {
+      "writes": {
+        "market.period_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.daily_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/price_predictions.py": {
+      "writes": {
+        "market.price_predictions": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.daily_prices",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/pros_cons.py": {
+      "writes": {
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/quarterly_compute.py": {
+      "writes": {
+        "market.quarterly_metrics": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/reit_metrics.py": {
+      "writes": {
+        "market.reit_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/run_resolution.py": {
+      "writes": {},
+      "reads": [
+        "screener.compute_run_finalizations",
+        "screener.compute_run_stages",
+        "screener.compute_runs"
+      ],
+      "joins": [
+        {
+          "table": "screener.compute_run_finalizations",
+          "alias": "f",
+          "on": "f.run_id = r.id",
+          "line": 33
+        }
+      ],
+      "dynamic": []
+    },
+    "compute/engine/run_stages.py": {
+      "writes": {
+        "screener.compute_run_finalizations": [
+          "insert"
+        ],
+        "screener.compute_run_stages": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/screen_sql.py": {
+      "writes": {},
+      "reads": [
+        "screener.compute_runs"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/sector_benchmarks.py": {
+      "writes": {
+        "market.sector_benchmarks": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/short_positions.py": {
+      "writes": {
+        "market.short_positions": [
+          "insert"
+        ],
+        "screener.universe": [
+          "update"
+        ],
+        "staging_au.short_positions": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/source_fingerprint.py": {
+      "writes": {},
+      "reads": [
+        "financials.annual_pnl",
+        "information_schema.columns"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/technical_compute.py": {
+      "writes": {
+        "market.daily_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "information_schema.columns",
+        "market.daily_prices",
+        "market.splits",
+        "staging_au.shares_stats"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/top5_strategy.py": {
+      "writes": {
+        "strategy.monthly_picks": [
+          "delete",
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "market.companies_current",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = u.asx_code",
+          "line": 130
+        }
+      ],
+      "dynamic": []
+    },
+    "compute/engine/universe_writer.py": {
+      "writes": {
+        "screener.compute_runs": [
+          "insert",
+          "update"
+        ],
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [
+        "information_schema.columns"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "compute/engine/weekly_compute.py": {
+      "writes": {
+        "market.weekly_metrics": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies_current",
+        "market.daily_prices"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code",
+          "line": 83
+        }
+      ],
+      "dynamic": []
+    },
+    "compute/engine/yearly_compute.py": {
+      "writes": {
+        "market.yearly_metrics": [
+          "delete",
+          "insert"
+        ]
+      },
+      "reads": [
+        "financials.annual_balance_sheet",
+        "financials.annual_cashflow",
+        "financials.annual_pnl",
+        "information_schema.columns",
+        "market.daily_prices",
+        "market.dividends",
+        "staging_au.shares_stats"
+      ],
+      "joins": [
+        {
+          "table": "financials.annual_balance_sheet",
+          "alias": "b",
+          "on": "b.asx_code = p.asx_code AND b.fiscal_year = p.fiscal_year",
+          "line": 251
+        },
+        {
+          "table": "financials.annual_cashflow",
+          "alias": "cf",
+          "on": "cf.asx_code = p.asx_code AND cf.fiscal_year = p.fiscal_year",
+          "line": 251
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/eodhd/download_daily_fundamentals.py": {
+      "writes": {},
+      "reads": [
+        "financials.annual_pnl",
+        "market.companies"
+      ],
+      "joins": [
+        {
+          "table": "market.companies",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code",
+          "line": 98
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/eodhd/download_historical_dividends.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/download_historical_fundamentals.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/download_historical_prices.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/load_dividends.py": {
+      "writes": {
+        "financials.annual_pnl": [
+          "update"
+        ],
+        "market.dividends": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/load_fundamentals.py": {
+      "writes": {
+        "financials.annual_balance_sheet": [
+          "insert"
+        ],
+        "financials.annual_cashflow": [
+          "insert"
+        ],
+        "financials.annual_pnl": [
+          "insert",
+          "update"
+        ],
+        "market.analyst_ratings": [
+          "insert"
+        ],
+        "market.companies": [
+          "update"
+        ],
+        "market.dividends": [
+          "insert"
+        ],
+        "market.quarterly_metrics": [
+          "insert"
+        ],
+        "market.splits": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/load_prices.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/build_screener_universe.py": {
+      "writes": {
+        "screener.universe": [
+          "delete",
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "financials.annual_balance_sheet",
+        "financials.annual_cashflow",
+        "financials.annual_pnl",
+        "financials.earnings_quarterly",
+        "market.analyst_ratings",
+        "market.asx_announcements",
+        "market.companies",
+        "market.companies_current",
+        "market.computed_metrics",
+        "market.daily_metrics",
+        "market.daily_prices",
+        "market.dividends",
+        "market.halfyearly_metrics",
+        "market.monthly_metrics",
+        "market.quarterly_metrics",
+        "market.short_positions",
+        "market.valuation_snapshot",
+        "market.weekly_metrics",
+        "market.yearly_metrics",
+        "staging_au.company_profile",
+        "staging_au.fundamentals",
+        "staging_au.shares_stats"
+      ],
+      "joins": [
+        {
+          "table": "market.valuation_snapshot",
+          "alias": "vs",
+          "on": "vs.asx_code = c.asx_code",
+          "line": 81
+        },
+        {
+          "table": "market.analyst_ratings",
+          "alias": "ar",
+          "on": "ar.asx_code = c.asx_code",
+          "line": 81
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/download_dividends.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/download_eod_prices.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/download_fundamentals.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/download_splits.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/jobs/budget_audit.py": {
+      "writes": {},
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/jobs/daily_pipeline.py": {
+      "writes": {
+        "market.pipeline_runs": [
+          "insert",
+          "update"
+        ],
+        "market.pipeline_step_runs": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/jobs/incremental_daily.py": {
+      "writes": {
+        "screener.universe": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/load_shares_history.py": {
+      "writes": {
+        "market.shares_history": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/load_to_staging_dividends.py": {
+      "writes": {
+        "staging_au.dividends": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/load_to_staging_exchange_symbols.py": {
+      "writes": {
+        "staging_au.exchange_symbols": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/load_to_staging_fundamentals.py": {
+      "writes": {
+        "staging_au.analyst_ratings": [
+          "insert"
+        ],
+        "staging_au.balance_sheet": [
+          "insert"
+        ],
+        "staging_au.cash_flow": [
+          "insert"
+        ],
+        "staging_au.company_profile": [
+          "insert"
+        ],
+        "staging_au.earnings": [
+          "insert"
+        ],
+        "staging_au.fundamentals": [
+          "insert"
+        ],
+        "staging_au.highlights": [
+          "insert"
+        ],
+        "staging_au.income_statement": [
+          "insert",
+          "truncate"
+        ],
+        "staging_au.shares_stats": [
+          "insert"
+        ],
+        "staging_au.valuation": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/load_to_staging_prices.py": {
+      "writes": {
+        "staging_au.eod_prices": [
+          "delete",
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/load_to_staging_splits.py": {
+      "writes": {
+        "staging_au.splits": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/sync_companies_from_exchange.py": {
+      "writes": {
+        "market.companies": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "staging_au.exchange_symbols"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_analyst_ratings.py": {
+      "writes": {
+        "market.analyst_ratings": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.analyst_ratings"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_companies.py": {
+      "writes": {
+        "market.companies": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "staging_au.company_profile"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_dividends.py": {
+      "writes": {
+        "market.dividends": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.dividends"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_earnings.py": {
+      "writes": {
+        "financials.earnings_quarterly": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.earnings"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_exchange.py": {
+      "writes": {
+        "market.exchange_list": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.exchange_symbols"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_financials.py": {
+      "writes": {
+        "financials.annual_balance_sheet": [
+          "insert",
+          "truncate"
+        ],
+        "financials.annual_cashflow": [
+          "insert",
+          "truncate"
+        ],
+        "financials.annual_pnl": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.balance_sheet",
+        "staging_au.cash_flow",
+        "staging_au.income_statement"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_prices.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.eod_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_splits.py": {
+      "writes": {
+        "market.splits": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.splits"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/eodhd/v2/transforms/transform_valuation.py": {
+      "writes": {
+        "market.valuation_snapshot": [
+          "insert",
+          "truncate"
+        ]
+      },
+      "reads": [
+        "staging_au.highlights",
+        "staging_au.valuation"
+      ],
+      "joins": [
+        {
+          "table": "staging_au.valuation",
+          "alias": "v",
+          "on": "v.asx_code = h.asx_code",
+          "line": 65
+        }
+      ],
+      "dynamic": []
+    }
+  },
+  "read_but_never_written": [
+    "information_schema.columns",
+    "market.asx_announcements",
+    "market.companies_current"
+  ],
+  "parse_errors": []
+}

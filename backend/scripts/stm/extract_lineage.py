@@ -1,0 +1,286 @@
+"""
+Which job writes which table, read off the jobs
+===============================================
+A source-to-target mapping needs a third fact beyond source and target: the
+process that moves one to the other. That fact is routinely the stalest thing
+in a mapping document, because it is the part a human types from memory.
+
+This reads it instead. Every module under the pipeline and compute trees is
+parsed, every SQL string literal in it is examined, and each statement is
+classified by what it does to which table:
+
+    writes   INSERT INTO x / UPDATE x / DELETE FROM x / TRUNCATE x /
+             COPY x FROM / CREATE TABLE x AS / MERGE INTO x
+    reads    FROM x / JOIN x / USING x
+
+The result is a table-level lineage graph: for each target table, the modules
+that write it and the tables those modules read. That is enough to populate
+the "Transformation job", "Tables involved" and "Join condition" columns of
+the mapping documents without anybody retyping them, and enough to draw the
+dependency edges the run sheet needs.
+
+What this is and is not
+-----------------------
+It is a STATIC read. A module that builds SQL by concatenation, or routes a
+table name through a variable, is reported as `dynamic` rather than guessed
+at -- those are listed explicitly so the gap is visible instead of absent.
+Silence would be the dangerous outcome: a lineage graph missing an edge looks
+exactly like a lineage graph that has no such edge.
+
+It also does not claim to be semantics. Knowing that `yearly_compute.py`
+writes `market.yearly_metrics` and reads `financials.annual_pnl` is lineage;
+knowing that `roe = net_profit / shareholders_equity` is derivation, and that
+is authored, reviewed prose that lives in the YAML sidecar.
+
+Usage:
+    cd backend && python scripts/stm/extract_lineage.py \
+        --out ../database/stm/lineage.json
+    ... --print     human-readable summary to stdout
+
+Exit codes:  0 lineage extracted
+             2 nothing to parse -- never a silent empty graph
+"""
+
+from __future__ import annotations
+
+import argparse
+import ast
+import json
+import re
+import sys
+from collections import defaultdict
+from pathlib import Path
+
+BACKEND = Path(__file__).resolve().parents[2]
+
+#: Where the pipeline lives. Anything outside these trees is not part of the
+#: Bronze -> Silver -> Gold -> Universe lineage and would only add noise.
+SOURCE_TREES = (
+    BACKEND / "scripts/eodhd",
+    BACKEND / "compute",
+)
+
+#: The layers. A table in none of these is out of scope for the mapping
+#: documents -- users, ai, meta, support and strategy are the product's own
+#: state, not the data pipeline.
+LAYER_OF_SCHEMA = {
+    "staging_au": "Bronze",
+    "financials": "Silver",
+    "market":     "Silver/Gold",     # split per-table by TABLE_LAYER below
+    "screener":   "Universe",
+}
+
+#: market.* holds both conformed entities and computed measures. The split is
+#: by table, not by schema, and it is declared rather than guessed: a name
+#: heuristic ("anything ending in _metrics is Gold") would silently
+#: misclassify the next table somebody adds.
+TABLE_LAYER = {
+    # Silver — conformed entities, one row per real-world thing
+    "market.companies":          "Silver",
+    "market.companies_current":  "Silver",
+    "market.daily_prices":       "Silver",
+    "market.dividends":          "Silver",
+    "market.splits":             "Silver",
+    "market.shares_history":     "Silver",
+    "market.exchange_list":      "Silver",
+    "market.funds":              "Silver",
+    "market.fund_prices":        "Silver",
+    "market.index_prices":       "Silver",
+    "market.global_index_prices": "Silver",
+    "market.commodity_prices":   "Silver",
+    "market.fx_rates":           "Silver",
+    "market.short_positions":    "Silver",
+    "market.asx_announcements":  "Silver",
+    "market.analyst_ratings":    "Silver",
+    "market.earnings_quarterly": "Silver",
+    "market.capital_raises":     "Silver",
+}
+
+WRITE_PATTERNS = [
+    ("insert",   re.compile(r"\bINSERT\s+INTO\s+([a-z_]+\.[a-z_]+)", re.I)),
+    ("update",   re.compile(r"\bUPDATE\s+(?:ONLY\s+)?([a-z_]+\.[a-z_]+)", re.I)),
+    ("delete",   re.compile(r"\bDELETE\s+FROM\s+(?:ONLY\s+)?([a-z_]+\.[a-z_]+)", re.I)),
+    ("truncate", re.compile(r"\bTRUNCATE\s+(?:TABLE\s+)?([a-z_]+\.[a-z_]+)", re.I)),
+    ("copy",     re.compile(r"\bCOPY\s+([a-z_]+\.[a-z_]+)\s*(?:\([^)]*\))?\s*FROM", re.I)),
+    ("ctas",     re.compile(r"\bCREATE\s+(?:TEMP\s+|TEMPORARY\s+|UNLOGGED\s+)?TABLE\s+"
+                            r"(?:IF\s+NOT\s+EXISTS\s+)?([a-z_]+\.[a-z_]+)\s+AS", re.I)),
+    ("merge",    re.compile(r"\bMERGE\s+INTO\s+([a-z_]+\.[a-z_]+)", re.I)),
+]
+
+READ_PATTERNS = [
+    re.compile(r"\bFROM\s+(?:ONLY\s+)?([a-z_]+\.[a-z_]+)", re.I),
+    re.compile(r"\bJOIN\s+([a-z_]+\.[a-z_]+)", re.I),
+    re.compile(r"\bUSING\s+([a-z_]+\.[a-z_]+)", re.I),
+]
+
+#: ON <condition> following a JOIN. The join condition is a column the user
+#: explicitly asked for, and it is knowable from the text.
+JOIN_ON = re.compile(
+    r"\bJOIN\s+([a-z_]+\.[a-z_]+)(?:\s+(?:AS\s+)?([a-z_][a-z_0-9]*))?\s+ON\s+(.+?)"
+    r"(?=\s+(?:LEFT|RIGHT|INNER|FULL|CROSS|JOIN|WHERE|GROUP|ORDER|LIMIT|UNION|\)|$))",
+    re.I | re.S)
+
+#: A statement whose target is interpolated rather than literal. Reported, not
+#: silently dropped: an edge nobody can see is indistinguishable from an edge
+#: that does not exist.
+DYNAMIC_TARGET = re.compile(
+    r"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|TRUNCATE(?:\s+TABLE)?|MERGE\s+INTO)\s+"
+    r"(\{[a-z_]+\}|%s|\$\{)", re.I)
+
+#: Only strings long enough and shaped like SQL. Parsing every literal in the
+#: tree would match docstrings that discuss SQL -- which is how a guard ends
+#: up reading its own explanation.
+SQL_SHAPED = re.compile(
+    r"\b(SELECT|INSERT|UPDATE|DELETE|TRUNCATE|COPY|MERGE|CREATE\s+TABLE)\b", re.I)
+
+
+def layer_of(table: str) -> str:
+    if table in TABLE_LAYER:
+        return TABLE_LAYER[table]
+    schema = table.split(".", 1)[0]
+    layer = LAYER_OF_SCHEMA.get(schema)
+    if layer == "Silver/Gold":
+        # market.* not named in TABLE_LAYER is a computed measure table.
+        return "Gold"
+    return layer or "out-of-scope"
+
+
+def _sql_literals(tree: ast.AST):
+    """Every string constant in the module that looks like SQL."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if len(node.value) >= 20 and SQL_SHAPED.search(node.value):
+                yield node.lineno, node.value
+
+
+def _normalise(sql: str) -> str:
+    """Strip SQL comments so a table named in a comment is not read as used.
+
+    A percent sign in a SQL comment once broke a statement in this codebase;
+    a table name in one would break this graph the same quiet way.
+    """
+    sql = re.sub(r"--[^\n]*", " ", sql)
+    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
+    return sql
+
+
+def analyse_module(path: Path) -> dict:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except SyntaxError as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+    writes  = defaultdict(set)      # table -> {operations}
+    reads   = set()
+    joins   = []
+    dynamic = []
+
+    for lineno, raw in _sql_literals(tree):
+        sql = _normalise(raw)
+        for op, pattern in WRITE_PATTERNS:
+            for m in pattern.finditer(sql):
+                writes[m.group(1).lower()].add(op)
+        for pattern in READ_PATTERNS:
+            for m in pattern.finditer(sql):
+                reads.add(m.group(1).lower())
+        for m in JOIN_ON.finditer(sql):
+            table, alias, cond = m.group(1).lower(), m.group(2), m.group(3)
+            joins.append({"table": table, "alias": alias,
+                          "on": " ".join(cond.split())[:400], "line": lineno})
+        if DYNAMIC_TARGET.search(sql):
+            dynamic.append({"line": lineno,
+                            "excerpt": " ".join(sql.split())[:160]})
+
+    # A table it writes is not also a source for the mapping document, even
+    # though UPDATE ... FROM makes it appear on both sides.
+    sources = sorted(reads - set(writes))
+
+    return {
+        "writes":  {t: sorted(ops) for t, ops in sorted(writes.items())},
+        "reads":   sources,
+        "joins":   joins,
+        "dynamic": dynamic,
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--out")
+    ap.add_argument("--print", action="store_true", dest="show")
+    args = ap.parse_args()
+
+    files = sorted({p for tree in SOURCE_TREES if tree.exists()
+                    for p in tree.rglob("*.py")
+                    if "__pycache__" not in p.parts})
+    if not files:
+        print(f"2  no modules found under {[str(t) for t in SOURCE_TREES]} — "
+              f"the lineage graph would be empty, and an empty graph reads "
+              f"exactly like a pipeline with no dependencies")
+        return 2
+
+    modules, errors = {}, []
+    for path in files:
+        result = analyse_module(path)
+        if "error" in result:
+            errors.append({"module": str(path.relative_to(BACKEND)),
+                           "error": result["error"]})
+            continue
+        if not result["writes"] and not result["reads"]:
+            continue                      # touches no table; not a pipeline step
+        modules[str(path.relative_to(BACKEND)).replace("\\", "/")] = result
+
+    # Invert: target table -> who writes it. This is the column the mapping
+    # documents need, and the direction the run sheet's edges point.
+    by_table = defaultdict(lambda: {"written_by": [], "layer": None})
+    for module, result in modules.items():
+        for table, ops in result["writes"].items():
+            by_table[table]["layer"] = layer_of(table)
+            by_table[table]["written_by"].append({"module": module,
+                                                  "operations": ops})
+
+    unwritten = sorted({t for m in modules.values() for t in m["reads"]}
+                       - set(by_table))
+
+    graph = {
+        "modules_scanned": len(files),
+        "modules_touching_tables": len(modules),
+        "tables_written": len(by_table),
+        "by_table": {k: by_table[k] for k in sorted(by_table)},
+        "by_module": modules,
+        "read_but_never_written": unwritten,
+        "parse_errors": errors,
+    }
+
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(graph, indent=2), encoding="utf-8")
+        print(f"lineage written: {out}")
+
+    print(f"modules scanned      {len(files)}")
+    print(f"modules touching DB  {len(modules)}")
+    print(f"tables written       {len(by_table)}")
+    dyn = sum(len(m["dynamic"]) for m in modules.values())
+    print(f"dynamic targets      {dyn}  (target not a literal: listed, not guessed)")
+    if errors:
+        print(f"parse errors         {len(errors)}")
+        for e in errors[:5]:
+            print(f"    {e['module']}: {e['error']}")
+
+    if args.show:
+        per_layer = defaultdict(list)
+        for table, info in sorted(by_table.items()):
+            per_layer[info["layer"]].append((table, info["written_by"]))
+        for layer in ("Bronze", "Silver", "Gold", "Universe", "out-of-scope"):
+            rows = per_layer.get(layer, [])
+            if not rows:
+                continue
+            print(f"\n== {layer}  ({len(rows)} tables) " + "=" * 30)
+            for table, writers in rows:
+                names = ", ".join(Path(w["module"]).name for w in writers)
+                print(f"  {table:40} <- {names}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

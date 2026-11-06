@@ -1,0 +1,195 @@
+# market.dividends  (Silver)
+#
+# Authored from backend/scripts/eodhd/v2/transforms/transform_dividends.py
+# :100-152, verified 6 November 2026.
+#
+# Grain: one row per (asx_code, ex_date, dividend_type) -- UNIQUE. Note that
+# dividend_type participates in the key, so a company paying an interim and a
+# special dividend with the same ex-date holds two rows, and a row whose
+# dividend_type is NULL cannot collide with anything under that constraint.
+#
+# Franking is the reason this table matters: grossed-up yield is the ASX
+# screener's distinguishing measure, and it is computed downstream from
+# amount_per_share and franking_pct held here.
+#
+# NINE of the seventeen columns are written by the transform. The remaining
+# eight include two pairs of near-duplicate columns (pay_date/payment_date,
+# dividend_type/div_type) that are a genuine hazard, documented below.
+
+table: market.dividends
+layer: Silver
+source_layer: Bronze
+grain: one row per (asx_code, ex_date, dividend_type)
+
+defaults:
+  source_system: EODHD
+  source_table: staging_au.dividends
+  writer_job: scripts/eodhd/v2/transforms/transform_dividends.py
+
+columns:
+  market.dividends:
+
+    id:
+      source_column: generated
+      transformation_rule: "nextval('dividends_id_seq')"
+      business_rule: >
+        Surrogate key. The business key is (asx_code, ex_date, dividend_type).
+      unit: n/a
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy
+      unit: n/a
+
+    ex_date:
+      source_column: date
+      transformation_rule: direct copy
+      business_rule: >
+        The EODHD dividend date IS the ex-date. This is the date the price
+        drops by the dividend, and the date a yield calculation must align to
+        -- not the payment date.
+      unit: date
+
+    record_date:
+      source_column: record_date
+      transformation_rule: direct copy
+      business_rule: Typically one business day after ex_date. Often NULL in the source.
+      unit: date
+
+    pay_date:
+      source_column: payment_date
+      transformation_rule: direct copy
+      business_rule: >
+        THE POPULATED ONE OF THE PAIR. Source staging_au.dividends.payment_date
+        lands here, in market.dividends.pay_date. The similarly named
+        market.dividends.payment_date column is NOT written by this transform
+        -- see below. Reading payment_date on this table returns NULL while
+        the value sits in pay_date.
+      unit: date
+
+    declared_date:
+      source_column: declaration_date
+      transformation_rule: direct copy
+      business_rule: Renamed from the source field. Often NULL.
+      unit: date
+
+    amount_per_share:
+      source_column: dividend
+      transformation_rule: "float(value); rows where it is NULL are SKIPPED"
+      business_rule: >
+        NOT NULL by constraint, enforced by dropping source rows with a NULL
+        dividend before insert (transform_dividends.py:121-122). Those rows
+        are counted and logged, not silently discarded, but they do not reach
+        this table at all -- so a dividend EODHD announced without an amount
+        is absent rather than present-and-unknown.
+
+        UNADJUSTED cash amount per share, in the currency of the `currency`
+        column. Not restated for later splits, so a historical dividend is
+        expressed per the share count of its own time and will not align with
+        a split-adjusted price series.
+      unit: currency per share
+
+    currency:
+      source_column: currency
+      derivation_formula: "currency = source currency OR 'AUD'"
+      transformation_rule: defaults to AUD when the source states none
+      business_rule: >
+        THE FALLBACK IS AN ASSUMPTION, NOT A FACT. A missing source currency
+        becomes 'AUD'. Dual-listed and USD-reporting companies do pay
+        non-AUD dividends, and for those a silent AUD default makes a
+        grossed-up yield wrong by the exchange rate. Compare
+        staging_au.fundamentals.reporting_currency, which deliberately keeps
+        NULL distinct from AUD for the same reason.
+      unit: ISO currency code
+
+    franking_pct:
+      source_column: franking_pct
+      transformation_rule: direct copy
+      business_rule: >
+        Percentage of the dividend carrying franking credits, 0-100. THE
+        COLUMN DEFAULT IS 0, so a row written without this column asserts
+        "unfranked" rather than "unknown" -- a confident negative. Where the
+        source supplies NULL the value is copied as NULL, which is the honest
+        state; the default only bites on paths that omit the column.
+      valid_values: "0 to 100 (percent, not a ratio)"
+      unit: percent
+
+    franking_credit_per_share:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Named by none of the three writers. The franking credit
+        is computed downstream from amount_per_share and franking_pct at the
+        company tax rate; this column was intended to persist it and does not.
+      unit: AUD per share
+
+    grossed_up_amount:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Named by none of the three writers. Grossed-up yield --
+        the product's distinguishing metric -- is computed downstream rather
+        than stored here. Anyone reading this column expecting the grossed-up
+        figure gets NULL, not a wrong number, which is the better failure.
+      unit: AUD per share
+
+    dividend_type:
+      source_column: period
+      derivation_formula: "dividend_type = period.lower() if period else None"
+      transformation_rule: lowercased source period label
+      business_rule: >
+        PART OF THE UNIQUE KEY, and nullable. Values come from EODHD's period
+        label lowercased -- 'interim', 'final', and similar. When the source
+        omits period the value is NULL, and NULLs do not collide in a UNIQUE
+        constraint, so two unlabelled dividends on the same ex-date can both
+        insert. The deduplication this key is supposed to provide does not
+        hold for exactly the rows whose type is unknown.
+      unit: n/a
+
+    is_drp_available:
+      source_column: not supplied
+      transformation_rule: column default false
+      business_rule: >
+        ALWAYS false. No writer sets it. A confident negative: it asserts no
+        dividend reinvestment plan exists, for every dividend ever paid,
+        including the many that do have one.
+      unit: n/a
+
+    drp_price:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. No writer sets it.
+      unit: AUD per share
+
+    payment_date:
+      source_column: not supplied by this transform
+      transformation_rule: not written by transform_dividends
+      business_rule: >
+        THE EMPTY HALF OF A DUPLICATE PAIR. The payment date supplied by
+        staging is written to pay_date, not here. Two columns for one fact,
+        with the populated one named differently from the source field it
+        came from. Code selecting payment_date gets NULL and has no signal
+        that pay_date holds the answer.
+      unit: date
+
+    unadjusted_value:
+      source_column: unadjusted_value
+      transformation_rule: not written by transform_dividends
+      business_rule: >
+        NULL from this transform, although staging_au.dividends carries an
+        unadjusted_value column. EODHD distinguishes the adjusted dividend
+        (restated for later splits) from the unadjusted one; amount_per_share
+        here receives the `dividend` field. Which of the two that is depends
+        on EODHD's own convention and is not established by this mapping --
+        flagged as an open question rather than asserted.
+      unit: currency per share
+
+    div_type:
+      source_column: not supplied
+      transformation_rule: never written by transform_dividends
+      business_rule: >
+        THE EMPTY HALF OF THE SECOND DUPLICATE PAIR. dividend_type is the
+        populated column and the one in the UNIQUE key; div_type is a wider
+        varchar(50) that stays NULL. Two columns, one fact, and the one with
+        the more natural name is the empty one.
+      unit: n/a

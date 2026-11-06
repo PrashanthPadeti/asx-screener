@@ -1,0 +1,78 @@
+# market.splits  (Silver)
+#
+# Authored from backend/scripts/eodhd/v2/transforms/transform_splits.py,
+# verified 6 November 2026.
+#
+# Small table, outsized importance: market.daily_prices.close is UNADJUSTED,
+# so this is the only record of the discontinuities a raw price series
+# contains. A return computed across a split date without applying the ratio
+# here is a price artefact, not a return.
+#
+# Grain: one row per (asx_code, split_date). Load: upsert; TRUNCATE on --full.
+
+table: market.splits
+layer: Silver
+source_layer: Bronze
+grain: one row per (asx_code, split_date)
+
+defaults:
+  source_system: EODHD
+  source_table: staging_au.splits
+  writer_job: scripts/eodhd/v2/transforms/transform_splits.py
+
+columns:
+  market.splits:
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy
+      unit: n/a
+
+    split_date:
+      source_column: date
+      transformation_rule: direct copy, renamed from `date`
+      business_rule: >
+        The effective date of the split. Prices on and after this date are on
+        the new share basis; prices before it are not.
+      unit: date
+
+    ratio:
+      source_column: split
+      derivation_formula: "ratio = new_shares / old_shares, parsed from the source string"
+      transformation_rule: >
+        parse_ratio() accepts both EODHD spellings:
+          '2:1'                -> 2.0   (2-for-1 forward split)
+          '1:10'               -> 0.1   (1-for-10 reverse split)
+          '1.000000/5.000000'  -> 0.2   (1-for-5 reverse, slash form)
+      business_rule: >
+        GREATER THAN 1 IS A FORWARD SPLIT, LESS THAN 1 IS A REVERSE SPLIT.
+        To restate a pre-split price onto the current basis, DIVIDE by the
+        ratio; to restate a share count, multiply. Getting this inverted
+        turns a 1-for-40 consolidation into a 40x price move.
+
+        A ratio's MAGNITUDE must account for the price discontinuity it is
+        offered to explain. A split record whose ratio is too small to
+        explain an observed move does not explain it -- MPP's 1-for-40
+        silenced a detector while the price moved 1,564x, which is the reason
+        that test exists.
+
+        NULL when the source string is absent or unparseable. A NULL ratio on
+        a real split is worse than no row: the date says a discontinuity
+        exists and the ratio cannot correct it.
+      unit: ratio (new shares per old share)
+
+    data_source:
+      source_column: literal
+      derivation_formula: "data_source = 'eodhd'"
+      business_rule: >
+        Column default is also 'eodhd' here, so unlike market.daily_prices the
+        default and the writer agree.
+      unit: n/a
+
+    loaded_at:
+      source_column: NOW()
+      transformation_rule: column default now()
+      business_rule: >
+        When this row was written, not when the split occurred. Not a lineage
+        marker for the source.
+      unit: timestamptz

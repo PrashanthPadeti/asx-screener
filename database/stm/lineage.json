@@ -1,7 +1,7 @@
 {
-  "modules_scanned": 108,
-  "modules_touching_tables": 68,
-  "tables_written": 62,
+  "modules_scanned": 157,
+  "modules_touching_tables": 101,
+  "tables_written": 66,
   "by_table": {
     "financials.annual_balance_sheet": {
       "written_by": [
@@ -16,6 +16,18 @@
           "operations": [
             "insert",
             "truncate"
+          ]
+        },
+        {
+          "module": "scripts/load_eodhd_financials.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/load_fmp_financials.py",
+          "operations": [
+            "insert"
           ]
         }
       ],
@@ -34,6 +46,18 @@
           "operations": [
             "insert",
             "truncate"
+          ]
+        },
+        {
+          "module": "scripts/load_eodhd_financials.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/load_fmp_financials.py",
+          "operations": [
+            "insert"
           ]
         }
       ],
@@ -59,6 +83,19 @@
           "operations": [
             "insert",
             "truncate"
+          ]
+        },
+        {
+          "module": "scripts/load_eodhd_financials.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/load_fmp_financials.py",
+          "operations": [
+            "insert"
           ]
         }
       ],
@@ -105,6 +142,23 @@
         }
       ],
       "layer": "Gold"
+    },
+    "market.asx_announcements": {
+      "written_by": [
+        {
+          "module": "scripts/asx/download_announcements.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/seed_announcements.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Silver"
     },
     "market.capital_raises": {
       "written_by": [
@@ -161,6 +215,18 @@
             "insert",
             "update"
           ]
+        },
+        {
+          "module": "scripts/load_asx_companies.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/repair/backfill_structural_flags.py",
+          "operations": [
+            "update"
+          ]
         }
       ],
       "layer": "Silver"
@@ -200,6 +266,42 @@
           "operations": [
             "insert",
             "truncate"
+          ]
+        },
+        {
+          "module": "scripts/load_eodhd_prices.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/load_fmp_prices.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/load_prices.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/update_prices.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/update_prices_eodhd.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/update_prices_fmp.py",
+          "operations": [
+            "insert"
           ]
         }
       ],
@@ -348,6 +450,12 @@
           "module": "compute/engine/index_prices.py",
           "operations": [
             "insert"
+          ]
+        },
+        {
+          "module": "scripts/repair_contaminated_index_history.py",
+          "operations": [
+            "update"
           ]
         }
       ],
@@ -504,10 +612,33 @@
       ],
       "layer": "Silver"
     },
+    "market.short_interest": {
+      "written_by": [
+        {
+          "module": "scripts/asic/load_short_positions.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/asic/transforms/transform_short.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "Gold"
+    },
     "market.short_positions": {
       "written_by": [
         {
           "module": "compute/engine/short_positions.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/asic/transforms/transform_short.py",
           "operations": [
             "insert"
           ]
@@ -575,6 +706,12 @@
           "operations": [
             "insert"
           ]
+        },
+        {
+          "module": "scripts/gate_seed_run.py",
+          "operations": [
+            "insert"
+          ]
         }
       ],
       "layer": "Universe"
@@ -583,6 +720,12 @@
       "written_by": [
         {
           "module": "compute/engine/run_stages.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/gate_seed_run.py",
           "operations": [
             "insert"
           ]
@@ -596,6 +739,18 @@
           "module": "compute/engine/universe_writer.py",
           "operations": [
             "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "scripts/gate_seed_run.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "scripts/p0a_adversarial_assertions.py",
+          "operations": [
             "update"
           ]
         }
@@ -807,6 +962,12 @@
           "operations": [
             "insert"
           ]
+        },
+        {
+          "module": "scripts/asic/load_to_staging_short.py",
+          "operations": [
+            "insert"
+          ]
         }
       ],
       "layer": "Bronze"
@@ -842,6 +1003,28 @@
             "delete",
             "insert",
             "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope"
+    },
+    "users.audit_log": {
+      "written_by": [
+        {
+          "module": "scripts/campaigns/founding_offer_reminder.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope"
+    },
+    "users.unsubscribe_tokens": {
+      "written_by": [
+        {
+          "module": "scripts/campaigns/founding_offer_reminder.py",
+          "operations": [
+            "insert"
           ]
         }
       ],
@@ -1366,6 +1549,112 @@
       ],
       "dynamic": []
     },
+    "scripts/asic/load_short_positions.py": {
+      "writes": {
+        "market.short_interest": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/asic/load_to_staging_short.py": {
+      "writes": {
+        "staging_au.short_positions": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/asic/transforms/transform_short.py": {
+      "writes": {
+        "market.short_interest": [
+          "insert"
+        ],
+        "market.short_positions": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "staging_au.short_positions"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/assert_feed_health.py": {
+      "writes": {},
+      "reads": [
+        "market.dividends"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/assert_marketing_claims.py": {
+      "writes": {},
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/asx/download_announcements.py": {
+      "writes": {
+        "market.asx_announcements": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/cagr_window_sizing.py": {
+      "writes": {},
+      "reads": [
+        "financials.annual_pnl",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/campaigns/founding_offer_reminder.py": {
+      "writes": {
+        "users.audit_log": [
+          "insert"
+        ],
+        "users.unsubscribe_tokens": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "users.users"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/diagnostics/assert_served_technicals_match_source.py": {
+      "writes": {},
+      "reads": [
+        "market.daily_metrics",
+        "market.daily_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/diagnostics/measure_evidence_identity_exposure.py": {
+      "writes": {},
+      "reads": [
+        "market.daily_metrics",
+        "market.daily_prices",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
     "scripts/eodhd/download_daily_fundamentals.py": {
       "writes": {},
       "reads": [
@@ -1813,12 +2102,331 @@
         }
       ],
       "dynamic": []
+    },
+    "scripts/eodhd_index_discovery.py": {
+      "writes": {},
+      "reads": [
+        "market.index_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/gate_a.py": {
+      "writes": {},
+      "reads": [
+        "screener.compute_runs"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/gate_b.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns",
+        "screener.compute_run_finalizations",
+        "screener.compute_run_stages",
+        "screener.compute_runs",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "screener.compute_run_finalizations",
+          "alias": "f",
+          "on": "f.run_id = r.id",
+          "line": 169
+        },
+        {
+          "table": "screener.compute_run_finalizations",
+          "alias": "f",
+          "on": "f.run_id = r.id",
+          "line": 248
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/gate_b_mutations.py": {
+      "writes": {},
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/gate_seed_run.py": {
+      "writes": {
+        "screener.compute_run_finalizations": [
+          "insert"
+        ],
+        "screener.compute_run_stages": [
+          "insert"
+        ],
+        "screener.compute_runs": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/load_asx_companies.py": {
+      "writes": {
+        "market.companies": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/load_eodhd_financials.py": {
+      "writes": {
+        "financials.annual_balance_sheet": [
+          "insert"
+        ],
+        "financials.annual_cashflow": [
+          "insert"
+        ],
+        "financials.annual_pnl": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/load_eodhd_prices.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/load_fmp_financials.py": {
+      "writes": {
+        "financials.annual_balance_sheet": [
+          "insert"
+        ],
+        "financials.annual_cashflow": [
+          "insert"
+        ],
+        "financials.annual_pnl": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/load_fmp_prices.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/load_prices.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/p0a_adversarial_assertions.py": {
+      "writes": {
+        "screener.compute_runs": [
+          "update"
+        ]
+      },
+      "reads": [
+        "market.companies_current",
+        "screener.compute_run_finalizations",
+        "screener.compute_run_stages",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "screener.compute_run_finalizations",
+          "alias": "f",
+          "on": "f.run_id = r.id",
+          "line": 185
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/p0a_canonical_run.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns",
+        "screener.compute_run_finalizations"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/p0a_discovery_evidence.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns",
+        "market.dividends",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/p0a_preflight.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns",
+        "market.dividends",
+        "screener.compute_runs",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "screener.compute_runs",
+          "alias": "r",
+          "on": "r.id = u.compute_run_id",
+          "line": 76
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/p0a_quantise_probe.py": {
+      "writes": {},
+      "reads": [
+        "information_schema.columns"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/prove_lease_exclusion.py": {
+      "writes": {},
+      "reads": [
+        "screener.compute_runs"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/repair/backfill_structural_flags.py": {
+      "writes": {
+        "market.companies": [
+          "update"
+        ]
+      },
+      "reads": [
+        "staging_au.company_profile",
+        "staging_au.fundamentals"
+      ],
+      "joins": [
+        {
+          "table": "staging_au.company_profile",
+          "alias": "p",
+          "on": "p.asx_code = c.asx_code",
+          "line": 77
+        },
+        {
+          "table": "staging_au.fundamentals",
+          "alias": "f",
+          "on": "f.asx_code = c.asx_code",
+          "line": 77
+        },
+        {
+          "table": "staging_au.company_profile",
+          "alias": "p",
+          "on": "p.asx_code = c.asx_code",
+          "line": 105
+        },
+        {
+          "table": "staging_au.fundamentals",
+          "alias": "f",
+          "on": "f.asx_code = c.asx_code",
+          "line": 105
+        }
+      ],
+      "dynamic": []
+    },
+    "scripts/repair_contaminated_index_history.py": {
+      "writes": {
+        "market.index_prices": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/seed_announcements.py": {
+      "writes": {
+        "market.asx_announcements": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/update_prices.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/update_prices_eodhd.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/update_prices_fmp.py": {
+      "writes": {
+        "market.daily_prices": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.companies"
+      ],
+      "joins": [],
+      "dynamic": []
     }
   },
   "read_but_never_written": [
     "information_schema.columns",
-    "market.asx_announcements",
-    "market.companies_current"
+    "market.companies_current",
+    "users.users"
   ],
   "parse_errors": []
 }

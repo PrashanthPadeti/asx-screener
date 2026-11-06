@@ -55,10 +55,22 @@ BACKEND = Path(__file__).resolve().parents[2]
 
 #: Where the pipeline lives. Anything outside these trees is not part of the
 #: Bronze -> Silver -> Gold -> Universe lineage and would only add noise.
+#: Widened on 6 November 2026. The first version scanned only scripts/eodhd
+#: and compute, and missed backend/scripts/*.py entirely -- which is where
+#: load_fmp_financials.py lives, the ONLY writer of
+#: financials.annual_cashflow.equity_raised, a column yearly_compute consumes
+#: as a governed input. A lineage graph that silently omits a directory
+#: reports "no writer" for columns that have one, which is the same sentence
+#: a genuinely dead column produces. Scan the tree and exclude by name, so a
+#: new directory is included by default rather than forgotten.
 SOURCE_TREES = (
-    BACKEND / "scripts/eodhd",
+    BACKEND / "scripts",
     BACKEND / "compute",
 )
+
+#: Directories under the scanned trees that are not pipeline code. Excluded
+#: by name and listed in the output, so the exclusions are visible.
+EXCLUDED_DIRS = frozenset({"__pycache__", "stm"})
 
 #: The layers. A table in none of these is out of scope for the mapping
 #: documents -- users, ai, meta, support and strategy are the product's own
@@ -211,7 +223,7 @@ def main() -> int:
 
     files = sorted({p for tree in SOURCE_TREES if tree.exists()
                     for p in tree.rglob("*.py")
-                    if "__pycache__" not in p.parts})
+                    if not EXCLUDED_DIRS & set(p.parts)})
     if not files:
         print(f"2  no modules found under {[str(t) for t in SOURCE_TREES]} — "
               f"the lineage graph would be empty, and an empty graph reads "

@@ -1,0 +1,367 @@
+# financials.annual_balance_sheet  (Silver)
+#
+# Authored from backend/scripts/eodhd/v2/transforms/transform_financials.py
+# :160-298, verified 6 November 2026.
+#
+# Units: every monetary column passes through _m() = round(v / 1_000_000, 2),
+# so this table is in AUD MILLIONS. Compare with staging_au.balance_sheet,
+# which holds the same figures in AUD units at NUMERIC(20,4).
+#
+# Grain: one row per (asx_code, fiscal_year). fiscal_year is
+# EXTRACT(YEAR FROM period_end_date) and is NOT the Australian FY convention
+# -- see financials_annual_pnl.yaml, which carries the full statement of that.
+#
+# Source filter: staging_au.balance_sheet WHERE period_type = 'yearly'.
+# Quarterly rows exist in staging and are never promoted here.
+#
+# Deduplication: where EODHD returns more than one yearly row whose period end
+# falls in the same calendar year, the row with the LATEST period_end_date
+# wins. Earlier rows are discarded, recoverable only from staging.
+#
+# THE SHAPE OF THIS TABLE IS MOSTLY EMPTY. 44 columns exist; the EODHD
+# transform supplies 19 of them and passes a literal None for 19 more. The
+# schema was designed for a richer source than the one feeding it. Each such
+# column is marked below, because "NULL because nothing writes it" and "NULL
+# because this company did not report it" are different facts and the column
+# type distinguishes neither.
+
+table: financials.annual_balance_sheet
+layer: Silver
+source_layer: Bronze
+grain: one row per (asx_code, fiscal_year)
+
+defaults:
+  source_system: EODHD
+  source_table: staging_au.balance_sheet
+  source_filter: "period_type = 'yearly'"
+  writer_job: scripts/eodhd/v2/transforms/transform_financials.py
+  unit: AUD millions
+
+columns:
+  financials.annual_balance_sheet:
+
+    id:
+      source_column: generated
+      transformation_rule: "nextval('annual_balance_sheet_id_seq')"
+      business_rule: >
+        Surrogate key. Not a business identifier and not stable across a full
+        reload: TRUNCATE ... RESTART IDENTITY on a --full run renumbers every
+        row. The business key is (asx_code, fiscal_year), which carries a
+        UNIQUE constraint.
+      unit: n/a
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy
+      unit: n/a
+
+    fiscal_year:
+      source_column: date
+      derivation_formula: "fiscal_year = EXTRACT(YEAR FROM period_end_date)"
+      business_rule: >
+        Calendar year of the period end, not the Australian FY convention.
+        A June filer and a December filer in the same fiscal_year report
+        periods six months apart.
+      unit: year
+
+    period_end_date:
+      source_column: date
+      transformation_rule: direct copy
+      business_rule: The authoritative period boundary where fiscal_year is ambiguous.
+      unit: date
+
+    cash_equivalents:
+      source_column: cash_and_short_term_investments
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        Cash AND short-term investments combined, as EODHD supplies them. Not
+        cash alone. Used as the subtrahend in net_debt below.
+
+    trade_receivables:
+      source_column: net_receivables
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: NET receivables, after provision for doubtful debts.
+
+    inventory:
+      source_column: inventory
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+
+    other_current_assets:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL. The transform passes None at this position
+        (transform_financials.py:210). No writer sets it. Not a reporting gap.
+
+    total_current_assets:
+      source_column: total_current_assets
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+
+    gross_block:
+      source_column: property_plant_equipment_net
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        MISNAMED, AND IT MATTERS. This column holds EODHD's
+        property_plant_equipment_NET -- PP&E after accumulated depreciation --
+        under a name that means PP&E at cost. The source comment at
+        transform_financials.py:212 reads "gross_block, accumulated_
+        depreciation, net_block = ppe approx", but only the first position
+        receives a value; the other two receive None.
+
+        Consequences: any asset-intensity or depreciation-rate measure built
+        on gross_block is computed on a net figure and understates the asset
+        base. gross_block - accumulated_depreciation does not yield net_block,
+        because accumulated_depreciation is always NULL. Treat this column as
+        "PP&E, net" regardless of its name.
+
+    accumulated_depreciation:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL. EODHD's annual balance sheet section does not carry it in
+        the projection this transform selects.
+
+    net_block:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL, despite being the column that should hold the net PP&E
+        figure that gross_block actually holds. See gross_block.
+
+    goodwill:
+      source_column: goodwill
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+
+    intangibles:
+      source_column: intangible_assets
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        Whether EODHD includes goodwill inside intangible_assets varies by
+        filer. Adding goodwill and intangibles can therefore double-count.
+
+    investments:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    other_non_current:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    total_assets:
+      source_column: total_assets
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        A reported zero is a value, not an absence: totalAssets was genuinely
+        zero in 19 of 33,201 company-years, which is why the loader must not
+        coerce 0 to NULL (v11.2.74).
+
+    trade_payables:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    advance_from_customers:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    short_term_debt:
+      source_column: short_long_term_debt_total
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        MISNAMED. The source field is shortLongTermDebtTotal, which EODHD
+        documents as total debt due within one year INCLUDING the current
+        portion of long-term borrowings -- not short-term debt alone.
+
+    other_current_liab:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    total_current_liab:
+      source_column: total_current_liabilities
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+
+    long_term_debt:
+      source_column: long_term_debt
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        Non-current BORROWINGS only. Distinct from long_term_debt_total, a
+        separate column holding longTermDebtTotal, which includes lease and
+        similar obligations and exceeds this by roughly 2x where both are
+        reported -- they disagree on 4,067 of the 6,558 years carrying both.
+        Never substitute one for the other within a series: Piotroski F5
+        compares year to year and would read the definition change as a
+        leverage change.
+
+    lease_liabilities:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL from this transform. Lease obligations are not absent from
+        the data -- they are inside long_term_debt_total, which is written by
+        a different path.
+
+    contingent_liabilities:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    other_non_current_liab:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    total_liabilities:
+      source_column: total_liabilities
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+
+    equity_capital:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL from this transform, even though staging_au.balance_sheet
+        carries common_stock and the transform SELECTs it. The selected value
+        is bound to a local and then never placed in the output tuple.
+
+    preference_capital:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    reserves:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    retained_earnings:
+      source_column: retained_earnings
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: Legitimately negative for loss-making companies.
+
+    minority_interest_bs:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: ALWAYS NULL. No writer sets it.
+
+    total_equity:
+      source_column: total_stockholder_equity
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        The denominator of ROE and the book value in P/B. Can be negative.
+        Applicability rules downstream withhold ratios on a non-positive
+        denominator rather than publishing a meaningless sign flip.
+
+    total_debt:
+      source_column: derived
+      tables_involved: staging_au.balance_sheet
+      derivation_formula: "total_debt = _m(short_long_term_debt_total) + _m(long_term_debt)"
+      transformation_rule: >
+        short_term_debt + long_term_debt, each converted to millions first.
+      business_rule: >
+        FABRICATES A ZERO WHEN BOTH INPUTS ARE ABSENT. The code is
+        `total_debt = _m(short_term_debt) or 0`, then adds long-term debt only
+        when that is not None (transform_financials.py:196-199). A company for
+        which EODHD reports neither figure receives total_debt = 0.00, which
+        reads as "this company has no debt" and is indistinguishable from a
+        genuine debt-free balance sheet. This is the same class of defect as
+        v11.2.74, where `if f != 0 else None` erased every disclosed zero --
+        here it runs the other way, manufacturing a disclosed zero from an
+        absence. Any debt-free screen built on total_debt = 0 will include
+        companies whose debt is merely unknown.
+
+    net_debt:
+      source_column: derived
+      derivation_formula: "net_debt = round(total_debt - cash_equivalents, 2)"
+      transformation_rule: computed in the transform, after conversion to millions
+      business_rule: >
+        NULL when total_debt is falsy OR cash is NULL. Because the guard is
+        `if total_debt and cash_m is not None`, a company with a genuine
+        total_debt of 0 gets net_debt = NULL rather than negative cash. So the
+        fabricated zero above does NOT propagate here -- the two columns
+        disagree about the same company by construction. Negative net_debt is
+        meaningful: net cash.
+
+    working_capital:
+      source_column: derived
+      derivation_formula: "working_capital = round(total_current_assets - total_current_liabilities, 2)"
+      business_rule: >
+        NULL when either side is NULL -- correctly, since a partial subtraction
+        would be a number nobody could interpret. Negative is normal for
+        retailers and others funded by trade credit.
+
+    book_value_per_share:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL from this transform. Per-share book value is computed
+        downstream in yearly_compute, where a share count is available.
+
+    face_value:
+      source_column: not supplied
+      transformation_rule: literal None
+      business_rule: >
+        ALWAYS NULL. Par value is not an ASX concept -- Australian shares have
+        no par value -- so the column is a schema artifact.
+
+    shares_outstanding:
+      source_column: Financials.Balance_Sheet.commonStockSharesOutstanding
+      source_table: staging_au.fundamentals (raw_json)
+      writer_job: annual shares ingestion (v11.2.73), NOT transform_financials
+      transformation_rule: direct copy of the reported share count
+      business_rule: >
+        The one "None in this transform" column that is nonetheless populated:
+        transform_financials passes None here, and a separate v11.2.73 path
+        fills it. Two consecutive years are required by Piotroski F7. A NULL
+        means the period was not reported, never that no shares exist.
+      unit: shares
+
+    is_restated:
+      source_column: not supplied
+      transformation_rule: column default false
+      business_rule: >
+        ALWAYS false. No writer sets it, so the default stands on every row.
+        It does NOT indicate that a figure has not been restated -- restatements
+        do occur and are absorbed silently by the upsert. A confident negative
+        where the truth is unknown.
+      unit: n/a
+
+    data_source:
+      source_column: literal
+      derivation_formula: "data_source = 'eodhd'"
+      business_rule: >
+        Provenance marker. Other writers of this table (load_fmp_financials.py)
+        set their own value, so this column is the only way to tell which
+        provider supplied a row.
+      unit: n/a
+
+    data_as_of:
+      source_column: NOW()
+      transformation_rule: set to NOW() on UPDATE only
+      business_rule: >
+        NOT a lineage marker. It moves on every upsert whether or not a value
+        changed, and writers other than transform_financials leave it
+        untouched. source_fingerprint.py rejected it for exactly this and
+        fingerprints content instead.
+      unit: timestamptz
+
+    long_term_debt_total:
+      source_column: Financials.Balance_Sheet.longTermDebtTotal
+      transformation_rule: "_m(): round(value / 1e6, 2)"
+      business_rule: >
+        Non-current debt INCLUDING lease and similar obligations. Exceeds
+        long_term_debt by roughly 2x where both are reported; the two disagree
+        on 4,067 of the 6,558 years carrying both. A NULL means the period did
+        not report it; the source states a genuine zero as 0.00.
+
+    cwip:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Unlike the other empty columns, cwip is not even named by
+        any of the four writers of this table -- it has no position in any
+        INSERT. Capital work in progress is an Indian-reporting concept
+        (the schema borrows from a screener.in-shaped model) and ASX filers do
+        not report it as a separate line.

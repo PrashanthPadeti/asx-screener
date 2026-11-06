@@ -1,0 +1,136 @@
+# market.daily_prices  (Silver)
+#
+# Authored from backend/scripts/eodhd/v2/transforms/transform_prices.py,
+# verified 6 November 2026.
+#
+# EIGHT MODULES WRITE THIS TABLE. transform_prices.py is the one the canonical
+# pipeline runs (stage `transform_prices`, the first producer in both run
+# plans). The others -- load_prices.py, load_eodhd_prices.py, load_fmp_prices.py,
+# update_prices.py, update_prices_eodhd.py, update_prices_fmp.py -- are earlier
+# or alternative provider paths. Only data_source distinguishes which wrote a
+# row, and its column DEFAULT is 'yahoo', a provider no current path uses.
+#
+# Grain: one row per (time, asx_code). PK, and the table is a TimescaleDB
+# hypertable (which is why its reltuples reads -1: the estimate lives on the
+# chunks, not the parent).
+#
+# Full-rebuild safety: a rebuild landing below 50% of the rows it replaces is
+# REFUSED (SHRINK_FLOOR). A price history only ever grows -- delisted codes
+# keep their history -- so a halving means the source stopped answering rather
+# than the market shrinking. Completeness is proved by a per-code md5 digest
+# of the full date set, not by row counts: equal counts over different days is
+# a real failure mode, and min/max dates alone would miss a hole in the middle.
+
+table: market.daily_prices
+layer: Silver
+source_layer: Bronze
+grain: one row per (time, asx_code)
+
+defaults:
+  source_system: EODHD
+  source_table: staging_au.eod_prices
+  writer_job: scripts/eodhd/v2/transforms/transform_prices.py
+  unit: AUD per share
+
+columns:
+  market.daily_prices:
+
+    time:
+      source_column: date
+      derivation_formula: "time = (staging date) || ' 16:00:00+10'"
+      transformation_rule: >
+        The staging DATE is anchored to a fixed +10:00 offset at 16:00, the
+        ASX close, producing 06:00 UTC.
+      business_rule: >
+        FIXED OFFSET, NOT A ZONE, AND DELIBERATELY SO. 'Australia/Sydney' is
+        the tempting spelling and is wrong in principle: it shifts to +11
+        under daylight saving and the write does not. Reading back must use
+        the exact inverse -- (time AT TIME ZONE INTERVAL '+10:00')::date --
+        or a row can be attributed to the wrong calendar day. The two
+        spellings agree today only because 06:00 UTC falls on the same date at
+        both offsets, which is agreement by luck.
+      unit: timestamptz (ASX close)
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy
+      unit: n/a
+
+    open:
+      source_column: open
+      transformation_rule: direct copy, no adjustment
+      business_rule: UNADJUSTED. As traded on the day.
+
+    high:
+      source_column: high
+      transformation_rule: direct copy, no adjustment
+      business_rule: UNADJUSTED intraday high.
+
+    low:
+      source_column: low
+      transformation_rule: direct copy, no adjustment
+      business_rule: UNADJUSTED intraday low.
+
+    close:
+      source_column: close
+      transformation_rule: direct copy, no adjustment
+      business_rule: >
+        UNADJUSTED closing price, and NOT NULL -- the only price column that
+        is. Every return and momentum measure in the product is computed on
+        THIS column, not on adjusted_close. That choice is deliberate but it
+        means a raw close series crosses splits and large capital returns
+        without a discontinuity marker, so a return spanning a split is a
+        price artefact unless the split is applied separately. See
+        market.splits, which exists to supply that correction.
+
+    adjusted_close:
+      source_column: adjusted_close
+      transformation_rule: direct copy
+      business_rule: >
+        DO NOT USE FOR PRICE RETURNS. Two independent problems: it is a
+        TOTAL-RETURN series (dividends reinvested), so it answers a different
+        question from close; and it is not maintained in step with close, so
+        it can be stale relative to the same row's close. Nullable, unlike
+        close.
+
+    volume:
+      source_column: volume
+      transformation_rule: direct copy
+      business_rule: >
+        Shares traded, unadjusted for splits -- so a volume series crosses a
+        split with a step change in the opposite direction to price.
+      unit: shares
+
+    value_traded:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Named by none of the eight writers. Dollar turnover would
+        have to be derived (volume x vwap, or volume x close as a proxy) and
+        nothing does so.
+      unit: AUD
+
+    trades_count:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. EODHD's end-of-day feed does not carry a trade count.
+      unit: count
+
+    vwap:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Volume-weighted average price requires intraday data the
+        end-of-day feed does not provide.
+
+    data_source:
+      source_column: literal
+      derivation_formula: "data_source = 'eodhd'"
+      transformation_rule: constant, set by the transform
+      business_rule: >
+        THE COLUMN DEFAULT IS 'yahoo', WHICH NO CURRENT PATH USES. Any row
+        written without naming this column carries a provenance that is false.
+        With eight writers across three providers this is the only field that
+        says which one produced a row, so a wrong default is not cosmetic.
+      unit: n/a

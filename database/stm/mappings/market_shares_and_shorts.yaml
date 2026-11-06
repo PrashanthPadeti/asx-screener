@@ -1,0 +1,189 @@
+# market.shares_history and market.short_positions  (Silver)
+#
+# Two small tables with a shared property: both are DATED OBSERVATION series
+# where the observation date and the date the observation refers to are
+# different columns, and confusing the two silently mis-times everything
+# downstream.
+#
+# Authored 6 November 2026 from:
+#   backend/scripts/eodhd/v2/load_shares_history.py
+#   backend/scripts/asic/transforms/transform_short.py
+
+table: market.shares_history
+layer: Silver
+source_layer: Bronze
+
+columns:
+
+  # ── market.shares_history ─────────────────────────────────────────────────
+  # Grain: one row per (asx_code, fiscal_date, source). Source participates in
+  # the key, so two providers can hold a count for the same period without
+  # overwriting one another.
+  #
+  # Deliberately RAW: dated share counts only, no derived dilution measures.
+  # Dilution is computed downstream so the definition can change without
+  # re-ingesting the history.
+  market.shares_history:
+
+    asx_code:
+      source_system: EODHD
+      source_table: staging_au.fundamentals (raw_json)
+      source_column: outstandingShares.annual[].code
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      transformation_rule: direct copy
+      unit: n/a
+
+    fiscal_date:
+      source_system: EODHD
+      source_table: staging_au.fundamentals (raw_json)
+      source_column: outstandingShares.annual[].dateFormatted
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      transformation_rule: direct copy of the formatted period end
+      business_rule: >
+        THE PERIOD THE COUNT REFERS TO, not when it was observed. Part of the
+        primary key. Pair with snapshot_date below, which is the other date
+        and means something else entirely.
+      unit: date
+
+    shares:
+      source_system: EODHD
+      source_table: staging_au.fundamentals (raw_json)
+      source_column: outstandingShares.annual[].shares
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      transformation_rule: direct copy
+      business_rule: >
+        Share count at fiscal_date, unadjusted for later splits. A series
+        crossing a split therefore steps, and the step is real rather than an
+        error -- market.splits carries the ratio that reconciles it.
+      unit: shares
+
+    shares_mln:
+      source_system: EODHD
+      source_table: staging_au.fundamentals (raw_json)
+      source_column: outstandingShares.annual[].sharesMln
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      transformation_rule: direct copy of the source's own millions figure
+      business_rule: >
+        NOT DERIVED FROM `shares` -- both come from the provider. They can
+        therefore disagree, and nothing constrains them to agree. Prefer
+        `shares` as the authority; treat a mismatch as a source-quality
+        signal rather than a rounding artefact.
+      unit: millions of shares
+
+    source:
+      source_system: internal
+      source_column: literal
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      derivation_formula: "source = 'eodhd_fundamentals_annual'"
+      business_rule: >
+        PART OF THE PRIMARY KEY, which is what lets a second provider coexist
+        rather than overwrite. Also means a consumer that forgets to filter on
+        source will fan out one row per provider once a second one exists.
+      unit: n/a
+
+    snapshot_date:
+      source_system: EODHD
+      source_table: staging_au.fundamentals
+      source_column: snapshot_date
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      transformation_rule: direct copy of the fundamentals file date
+      business_rule: >
+        WHEN THE OBSERVATION WAS TAKEN, not what period it describes. Two
+        snapshots can report different counts for the same fiscal_date after
+        a restatement; the newest snapshot wins on upsert, so the prior
+        reported count is overwritten and not recoverable from this table.
+      unit: date
+
+    loaded_at:
+      source_system: internal
+      source_column: NOW()
+      writer_job: scripts/eodhd/v2/load_shares_history.py
+      transformation_rule: column default now()
+      business_rule: Row write time. A third date, distinct from both above.
+      unit: timestamptz
+
+  # ── market.short_positions ────────────────────────────────────────────────
+  # Grain: one row per (report_date, asx_code).
+  # Source: ASIC, not EODHD. Published with a 2-3 business day lag, and the
+  # scrape is non-fatal in the pipeline -- a failure must not block prices,
+  # compute or the universe build.
+  market.short_positions:
+
+    report_date:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: report_date
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy
+      business_rule: >
+        ASIC's own report date, NOT the date it was fetched. ASIC publishes
+        with a 2-3 business day lag, so the newest row here is always several
+        days behind the market. A short-interest figure presented beside a
+        live price is comparing two different days.
+      unit: date
+
+    asx_code:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: asx_code
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy
+      unit: n/a
+
+    short_pct:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: short_pct
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy
+      business_rule: >
+        Reported short positions as a percentage of total issued capital.
+        ASIC's own figure, not recomputed from short_shares / total_issued.
+      valid_values: "0 to 100 (percent)"
+      unit: percent
+
+    short_shares:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: short_shares
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy
+      business_rule: >
+        Reported short position in shares. staging_au.short_positions also
+        carries total_issued, which is NOT promoted to this table -- so the
+        denominator behind short_pct is not available here.
+      unit: shares
+
+    short_pct_chg_1w:
+      source_system: derived
+      source_table: staging_au.short_positions
+      source_column: derived
+      writer_job: scripts/asic/transforms/transform_short.py
+      tables_involved: staging_au.short_positions (self-join, current vs prior snapshot)
+      join_condition: >
+        prior = the most recent report_date strictly BEFORE the current one
+        and no more than 14 days earlier, same asx_code
+      derivation_formula: "short_pct_chg_1w = current.short_pct - prior.short_pct"
+      transformation_rule: >
+        Difference against the previous ASIC snapshot, computed only for the
+        most recent report_date in staging.
+      business_rule: >
+        A DIFFERENCE IN PERCENTAGE POINTS, not a percentage change. A move
+        from 2% to 3% short gives 1.0, not 50.
+
+        "1w" IS APPROXIMATE. The window is "the previous snapshot, if within
+        14 days" -- so over a holiday period or a publication gap the figure
+        can span two weeks while still being labelled one. NULL when no prior
+        snapshot exists inside 14 days, which is the honest outcome and must
+        not be read as "no change".
+      unit: percentage points
+
+    updated_at:
+      source_system: internal
+      source_column: NOW()
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: column default now(), refreshed on upsert
+      business_rule: >
+        When this row was last written. Says nothing about how current ASIC's
+        data is -- report_date is the column that does.
+      unit: timestamptz

@@ -136,6 +136,53 @@ def load_snapshot(path: Path) -> dict:
     }
 
 
+def merge_snapshots(paths: list) -> dict:
+    """Several snapshots as one picture of the database.
+
+    The schemas are large enough that they are taken in slices and carried
+    across by hand. Merging them is only honest if the slices describe the
+    same database at compatible times, so that is checked rather than
+    assumed: two slices from different databases would produce a mapping
+    document that is internally consistent and describes no real system.
+
+    A table appearing in two slices keeps the first; the slices are disjoint
+    by construction and an overlap is reported.
+    """
+    snaps = [load_snapshot(p) for p in paths]
+    databases = {s.get("database") for s in snaps}
+    if len(databases) > 1:
+        raise SystemExit(
+            f"2  snapshots come from different databases {sorted(databases)}; "
+            f"merging them would describe a system that does not exist")
+
+    merged = dict(snaps[0])
+    seen_tables, overlaps = set(), []
+    merged["tables"], merged["columns"] = [], []
+    merged["constraints"], merged["indexes"] = [], []
+
+    for snap in snaps:
+        for t in snap["tables"]:
+            fq = f"{t['table_schema']}.{t['table_name']}"
+            if fq in seen_tables:
+                overlaps.append(fq)
+                continue
+            seen_tables.add(fq)
+            merged["tables"].append(t)
+        for key in ("columns", "constraints", "indexes"):
+            merged[key].extend(
+                r for r in snap[key]
+                if f"{r['table_schema']}.{r['table_name']}" not in
+                   {o for o in overlaps})
+
+    merged["taken_at_utc"] = " + ".join(sorted(s["taken_at_utc"] for s in snaps))
+    merged["slices"] = [{"taken_at_utc": s["taken_at_utc"],
+                         "schemas": s.get("schemas_requested"),
+                         "tables": len(s["tables"])} for s in snaps]
+    if overlaps:
+        merged["overlapping_tables"] = sorted(set(overlaps))
+    return merged
+
+
 def index_snapshot(snap: dict) -> dict:
     """Reshape the snapshot into lookups keyed by schema.table[.column]."""
     tables, columns = {}, defaultdict(list)
@@ -417,7 +464,10 @@ def exposed_fields() -> dict:
 def main() -> int:
     ap = argparse.ArgumentParser()
     root = BACKEND.parent / "database/stm"
-    ap.add_argument("--snapshot", default=str(root / "schema_snapshot.json"))
+    ap.add_argument("--snapshot", action="append",
+                    help="schema snapshot JSON; repeatable, and the slices "
+                         "are merged after checking they describe the same "
+                         "database")
     ap.add_argument("--lineage",  default=str(root / "lineage.json"))
     ap.add_argument("--mappings", default=str(root / "mappings"))
     ap.add_argument("--out-dir",  default=str(root))
@@ -425,16 +475,19 @@ def main() -> int:
     ap.add_argument("--fail-on-unmapped", action="store_true")
     args = ap.parse_args()
 
-    snap_path, lin_path = Path(args.snapshot), Path(args.lineage)
-    for path, what, how in ((snap_path, "schema snapshot", "snapshot_schema.py"),
-                            (lin_path, "lineage graph", "extract_lineage.py")):
+    snap_paths = [Path(p) for p in (args.snapshot or
+                                    [str(root / "schema_snapshot.json")])]
+    lin_path = Path(args.lineage)
+    for path, what, how in ([(p, "schema snapshot", "snapshot_schema.py")
+                             for p in snap_paths]
+                            + [(lin_path, "lineage graph", "extract_lineage.py")]):
         if not path.exists():
             print(f"2  {what} not found at {path}; run {how} first. Building "
                   f"the mapping without it would mean inventing the half that "
                   f"is supposed to be evidence")
             return 2
 
-    snap    = load_snapshot(snap_path)
+    snap    = merge_snapshots(snap_paths)
     lineage = json.loads(lin_path.read_text(encoding="utf-8"))
     snap_idx = index_snapshot(snap)
     mappings = load_mappings(Path(args.mappings))

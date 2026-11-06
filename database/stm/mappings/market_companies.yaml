@@ -1,0 +1,481 @@
+# market.companies  (Silver) — SCD Type 2
+#
+# Authored 6 November 2026 from
+#   backend/scripts/eodhd/v2/transforms/transform_companies.py:50-200
+#   backend/scripts/eodhd/v2/sync_companies_from_exchange.py
+#   backend/compute/engine/asx_indices.py
+#   backend/scripts/eodhd/load_fundamentals.py
+#
+# SEVEN WRITERS. Grain is one row per (asx_code, version) -- roughly 1.7 rows
+# per code, 4,480 rows for ~2,100 companies. ALWAYS read through
+# market.companies_current, the view that filters is_current = TRUE. Reading
+# this table directly returns superseded rows, which inflates counts, consumes
+# LIMIT budget, and makes any single-row fetch an arbitrary choice between the
+# current record and a historical one.
+#
+# ONLY NINE FIELDS ARE VERSIONED. SCD2_FIELDS is:
+#   gics_sector, gics_industry_group, gics_industry, gics_sub_industry,
+#   company_type, status, fiscal_year_end_month, is_reit, is_miner
+# A change in any of those closes the current row (valid_to = today,
+# is_current = FALSE) and inserts a new version. A change in anything else
+# updates the current row IN PLACE -- so company_name history is not kept,
+# and a name change leaves no trace.
+#
+# TWENTY OF THE FIFTY-TWO COLUMNS ARE NEVER NAMED BY ANY WRITER. They hold
+# their column default -- false for the flags, NULL otherwise -- on every row
+# forever. Each is marked. The dangerous ones are the booleans, because a
+# default of false is a CONFIDENT NEGATIVE: the row asserts "not a bank"
+# rather than "nobody has assessed this".
+
+table: market.companies
+layer: Silver
+source_layer: Bronze
+grain: one row per (asx_code, version); read via market.companies_current
+
+defaults:
+  source_system: EODHD
+  source_table: staging_au.company_profile
+  writer_job: scripts/eodhd/v2/transforms/transform_companies.py
+
+columns:
+  market.companies:
+
+    id:
+      source_column: generated
+      transformation_rule: "nextval('companies_id_seq')"
+      business_rule: >
+        Surrogate key per VERSION, not per company. Two rows for one company
+        carry two ids. Joining on id pins a historical version.
+      unit: n/a
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy
+      business_rule: >
+        NOT unique on this table -- it repeats across versions. Uniqueness is
+        enforced only by the partial index idx_companies_current_code, which
+        is UNIQUE on asx_code WHERE is_current = true.
+      unit: n/a
+
+    isin:
+      source_column: isin
+      transformation_rule: "sn(): trimmed, empty string to NULL"
+      business_rule: >
+        Carries a UNIQUE constraint across ALL versions, not just current
+        ones. A company re-issued under a new ISIN keeps the old value on its
+        superseded row, so the constraint is doing work nobody designed.
+        Updated via COALESCE, so a source that stops supplying it never
+        clears the stored value.
+      unit: n/a
+
+    company_name:
+      source_column: name
+      transformation_rule: "sn(); updated via COALESCE(new, existing)"
+      business_rule: >
+        NOT VERSIONED. A name change updates the current row in place, so the
+        former name is lost. COALESCE means a NULL from the source never
+        clears it -- a company delisted from the feed keeps its last known
+        name indefinitely.
+      unit: n/a
+
+    short_name:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Named by no writer.
+      unit: n/a
+
+    gics_sector:
+      source_column: sector
+      transformation_rule: "sn(): trimmed, empty string to NULL"
+      business_rule: >
+        VERSIONED. EODHD's sector string, not a GICS code. The sector
+        vocabulary is the provider's; downstream domain classification
+        (domain_resolver.py) matches on these strings, so a provider
+        relabelling changes applicability decisions.
+      unit: n/a
+
+    gics_industry_group:
+      source_column: gic_group
+      transformation_rule: "sn()"
+      business_rule: VERSIONED.
+      unit: n/a
+
+    gics_industry:
+      source_column: gic_industry
+      transformation_rule: "sn()"
+      business_rule: >
+        VERSIONED, and the field that actually decides bank and insurer
+        treatment. domain_resolver.py maps these strings (for example
+        "banks") to a Domain, with explicit per-code overrides such as MQG.
+        See is_bank below, which does NOT do this.
+      unit: n/a
+
+    gics_sub_industry:
+      source_column: gic_sub_industry
+      transformation_rule: "sn()"
+      business_rule: VERSIONED.
+      unit: n/a
+
+    asx_sector:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Named by no writer. GICS fields carry sector.
+      unit: n/a
+
+    company_type:
+      source_column: type
+      transformation_rule: "_stock_type(row['type'])"
+      business_rule: >
+        VERSIONED. Normalised from EODHD's instrument type -- the field that
+        separates ordinary shares from ETFs, trusts and other instruments.
+      unit: n/a
+
+    is_reit:
+      source_column: derived
+      tables_involved: staging_au.company_profile
+      derivation_formula: "is_reit = classify_reit(row)"
+      transformation_rule: classification over the profile row
+      business_rule: >
+        VERSIONED, and genuinely computed. Note the removed helper
+        `sb(v) = bool(v) if v is not None else False`, deleted deliberately
+        because turning None into False is exactly the collapse that
+        published 805 unassessed companies as confirmed non-REITs. Where
+        classification cannot decide, the honest value is NULL, not false.
+      unit: n/a
+
+    is_miner:
+      source_column: derived
+      derivation_formula: "is_miner = classify_miner(row)"
+      business_rule: VERSIONED, and genuinely computed. Same NULL-vs-false caution as is_reit.
+      unit: n/a
+
+    is_bank:
+      source_column: not supplied
+      transformation_rule: never written; column default false
+      business_rule: >
+        ALWAYS FALSE, FOR EVERY COMPANY INCLUDING EVERY BANK. No writer sets
+        it; the only occurrence in the codebase is a Pydantic default in
+        app/schemas/company.py. Bank treatment -- suppressing EV/EBITDA,
+        Altman Z, current ratio and net margin -- is decided by
+        domain_resolver.py from gics_industry, not from this column.
+
+        The trap is that the column exists and reads as an answer. A screen
+        filtering is_bank = true returns nothing; a consumer reading it
+        concludes CBA is not a bank. Use the domain resolver.
+      unit: n/a
+
+    is_insurer:
+      source_column: not supplied
+      transformation_rule: never written; column default false
+      business_rule: >
+        ALWAYS FALSE. Same as is_bank: insurer treatment comes from
+        domain_resolver.py, not from here.
+      unit: n/a
+
+    is_asx20:
+      source_column: index membership
+      writer_job: compute/engine/asx_indices.py
+      transformation_rule: set from the index constituent list
+      business_rule: >
+        Default false. Where the constituent list is unavailable the flag
+        stays false rather than unknown, so "not in the index" and "we could
+        not check" are the same value.
+      unit: n/a
+
+    is_asx50:
+      source_column: index membership
+      writer_job: compute/engine/asx_indices.py
+      transformation_rule: set from the index constituent list
+      unit: n/a
+
+    is_asx100:
+      source_column: index membership
+      writer_job: compute/engine/asx_indices.py
+      transformation_rule: set from the index constituent list
+      business_rule: >
+        The ASX100 constituent series was stale from May 2026 for a period --
+        see the series provenance work. A stale constituent list leaves this
+        flag asserting a membership that may have lapsed.
+      unit: n/a
+
+    is_asx200:
+      source_column: index membership
+      writer_job: compute/engine/asx_indices.py
+      transformation_rule: set from the index constituent list
+      unit: n/a
+
+    is_asx300:
+      source_column: index membership
+      writer_job: compute/engine/asx_indices.py
+      transformation_rule: set from the index constituent list
+      unit: n/a
+
+    is_all_ords:
+      source_column: not supplied
+      transformation_rule: never written; column default false
+      business_rule: >
+        ALWAYS FALSE. No writer sets it. A screen on All Ordinaries
+        membership returns nothing.
+      unit: n/a
+
+    is_small_ords:
+      source_column: not supplied
+      transformation_rule: never written; column default false
+      business_rule: >
+        ALWAYS FALSE, and referenced nowhere in the codebase outside the
+        migration that created it.
+      unit: n/a
+
+    listing_date:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL, although staging_au.company_profile carries ipo_date.
+        The transform does not select it.
+      unit: date
+
+    ipo_price:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Named by no writer.
+      unit: AUD per share
+
+    delisting_date:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL, and referenced NOWHERE in the codebase outside its
+        migration. Delisting is represented only by `status`, so the date a
+        company left the market is not recorded anywhere.
+      unit: date
+
+    delisting_reason:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Referenced nowhere outside its migration.
+      unit: n/a
+
+    status:
+      source_column: literal
+      derivation_formula: "status = 'active'"
+      transformation_rule: hardcoded by transform_companies
+      business_rule: >
+        VERSIONED, and the column that decides whether a company appears in
+        the product -- the screener population is
+        `price IS NOT NULL AND status = 'active'`.
+
+        transform_companies ALWAYS writes 'active', with the source comment
+        "staging doesn't have status; default active". So this transform can
+        only ever mark a company active; it can never retire one. Retirement
+        comes from a different writer (the exchange sync), which is what
+        narrowed the served list from 3,737 to 2,147 in v11.2.10. A company
+        that vanishes from the EODHD feed without the sync running stays
+        'active' and keeps being served.
+      valid_values: "'active' and whatever the exchange sync sets"
+      unit: n/a
+
+    financial_year_end:
+      source_column: not supplied
+      transformation_rule: never written; column default 6
+      business_rule: >
+        ALWAYS 6. The default asserts a June year end for every company,
+        including December filers. fiscal_year_end_month is the column that
+        is actually derived from the source; this one is a stale duplicate
+        with a confident wrong default.
+      unit: month number
+
+    shares_outstanding:
+      source_column: SharesStats.SharesOutstanding
+      source_table: staging_au.shares_stats
+      writer_job: scripts/eodhd/load_fundamentals.py
+      transformation_rule: direct copy of the latest reported count
+      business_rule: >
+        A POINT-IN-TIME value, overwritten on each load -- no history here.
+        market.shares_history holds the dated series. Unadjusted for splits.
+      unit: shares
+
+    shares_float:
+      source_column: SharesStats.SharesFloat
+      source_table: staging_au.shares_stats
+      writer_job: scripts/eodhd/load_fundamentals.py
+      transformation_rule: direct copy
+      business_rule: Free float, a subset of shares_outstanding. Point-in-time.
+      unit: shares
+
+    face_value:
+      source_column: not supplied
+      transformation_rule: never written by any writer of this table
+      business_rule: >
+        ALWAYS NULL. Australian shares have no par value, so the column is a
+        schema artifact inherited from a model built for another market.
+      unit: AUD
+
+    website:
+      source_column: web_url
+      transformation_rule: "sn(); updated via COALESCE(new, existing)"
+      business_rule: NOT VERSIONED. COALESCE means a removed source value never clears.
+      unit: n/a
+
+    abn:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. EODHD does not supply Australian business numbers.
+      unit: n/a
+
+    acn:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Referenced nowhere outside its migration.
+      unit: n/a
+
+    domicile:
+      source_column: not supplied
+      transformation_rule: never written; column default 'Australia'
+      business_rule: >
+        ALWAYS 'Australia'. A confident value, not an observation. Foreign-
+        domiciled ASX listings exist and carry the same default, so this
+        column cannot be used to identify them.
+      unit: n/a
+
+    state:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Named by no writer of this table.
+      unit: n/a
+
+    primary_commodity:
+      source_column: not supplied
+      transformation_rule: never written by any writer of this table
+      business_rule: >
+        ALWAYS NULL here. Commodity exposure for miners is computed in
+        mining_metrics.py and lands elsewhere; this column is not the one it
+        writes.
+      unit: n/a
+
+    secondary_commodity:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL.
+      unit: n/a
+
+    description:
+      source_column: description
+      transformation_rule: "sn(); updated via COALESCE(new, existing)"
+      business_rule: NOT VERSIONED. Free text from the provider.
+      unit: n/a
+
+    logo_url:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL.
+      unit: n/a
+
+    employee_count:
+      source_column: full_time_employees
+      transformation_rule: >
+        COMPUTED AND DISCARDED by transform_companies. new_vals carries it
+        (transform_companies.py:114) and no INSERT or UPDATE in that module
+        names the column, so the value is built and thrown away each run --
+        the same pattern as common_stock in the balance-sheet transform.
+      business_rule: >
+        Populated, if at all, only by load_fundamentals.py. Where that path
+        has not run for a company the column is NULL despite the source
+        carrying a value.
+      unit: headcount
+
+    created_at:
+      source_column: NOW()
+      transformation_rule: set to NOW() on insert
+      business_rule: >
+        When this VERSION was created, not when the company was first seen.
+        A re-versioned company gets a fresh created_at on the new row.
+      unit: timestamptz
+
+    updated_at:
+      source_column: NOW()
+      transformation_rule: set to NOW() on every in-place update and on versioning
+      business_rule: >
+        Moves on every run that touches the row, whether or not a value
+        changed. Not a change marker.
+      unit: timestamptz
+
+    percent_insiders:
+      source_column: SharesStats.PercentInsiders
+      source_table: staging_au.shares_stats
+      writer_job: scripts/eodhd/load_fundamentals.py
+      transformation_rule: direct copy
+      valid_values: "0 to 100 (percent)"
+      unit: percent
+
+    percent_institutions:
+      source_column: SharesStats.PercentInstitutions
+      source_table: staging_au.shares_stats
+      writer_job: scripts/eodhd/load_fundamentals.py
+      transformation_rule: direct copy
+      valid_values: "0 to 100 (percent)"
+      unit: percent
+
+    cusip:
+      source_column: cusip
+      transformation_rule: direct copy where supplied
+      business_rule: >
+        A US identifier. Present for cross-listed companies only; NULL for
+        the great majority of ASX issuers.
+      unit: n/a
+
+    fiscal_year_end_month:
+      source_column: fiscal_year_end
+      derivation_formula: "fiscal_year_end_month = _fiscal_month(row['fiscal_year_end'])"
+      transformation_rule: month number parsed from the source's year-end string
+      business_rule: >
+        VERSIONED, and the column that actually carries the year end --
+        unlike financial_year_end, which is always its default of 6. A change
+        here creates a new version, which is correct: a year-end change
+        alters what every annual figure refers to.
+      valid_values: "1 to 12"
+      unit: month number
+
+    valid_from:
+      source_column: TODAY
+      transformation_rule: set to the run date on insert; column default CURRENT_DATE
+      business_rule: >
+        SCD2 interval start. The date this VERSION was created, which is the
+        date the change was DETECTED, not the date it took effect. A
+        reclassification EODHD published a month ago is dated today.
+      unit: date
+
+    valid_to:
+      source_column: TODAY on supersession
+      transformation_rule: NULL on insert; set to the run date when superseded
+      business_rule: >
+        SCD2 interval end. NULL means current. The interval is therefore
+        [valid_from, valid_to) with same-day boundaries, so two versions
+        created on the same day produce a zero-length interval.
+      unit: date
+
+    is_current:
+      source_column: literal
+      transformation_rule: TRUE on insert; set FALSE when superseded
+      business_rule: >
+        The flag every read must filter on, and the one the partial unique
+        index is built over. market.companies_current exists so that no
+        caller has to remember.
+      unit: n/a
+
+    business_model_tag:
+      source_column: not supplied
+      transformation_rule: never written by any writer of this table
+      business_rule: >
+        ALWAYS NULL from the pipeline. Documented as admin-maintained
+        (SaaS, Subscription, Mining, REIT, Services, Manufacturing, Retail,
+        Infrastructure, Biotech), so any value present was entered by hand
+        and is not refreshed by any job.
+      unit: n/a
+
+    commodity_exposure:
+      source_column: not supplied
+      transformation_rule: never written by any writer of this table
+      business_rule: >
+        ALWAYS NULL from the pipeline. Admin-maintained (Gold, Iron Ore,
+        Lithium, Copper, Coal, Oil & Gas, Agriculture, Diversified, None).
+      unit: n/a

@@ -231,7 +231,8 @@ def _compact(snapshot: dict) -> dict:
         "meta": {k: snapshot[k] for k in
                  ("snapshot_version", "taken_at_utc", "host", "database",
                   "server_version", "schemas_requested", "schemas_found",
-                  "schemas_missing", "counts")},
+                  "schemas_missing", "tables_requested", "tables_absent",
+                  "counts")},
         "tables": [[t["table_schema"], t["table_name"], t["kind"],
                     t["estimated_rows"], t.get("table_comment")]
                    for t in snapshot["tables"]],
@@ -256,6 +257,11 @@ def main() -> int:
     ap.add_argument("--env-file",
                     help="path to the .env holding DATABASE_URL, for when this "
                          "script is run from outside the checkout")
+    ap.add_argument("--tables",
+                    help="comma-separated schema.table list to restrict to. "
+                         "A named table that does not exist is reported, not "
+                         "silently omitted — a mapping document missing a "
+                         "table reads the same as one that has no such table")
     ap.add_argument("--compact", action="store_true",
                     help="columnar encoding with empty fields dropped. Same "
                          "facts, roughly a fifth the bytes, for when the only "
@@ -297,6 +303,25 @@ def main() -> int:
               f"nothing, and an empty mapping document reads as a clean one")
         return 2
 
+    requested_tables, absent_tables = None, []
+    if args.tables:
+        requested_tables = {t.strip() for t in args.tables.split(",") if t.strip()}
+        present = {f"{t['table_schema']}.{t['table_name']}" for t in tables}
+        absent_tables = sorted(requested_tables - present)
+
+        def keep(row):
+            return f"{row['table_schema']}.{row['table_name']}" in requested_tables
+
+        tables      = [t for t in tables if keep(t)]
+        columns     = [c for c in columns if keep(c)]
+        constraints = [c for c in constraints if keep(c)]
+        indexes     = [i for i in indexes if keep(i)]
+
+        if not columns:
+            print(f"2  none of the {len(requested_tables)} named table(s) "
+                  f"exist in {schemas}; the snapshot would be empty")
+            return 2
+
     found = sorted({t["table_schema"] for t in tables})
     missing = sorted(set(schemas) - set(found))
 
@@ -309,6 +334,8 @@ def main() -> int:
         "schemas_requested": schemas,
         "schemas_found":     found,
         "schemas_missing":   missing,
+        "tables_requested":  sorted(requested_tables) if requested_tables else None,
+        "tables_absent":     absent_tables,
         "counts": {"tables": len(tables), "columns": len(columns),
                    "constraints": len(constraints), "indexes": len(indexes)},
         "tables":      tables,
@@ -336,6 +363,9 @@ def main() -> int:
         n = sum(1 for c in columns if c["table_schema"] == schema)
         t = sum(1 for x in tables if x["table_schema"] == schema)
         print(f"    {schema:14} {t:4} tables  {n:5} columns")
+    if absent_tables:
+        print(f"  WARNING {len(absent_tables)} table(s) named but not present: "
+              f"{absent_tables}")
     if missing:
         # Not fatal, but never silent: a requested schema that does not exist
         # means the mapping document will be missing a layer entirely.

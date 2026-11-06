@@ -1,0 +1,138 @@
+# Reference and event tables  (Silver)
+#   financials.earnings_quarterly  EPS actual vs estimate
+#   market.analyst_ratings         consensus ratings
+#   market.exchange_list           the exchange's own instrument list
+#   market.funds                   ETF and listed-fund reference data
+#   market.capital_raises          raises parsed out of announcement titles
+#   market.asx_announcements       announcement cache
+#
+# Authored 7 November 2026 from transform_earnings.py,
+# transform_analyst_ratings.py, transform_exchange.py, fund_prices.py,
+# capital_raise_tracker.py, app/workers/announcement_worker.py and
+# app/api/v1/routes/companies.py.
+#
+# A PROPERTY SHARED BY THE FIRST FOUR: they are upserted on asx_code alone,
+# so they hold ONE CURRENT ROW PER COMPANY and no history. staging carries a
+# snapshot_date for several of them; market.analyst_ratings does not promote
+# it, so the as-of date of a consensus rating is not recorded anywhere a
+# consumer can reach.
+
+table: financials.earnings_quarterly
+layer: Silver
+source_layer: Bronze
+
+columns:
+
+  # ── financials.earnings_quarterly ─────────────────────────────────────────
+  financials.earnings_quarterly:
+    id:              {source_system: internal, source_column: generated, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: "nextval('earnings_quarterly_id_seq')", business_rule: "Surrogate key; business key is (asx_code, period_end_date).", unit: n/a}
+    asx_code:        {source_system: EODHD, source_table: staging_au.earnings, source_column: asx_code, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: direct copy, unit: n/a}
+    period_end_date: {source_system: EODHD, source_table: staging_au.earnings, source_column: date, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: direct copy, business_rule: "The period the result covers, NOT the date it was reported. Despite the table name there is no reporting date here, so this series cannot be used point-in-time.", unit: date}
+    eps_actual:      {source_system: EODHD, source_table: staging_au.earnings, source_column: eps_actual, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: direct copy, business_rule: "AUD per share. NUMERIC(12,6) both sides, so no precision is lost here -- unlike annual_pnl.eps, which narrows 12,6 to 18,4.", unit: AUD per share}
+    eps_estimate:    {source_system: EODHD, source_table: staging_au.earnings, source_column: eps_estimate, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: direct copy, business_rule: "Consensus estimate as it stood when the provider captured it. The vintage of that consensus is not recorded.", unit: AUD per share}
+    eps_difference:  {source_system: EODHD, source_table: staging_au.earnings, source_column: eps_difference, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: direct copy, business_rule: "Taken as reported, NOT recomputed as actual - estimate. The two can disagree if the provider revised one side without the other.", unit: AUD per share}
+    surprise_pct:    {source_system: EODHD, source_table: staging_au.earnings, source_column: surprise_percent, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: "direct copy, renamed", business_rule: "Provider's own surprise figure. Undefined where the estimate is zero or near zero, and the provider's handling of that is not visible here.", unit: percent}
+    beat_miss:       {source_system: derived, source_column: derived, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, derivation_formula: "'beat' if actual > estimate; 'miss' if actual < estimate; 'met' if equal; NULL if either is NULL", business_rule: "A STRICT inequality with no tolerance band, so a one-cent difference on a dollar of EPS reads as a beat. 'met' therefore requires exact equality and is rare. NULL is an honest absence, not a third outcome.", valid_values: "beat, miss, met, NULL", unit: n/a}
+    data_source:     {source_system: internal, source_column: literal, writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, derivation_formula: "data_source = 'eodhd'", business_rule: "Column default is also 'eodhd', so default and writer agree.", unit: n/a}
+    loaded_at:       {source_system: internal, source_column: NOW(), writer_job: scripts/eodhd/v2/transforms/transform_earnings.py, transformation_rule: "set to NOW() on UPDATE; column default now() on INSERT", business_rule: "Row write time. Moves on every upsert regardless of whether a value changed.", unit: timestamptz}
+
+  # ── market.analyst_ratings ────────────────────────────────────────────────
+  # Upserted on asx_code. ONE ROW PER COMPANY, current only.
+  market.analyst_ratings:
+    asx_code:        {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: asx_code, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, is_key: PK, business_rule: "The whole primary key, which is what makes this current-only.", unit: n/a}
+    rating:          {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: rating, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, business_rule: "Consensus rating on the provider's numeric scale. NUMERIC(4,2). The scale's direction -- whether 1 is a strong buy or a strong sell -- is the provider's convention and is NOT documented in the schema; verify against a known name before interpreting.", unit: provider scale}
+    target_price:    {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: target_price, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, business_rule: "Consensus target. Currency is not recorded, and is the provider's rather than necessarily AUD.", unit: currency per share}
+    strong_buy:      {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: strong_buy, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: "direct copy; integer narrowed to smallint", business_rule: "Count of analysts. NARROWED from int4 in staging to int2 here -- harmless for analyst counts, noted because the narrowing is silent.", unit: count}
+    buy:             {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: buy, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, unit: count}
+    hold:            {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: hold, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, unit: count}
+    sell:            {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: sell, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, unit: count}
+    strong_sell:     {source_system: EODHD, source_table: staging_au.analyst_ratings, source_column: strong_sell, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: direct copy, business_rule: "A row where all five counts are NULL is a company nobody covers; a row where all five are 0 asserts coverage by zero analysts. The source's handling of that distinction is not established here.", unit: count}
+    data_source:     {source_system: internal, source_column: literal, writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, derivation_formula: "data_source = 'eodhd'", unit: n/a}
+    updated_at:      {source_system: internal, source_column: NOW(), writer_job: scripts/eodhd/v2/transforms/transform_analyst_ratings.py, transformation_rule: "set to NOW() on upsert", business_rule: "WHEN WE WROTE IT, not when the consensus was struck. staging_au.analyst_ratings carries snapshot_date and this table does NOT promote it, so the age of the underlying consensus is unrecoverable here. A rating refreshed by a re-run of an unchanged source looks new.", unit: timestamptz}
+
+  # ── market.exchange_list ──────────────────────────────────────────────────
+  # The exchange's own instrument list. Upserted on asx_code; current only.
+  # This is the population source for company retirement: a code that
+  # disappears from the exchange list is how a company stops being active.
+  market.exchange_list:
+    asx_code:        {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: code, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: "direct copy, renamed from code", is_key: PK, unit: n/a}
+    company_name:    {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: name, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: direct copy, business_rule: "May differ from market.companies.company_name, which comes from the profile endpoint rather than the exchange list. Neither is reconciled against the other.", unit: n/a}
+    country:         {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: country, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: direct copy, unit: n/a}
+    exchange:        {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: exchange, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: direct copy, unit: n/a}
+    currency:        {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: currency, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: direct copy, business_rule: "The LISTING currency, not the reporting currency. BHP lists in AUD and reports in USD; this column says AUD and is right about the listing.", unit: ISO currency code}
+    stock_type:      {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: type, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: "direct copy, renamed from type", business_rule: "Separates ordinary shares from ETFs, trusts and other instruments. The screener universe depends on this distinction being right.", unit: n/a}
+    isin:            {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: isin, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: direct copy, business_rule: "varchar(20) here against varchar(12) on market.companies.isin -- the same identifier at two widths.", unit: n/a}
+    snapshot_date:   {source_system: EODHD, source_table: staging_au.exchange_symbols, source_column: snapshot_date, writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: direct copy, business_rule: "The date the exchange list was captured -- and the one column that makes retirement decidable: a code whose snapshot_date has stopped advancing is no longer on the exchange's list. Unlike analyst_ratings, this table DOES promote it.", unit: date}
+    updated_at:      {source_system: internal, source_column: NOW(), writer_job: scripts/eodhd/v2/transforms/transform_exchange.py, transformation_rule: "set to NOW() on upsert", business_rule: "Row write time; snapshot_date is the observation date.", unit: timestamptz}
+
+  # ── market.funds ──────────────────────────────────────────────────────────
+  # NOT INGESTED. Every column comes from a HARDCODED list of dicts in
+  # compute/engine/fund_prices.py. This is the same structure that served 8
+  # ETFs at four-month-old prices after they were removed from a producer's
+  # hardcoded list: deleting an entry stops updates without retiring the rows
+  # already stored, and nothing in the table records that it has gone quiet.
+  market.funds:
+    asx_code:            {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: asx_code, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, is_key: PK, business_rule: "Membership of the hardcoded list is the fund universe. 55 rows.", unit: n/a}
+    fund_name:           {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: fund_name, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, business_rule: "Editorial, maintained by hand. A rename in code rewrites history on the next upsert.", unit: n/a}
+    fund_type:           {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: fund_type, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, valid_values: "ETF, LIC and others per the list", unit: n/a}
+    asset_class:         {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: asset_class, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, valid_values: "Australian Equities, Global Equities and others per the list", unit: n/a}
+    index_tracked:       {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: index_tracked, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, business_rule: "A free-text index name, not a key into market.indices. Cannot be joined.", unit: n/a}
+    fund_manager:        {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: fund_manager, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, unit: n/a}
+    mer_pct:             {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: mer_pct, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, business_rule: "A RATIO DESPITE THE NAME. The list carries mer_pct=0.0021 for a 0.21% fee, so the stored value is a decimal fraction and the column name says percent. Anything presenting it as a percentage without multiplying by 100 understates the fee 100-fold. Hand-maintained, so it drifts from the PDS silently.", unit: ratio}
+    funds_under_mgmt_bn: {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: funds_under_mgmt_bn, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, business_rule: "BILLIONS of AUD, hand-entered and therefore a point-in-time figure frozen at whenever someone last edited the file. Not refreshed by any job.", unit: AUD billions}
+    inception_date:      {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: inception_date, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, unit: date}
+    distribution_freq:   {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: distribution_freq, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, valid_values: "quarterly, monthly, semi-annual, annual per the list", unit: n/a}
+    is_hedged:           {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: is_hedged, writer_job: compute/engine/fund_prices.py, transformation_rule: constant from the list, business_rule: "Currency hedging. Column default false, so an entry omitting the key asserts unhedged rather than unknown.", unit: n/a}
+    is_active:           {source_system: internal, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: "never set from the list; column default true", business_rule: "ALWAYS true. The list carries no is_active key, so a delisted fund -- MLT, which merged into SOL in November 2021 and is commented out in the file -- would still read active if its row survived. This is the column that should carry retirement and does not.", unit: n/a}
+    asx_url:             {source_system: internal, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: never set from the list, business_rule: "ALWAYS NULL. No entry in the hardcoded list carries it.", unit: n/a}
+    created_at:          {source_system: internal, source_column: NOW(), writer_job: compute/engine/fund_prices.py, transformation_rule: column default now(), unit: timestamptz}
+    updated_at:          {source_system: internal, source_column: NOW(), writer_job: compute/engine/fund_prices.py, transformation_rule: "set to NOW() on upsert", business_rule: "Moves whenever the job runs, so it reflects the job's health, not the fund data's currency -- the data is a constant in a source file.", unit: timestamptz}
+
+  # ── market.capital_raises ─────────────────────────────────────────────────
+  # DERIVED BY PARSING ANNOUNCEMENT TITLES. _detect_raise_type() and
+  # _extract_amount() run over market.asx_announcements.title. Everything in
+  # this table inherits the accuracy of a regex over free text written by
+  # listed companies for humans.
+  #
+  # ON CONFLICT ... DO NOTHING, so the FIRST parse of a given
+  # (asx_code, announcement_date, raise_type) wins permanently. A later,
+  # better parse of the same event is discarded rather than correcting it.
+  market.capital_raises:
+    id:                {source_system: internal, source_column: generated, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: "nextval('capital_raises_id_seq')", unit: n/a}
+    asx_code:          {source_system: derived, source_table: market.asx_announcements, source_column: asx_code, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: direct copy from the announcement, unit: n/a}
+    raise_type:        {source_system: derived, source_table: market.asx_announcements, source_column: "title (parsed)", writer_job: compute/engine/capital_raise_tracker.py, derivation_formula: "raise_type = _detect_raise_type(title)", transformation_rule: "keyword detection over the announcement title", business_rule: "PART OF THE UNIQUE KEY, so a misclassified type creates a second row for one event rather than colliding with the first. Placement, SPP, rights issue and entitlement offer are distinguished by title wording alone.", unit: n/a}
+    amount_m:          {source_system: derived, source_table: market.asx_announcements, source_column: "title (parsed)", writer_job: compute/engine/capital_raise_tracker.py, derivation_formula: "amount_m = _extract_amount(title)", transformation_rule: "numeric extraction from the announcement title", business_rule: "MILLIONS OF AUD, extracted from free text. NULL when the title states no figure, which is common -- the amount is usually in the body, which is not parsed. A NULL here does not mean a small raise.", unit: AUD millions}
+    price_per_share:   {source_system: derived, source_table: market.asx_announcements, source_column: "title (parsed)", writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: "extracted from the announcement title where stated", business_rule: "Issue price. NULL whenever the title omits it.", unit: AUD per share}
+    shares_issued:     {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: not named in the INSERT, business_rule: "ALWAYS NULL. Not parsed. So dilution from a raise cannot be computed from this table even when amount and price are both present -- the count is simply absent rather than derived as amount / price.", unit: shares}
+    discount_pct:      {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: not named in the INSERT, business_rule: "ALWAYS NULL. The discount to market -- the figure that says whether a raise was punitive to existing holders -- is not computed, despite price_per_share and a price history both being available.", unit: percent}
+    announcement_date: {source_system: derived, source_table: market.asx_announcements, source_column: released_at, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: "date of the announcement", business_rule: "Part of the UNIQUE key. The date the raise was ANNOUNCED, not when it settled.", unit: date}
+    record_date:       {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: not named in the INSERT, business_rule: "ALWAYS NULL.", unit: date}
+    settlement_date:   {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: not named in the INSERT, business_rule: "ALWAYS NULL. So the date new shares actually entered the register is unavailable, and a raise cannot be aligned to the share-count step it caused in market.shares_history.", unit: date}
+    announcement_id:   {source_system: derived, source_table: market.asx_announcements, source_column: id, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: "str(announcement row id)", business_rule: "Traceability back to the announcement the parse came from -- the only way to audit a parsed row. Note this is the announcements table's surrogate id, not the ASX-assigned document id in asx_announcements.announcement_id.", unit: n/a}
+    title:             {source_system: derived, source_table: market.asx_announcements, source_column: title, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: "direct copy, TRUNCATED to 500 characters", business_rule: "The exact text the parse was run against, which is what makes a bad parse diagnosable. Truncation at 500 chars means a long title is stored shorter than what was parsed.", unit: n/a}
+    url:               {source_system: derived, source_table: market.asx_announcements, source_column: url, writer_job: compute/engine/capital_raise_tracker.py, transformation_rule: direct copy, business_rule: "Link to the source document, where the unparsed detail actually lives.", unit: n/a}
+
+  # ── market.asx_announcements ──────────────────────────────────────────────
+  # TWO WRITERS, BOTH IN THE API LAYER, WITH DIFFERENT COLUMN SETS:
+  #   app/workers/announcement_worker.py  the scheduled fetcher (19:10 Sydney)
+  #   app/api/v1/routes/companies.py      a cache write on a page request
+  # The worker sets source_type and source_label; the route sets
+  # document_date, num_pages and file_size_kb. Neither sets both. So which
+  # columns a row carries depends on which path first saw that announcement,
+  # and ON CONFLICT DO NOTHING means the first one wins permanently.
+  market.asx_announcements:
+    id:               {source_system: internal, source_column: generated, writer_job: app/workers/announcement_worker.py, transformation_rule: "nextval('asx_announcements_id_seq')", unit: n/a}
+    asx_code:         {source_system: ASX, source_table: "asx.com.au public API", source_column: code, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, business_rule: "TEXT here, not varchar(10) as everywhere else in the schema.", unit: n/a}
+    announcement_id:  {source_system: ASX, source_table: "asx.com.au public API", source_column: document id, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, business_rule: "ASX-assigned document ID, unique per company announcement. Half of the UNIQUE key with asx_code, and the basis of the DO NOTHING dedupe.", unit: n/a}
+    released_at:      {source_system: ASX, source_table: "asx.com.au public API", source_column: release timestamp, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, business_rule: "When the ASX released it. The column every read orders by, and nullable -- a NULL sorts last under NULLS LAST and effectively disappears from a recent-announcements list.", unit: timestamptz}
+    document_date:    {source_system: ASX, source_table: "asx.com.au public API", source_column: document date, writer_job: app/api/v1/routes/companies.py, transformation_rule: direct copy, business_rule: "SET ONLY BY THE ROUTE, not by the scheduled worker. Rows the worker created carry NULL here regardless of what the ASX supplied.", unit: date}
+    title:            {source_system: ASX, source_table: "asx.com.au public API", source_column: header, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, business_rule: "The text market.capital_raises is parsed out of, and the target of a trigram index for search.", unit: n/a}
+    document_type:    {source_system: ASX, source_table: "asx.com.au public API", source_column: document type, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, business_rule: "ASX's own classification. Free text, not a controlled vocabulary in this schema.", unit: n/a}
+    url:              {source_system: ASX, source_table: "asx.com.au public API", source_column: url, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, unit: n/a}
+    market_sensitive: {source_system: ASX, source_table: "asx.com.au public API", source_column: market sensitive flag, writer_job: app/workers/announcement_worker.py, transformation_rule: direct copy, business_rule: "True when the ASX flagged it. Column default FALSE, so an announcement whose flag was not captured asserts not-sensitive rather than unknown -- and a partial index exists on WHERE market_sensitive = true, so such rows are invisible to that path.", unit: n/a}
+    price_sensitive:  {source_system: ASX, source_table: "asx.com.au public API", source_column: price sensitive flag, writer_job: app/api/v1/routes/companies.py, transformation_rule: direct copy, business_rule: "Documented as a subset of market_sensitive. Default FALSE, same confident-negative caveat. Set by the route path; the worker's INSERT does not name it.", unit: n/a}
+    num_pages:        {source_system: ASX, source_table: "asx.com.au public API", source_column: page count, writer_job: app/api/v1/routes/companies.py, transformation_rule: direct copy, business_rule: "ROUTE ONLY. NULL on every row the scheduled worker created.", unit: count}
+    file_size_kb:     {source_system: ASX, source_table: "asx.com.au public API", source_column: file size, writer_job: app/api/v1/routes/companies.py, transformation_rule: direct copy, business_rule: "ROUTE ONLY. NULL on every row the scheduled worker created.", unit: kilobytes}
+    created_at:       {source_system: internal, source_column: NOW(), writer_job: app/workers/announcement_worker.py, transformation_rule: column default now(), business_rule: "When we cached it, which can be long after released_at for a backfilled company.", unit: timestamptz}
+    source_type:      {source_system: internal, source_column: literal, writer_job: app/workers/announcement_worker.py, transformation_rule: "set by the worker; column default 'market_news'", business_rule: "WORKER ONLY. Rows written by the route path fall back to the default 'market_news' whether or not that is what they are.", unit: n/a}
+    source_label:     {source_system: internal, source_column: literal, writer_job: app/workers/announcement_worker.py, transformation_rule: "set by the worker; column default 'Finance News'", business_rule: "WORKER ONLY, and the string a customer sees. Rows from the route path are labelled 'Finance News' by default, which is the displayed provenance regardless of the real source.", unit: n/a}

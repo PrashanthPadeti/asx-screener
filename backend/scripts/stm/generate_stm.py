@@ -324,6 +324,14 @@ def load_strategy_of(lineage: dict, table: str) -> str:
     if not info:
         return ""
     ops = {op for w in info["written_by"] for op in w["operations"]}
+
+    # The UNION of operations across every writer, which is not the same as
+    # the strategy any single run uses. financials.annual_pnl upserts on the
+    # daily path and TRUNCATEs only under --full; reporting just "full reload"
+    # would describe a mode that runs rarely as though it were the normal one.
+    if "truncate" in ops and ("update" in ops or "insert" in ops):
+        both = "upsert" if "update" in ops else "insert"
+        return f"{both} on the incremental path; TRUNCATE + INSERT on a full run"
     if "truncate" in ops and "insert" in ops:
         return "full reload (TRUNCATE + INSERT)"
     if "delete" in ops and "insert" in ops:

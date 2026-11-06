@@ -249,6 +249,155 @@ columns:
         can be distinguished rather than merged silently.
       unit: n/a
 
+    # ── Columns transform_financials does not write ────────────────────────
+    # annual_pnl has FIVE writers: transform_financials.py (the daily path,
+    # mapped above), load_fundamentals.py, load_dividends.py,
+    # load_eodhd_financials.py and load_fmp_financials.py. Ten of the columns
+    # below are named by NONE of them and hold their default forever.
+
+    id:
+      source_column: generated
+      transformation_rule: "nextval('annual_pnl_id_seq')"
+      business_rule: >
+        Surrogate key, renumbered by a --full reload. The business key is
+        (asx_code, fiscal_year), which carries the UNIQUE constraint.
+      unit: n/a
+
+    report_date:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Named by none of the five writers. The date a result was
+        REPORTED -- as distinct from period_end_date, the period it covers --
+        is therefore unavailable, so point-in-time correctness cannot be
+        established from this table: there is no way to know when a figure
+        became public. financials.half_year_pnl has a column of the same name,
+        which is why a repo-wide search for it misleadingly finds hits.
+      unit: date
+
+    other_income:
+      source_column: not supplied by the EODHD transform
+      transformation_rule: literal None from transform_financials
+      business_rule: >
+        NULL on rows this transform wrote. Written only by the
+        load_fundamentals / FMP paths, so whether a row carries it depends on
+        which writer last touched it, and only data_source says which.
+
+    amortisation:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. Amortisation is not absent from the data -- it is folded
+        into `depreciation`, which receives EODHD's combined
+        depreciation_amortization. Reading this column as "amortisation is
+        zero or unknown" while depreciation silently contains both is the
+        trap.
+
+    interest_income:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. interest_expense is populated, so any net-interest
+        calculation has only one side and will overstate the net cost.
+
+    minority_interest:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. For companies with material non-controlling interests,
+        net_profit and pat cannot be reconciled to the parent's share from
+        this table.
+
+    extraordinary_items:
+      source_column: not supplied by the EODHD transform
+      transformation_rule: literal None from transform_financials
+      business_rule: NULL on rows this transform wrote; set only by other provider paths.
+
+    dividend_paid:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. The cash dividend figure lives in
+        financials.annual_cashflow.dividends_paid; this column duplicates the
+        concept and holds nothing.
+
+    material_cost:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. A cost-breakdown line inherited from a schema modelled
+        on a different market's disclosure regime; EODHD does not supply it.
+
+    employee_cost:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: ALWAYS NULL. Same inheritance as material_cost.
+
+    shares_used:
+      source_column: supplied by the fundamentals path
+      transformation_rule: not written by transform_financials
+      business_rule: >
+        The share count the reported EPS was struck on. NULL on rows this
+        transform wrote. Where it is present it is the honest denominator for
+        reconciling eps against net_profit; where it is NULL, any such
+        reconciliation has to substitute a share count from another period,
+        which is what makes historical per-share figures revise.
+      unit: shares
+
+    dps:
+      source_column: derived from market.dividends
+      source_table: market.dividends
+      writer_job: scripts/eodhd/load_dividends.py
+      transformation_rule: dividends aggregated to the fiscal year
+      business_rule: >
+        Written by the DIVIDENDS loader, not by the financials transform --
+        which is why load_dividends.py appears as a writer of a P&L table and
+        looks wrong in the lineage graph until you see this. Aggregated from
+        market.dividends over the fiscal year, so it inherits that table's
+        ex-date basis rather than the cash-paid basis in the cash-flow
+        statement; the two will not agree.
+      unit: AUD per share
+
+    dps_franking_pct:
+      source_column: not supplied
+      transformation_rule: never written; column default 0
+      business_rule: >
+        ALWAYS 0, AND THAT IS A CONFIDENT NEGATIVE. The default asserts every
+        dividend in this table is unfranked, which is wrong for most of the
+        ASX. Franking is real and lives in market.dividends.franking_pct;
+        this column is the empty duplicate. A grossed-up yield computed from
+        here would be identical to the plain yield for every company.
+      valid_values: "0 to 100 (percent)"
+      unit: percent
+
+    dps_grossed_up:
+      source_column: not supplied
+      transformation_rule: never written
+      business_rule: >
+        ALWAYS NULL. The grossed-up dividend -- the product's distinguishing
+        measure -- is computed downstream and never persisted here.
+      unit: AUD per share
+
+    currency:
+      source_column: not supplied by the EODHD transform
+      transformation_rule: never written; column default 'AUD'
+      business_rule: >
+        ALWAYS 'AUD', ASSERTED NOT OBSERVED. No writer sets it. USD-reporting
+        ASX companies exist -- BHP among them -- and their statements are
+        stated in USD while this column claims AUD. The honest value is in
+        staging_au.fundamentals.reporting_currency, which deliberately keeps
+        NULL distinct from AUD precisely because General.CurrencyCode reads
+        AUD for USD reporters. That care is lost here.
+      unit: ISO currency code
+
+    is_restated:
+      source_column: not supplied
+      transformation_rule: never written; column default false
+      business_rule: >
+        ALWAYS false. A confident negative: restatements occur and the upsert
+        absorbs them silently, overwriting the prior figures with no marker.
+      unit: n/a
+
     data_as_of:
       source_column: NOW()
       transformation_rule: "set to NOW() on UPDATE only, not on INSERT"

@@ -1,0 +1,151 @@
+# The five price-series tables  (Silver)
+#   market.index_prices        ASX indices
+#   market.global_index_prices offshore indices
+#   market.commodity_prices    commodities
+#   market.fx_rates            currency pairs
+#   market.fund_prices         ETFs and listed funds
+#
+# Authored 6 November 2026 from compute/engine/index_prices.py,
+# global_markets.py, commodities.py and fund_prices.py.
+#
+# ONE SHAPE, FOUR IMPLEMENTATIONS. All five tables carry the same return and
+# 52-week columns, and the function that computes them is DUPLICATED: a
+# `_pct_return` in index_prices.py, another in global_markets.py, another in
+# commodities.py, and a `_pct` in fund_prices.py. They agree today. Nothing
+# makes them agree tomorrow, and a fix applied to one is a fix applied to a
+# quarter of the product.
+#
+# RETURN SEMANTICS, identical across all four copies:
+#   formula   (close[i] - close[i - lookback]) / close[i - lookback]
+#   unit      RATIO, not percent. 0.0834 is 8.34%.
+#   lookback  TRADING ROWS, not calendar time:
+#             1d=1, 1w=5, 1m=21, 3m=63, 6m=126, 1y=252
+#   NULL when there is less history than the lookback, when the prior close
+#   is zero, or when either end is NaN. All three are honest absences.
+#
+# THE 252-ROW WINDOW IS NOT A YEAR. The lookback counts ROWS held, not days
+# elapsed. A series with a gap -- a trading halt, a suspension, a feed outage,
+# a late-listed instrument -- reaches 252 rows further back in calendar time
+# than a continuous one, so return_1y silently measures a longer period for
+# exactly the instruments whose history is incomplete. The column name asserts
+# a period the computation does not guarantee. This is a known open defect,
+# not a quirk of this document.
+#
+# Returns are computed from the FETCHED frame, never from stored history, so a
+# figure is single-source over a continuous window even where the stored
+# series has a hole. What is mixed across a provider switch is the DISPLAYED
+# series, not any individual figure.
+
+table: market.index_prices
+layer: Silver
+source_layer: Bronze
+
+columns:
+
+  # ── market.index_prices ───────────────────────────────────────────────────
+  market.index_prices:
+    index_code:      {source_system: Yahoo Finance, source_table: external API, source_column: ticker, writer_job: compute/engine/index_prices.py, transformation_rule: internal index code, is_key: PK, business_rule: "FK to market.indices, a table outside this layer's snapshot.", unit: n/a}
+    price_date:      {source_system: Yahoo Finance, source_table: external API, source_column: date, writer_job: compute/engine/index_prices.py, transformation_rule: direct copy, unit: date}
+    close_price:     {source_system: Yahoo Finance, source_table: external API, source_column: close, writer_job: compute/engine/index_prices.py, transformation_rule: direct copy, business_rule: "The only input to every return and 52-week figure below. NUMERIC(12,2) here against NUMERIC(16,4) on global_index_prices -- the same quantity at two precisions.", unit: index points}
+    open_price:      {source_system: Yahoo Finance, source_table: external API, source_column: open, writer_job: compute/engine/index_prices.py, transformation_rule: "direct copy, NaN to NULL", unit: index points}
+    high_price:      {source_system: Yahoo Finance, source_table: external API, source_column: high, writer_job: compute/engine/index_prices.py, transformation_rule: "direct copy, NaN to NULL", unit: index points}
+    low_price:       {source_system: Yahoo Finance, source_table: external API, source_column: low, writer_job: compute/engine/index_prices.py, transformation_rule: "direct copy, NaN to NULL", unit: index points}
+    volume:          {source_system: Yahoo Finance, source_table: external API, source_column: volume, writer_job: compute/engine/index_prices.py, transformation_rule: "direct copy, NaN to NULL", unit: shares}
+    return_1d:       {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - close[i-1]) / close[i-1]", business_rule: "Ratio, not percent.", unit: ratio}
+    return_1w:       {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - close[i-5]) / close[i-5]", business_rule: "5 TRADING ROWS, not 7 days.", unit: ratio}
+    return_1m:       {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - close[i-21]) / close[i-21]", business_rule: "21 trading rows.", unit: ratio}
+    return_3m:       {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - close[i-63]) / close[i-63]", business_rule: "63 trading rows.", unit: ratio}
+    return_6m:       {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - close[i-126]) / close[i-126]", business_rule: "126 trading rows.", unit: ratio}
+    return_1y:       {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - close[i-252]) / close[i-252]", business_rule: "252 ROWS, NOT A YEAR. Spans more calendar time wherever history has gaps. Known open defect.", unit: ratio}
+    return_ytd:      {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "(close[i] - last_close_of_prior_year) / last_close_of_prior_year", business_rule: "The only calendar-anchored return here. NULL when no prior-year row exists in the frame.", unit: ratio}
+    high_52w:        {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "max(close over the trailing 252 rows)", business_rule: "Requires at least 5 non-null closes in the window, else NULL. Computed on CLOSE only -- it is the highest close, never the highest intraday high, despite the name.", unit: index points}
+    low_52w:         {source_system: derived, source_column: derived, writer_job: compute/engine/index_prices.py, derivation_formula: "min(close over the trailing 252 rows)", business_rule: "Lowest CLOSE, not lowest intraday low.", unit: index points}
+    created_at:      {source_system: internal, source_column: NOW(), writer_job: compute/engine/index_prices.py, transformation_rule: column default now(), business_rule: "Row write time, not an observation date.", unit: timestamptz}
+
+  # ── market.global_index_prices ────────────────────────────────────────────
+  # Same shape, different writer and a separate copy of _pct_return.
+  market.global_index_prices:
+    index_code:      {source_system: Yahoo Finance, source_table: external API, source_column: ticker, writer_job: compute/engine/global_markets.py, transformation_rule: internal index code, is_key: PK, business_rule: "FK to market.global_indices, outside this snapshot.", unit: n/a}
+    price_date:      {source_system: Yahoo Finance, source_table: external API, source_column: date, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy, unit: date}
+    close_price:     {source_system: Yahoo Finance, source_table: external API, source_column: close, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy, business_rule: "In the index's OWN currency; no FX normalisation. Comparing a return here with an ASX return is valid; comparing levels is not.", unit: index points}
+    open_price:      {source_system: Yahoo Finance, source_table: external API, source_column: open, writer_job: compute/engine/global_markets.py, transformation_rule: "direct copy, NaN to NULL", unit: index points}
+    high_price:      {source_system: Yahoo Finance, source_table: external API, source_column: high, writer_job: compute/engine/global_markets.py, transformation_rule: "direct copy, NaN to NULL", unit: index points}
+    low_price:       {source_system: Yahoo Finance, source_table: external API, source_column: low, writer_job: compute/engine/global_markets.py, transformation_rule: "direct copy, NaN to NULL", unit: index points}
+    volume:          {source_system: Yahoo Finance, source_table: external API, source_column: volume, writer_job: compute/engine/global_markets.py, transformation_rule: "direct copy, NaN to NULL", unit: shares}
+    return_1d:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "(close[i] - close[i-1]) / close[i-1]", business_rule: "A SECOND COPY of _pct_return. Identical today, independently maintained.", unit: ratio}
+    return_1w:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "5-row lookback", unit: ratio}
+    return_1m:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "21-row lookback", unit: ratio}
+    return_3m:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "63-row lookback", unit: ratio}
+    return_6m:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "126-row lookback", unit: ratio}
+    return_1y:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "252-row lookback", business_rule: "252 ROWS, not a year. Offshore market holidays differ from the ASX, so the calendar span differs per index.", unit: ratio}
+    return_ytd:      {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "from last close of prior calendar year", unit: ratio}
+    high_52w:        {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "max(close over trailing 252 rows)", business_rule: "Highest CLOSE, not highest intraday high.", unit: index points}
+    low_52w:         {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "min(close over trailing 252 rows)", unit: index points}
+
+  # ── market.commodity_prices ───────────────────────────────────────────────
+  # Instrument list is HARDCODED in commodities.py, with mixed upstreams:
+  # 'eodhd' for metals (as .FOREX spot pairs) and 'av' (Alpha Vantage) for
+  # energy. The table comment says "fetched from EODHD .COMM exchange", which
+  # is true of only part of the list.
+  market.commodity_prices:
+    commodity_code:  {source_system: internal, source_table: hardcoded list in commodities.py, source_column: code, writer_job: compute/engine/commodities.py, transformation_rule: internal code, is_key: PK, business_rule: "Our own short code (GC, SI, CL), not the provider ticker. The provider ticker is in the same hardcoded row and is not stored.", unit: n/a}
+    commodity_name:  {source_system: internal, source_table: hardcoded list in commodities.py, source_column: name, writer_job: compute/engine/commodities.py, transformation_rule: constant from the list, business_rule: "Editorial label. Changing it in code silently rewrites history on the next upsert.", unit: n/a}
+    category:        {source_system: internal, source_table: hardcoded list in commodities.py, source_column: category, writer_job: compute/engine/commodities.py, transformation_rule: constant from the list, valid_values: "Precious Metals, Energy, and the other groupings declared in commodities.py", unit: n/a}
+    unit:            {source_system: internal, source_table: hardcoded list in commodities.py, source_column: unit, writer_job: compute/engine/commodities.py, transformation_rule: constant from the list, business_rule: "THE PRICES ARE NOT COMPARABLE WITHOUT THIS COLUMN. USD/oz, USD/bbl and USD/MMBtu all sit in close_price. Any aggregation across commodities that ignores unit is meaningless.", valid_values: "USD/oz, USD/bbl, USD/MMBtu, and others per the list", unit: n/a}
+    price_date:      {source_system: EODHD / Alpha Vantage, source_table: external API, source_column: date, writer_job: compute/engine/commodities.py, transformation_rule: direct copy, unit: date}
+    close_price:     {source_system: EODHD / Alpha Vantage, source_table: external API, source_column: close, writer_job: compute/engine/commodities.py, transformation_rule: direct copy, business_rule: "Denominated per the `unit` column, in USD -- NOT converted to AUD. An ASX gold miner's costs in AUD are not directly comparable to this.", unit: see unit column}
+    open_price:      {source_system: EODHD / Alpha Vantage, source_table: external API, source_column: open, writer_job: compute/engine/commodities.py, transformation_rule: direct copy, unit: see unit column}
+    high_price:      {source_system: EODHD / Alpha Vantage, source_table: external API, source_column: high, writer_job: compute/engine/commodities.py, transformation_rule: direct copy, unit: see unit column}
+    low_price:       {source_system: EODHD / Alpha Vantage, source_table: external API, source_column: low, writer_job: compute/engine/commodities.py, transformation_rule: direct copy, unit: see unit column}
+    return_1d:       {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "(close[i] - close[i-1]) / close[i-1]", business_rule: "A THIRD COPY of _pct_return.", unit: ratio}
+    return_1w:       {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "5-row lookback", unit: ratio}
+    return_1m:       {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "21-row lookback", unit: ratio}
+    return_3m:       {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "63-row lookback", unit: ratio}
+    return_6m:       {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "126-row lookback", unit: ratio}
+    return_1y:       {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "252-row lookback", business_rule: "252 ROWS. Commodity calendars differ from equity calendars, so the span differs again.", unit: ratio}
+    return_ytd:      {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "from last close of prior calendar year", unit: ratio}
+    high_52w:        {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "max(close over trailing 252 rows)", unit: see unit column}
+    low_52w:         {source_system: derived, source_column: derived, writer_job: compute/engine/commodities.py, derivation_formula: "min(close over trailing 252 rows)", unit: see unit column}
+
+  # ── market.fx_rates ───────────────────────────────────────────────────────
+  market.fx_rates:
+    fx_pair:         {source_system: Yahoo Finance, source_table: external API, source_column: pair, writer_job: compute/engine/global_markets.py, transformation_rule: internal pair code, is_key: PK, business_rule: "DIRECTION IS NOT RECORDED ANYWHERE BUT THE CODE ITSELF. AUDUSD and USDAUD are reciprocals and nothing in the row says which convention a given pair follows.", unit: n/a}
+    rate_date:       {source_system: Yahoo Finance, source_table: external API, source_column: date, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy, unit: date}
+    rate:            {source_system: Yahoo Finance, source_table: external API, source_column: close, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy of the closing rate, business_rule: "NOT NULL. The close, not an average or a fix. Units of the quote currency per one unit of the base, per the pair convention.", unit: quote per base}
+    open_rate:       {source_system: Yahoo Finance, source_table: external API, source_column: open, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy, unit: quote per base}
+    high_rate:       {source_system: Yahoo Finance, source_table: external API, source_column: high, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy, unit: quote per base}
+    low_rate:        {source_system: Yahoo Finance, source_table: external API, source_column: low, writer_job: compute/engine/global_markets.py, transformation_rule: direct copy, unit: quote per base}
+    return_1d:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "(rate[i] - rate[i-1]) / rate[i-1]", business_rule: "Computed over the RATE series. Its sign depends on the pair's direction convention, which the row does not carry.", unit: ratio}
+    return_1w:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "5-row lookback over rate", unit: ratio}
+    return_1m:       {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "21-row lookback over rate", unit: ratio}
+    return_ytd:      {source_system: derived, source_column: derived, writer_job: compute/engine/global_markets.py, derivation_formula: "from last rate of prior calendar year", business_rule: "fx_rates carries no 3m, 6m, 1y or 52-week columns, unlike the other four tables.", unit: ratio}
+
+  # ── market.fund_prices ────────────────────────────────────────────────────
+  # The fund UNIVERSE is a HARDCODED list of dicts in fund_prices.py. That is
+  # the exact shape of the defect that served 8 ETFs at four-month-old prices
+  # after they were deleted from a producer's hardcoded list: removal from the
+  # list stops updates without retiring the rows already stored. Treat any
+  # instrument's freshness here as unproven by the table itself.
+  market.fund_prices:
+    asx_code:        {source_system: internal, source_table: hardcoded list in fund_prices.py, source_column: asx_code, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, is_key: PK, business_rule: "FK to market.funds. Membership of the hardcoded list decides whether this fund is ever updated again.", unit: n/a}
+    price_date:      {source_system: Yahoo Finance, source_table: external API, source_column: date, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, unit: date}
+    close_price:     {source_system: Yahoo Finance, source_table: external API, source_column: close, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, business_rule: "MARKET price, not net asset value. For a listed fund the two differ by the premium or discount, which nav_discount_pct below is supposed to carry and does not.", unit: AUD per unit}
+    open_price:      {source_system: Yahoo Finance, source_table: external API, source_column: open, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, unit: AUD per unit}
+    high_price:      {source_system: Yahoo Finance, source_table: external API, source_column: high, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, unit: AUD per unit}
+    low_price:       {source_system: Yahoo Finance, source_table: external API, source_column: low, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, unit: AUD per unit}
+    volume:          {source_system: Yahoo Finance, source_table: external API, source_column: volume, writer_job: compute/engine/fund_prices.py, transformation_rule: direct copy, unit: units}
+    nav:             {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: literal None, business_rule: "ALWAYS NULL. fund_prices.py writes None explicitly (line 191). Net asset value is not fetched from any source.", unit: AUD per unit}
+    nav_discount_pct: {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: literal None, business_rule: "ALWAYS NULL, and it cannot be otherwise while nav is NULL -- the discount is price against NAV. The premium/discount a listed fund trades at is therefore not available anywhere in the product.", unit: percent}
+    distribution_yield: {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: literal None, business_rule: "ALWAYS NULL. Distributions are not ingested for funds.", unit: percent}
+    return_1d:       {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "(close[i] - close[i-1]) / close[i-1]", business_rule: "A FOURTH COPY of the helper, here named _pct. PRICE return only -- distributions are not reinvested, so it understates total return for a high-distributing fund.", unit: ratio}
+    return_1w:       {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "5-row lookback", unit: ratio}
+    return_1m:       {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "21-row lookback", unit: ratio}
+    return_3m:       {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "63-row lookback", unit: ratio}
+    return_6m:       {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "126-row lookback", unit: ratio}
+    return_1y:       {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "252-row lookback", business_rule: "252 ROWS, not a year.", unit: ratio}
+    return_3y_pa:    {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: literal None, business_rule: "ALWAYS NULL. Written as None (line 194). The column name promises an annualised three-year return that nothing computes.", unit: ratio per annum}
+    return_5y_pa:    {source_system: not supplied, source_column: not supplied, writer_job: compute/engine/fund_prices.py, transformation_rule: literal None, business_rule: "ALWAYS NULL. Written as None (line 195).", unit: ratio per annum}
+    return_ytd:      {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "from last close of prior calendar year", unit: ratio}
+    high_52w:        {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "max(close over trailing 252 rows)", business_rule: "Requires at least 5 non-null closes. Highest CLOSE, not highest intraday high.", unit: AUD per unit}
+    low_52w:         {source_system: derived, source_column: derived, writer_job: compute/engine/fund_prices.py, derivation_formula: "min(close over trailing 252 rows)", unit: AUD per unit}
+    created_at:      {source_system: internal, source_column: NOW(), writer_job: compute/engine/fund_prices.py, transformation_rule: column default now(), business_rule: "Row write time. NOT a freshness guarantee for the instrument -- a fund dropped from the hardcoded list simply stops gaining rows.", unit: timestamptz}

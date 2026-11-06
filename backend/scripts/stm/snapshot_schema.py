@@ -195,6 +195,58 @@ SELECT n.nspname                        AS table_schema,
 """
 
 
+#: Field order for the compact column encoding. The reader reconstructs the
+#: full records from this, so the two must not drift: it is written once here
+#: and carried INSIDE the artifact, rather than duplicated in the reader.
+COMPACT_COLUMN_FIELDS = [
+    "column_name", "ordinal_position", "data_type", "udt_name",
+    "character_maximum_length", "numeric_precision", "numeric_scale",
+    "is_nullable", "column_default", "is_generated", "generation_expression",
+    "datetime_precision", "column_comment",
+]
+
+
+def _compact(snapshot: dict) -> dict:
+    """The same facts, columnar, with empty trailing fields dropped.
+
+    Lossless with respect to everything the mapping documents consume. It
+    exists because the only route off a browser-console host is a paste, and
+    a 1.2MB artifact is not pasteable. The field order travels with the
+    payload so a reader can never decode it against a different schema than
+    the writer used -- the failure that encoding would otherwise invite is
+    silent column shifting, which produces a document that is wrong in every
+    row while looking entirely normal.
+    """
+    grouped = {}
+    for col in snapshot["columns"]:
+        key = f"{col['table_schema']}.{col['table_name']}"
+        row = [col.get(f) for f in COMPACT_COLUMN_FIELDS]
+        while row and row[-1] in (None, ""):
+            row.pop()
+        grouped.setdefault(key, []).append(row)
+
+    return {
+        "compact": 1,
+        "column_fields": COMPACT_COLUMN_FIELDS,
+        "meta": {k: snapshot[k] for k in
+                 ("snapshot_version", "taken_at_utc", "host", "database",
+                  "server_version", "schemas_requested", "schemas_found",
+                  "schemas_missing", "counts")},
+        "tables": [[t["table_schema"], t["table_name"], t["kind"],
+                    t["estimated_rows"], t.get("table_comment")]
+                   for t in snapshot["tables"]],
+        "columns": grouped,
+        "constraints": [[c["table_schema"], c["table_name"],
+                         c["constraint_name"], c["constraint_type"],
+                         c["definition"], c.get("columns"),
+                         c.get("references_table"), c.get("references_columns")]
+                        for c in snapshot["constraints"]],
+        "indexes": [[i["table_schema"], i["table_name"], i["index_name"],
+                     i["is_unique"], i["is_primary"], i["definition"]]
+                    for i in snapshot["indexes"]],
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True,
@@ -204,6 +256,10 @@ def main() -> int:
     ap.add_argument("--env-file",
                     help="path to the .env holding DATABASE_URL, for when this "
                          "script is run from outside the checkout")
+    ap.add_argument("--compact", action="store_true",
+                    help="columnar encoding with empty fields dropped. Same "
+                         "facts, roughly a fifth the bytes, for when the only "
+                         "way off the host is a terminal paste")
     args = ap.parse_args()
 
     schemas = [s.strip() for s in args.schemas.split(",") if s.strip()]
@@ -263,7 +319,12 @@ def main() -> int:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(snapshot, indent=2, default=str), encoding="utf-8")
+    if args.compact:
+        out.write_text(json.dumps(_compact(snapshot), separators=(",", ":"),
+                                  default=str), encoding="utf-8")
+    else:
+        out.write_text(json.dumps(snapshot, indent=2, default=str),
+                       encoding="utf-8")
 
     print(f"snapshot written: {out}")
     print(f"  taken_at  {snapshot['taken_at_utc']}  on {snapshot['host']}")

@@ -90,6 +90,52 @@ STM_COLUMNS = [
 
 # ── Snapshot helpers ─────────────────────────────────────────────────────────
 
+def load_snapshot(path: Path) -> dict:
+    """Read a snapshot in either encoding, returning the full form.
+
+    A compact snapshot carries its own ``column_fields`` order, and the
+    expansion uses THAT, never a copy held here. A reader with its own idea
+    of the field order decodes a differently-ordered payload into a document
+    where every row is wrong and nothing looks wrong -- precision read as
+    scale, a comment read as a default.
+    """
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not raw.get("compact"):
+        return raw
+
+    fields = raw.get("column_fields")
+    if not fields:
+        raise SystemExit(
+            f"2  {path.name} is marked compact but carries no column_fields; "
+            f"it cannot be decoded without guessing the field order, and a "
+            f"wrong guess produces a document that is wrong in every row")
+
+    columns = []
+    for key, rows in raw["columns"].items():
+        schema, _, table = key.partition(".")
+        for row in rows:
+            padded = list(row) + [None] * (len(fields) - len(row))
+            record = dict(zip(fields, padded))
+            record["table_schema"], record["table_name"] = schema, table
+            columns.append(record)
+
+    return {
+        **raw["meta"],
+        "columns": columns,
+        "tables": [dict(zip(("table_schema", "table_name", "kind",
+                             "estimated_rows", "table_comment"), t))
+                   for t in raw["tables"]],
+        "constraints": [dict(zip(("table_schema", "table_name",
+                                  "constraint_name", "constraint_type",
+                                  "definition", "columns", "references_table",
+                                  "references_columns"), c))
+                        for c in raw["constraints"]],
+        "indexes": [dict(zip(("table_schema", "table_name", "index_name",
+                              "is_unique", "is_primary", "definition"), i))
+                    for i in raw["indexes"]],
+    }
+
+
 def index_snapshot(snap: dict) -> dict:
     """Reshape the snapshot into lookups keyed by schema.table[.column]."""
     tables, columns = {}, defaultdict(list)
@@ -388,7 +434,7 @@ def main() -> int:
                   f"is supposed to be evidence")
             return 2
 
-    snap    = json.loads(snap_path.read_text(encoding="utf-8"))
+    snap    = load_snapshot(snap_path)
     lineage = json.loads(lin_path.read_text(encoding="utf-8"))
     snap_idx = index_snapshot(snap)
     mappings = load_mappings(Path(args.mappings))

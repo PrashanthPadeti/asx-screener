@@ -1,0 +1,565 @@
+# The market_snapshot.py family  (Gold)
+#
+#   market.index_snapshots    ASX200 / ASX300 aggregate stats
+#   market.sector_snapshots   per-GICS-sector performance
+#   market.mover_snapshots    top-10 gainers, losers, most active, surges
+#   market.exdiv_snapshots    upcoming ex-dividend dates
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/market_snapshot.py
+#   backend/compute/engine/snapshot_stages.py
+#
+# ── Source layer: UNIVERSE, not Silver ─────────────────────────────────────
+# Every one of these reads screener.universe, which is the Universe layer.
+# They are Gold tables fed from Universe rather than from Silver, so the
+# medallion arrow runs backwards here. Recorded rather than smoothed over:
+# a reader tracing index_snapshots back to prices goes through the universe
+# build, and anything the universe does to a value (COALESCE, fallback, unit
+# change) is already applied before these aggregates see it.
+#
+# market.mover_snapshots additionally reads market.period_metrics (Gold).
+#
+# ── Three different times, and they are not interchangeable ────────────────
+#   snapshot_date   EVENT TIME: the date the snapshot describes. Supplied by
+#                   --date or defaulted to today. Part of every key.
+#   created_at      LOAD TIME: when the row was written. NOW() on upsert,
+#                   now() by default on insert.
+#   ex_div_date /   FUTURE EVENT TIME (exdiv only): dates the row is ABOUT,
+#   pay_date        both later than snapshot_date by construction.
+#   pm.computed_date  A FOURTH TIME (movers only): the period_metrics run the
+#                   high/low came from, taken as MAX(computed_date) and NOT
+#                   constrained to equal snapshot_date.
+#
+# ── Consumers (verified 9 Nov 2026) ────────────────────────────────────────
+#   all four        app/api/v1/routes/market.py          (user-facing)
+#   index, movers   app/api/v1/routes/admin.py
+#   movers          app/workers/anomaly_worker.py, app/scheduler_registry.py
+# Unlike market.short_interest, these are read.
+#
+# ── Stage contract ─────────────────────────────────────────────────────────
+# REQUIRED_STAGES = ("index", "sector", "movers"). EXDIV IS NOT REQUIRED, so
+# a run that writes no ex-dividend rows is still a successful run. Each stage
+# commits its own transaction, after a five-month defect in which stage 3's
+# handler called session.rollback() and discarded stages 1 and 2 nightly
+# while the log said "Committed snapshot".
+#
+# ── OPEN: the market_cap unit ──────────────────────────────────────────────
+# screener.universe.market_cap is populated from market.valuation_snapshot
+# .market_cap (build_screener_universe.py line 333), which this project's
+# own comment calls "raw AUD" and which carries EODHD's full-currency-unit
+# figure. Two constants in market_snapshot.py only make sense against a
+# MILLIONS basis:
+#     total_market_cap_bn = SUM(market_cap) / 1000.0
+#     liquid_filter       = market_cap > 20
+# On a raw-AUD basis the first yields THOUSANDS of AUD under a column named
+# _bn, and the second admits anything above twenty dollars.
+# NOT YET CONFIRMED against production. See database/stm/OPEN_FINDINGS.md.
+
+table: market.index_snapshots
+layer: Gold
+source_layer: Universe
+
+defaults:
+  source_system: internal
+  source_table: screener.universe
+  tables_involved: screener.universe
+  writer_job: compute/engine/market_snapshot.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  join_condition: none - single-table aggregate
+
+columns:
+
+  # ── market.index_snapshots ────────────────────────────────────────────────
+  # Grain: one row per (snapshot_date, index_code). Two rows per run:
+  # ASX200 and ASX300.
+  # Filter: WHERE <is_asx200|is_asx300> = TRUE AND status = 'active'
+  market.index_snapshots:
+
+    snapshot_date:
+      source_system: internal
+      source_table: n/a
+      source_column: --date argument, defaulting to today
+      is_key: "yes"
+      transformation_rule: the date the snapshot describes
+      business_rule: >
+        EVENT TIME. Says which day the aggregate is ABOUT. It does not
+        establish that the underlying universe was rebuilt that day --
+        screener.universe carries its own universe_built_at, and this job
+        reads whatever is there.
+      unit: date
+
+    index_code:
+      source_system: internal
+      source_table: n/a
+      source_column: literal 'ASX200' / 'ASX300'
+      is_key: "yes"
+      derivation_formula: "loop over [('ASX200','is_asx200'), ('ASX300','is_asx300')]"
+      transformation_rule: literal, paired with the universe flag it filters on
+      valid_values: "ASX200, ASX300"
+      business_rule: >
+        Membership comes from screener.universe.is_asx200 / is_asx300, set by
+        compute/engine/asx_indices.py -- a job whose own freshness is listed
+        as NOT INDEPENDENTLY OBSERVABLE in the output-freshness registry,
+        because it writes no timestamp. A stale membership flag produces a
+        confident aggregate over the wrong constituents.
+      unit: n/a
+
+    stock_count:
+      source_column: (row count)
+      derivation_formula: "COUNT(*)"
+      source_filter: "<index flag> = TRUE AND status = 'active'"
+      transformation_rule: constituents matching the filter
+      business_rule: >
+        ACTIVE constituents only. Will not equal 200 or 300: the flag is
+        whatever asx_indices last wrote, and delisted or suspended members
+        are excluded by status.
+      unit: count
+
+    gainers:
+      source_column: return_1w
+      derivation_formula: "COUNT(*) FILTER (WHERE return_1w > 0)"
+      transformation_rule: strictly positive one-week return
+      business_rule: >
+        gainers + losers + unchanged CAN BE LESS THAN stock_count, because a
+        constituent with a NULL return_1w falls in none of the three. That
+        shortfall is the honest representation of unknown -- see `unchanged`.
+      unit: count
+
+    losers:
+      source_column: return_1w
+      derivation_formula: "COUNT(*) FILTER (WHERE return_1w < 0)"
+      transformation_rule: strictly negative one-week return
+      unit: count
+
+    unchanged:
+      source_column: return_1w
+      derivation_formula: "COUNT(*) FILTER (WHERE return_1w = 0)"
+      transformation_rule: STRICTLY FLAT - exactly zero
+      business_rule: >
+        NULL IS DELIBERATELY EXCLUDED. The filter previously read
+        `return_1w = 0 OR return_1w IS NULL`, which reported a company whose
+        return we do not have as a company whose price did not move. Once
+        summed into one integer the page cannot tell them apart.
+
+        The run now REFUSES rather than folding unknowns in: a separate
+        `no_return` count is computed, and if it is non-zero the job raises
+        SnapshotIncomplete, because this table has no column to record it.
+        The stated fix when that fires is a no_return column, not a wider
+        FILTER.
+      unit: count
+
+    avg_return_1w:
+      source_column: return_1w
+      derivation_formula: "AVG(return_1w)"
+      transformation_rule: mean one-week return across constituents
+      business_rule: >
+        EQUAL-WEIGHTED, not capitalisation-weighted, so it is not the index's
+        own return and will diverge from the published ASX200 move. SQL AVG
+        ignores NULLs, so the denominator is constituents WITH a return, not
+        stock_count.
+      unit: ratio
+
+    total_market_cap_bn:
+      source_column: market_cap
+      derivation_formula: "SUM(market_cap) / 1000.0"
+      transformation_rule: summed constituent market cap, divided by 1000
+      business_rule: >
+        UNIT UNCONFIRMED -- see the header note and OPEN_FINDINGS.md. The
+        divisor yields billions only if screener.universe.market_cap is in
+        MILLIONS; that column is populated from
+        market.valuation_snapshot.market_cap, which carries EODHD's raw
+        full-currency figure. On a raw-AUD basis this column holds thousands
+        of AUD under a name that says billions.
+
+        SUM also ignores NULLs, so a constituent with no market cap silently
+        lowers the total rather than making it NULL.
+      unit: "AUD billions (claimed; see OPEN_FINDINGS.md)"
+
+    created_at:
+      source_system: internal
+      source_table: n/a
+      source_column: NOW()
+      transformation_rule: column default now() on insert, NOW() on upsert
+      business_rule: >
+        LOAD TIME, not event time. A backfill run writes an old snapshot_date
+        with today's created_at, and that is correct: the pair records both
+        what the row is about and when it was produced.
+      unit: timestamptz
+
+  # ── market.sector_snapshots ───────────────────────────────────────────────
+  # Grain: one row per (snapshot_date, sector).
+  # Filter: WHERE status = 'active' AND sector IS NOT NULL, GROUP BY sector.
+  #
+  # Same shape as index_snapshots with TWO asymmetries worth knowing:
+  #   * NO `unchanged` COLUMN. Flat constituents are counted nowhere, so
+  #     gainers + losers < stock_count is the normal case here rather than a
+  #     signal.
+  #   * NO no_return GUARD. The index stage refuses when a constituent has a
+  #     NULL return_1w; this stage does not check, so sectors silently
+  #     under-count. The protection applied to one aggregate was not applied
+  #     to its sibling.
+  market.sector_snapshots:
+
+    snapshot_date:
+      source_system: internal
+      source_table: n/a
+      source_column: --date argument, defaulting to today
+      is_key: "yes"
+      transformation_rule: the date the snapshot describes
+      business_rule: EVENT TIME - see index_snapshots.snapshot_date.
+      unit: date
+
+    sector:
+      source_column: sector
+      is_key: "yes"
+      derivation_formula: "GROUP BY sector"
+      source_filter: "status = 'active' AND sector IS NOT NULL"
+      transformation_rule: GICS sector as carried on the universe row
+      business_rule: >
+        Companies with a NULL sector are EXCLUDED ENTIRELY -- they appear in
+        no row, not in an "Unknown" bucket. The sum of stock_count across
+        sectors is therefore less than the active universe, and nothing in
+        this table records by how much.
+      unit: n/a
+
+    stock_count:
+      source_column: (row count)
+      derivation_formula: "COUNT(*)"
+      source_filter: "status = 'active' AND sector IS NOT NULL"
+      transformation_rule: active companies in the sector
+      unit: count
+
+    gainers:
+      source_column: return_1w
+      derivation_formula: "COUNT(*) FILTER (WHERE return_1w > 0)"
+      transformation_rule: strictly positive one-week return
+      business_rule: >
+        No `unchanged` column exists on this table, so flat and unknown
+        constituents are both simply absent from gainers and losers.
+      unit: count
+
+    losers:
+      source_column: return_1w
+      derivation_formula: "COUNT(*) FILTER (WHERE return_1w < 0)"
+      transformation_rule: strictly negative one-week return
+      unit: count
+
+    avg_return_1w:
+      source_column: return_1w
+      derivation_formula: "AVG(return_1w) FILTER (WHERE return_1w IS NOT NULL)"
+      transformation_rule: mean one-week return across the sector
+      business_rule: >
+        The explicit IS NOT NULL filter is a no-op -- SQL AVG already ignores
+        NULLs -- so this is identical to the index version despite looking
+        stricter. Equal-weighted, not capitalisation-weighted.
+      unit: ratio
+
+    total_market_cap_bn:
+      source_column: market_cap
+      derivation_formula: "SUM(market_cap) / 1000.0"
+      transformation_rule: summed sector market cap, divided by 1000
+      business_rule: >
+        UNIT UNCONFIRMED - identical derivation to
+        index_snapshots.total_market_cap_bn; see that column and
+        OPEN_FINDINGS.md.
+      unit: "AUD billions (claimed; see OPEN_FINDINGS.md)"
+
+    created_at:
+      source_system: internal
+      source_table: n/a
+      source_column: NOW()
+      transformation_rule: column default now() on insert, NOW() on upsert
+      business_rule: LOAD TIME, not event time.
+      unit: timestamptz
+
+  # ── market.mover_snapshots ────────────────────────────────────────────────
+  # Grain: one row per (snapshot_date, snapshot_type, rank). rank is 1..10.
+  #
+  # Source:
+  #   FROM screener.universe u
+  #   LEFT JOIN market.period_metrics pm
+  #          ON pm.asx_code = u.asx_code
+  #         AND pm.computed_date = (SELECT MAX(computed_date)
+  #                                 FROM market.period_metrics)
+  #
+  # Liquidity filter on every panel:
+  #   status = 'active' AND price > 0.05 AND market_cap > 20
+  market.mover_snapshots:
+
+    snapshot_date:
+      source_system: internal
+      source_table: n/a
+      source_column: --date argument, defaulting to today
+      is_key: "yes"
+      transformation_rule: the date the snapshot describes
+      business_rule: >
+        EVENT TIME. Note it is NOT constrained to match the period_metrics
+        row the high/low came from -- that join takes MAX(computed_date)
+        independently, deliberately, "to avoid a CURRENT_DATE race when the
+        nightly jobs run in different orders". So period_high and period_low
+        on a given row can come from a different date than snapshot_date,
+        and nothing on the row records which.
+      unit: date
+
+    snapshot_type:
+      source_system: internal
+      source_table: n/a
+      source_column: literal, built per panel
+      is_key: "yes"
+      derivation_formula: "f'{GAINER|LOSER}_{1D|1W|1M|3M}', plus GAINER, LOSER, ACTIVE, BUYING, SELLING"
+      valid_values: >
+        GAINER_1W, GAINER_1M, GAINER_3M, LOSER_1W, LOSER_1M, LOSER_3M,
+        GAINER, LOSER (legacy aliases of the 1W panels), ACTIVE, BUYING,
+        SELLING. GAINER_1D and LOSER_1D are DECLARED BUT NEVER WRITTEN.
+      transformation_rule: panel identifier
+      business_rule: >
+        The 1D PANELS DO NOT EXIST. RETURN_PERIODS declares ("1D",
+        "return_1d"), but screener.universe has never had a return_1d column.
+        Availability is now established before any statement runs, so the
+        panel is skipped with a log line instead of raising -- and the entry
+        is kept in the declaration on purpose, because deleting it would
+        hide the real gap: a one-day return is not computed anywhere.
+
+        GAINER and LOSER are aliases assigned in Python from the 1W panels
+        for backwards compatibility, so those rows are DUPLICATES of
+        GAINER_1W and LOSER_1W under a second name.
+      unit: n/a
+
+    rank:
+      source_system: internal
+      source_table: n/a
+      source_column: enumerate(rows, start=1)
+      is_key: "yes"
+      derivation_formula: "ORDER BY <panel ordering> LIMIT 10, position"
+      transformation_rule: 1-based position within the panel
+      business_rule: >
+        Rank is assigned by the ORDER BY of each panel, which differs: the
+        gainer and loser panels order by the period return, ACTIVE by raw
+        volume, BUYING and SELLING by volume / avg_volume_20d. Rank 1 means
+        something different in each.
+      valid_values: "1..10 (TOP_N)"
+      unit: rank
+
+    asx_code:
+      source_column: asx_code
+      transformation_rule: direct copy
+      unit: n/a
+
+    company_name:
+      source_column: company_name
+      transformation_rule: direct copy
+      business_rule: >
+        DENORMALISED at snapshot time. A later rename in market.companies
+        does not reach rows already written, so a historical snapshot keeps
+        the name as it stood.
+      unit: n/a
+
+    sector:
+      source_column: sector
+      transformation_rule: direct copy, denormalised at snapshot time
+      unit: n/a
+
+    price:
+      source_column: price
+      transformation_rule: direct copy
+      business_rule: >
+        screener.universe.price is the latest close from market.daily_prices,
+        so it is as current as price ingestion -- and the liquidity filter
+        `price > 0.05` is applied to it.
+      unit: AUD
+
+    return_1w:
+      source_column: return_1d / return_1w / return_1m / return_3m
+      derivation_formula: "period_return = u.<RETURN_PERIODS[snapshot_type]> ; stored into the return_1w column"
+      transformation_rule: the period return for THIS PANEL, whichever period that is
+      business_rule: >
+        THE COLUMN NAME IS WRONG FOR MOST ROWS. A GAINER_3M row carries the
+        THREE-MONTH return in a column called return_1w; a GAINER_1M row
+        carries the one-month return there. Only the 1W panels (and their
+        GAINER / LOSER aliases) hold an actual one-week return.
+
+        The transform is explicit about it -- "stored in the return_1w column
+        for query consistency" -- so a consumer must read snapshot_type to
+        know what unit of time this number spans. Any query that aggregates
+        return_1w across snapshot_types is mixing periods.
+      unit: ratio (period depends on snapshot_type)
+
+    volume:
+      source_column: volume
+      transformation_rule: direct copy
+      business_rule: Latest session volume as carried on the universe row.
+      unit: shares
+
+    avg_volume_20d:
+      source_column: avg_volume_20d
+      transformation_rule: direct copy
+      business_rule: >
+        The denominator of the BUYING and SELLING panels, which require
+        volume / avg_volume_20d >= 1.5. A row with a NULL or zero average is
+        excluded from those panels by the WHERE clause rather than producing
+        a division error.
+      unit: shares
+
+    short_pct:
+      source_column: short_pct
+      transformation_rule: direct copy
+      business_rule: >
+        Carried for display. The MOST SHORTED panel named in the module
+        docstring is NOT among the snapshot_types actually written -- the
+        panels are gainers, losers, ACTIVE, BUYING and SELLING.
+      unit: percent
+
+    market_cap:
+      source_column: market_cap
+      transformation_rule: direct copy
+      business_rule: >
+        UNIT UNCONFIRMED - the same column the liquidity filter tests with
+        `market_cap > 20`. See OPEN_FINDINGS.md.
+      unit: "AUD (basis unconfirmed)"
+
+    created_at:
+      source_system: internal
+      source_table: n/a
+      source_column: NOW()
+      transformation_rule: column default now() on insert, NOW() on upsert
+      business_rule: LOAD TIME, not event time.
+      unit: timestamptz
+
+    period_high:
+      source_table: market.period_metrics
+      source_column: high_1d / high_1w / high_1m / high_3m
+      tables_involved: screener.universe, market.period_metrics
+      join_condition: >
+        LEFT JOIN market.period_metrics pm ON pm.asx_code = u.asx_code
+        AND pm.computed_date = (SELECT MAX(computed_date) FROM market.period_metrics)
+      derivation_formula: "pm.<period_hl_cols[snapshot_suffix]][0]>"
+      transformation_rule: period high matching the panel's period
+      business_rule: >
+        Inherits every caveat of market.period_metrics: the window is
+        CALENDAR days and does not match its name (1d is ~3 days, 1m is 35,
+        3m is 100), it is anchored on CURRENT_DATE rather than the newest
+        price, and it is UNADJUSTED for splits.
+
+        A LEFT JOIN, so a code absent from the latest period_metrics run
+        still appears in the panel with NULL high and low rather than being
+        dropped. The volume panels (ACTIVE, BUYING, SELLING) always use the
+        1W columns regardless of what they are ranking.
+      unit: AUD
+
+    period_low:
+      source_table: market.period_metrics
+      source_column: low_1d / low_1w / low_1m / low_3m
+      tables_involved: screener.universe, market.period_metrics
+      join_condition: >
+        LEFT JOIN market.period_metrics pm ON pm.asx_code = u.asx_code
+        AND pm.computed_date = (SELECT MAX(computed_date) FROM market.period_metrics)
+      derivation_formula: "pm.<period_hl_cols[snapshot_suffix]][1]>"
+      transformation_rule: period low matching the panel's period
+      business_rule: See period_high.
+      unit: AUD
+
+  # ── market.exdiv_snapshots ────────────────────────────────────────────────
+  # Grain: one row per (snapshot_date, asx_code).
+  #
+  #   WHERE status = 'active'
+  #     AND ex_div_date IS NOT NULL
+  #     AND ex_div_date BETWEEN snapshot_date AND snapshot_date + 14 days
+  #   ORDER BY ex_div_date ASC
+  #   LIMIT 50
+  #
+  # Load: DELETE WHERE snapshot_date = :d, then INSERT ... ON CONFLICT DO
+  # UPDATE. The delete is there because the 14-day window shifts daily, so a
+  # company that has gone ex-dividend must leave the row set rather than
+  # linger.
+  #
+  # NOT A REQUIRED STAGE. REQUIRED_STAGES is ("index", "sector", "movers"),
+  # so a run that writes zero ex-dividend rows still reports success.
+  market.exdiv_snapshots:
+
+    snapshot_date:
+      source_system: internal
+      source_table: n/a
+      source_column: --date argument, defaulting to today
+      is_key: "yes"
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: the date the 14-day window starts from
+      business_rule: >
+        EVENT TIME, and also the window anchor: the query selects
+        ex_div_date BETWEEN snapshot_date AND snapshot_date + 14 days. A row
+        here is a statement about the fortnight FOLLOWING this date.
+      unit: date
+
+    asx_code:
+      source_column: asx_code
+      is_key: "yes"
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: direct copy
+      unit: n/a
+
+    company_name:
+      source_column: company_name
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: direct copy, denormalised at snapshot time
+      unit: n/a
+
+    ex_div_date:
+      source_column: ex_div_date
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      source_filter: "ex_div_date BETWEEN snapshot_date AND snapshot_date + 14 days"
+      transformation_rule: direct copy
+      business_rule: >
+        A FUTURE EVENT DATE, distinct from snapshot_date. The date on and
+        after which a buyer is not entitled to the declared dividend. Always
+        within 14 days of snapshot_date by construction, so this table can
+        never answer "what went ex-dividend last month".
+      unit: date
+
+    pay_date:
+      source_column: pay_date
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: direct copy
+      business_rule: >
+        A SECOND future event date, typically weeks after ex_div_date, and
+        NOT bounded by the 14-day window -- only ex_div_date is filtered.
+        Nullable: an announced ex-dividend date without a confirmed payment
+        date is normal.
+      unit: date
+
+    dps_ttm:
+      source_column: dps_ttm
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: direct copy
+      business_rule: >
+        TRAILING twelve-month dividend per share, carried from the universe.
+        It is NOT the dividend about to go ex -- it is the past year's total,
+        displayed beside a forthcoming event.
+      unit: AUD per share
+
+    dividend_yield:
+      source_column: dividend_yield
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: direct copy
+      business_rule: >
+        Trailing yield from the universe row, unfranked. Franking is carried
+        separately in franking_pct and is not applied here.
+      unit: ratio
+
+    franking_pct:
+      source_column: franking_pct
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: direct copy
+      business_rule: >
+        Percentage of the dividend carrying franking credits. Declared
+        NUMERIC(5,2), so it is a PERCENT here (0-100), unlike
+        dividend_yield beside it which is a ratio. Two different conventions
+        in adjacent columns of one row.
+      unit: percent
+
+    created_at:
+      source_system: internal
+      source_table: n/a
+      source_column: NOW()
+      load_strategy: delete-by-snapshot_date, then upsert on (snapshot_date, asx_code)
+      transformation_rule: column default now() on insert, NOW() on upsert
+      business_rule: LOAD TIME, not event time.
+      unit: timestamptz

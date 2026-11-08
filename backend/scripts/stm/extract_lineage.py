@@ -106,7 +106,84 @@ TABLE_LAYER = {
     "market.analyst_ratings":    "Silver",
     "market.earnings_quarterly": "Silver",
     "market.capital_raises":     "Silver",
+    # Added 9 Nov 2026. Both were absent, so both fell through to the old
+    # "market.* not named here is Gold" default and were classified Gold
+    # while being written by Bronze->Silver transforms. The Bronze->Silver
+    # mapping took its population from this classification and reported
+    # "366/366 mapped, gate passes" over a layer missing two of its tables.
+    "market.short_interest":     "Silver",
+    "market.valuation_snapshot": "Silver",
 }
+
+#: Gold — computed measures, derived from Silver rather than landed from a
+#: source. Declared for the same reason the Silver list is: an inferred
+#: classification is only as good as its proxy, and every proxy available
+#: here is a fact about the CODE rather than about the DATA.
+#:
+#: A writer-location heuristic was tried and discarded on 9 Nov 2026:
+#: compute/engine/fund_prices.py writes market.fund_prices, a conformed
+#: Silver entity, so "lives in compute/engine" implied Gold for seven Silver
+#: tables. Seven false alarms on a line that exists to carry real ones is
+#: worse than no line at all.
+TABLE_LAYER_GOLD = {
+    "market.anomalies", "market.computed_metrics", "market.daily_metrics",
+    "market.exdiv_snapshots", "market.global_indices",
+    "market.halfyearly_metrics", "market.heatmap_cache",
+    "market.heatmap_labels", "market.index_snapshots",
+    "market.mining_metrics", "market.monthly_metrics",
+    "market.mover_snapshots", "market.period_metrics",
+    "market.price_predictions", "market.quarterly_metrics",
+    "market.reit_metrics", "market.sector_benchmarks",
+    "market.sector_snapshots", "market.weekly_metrics",
+    "market.yearly_metrics",
+}
+
+#: Neither Silver nor Gold: pipeline control and telemetry. Named rather than
+#: omitted, so "not a data layer" is a decision on the record instead of a
+#: table nobody classified.
+TABLE_LAYER_CONTROL = {
+    "market.pipeline_runs": "run-level telemetry written by the daily "
+                            "pipeline; carries no business data",
+    "market.pipeline_step_runs": "per-step telemetry written by the daily "
+                                 "pipeline; carries no business data",
+}
+
+
+def classify(table: str, modules: list) -> dict:
+    """Layer, and how it was decided — never a silent default.
+
+    Every market.* table must appear in exactly one declaration. One that
+    appears in none is UNCLASSIFIED and says so; it is not quietly assigned.
+
+    The previous version returned "Gold" for any unnamed market.* table, and
+    that default was indistinguishable from a decision. It is how
+    market.short_interest and market.valuation_snapshot — both written by
+    Bronze->Silver transforms — came to sit in the Gold layer, and how the
+    Bronze->Silver mapping came to report itself complete over a layer that
+    was missing two of its twenty-two tables.
+    """
+    if table in TABLE_LAYER:
+        return {"layer": TABLE_LAYER[table], "layer_source": "declared"}
+    if table in TABLE_LAYER_GOLD:
+        return {"layer": "Gold", "layer_source": "declared"}
+    if table in TABLE_LAYER_CONTROL:
+        return {"layer": "control", "layer_source": "declared",
+                "layer_note": TABLE_LAYER_CONTROL[table]}
+
+    schema = table.split(".", 1)[0]
+    base = LAYER_OF_SCHEMA.get(schema)
+    if base is None:
+        return {"layer": "out-of-scope", "layer_source": "schema"}
+    if base != "Silver/Gold":
+        return {"layer": base, "layer_source": "schema"}
+
+    return {"layer": "UNCLASSIFIED", "layer_source": "none",
+            "layer_conflict": (
+                f"{table} is written by "
+                f"{', '.join(m.rsplit('/', 1)[-1] for m in modules) or 'nothing'} "
+                f"but appears in no layer declaration. Add it to TABLE_LAYER, "
+                f"TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately — a "
+                f"table that defaults into a layer is a table nobody placed.")}
 
 WRITE_PATTERNS = [
     ("insert",   re.compile(r"\bINSERT\s+INTO\s+([a-z_]+\.[a-z_]+)", re.I)),
@@ -147,13 +224,18 @@ SQL_SHAPED = re.compile(
 
 
 def layer_of(table: str) -> str:
+    """Declared layer only, with no writer evidence and no default.
+
+    Retained for callers that have a table name and nothing else. It cannot
+    classify an undeclared market.* table and says so rather than guessing;
+    `classify(table, modules)` is what the graph build uses.
+    """
     if table in TABLE_LAYER:
         return TABLE_LAYER[table]
     schema = table.split(".", 1)[0]
     layer = LAYER_OF_SCHEMA.get(schema)
     if layer == "Silver/Gold":
-        # market.* not named in TABLE_LAYER is a computed measure table.
-        return "Gold"
+        return "UNCLASSIFIED"
     return layer or "out-of-scope"
 
 
@@ -243,20 +325,33 @@ def main() -> int:
 
     # Invert: target table -> who writes it. This is the column the mapping
     # documents need, and the direction the run sheet's edges point.
+    # Two passes, deliberately. Classification depends on the writers, so it
+    # cannot happen while they are still being collected: the old single pass
+    # classified a table from the FIRST module that wrote it and never
+    # revisited the answer when a second writer appeared.
     by_table = defaultdict(lambda: {"written_by": [], "layer": None})
     for module, result in modules.items():
         for table, ops in result["writes"].items():
-            by_table[table]["layer"] = layer_of(table)
             by_table[table]["written_by"].append({"module": module,
                                                   "operations": ops})
 
+    for table, info in by_table.items():
+        info.update(classify(table, [w["module"] for w in info["written_by"]]))
+
     unwritten = sorted({t for m in modules.values() for t in m["reads"]}
                        - set(by_table))
+
+    conflicts = {t: i["layer_conflict"] for t, i in sorted(by_table.items())
+                 if i.get("layer_conflict")}
 
     graph = {
         "modules_scanned": len(files),
         "modules_touching_tables": len(modules),
         "tables_written": len(by_table),
+        # Carried in the artifact, not only printed. A consumer reading this
+        # file must be able to see that a layer is disputed without having
+        # watched the run that produced it.
+        "layer_conflicts": conflicts,
         "by_table": {k: by_table[k] for k in sorted(by_table)},
         "by_module": modules,
         "read_but_never_written": unwritten,
@@ -278,6 +373,13 @@ def main() -> int:
         print(f"parse errors         {len(errors)}")
         for e in errors[:5]:
             print(f"    {e['module']}: {e['error']}")
+
+    # Printed every run, including clean ones, so "every table is placed" and
+    # "nobody looked" never render the same way.
+    print(f"unclassified tables  {len(conflicts)}"
+          + ("" if conflicts else "  (every table is declared)"))
+    for table, why in conflicts.items():
+        print(f"    {table}: {why}")
 
     if args.show:
         per_layer = defaultdict(list)

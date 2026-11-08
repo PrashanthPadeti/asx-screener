@@ -2,6 +2,7 @@
   "modules_scanned": 157,
   "modules_touching_tables": 101,
   "tables_written": 66,
+  "layer_conflicts": {},
   "by_table": {
     "financials.annual_balance_sheet": {
       "written_by": [
@@ -31,7 +32,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "schema"
     },
     "financials.annual_cashflow": {
       "written_by": [
@@ -61,7 +63,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "schema"
     },
     "financials.annual_pnl": {
       "written_by": [
@@ -99,7 +102,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "schema"
     },
     "financials.earnings_quarterly": {
       "written_by": [
@@ -111,7 +115,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "schema"
     },
     "market.analyst_ratings": {
       "written_by": [
@@ -129,7 +134,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.anomalies": {
       "written_by": [
@@ -141,7 +147,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.asx_announcements": {
       "written_by": [
@@ -158,7 +165,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.capital_raises": {
       "written_by": [
@@ -169,7 +177,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.commodity_prices": {
       "written_by": [
@@ -180,7 +189,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.companies": {
       "written_by": [
@@ -229,7 +239,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.computed_metrics": {
       "written_by": [
@@ -240,7 +251,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.daily_metrics": {
       "written_by": [
@@ -251,7 +263,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.daily_prices": {
       "written_by": [
@@ -305,7 +318,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.dividends": {
       "written_by": [
@@ -329,7 +343,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.exchange_list": {
       "written_by": [
@@ -341,7 +356,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.exdiv_snapshots": {
       "written_by": [
@@ -353,7 +369,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.fund_prices": {
       "written_by": [
@@ -364,7 +381,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.funds": {
       "written_by": [
@@ -375,7 +393,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.fx_rates": {
       "written_by": [
@@ -386,7 +405,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.global_index_prices": {
       "written_by": [
@@ -397,7 +417,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.global_indices": {
       "written_by": [
@@ -408,7 +429,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.halfyearly_metrics": {
       "written_by": [
@@ -419,7 +441,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.heatmap_cache": {
       "written_by": [
@@ -431,7 +454,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.heatmap_labels": {
       "written_by": [
@@ -442,7 +466,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.index_prices": {
       "written_by": [
@@ -459,7 +484,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.index_snapshots": {
       "written_by": [
@@ -470,7 +496,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.mining_metrics": {
       "written_by": [
@@ -481,7 +508,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.monthly_metrics": {
       "written_by": [
@@ -492,7 +520,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.mover_snapshots": {
       "written_by": [
@@ -503,7 +532,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.period_metrics": {
       "written_by": [
@@ -514,7 +544,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.pipeline_runs": {
       "written_by": [
@@ -526,7 +557,9 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "control",
+      "layer_source": "declared",
+      "layer_note": "run-level telemetry written by the daily pipeline; carries no business data"
     },
     "market.pipeline_step_runs": {
       "written_by": [
@@ -538,7 +571,9 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "control",
+      "layer_source": "declared",
+      "layer_note": "per-step telemetry written by the daily pipeline; carries no business data"
     },
     "market.price_predictions": {
       "written_by": [
@@ -549,7 +584,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.quarterly_metrics": {
       "written_by": [
@@ -566,7 +602,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.reit_metrics": {
       "written_by": [
@@ -577,7 +614,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.sector_benchmarks": {
       "written_by": [
@@ -588,7 +626,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.sector_snapshots": {
       "written_by": [
@@ -599,7 +638,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.shares_history": {
       "written_by": [
@@ -610,7 +650,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.short_interest": {
       "written_by": [
@@ -627,7 +668,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.short_positions": {
       "written_by": [
@@ -644,7 +686,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.splits": {
       "written_by": [
@@ -662,7 +705,8 @@
           ]
         }
       ],
-      "layer": "Silver"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.valuation_snapshot": {
       "written_by": [
@@ -674,7 +718,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Silver",
+      "layer_source": "declared"
     },
     "market.weekly_metrics": {
       "written_by": [
@@ -685,7 +730,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "market.yearly_metrics": {
       "written_by": [
@@ -697,7 +743,8 @@
           ]
         }
       ],
-      "layer": "Gold"
+      "layer": "Gold",
+      "layer_source": "declared"
     },
     "screener.compute_run_finalizations": {
       "written_by": [
@@ -714,7 +761,8 @@
           ]
         }
       ],
-      "layer": "Universe"
+      "layer": "Universe",
+      "layer_source": "schema"
     },
     "screener.compute_run_stages": {
       "written_by": [
@@ -731,7 +779,8 @@
           ]
         }
       ],
-      "layer": "Universe"
+      "layer": "Universe",
+      "layer_source": "schema"
     },
     "screener.compute_runs": {
       "written_by": [
@@ -755,7 +804,8 @@
           ]
         }
       ],
-      "layer": "Universe"
+      "layer": "Universe",
+      "layer_source": "schema"
     },
     "screener.universe": {
       "written_by": [
@@ -816,7 +866,8 @@
           ]
         }
       ],
-      "layer": "Universe"
+      "layer": "Universe",
+      "layer_source": "schema"
     },
     "staging_au.analyst_ratings": {
       "written_by": [
@@ -827,7 +878,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.balance_sheet": {
       "written_by": [
@@ -838,7 +890,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.cash_flow": {
       "written_by": [
@@ -849,7 +902,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.company_profile": {
       "written_by": [
@@ -860,7 +914,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.dividends": {
       "written_by": [
@@ -872,7 +927,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.earnings": {
       "written_by": [
@@ -883,7 +939,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.eod_prices": {
       "written_by": [
@@ -896,7 +953,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.exchange_symbols": {
       "written_by": [
@@ -908,7 +966,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.fundamentals": {
       "written_by": [
@@ -919,7 +978,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.highlights": {
       "written_by": [
@@ -930,7 +990,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.income_statement": {
       "written_by": [
@@ -942,7 +1003,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.shares_stats": {
       "written_by": [
@@ -953,7 +1015,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.short_positions": {
       "written_by": [
@@ -970,7 +1033,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.splits": {
       "written_by": [
@@ -982,7 +1046,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "staging_au.valuation": {
       "written_by": [
@@ -993,7 +1058,8 @@
           ]
         }
       ],
-      "layer": "Bronze"
+      "layer": "Bronze",
+      "layer_source": "schema"
     },
     "strategy.monthly_picks": {
       "written_by": [
@@ -1006,7 +1072,8 @@
           ]
         }
       ],
-      "layer": "out-of-scope"
+      "layer": "out-of-scope",
+      "layer_source": "schema"
     },
     "users.audit_log": {
       "written_by": [
@@ -1017,7 +1084,8 @@
           ]
         }
       ],
-      "layer": "out-of-scope"
+      "layer": "out-of-scope",
+      "layer_source": "schema"
     },
     "users.unsubscribe_tokens": {
       "written_by": [
@@ -1028,7 +1096,8 @@
           ]
         }
       ],
-      "layer": "out-of-scope"
+      "layer": "out-of-scope",
+      "layer_source": "schema"
     }
   },
   "by_module": {

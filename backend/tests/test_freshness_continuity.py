@@ -262,14 +262,24 @@ def test_missing_weekdays_is_membership_not_counts():
 
 
 if __name__ == "__main__":
-    failed = 0
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"  ok    {name}")
-            except Exception as exc:                            # noqa: BLE001
-                failed += 1
-                print(f"  FAIL  {name}: {type(exc).__name__}: {exc}")
-    print(f"\n{failed} failed")
-    sys.exit(1 if failed else 0)
+    # Prints "N/M passed" at line start, which is what the full-suite gate
+    # reads as EVIDENCE OF EXECUTION. The first version of this block printed
+    # "0 failed" instead; the gate correctly reported the whole file
+    # INCONCLUSIVE, because a file that defines its functions and calls none
+    # also exits 0 and says nothing. A suite certifying a release must be
+    # able to prove it ran.
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    failures = []
+    for name, fn in tests:
+        try:
+            fn()
+            print(f"  PASS  {name}")
+        except AssertionError as e:
+            failures.append(name)
+            print(f"  FAIL  {name}  - {e}")
+        except Exception as e:                                     # noqa: BLE001
+            failures.append(name)
+            print(f"  ERROR {name}  - {type(e).__name__}: {e}")
+    print(f"\n{len(tests) - len(failures)}/{len(tests)} passed")
+    sys.exit(1 if failures else 0)

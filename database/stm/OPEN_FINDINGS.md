@@ -197,16 +197,32 @@ alone would make every displayed total wrong by a million.
    with a behavioural consequence rather than a labelling one: micro-caps
    can occupy the top-gainer panels the filter exists to keep them out of.
 
-   **To confirm:**
-   ```sql
-   SELECT snapshot_type, count(*) AS rows,
-          min(market_cap) AS smallest, max(market_cap) AS largest
-   FROM market.mover_snapshots
-   WHERE snapshot_date = (SELECT max(snapshot_date) FROM market.mover_snapshots)
-   GROUP BY snapshot_type ORDER BY smallest;
+   **CONFIRMED BY EFFECT, 9 Nov 2026.** Smallest constituent per panel on
+   the latest snapshot:
+
    ```
-   A `smallest` below 20,000,000 proves the floor is not operating as
-   twenty million.
+   LOSER_3M / LOSER_1M        2,734,455    (A$2.7M)
+   GAINER_1M / 1W / GAINER    5,060,275
+   GAINER_3M                  6,342,829
+   LOSER / LOSER_1W           8,877,334
+   SELLING                   10,029,406
+   BUYING                    12,201,436
+   ACTIVE                    32,104,284
+   ```
+
+   Six of eleven panels contain a constituent below A$20M; the smallest is
+   roughly seven times under the intended floor. If `market_cap > 20` were
+   being read as twenty million, no `smallest` could fall below
+   20,000,000. The filter is operating at twenty dollars.
+
+   The same output independently confirms two properties this mapping
+   derived from reading the code, which is worth recording because it
+   means the document is describing the system that is running:
+   - **11 snapshot types, none ending `_1D`** -- the 1D panels are
+     declared in RETURN_PERIODS and never written.
+   - `GAINER` matches `GAINER_1W` on both bounds (5,060,275 /
+     4,464,807,936) and `LOSER` matches `LOSER_1W` (8,877,334 /
+     637,415,808) -- the legacy aliases are exact duplicates.
 
 ### Also visible in that output, and not yet explained
 
@@ -232,5 +248,5 @@ constituent lists, and give `asx_indices` an observable output.
 | 3 | `DO NOTHING` blocks corrections | `market.capital_raises` | OPEN |
 | 4a | `_bn` column holds THOUSANDS (display is correct; fix needs both ends) | snapshot family | CONFIRMED |
 | 4b | Frontend comment says "millions", also wrong, contradicts its own formula | `IndexDetailContent.tsx:67` | CONFIRMED |
-| 4c | Liquidity filter `market_cap > 20` is twenty DOLLARS — panels have no floor | `market.mover_snapshots` | CONFIRMED by reading; one query shows the effect |
+| 4c | Liquidity filter is twenty DOLLARS — smallest panel constituent A$2.7M | `market.mover_snapshots` | **CONFIRMED by effect** |
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |

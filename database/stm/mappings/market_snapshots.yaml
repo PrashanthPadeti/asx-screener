@@ -43,17 +43,22 @@
 # handler called session.rollback() and discarded stages 1 and 2 nightly
 # while the log said "Committed snapshot".
 #
-# ── OPEN: the market_cap unit ──────────────────────────────────────────────
+# ── CONFIRMED: market_cap is RAW AUD, and two constants assume millions ────
 # screener.universe.market_cap is populated from market.valuation_snapshot
-# .market_cap (build_screener_universe.py line 333), which this project's
-# own comment calls "raw AUD" and which carries EODHD's full-currency-unit
-# figure. Two constants in market_snapshot.py only make sense against a
-# MILLIONS basis:
-#     total_market_cap_bn = SUM(market_cap) / 1000.0
-#     liquid_filter       = market_cap > 20
-# On a raw-AUD basis the first yields THOUSANDS of AUD under a column named
-# _bn, and the second admits anything above twenty dollars.
-# NOT YET CONFIRMED against production. See database/stm/OPEN_FINDINGS.md.
+# .market_cap (build_screener_universe.py, the vs.market_cap entry), which
+# carries EODHD's full-currency-unit figure.
+#
+# Measured in production 9 Nov 2026: ASX200 total_market_cap_bn =
+# 3,315,282,273.66. That cannot be billions; it is THOUSANDS of AUD
+# (x 1,000 = A$3.32 trillion). Two constants assume a millions basis:
+#     total_market_cap_bn = SUM(market_cap) / 1000.0   -> stores thousands
+#     liquid_filter       = market_cap > 20            -> twenty DOLLARS
+#
+# The DISPLAYED figure is nonetheless correct: both frontend formatters
+# divide for a thousands basis and render $3.3T. Correcting the stored
+# value without changing them in the same release would make every
+# displayed total wrong by a million.
+# See database/stm/OPEN_FINDINGS.md section 4.
 
 table: market.index_snapshots
 layer: Gold
@@ -164,16 +169,18 @@ columns:
       derivation_formula: "SUM(market_cap) / 1000.0"
       transformation_rule: summed constituent market cap, divided by 1000
       business_rule: >
-        UNIT UNCONFIRMED -- see the header note and OPEN_FINDINGS.md. The
-        divisor yields billions only if screener.universe.market_cap is in
-        MILLIONS; that column is populated from
-        market.valuation_snapshot.market_cap, which carries EODHD's raw
-        full-currency figure. On a raw-AUD basis this column holds thousands
-        of AUD under a name that says billions.
+        HOLDS THOUSANDS OF AUD, NOT BILLIONS. Confirmed in production:
+        ASX200 reads 3,315,282,273.66, which is A$3.32 trillion. The source
+        column is raw AUD, so dividing by 1,000 gives thousands and the
+        _bn suffix is wrong by a factor of 1,000,000.
+
+        The displayed figure is correct anyway -- both frontend formatters
+        divide for a thousands basis. A fix must change the column and both
+        formatters together, or every total on the site moves by 1e6.
 
         SUM also ignores NULLs, so a constituent with no market cap silently
         lowers the total rather than making it NULL.
-      unit: "AUD billions (claimed; see OPEN_FINDINGS.md)"
+      unit: "AUD thousands (column name says billions - confirmed wrong)"
 
     created_at:
       source_system: internal
@@ -259,10 +266,10 @@ columns:
       derivation_formula: "SUM(market_cap) / 1000.0"
       transformation_rule: summed sector market cap, divided by 1000
       business_rule: >
-        UNIT UNCONFIRMED - identical derivation to
+        HOLDS THOUSANDS OF AUD, NOT BILLIONS - identical derivation to
         index_snapshots.total_market_cap_bn; see that column and
-        OPEN_FINDINGS.md.
-      unit: "AUD billions (claimed; see OPEN_FINDINGS.md)"
+        OPEN_FINDINGS.md section 4.
+      unit: "AUD thousands (column name says billions - confirmed wrong)"
 
     created_at:
       source_system: internal
@@ -413,9 +420,14 @@ columns:
       source_column: market_cap
       transformation_rule: direct copy
       business_rule: >
-        UNIT UNCONFIRMED - the same column the liquidity filter tests with
-        `market_cap > 20`. See OPEN_FINDINGS.md.
-      unit: "AUD (basis unconfirmed)"
+        RAW AUD (full currency units), confirmed. This is the column the
+        liquidity filter tests with `market_cap > 20` -- which on a raw-AUD
+        basis is TWENTY DOLLARS, not twenty million, so every mover panel
+        has effectively no market-cap floor and a micro-cap can occupy a
+        top-gainer slot. The one finding here with a behavioural
+        consequence rather than a labelling one.
+        See OPEN_FINDINGS.md section 4c.
+      unit: AUD (raw, full currency units)
 
     created_at:
       source_system: internal

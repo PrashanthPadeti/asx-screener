@@ -150,47 +150,76 @@ change, with the provenance of the correction recorded.
 **Tables:** `market.index_snapshots`, `market.sector_snapshots`,
 `market.mover_snapshots`
 **Writer:** `compute/engine/market_snapshot.py`
-**Status:** OPEN — unconfirmed, one query settles it
+**Status:** CONFIRMED 9 Nov 2026. Display is correct; the labels and the
+liquidity filter are not.
 
-`screener.universe.market_cap` is populated from
-`market.valuation_snapshot.market_cap` (`build_screener_universe.py`, the
-`vs.market_cap` entry in the SELECT list), which carries EODHD's
-**full-currency-unit** figure. `build_screener_universe.py` calls it "raw
-AUD" in its own comment, and the market-cap tier flags beside it test against
-`50000000000` — consistent with raw AUD.
-
-Two constants in `market_snapshot.py` only make sense against a **millions**
-basis:
+### Confirmed against production
 
 ```
-total_market_cap_bn = SUM(market_cap) / 1000.0
-liquid_filter       = market_cap > 20
+ index_code | snapshot_date | stock_count | total_market_cap_bn
+------------+---------------+-------------+---------------------
+ ASX200     | 2026-11-08    |         189 |       3315282273.66
+ ASX300     | 2026-11-08    |         277 |       3411784977.37
 ```
 
-On a raw-AUD basis the first stores **thousands of AUD** in a column named
-`_bn`, and the second admits anything above **twenty dollars** rather than
-twenty million — which would make the liquidity filter on every mover panel
-effectively inert.
+3,315,282,273.66 cannot be billions — that would be 3.3 billion billion. It
+is **thousands of AUD**: x 1,000 = A$3.32 trillion, the right order for the
+ASX200. So `screener.universe.market_cap` is raw AUD, `SUM(...)/1000.0`
+yields thousands, and the `_bn` suffix is wrong by a factor of 1,000,000.
 
-**Not confirmed.** This rests on reading the SELECT-list alignment in a long
-INSERT, which is exactly the kind of column-position reasoning that should
-not be trusted on its own.
+### What is NOT broken: the displayed figure
 
-**To settle** — one query:
+Both frontend formatters divide correctly for a thousands basis:
 
-```sql
-SELECT index_code, snapshot_date, stock_count, total_market_cap_bn
-FROM market.index_snapshots
-ORDER BY snapshot_date DESC, index_code
-LIMIT 4;
-```
+- `frontend/app/market/page.tsx` `fmtCap`: `v / 1e9` -> `$3.3T`
+- `frontend/app/indices/[code]/IndexDetailContent.tsx` `fmtIndexTotalCap`:
+  `v / 1e6` -> "billions", then `/1e3` -> `$3.32T`
 
-ASX200's total market capitalisation is on the order of A$2 trillion.
+Customers see an accurate number. **Do not "fix" the stored value without
+changing both formatters in the same release** — correcting the column
+alone would make every displayed total wrong by a million.
 
-- `total_market_cap_bn` ≈ **2000** → `market_cap` is in millions, the
-  derivation is correct, and this finding closes.
-- `total_market_cap_bn` ≈ **2,000,000,000** → it is thousands of AUD under a
-  billions label, and the liquidity filter is inert. Both are defects.
+### What IS wrong
+
+1. **The column name.** `total_market_cap_bn` holds thousands. Any new
+   consumer that reads the API field at its name is out by 1e6.
+2. **The frontend comment is also wrong, and differently.**
+   `IndexDetailContent.tsx:67` says *"stored in millions of AUD despite the
+   `_bn` suffix"*. It is thousands, not millions — and the comment is
+   inconsistent with the formula directly beneath it, since millions to
+   billions is a divide by 1,000, not 1,000,000. The arithmetic is right
+   for the wrong stated reason, which is the most fragile state to leave it
+   in: the next person to trust the comment over the code will break it.
+3. **The liquidity filter is inert.** `liquid_filter` requires
+   `market_cap > 20`. On a raw-AUD basis that is **twenty dollars**, not
+   twenty million, so every mover panel (GAINER/LOSER/ACTIVE/BUYING/
+   SELLING) has effectively no market-cap floor. This is the one finding
+   with a behavioural consequence rather than a labelling one: micro-caps
+   can occupy the top-gainer panels the filter exists to keep them out of.
+
+   **To confirm:**
+   ```sql
+   SELECT snapshot_type, count(*) AS rows,
+          min(market_cap) AS smallest, max(market_cap) AS largest
+   FROM market.mover_snapshots
+   WHERE snapshot_date = (SELECT max(snapshot_date) FROM market.mover_snapshots)
+   GROUP BY snapshot_type ORDER BY smallest;
+   ```
+   A `smallest` below 20,000,000 proves the floor is not operating as
+   twenty million.
+
+### Also visible in that output, and not yet explained
+
+`stock_count` is **189** for ASX200 and **277** for ASX300, against
+nominal 200 and 300. The filter is `<flag> = TRUE AND status = 'active'`,
+so the shortfall is either suspended/delisted constituents or stale index
+membership. `compute/engine/asx_indices.py` writes those flags and is
+listed as NOT INDEPENDENTLY OBSERVABLE in the output-freshness registry
+because it writes no timestamp — so a stale membership set would produce
+exactly this and nothing would report it.
+
+**To settle:** compare the flag counts against the published index
+constituent lists, and give `asx_indices` an observable output.
 
 ---
 
@@ -201,4 +230,7 @@ ASX200's total market capitalisation is on the order of A$2 trillion.
 | 1 | Window names, clock anchoring, unadjusted basis | `market.period_metrics` | OPEN |
 | 2 | No backend reader found | `market.short_interest` | OPEN — not confirmed unused |
 | 3 | `DO NOTHING` blocks corrections | `market.capital_raises` | OPEN |
-| 4 | `market_cap` unit in aggregates | snapshot family | OPEN — one query settles it |
+| 4a | `_bn` column holds THOUSANDS (display is correct; fix needs both ends) | snapshot family | CONFIRMED |
+| 4b | Frontend comment says "millions", also wrong, contradicts its own formula | `IndexDetailContent.tsx:67` | CONFIRMED |
+| 4c | Liquidity filter `market_cap > 20` is twenty DOLLARS — panels have no floor | `market.mover_snapshots` | CONFIRMED by reading; one query shows the effect |
+| 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |

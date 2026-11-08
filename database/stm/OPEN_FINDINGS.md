@@ -243,7 +243,7 @@ constituent lists, and give `asx_indices` an observable output.
 
 **Table:** `market.yearly_metrics` (188 columns)
 **Writer:** `compute/engine/yearly_compute.py` (the only writer)
-**Status:** OPEN — one query decides which of two findings this is
+**Status:** CONFIRMED 9 Nov 2026 — it is BOTH findings at once
 
 The INSERT statement names **124 columns**. The table has **188**. The 64
 absent ones include `peg_ratio`, `pcf_ratio`, `p_fcf_ratio`, `ev_fcf`,
@@ -288,16 +288,54 @@ SELECT count(*) AS rows,
 FROM market.yearly_metrics;
 ```
 
-- **All zero** -> the columns are reliably NULL. They are dead schema: a
-  consumer gets nothing, which is at least honest. The finding becomes
-  "remove or populate", and `beta_1y` being barren is explained.
-- **Any non-zero** -> those are FROZEN values from a retired code path,
-  still being served, sitting on rows whose `computed_at` asserts they were
-  produced by the latest run. A reader cannot tell a current value from one
-  left behind years ago. That is a correctness finding, not a tidiness one.
+### Measured
 
-**Until this is answered, no `*_7y` / `*_10y` average, no `beta_*`, no
-`price_cagr_*` and none of the other 64 should be treated as current.**
+```
+rows   33,864      max(computed_at)  2026-11-08
+peg_ratio            0     dead
+beta_1y              0     dead
+price_cagr_3y    3,405     10.1% populated
+beneish_m_score  3,772     11.1%
+croic            4,384     12.9%
+quick_ratio      6,261     18.5%
+avg_roe_7y       6,424     19.0%
+```
+
+The 64 columns are **two different defects wearing one shape**.
+
+#### 6a. Dead schema — `peg_ratio`, `beta_1y` (and others at zero)
+
+Never populated by anything. A consumer reading them gets NULL on every
+row of every year. This is at least honest, and it explains the
+long-standing observation that `beta_1y` is barren: nothing writes it.
+
+Fix: populate or drop. Low urgency, no wrong answers served.
+
+#### 6b. Frozen values under a fresh timestamp — the real defect
+
+`quick_ratio`, `croic`, `avg_roe_7y`, `beneish_m_score`, `price_cagr_3y`
+and others hold values on 10-19% of rows, written by a code path that no
+longer runs.
+
+The upsert's `DO UPDATE SET` lists only the 124 INSERT columns, so these
+survive every rewrite untouched. `max(computed_at)` is today, meaning rows
+are being restamped as freshly computed while carrying columns no current
+run produced. **A reader has no way to date those values** — the row's own
+timestamp asserts they are current.
+
+This is precisely the mechanism `yearly_compute.py` describes when it
+explains why it writes explicit NULLs for five retired return columns:
+leaving a column unwritten freezes the last value the engine produced. The
+protection was applied to five columns and not to these.
+
+Fix: write explicit NULLs for every retired column, exactly as the five
+return columns already are — not a schema drop, because dropping loses the
+record that the column was once produced and does nothing for the rows
+already served.
+
+**None of the 64 should be treated as current.** The partial population is
+the trap: a column that is NULL everywhere is obviously absent, while one
+populated on 18% of rows looks like a metric with coverage gaps.
 
 ## Tracking
 
@@ -310,4 +348,5 @@ FROM market.yearly_metrics;
 | 4b | Frontend comment says "millions", also wrong, contradicts its own formula | `IndexDetailContent.tsx:67` | CONFIRMED |
 | 4c | Liquidity filter is twenty DOLLARS — smallest panel constituent A$2.7M | `market.mover_snapshots` | **CONFIRMED by effect** |
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |
-| 6 | 64 of 188 columns absent from the only writer's INSERT | `market.yearly_metrics` | OPEN — NULL or frozen? one query decides |
+| 6a | Dead schema: `peg_ratio`, `beta_1y` never populated | `market.yearly_metrics` | CONFIRMED |
+| 6b | Frozen values on 10-19% of rows under a fresh `computed_at` | `market.yearly_metrics` | **CONFIRMED** |

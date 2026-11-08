@@ -72,6 +72,45 @@ class Anchor:
     #: positive in exchange for detecting a real stoppage the next morning
     #: instead of three days later. A single closure day does not trip it.
     max_weekdays_behind: Optional[int] = None
+    #: When set, the anchor is ALSO checked for holes BEHIND the frontier:
+    #: this many weekdays ending at the newest observed date must each carry
+    #: at least one row.
+    #:
+    #: Recency and completeness are different properties, and max() can only
+    #: ever measure the first. On 2-4 November 2026 market.daily_prices held
+    #: no rows at all for three consecutive trading days while 5 and 6
+    #: November were present; this check reported `0 weekdays behind, FRESH`
+    #: throughout, truthfully, because the newest row was current. Every
+    #: window metric for the week — returns, moving averages, the 252-row
+    #: lookbacks — was computed across that hole and published.
+    #:
+    #: The window is anchored at `latest`, not at today, so "today's rows have
+    #: not arrived yet" can never be mistaken for a gap. Recency remains
+    #: max_weekdays_behind's job; this one looks only at what is already
+    #: behind the frontier.
+    continuity_weekdays: Optional[int] = None
+    #: Weekdays inside that window permitted to be absent before it is a
+    #: fault. Carries the SAME stated limitation as max_weekdays_behind: this
+    #: is weekday arithmetic, NOT an exchange trading calendar. One public
+    #: holiday inside the window is tolerated; two consecutive closures
+    #: (Good Friday + Easter Monday, Christmas + Boxing Day) will read as a
+    #: gap, roughly twice a year.
+    #:
+    #: That false positive is accepted for the same reason it is accepted
+    #: above: an explainable alarm twice a year is a better trade than three
+    #: trading days of missing prices being served as though complete. Raising
+    #: this to 2 would silence the exact defect the check was built for — a
+    #: three-day hole minus a two-day tolerance leaves one, under the limit.
+    max_missing_weekdays: int = 1
+    #: SQL expression yielding the observation DATE for one row, when the
+    #: anchor column is not already a date. Must appear in ALLOWED_DATE_EXPRS.
+    #:
+    #: market.daily_prices stores each row at `date 16:00:00+10`, so the
+    #: staging date is recovered at a FIXED +10 offset — deliberately not
+    #: 'Australia/Sydney', which would shift rows by an hour across a DST
+    #: boundary and invent or erase a calendar day at the edges. This matches
+    #: STAGING_DATE in transform_prices.py, which is what wrote them.
+    date_expr: Optional[str] = None
     #: The file that writes this column. An anchor is a guess until it is
     #: checked against its writer: the first version of this registry anchored
     #: top5_strategy on `created_at` when the job writes `computed_at`. Stated
@@ -106,11 +145,20 @@ ANCHORS: tuple[Anchor, ...] = (
     #
     # max_age_hours is retained as the declared cadence bound and is what the
     # finding reports, but max_weekdays_behind governs the verdict.
+    # Continuity added 8 Nov 2026, after a gap this anchor was green through.
+    # The September hole it was built for was at the FRONTIER, so max() caught
+    # it once the anchor existed. The November hole was BEHIND the frontier —
+    # 2, 3 and 4 November absent while 5 and 6 were present — and max() is
+    # structurally incapable of seeing that. Ten weekdays is two trading
+    # weeks: long enough that a gap is caught well before it ages out of the
+    # window, short enough that one run's query stays trivial.
     Anchor("daily_prices", "market.daily_prices", "time", 24 * 5,
            "the newest dated row in the price table. More than one weekday "
            "behind means ingestion has stopped, which is the single most "
            "customer-visible failure this product has",
            cadence_hours=24, max_weekdays_behind=1,
+           continuity_weekdays=10, max_missing_weekdays=1,
+           date_expr="(time AT TIME ZONE INTERVAL '+10:00')::date",
            writer="scripts/eodhd/v2/transforms/transform_prices.py"),
     Anchor("screener_universe", "screener.universe", "universe_built_at", 24 * 5,
            "the canonical daily run rebuilds the served universe; if its "
@@ -146,6 +194,36 @@ UNOBSERVABLE: dict[str, str] = {
 }
 
 
+#: Every date expression any anchor is permitted to use, enumerated.
+#:
+#: existence_sql and latest_sql can be made safe by character inspection
+#: because an identifier is alphanumeric; a date expression is not, so it gets
+#: an allowlist instead of a looser rule. Nothing here is ever built from a
+#: caller, a request or an environment variable, and an anchor naming an
+#: expression that is not in this set raises rather than interpolating it.
+ALLOWED_DATE_EXPRS: frozenset[str] = frozenset({
+    "(time AT TIME ZONE INTERVAL '+10:00')::date",
+})
+
+
+class _DaysUnavailable:
+    """Sentinel: the continuity query could not be executed."""
+
+    def __repr__(self) -> str:                                   # pragma: no cover
+        return "DAYS_UNAVAILABLE"
+
+
+#: Passed by a consumer whose continuity query FAILED, as distinct from one
+#: that ran and found nothing.
+#:
+#: The distinction is the whole point. An empty set means "no rows in the
+#: window", which is a real and alarming answer; a failure to obtain is not an
+#: answer at all, and rendering it as one would either invent a gap that does
+#: not exist or hide one that does. Cannot-exist and failed-to-obtain are
+#: different facts, and only the second is an instrument defect.
+DAYS_UNAVAILABLE = _DaysUnavailable()
+
+
 @dataclass(frozen=True)
 class Finding:
     """What is known about one job, in a shape both consumers can render."""
@@ -164,6 +242,11 @@ class Finding:
     #: lead an operator to believe 120h was still the threshold.
     weekdays_behind: Optional[int] = None
     limit_weekdays: Optional[int] = None
+    #: Weekdays inside the continuity window that carried no row, as ISO
+    #: strings. Empty list = the window was checked and was whole; None = the
+    #: anchor declares no continuity check. The two are NOT the same and are
+    #: deliberately distinguishable by any consumer reading as_dict().
+    missing_days: Optional[list] = None
     reason: str = ""
 
     @property
@@ -193,6 +276,7 @@ class Finding:
             "limit_hours": self.limit_hours,
             "weekdays_behind": self.weekdays_behind,
             "limit_weekdays": self.limit_weekdays,
+            "missing_days": self.missing_days,
             "reason": self.reason,
         }
 
@@ -213,6 +297,78 @@ def weekdays_behind(latest: date, now: date) -> int:
             n += 1
         d += timedelta(days=1)
     return n
+
+
+def expected_weekdays(latest: date, span: int) -> list[date]:
+    """The `span` most recent weekdays ending at `latest` inclusive.
+
+    Anchored at `latest` rather than at today on purpose. A window ending
+    today would report every morning before ingestion as a one-day gap, and
+    an instrument that cries wolf daily is one an operator learns to ignore —
+    which is how the September hole survived four days. Recency is
+    max_weekdays_behind's job; this window only ever looks backwards from a
+    date that is, by construction, present.
+
+    If `latest` itself falls on a weekend the walk simply skips it: the
+    window is made of weekdays, wherever the frontier happens to sit.
+    """
+    if span <= 0:
+        return []
+    out: list[date] = []
+    d = latest
+    while len(out) < span:
+        if d.weekday() < 5:
+            out.append(d)
+        d -= timedelta(days=1)
+    return sorted(out)
+
+
+def missing_weekdays(present: set, latest: date, span: int) -> list[date]:
+    """Weekdays in the window that carried no row at all.
+
+    `present` is the set of dates actually observed. Membership, not counts:
+    a day with one row is present, and a day with two thousand rows is no
+    more present than that. Row-count thresholds belong to a different check
+    and would make this one argue about partial days.
+    """
+    return [d for d in expected_weekdays(latest, span) if d not in present]
+
+
+def observed_days_sql(anchor: Anchor) -> str:
+    """Distinct observation dates recent enough to cover the window.
+
+    Over-fetches deliberately: the SQL takes a generous calendar lookback and
+    the window itself is computed in Python by expected_weekdays. Pushing the
+    weekday arithmetic into SQL would put the decision in two places, and the
+    whole point of this module is that the decision lives in exactly one.
+
+    Parameterless, like its neighbours, and for the same reason: the two
+    consumers use different drivers with different paramstyles. Every value
+    embedded here comes from ANCHORS and ALLOWED_DATE_EXPRS, both frozen in
+    this file.
+    """
+    if anchor.continuity_weekdays is None:
+        raise ValueError(
+            f"{anchor.job} declares no continuity window; asking for its "
+            f"observed days is a caller defect, not a missing feature")
+
+    schema, name = anchor.table.split(".", 1)
+    for part in (schema, name, anchor.column):
+        if not part.replace("_", "").isalnum():
+            raise ValueError(f"refusing to build SQL from {part!r}")
+
+    expr = anchor.date_expr or anchor.column
+    if anchor.date_expr is not None and expr not in ALLOWED_DATE_EXPRS:
+        raise ValueError(
+            f"{anchor.job} names date_expr {expr!r}, which is not in "
+            f"ALLOWED_DATE_EXPRS. Add it there deliberately rather than "
+            f"letting an anchor introduce arbitrary SQL.")
+
+    # Calendar days needed to contain N weekdays is N*7/5, plus slack for a
+    # weekend at either end. Doubling is cheap and cannot under-cover.
+    lookback = anchor.continuity_weekdays * 2 + 7
+    return (f"SELECT DISTINCT {expr} AS d FROM {anchor.table} "
+            f"WHERE {anchor.column} >= now() - interval '{lookback} days'")
 
 
 def existence_sql(anchor: Anchor) -> str:
@@ -249,8 +405,17 @@ def latest_sql(anchor: Anchor) -> str:
 
 def classify(anchor: Anchor, column_exists: bool,
              latest: Optional[datetime],
-             now: Optional[datetime] = None) -> Finding:
-    """The decision, pure. Both consumers call exactly this."""
+             now: Optional[datetime] = None,
+             observed_days: Optional[set] = None) -> Finding:
+    """The decision, pure. Both consumers call exactly this.
+
+    `observed_days` is REQUIRED when the anchor declares a continuity window,
+    and omitting it raises. It is not defaulted to "skip the check" on
+    purpose: a consumer that forgets would otherwise keep printing a green
+    verdict for a property it never evaluated, which is the precise shape of
+    the defect this parameter was added to close. An entitlement is true only
+    where the path enforces it; so is a freshness check.
+    """
     if not column_exists:
         return Finding(anchor.job, "broken", anchor.table, anchor.column,
                        limit_hours=anchor.max_age_hours,
@@ -272,25 +437,78 @@ def classify(anchor: Anchor, column_exists: bool,
         latest = latest.replace(tzinfo=timezone.utc)
     age = (now - latest).total_seconds() / 3600.0
 
+    # Completeness is evaluated independently of recency, and BEFORE the lag
+    # verdict is allowed to stand. A frontier inside its limit says nothing
+    # about the days behind it: on 6 November 2026 the lag check was
+    # correctly green while three trading days were missing.
+    #
+    # Reached only once the column exists and the table has rows: the two
+    # early returns above are instrument defects, and a consumer cannot be
+    # expected to have queried days from a column that is not there.
+    gap: Optional[list] = None
+    if anchor.continuity_weekdays is not None:
+        if observed_days is DAYS_UNAVAILABLE:
+            return Finding(
+                anchor.job, "broken", anchor.table, anchor.column,
+                observed_at=latest.isoformat(), age_hours=age,
+                limit_hours=anchor.max_age_hours,
+                reason=(f"the continuity window could not be read, so "
+                        f"completeness is unknown. The newest row is "
+                        f"{latest.date().isoformat()}; whether the "
+                        f"{anchor.continuity_weekdays} weekdays behind it "
+                        f"are whole was not established. Reported as an "
+                        f"instrument defect rather than as a verdict."))
+        if observed_days is None:
+            raise ValueError(
+                f"{anchor.job} declares a {anchor.continuity_weekdays}-"
+                f"weekday continuity window but the caller supplied no "
+                f"observed_days. Run observed_days_sql(anchor) and pass the "
+                f"result; this raises rather than reporting an anchor as "
+                f"current on a property nobody evaluated.")
+        gap = missing_weekdays(set(observed_days), latest.date(),
+                               anchor.continuity_weekdays)
+
+    def _gap_reason() -> str:
+        shown = ", ".join(d.isoformat() for d in gap[:6])
+        more = f" (+{len(gap) - 6} more)" if len(gap) > 6 else ""
+        return (f"{len(gap)} weekday(s) in the last "
+                f"{anchor.continuity_weekdays} carry no row at all: "
+                f"{shown}{more}. The newest row is current, so lag alone "
+                f"reads healthy; the series is not. Limit is "
+                f"{anchor.max_missing_weekdays} (weekday arithmetic, not an "
+                f"exchange calendar — one public holiday is tolerated).")
+
+    gapped = gap is not None and len(gap) > anchor.max_missing_weekdays
+    missing_iso = ([d.isoformat() for d in gap] if gap is not None else None)
+
     if anchor.max_weekdays_behind is not None:
         behind = weekdays_behind(latest.date(), now.date())
-        state = "current" if behind <= anchor.max_weekdays_behind else "stale"
+        lagging = behind > anchor.max_weekdays_behind
+        state = "stale" if (lagging or gapped) else "current"
+        if lagging:
+            reason = (f"{behind} weekdays behind, limit "
+                      f"{anchor.max_weekdays_behind} — {anchor.why}")
+        elif gapped:
+            reason = _gap_reason()
+        else:
+            reason = ""
         return Finding(
             anchor.job, state, anchor.table, anchor.column,
             observed_at=latest.isoformat(), age_hours=age,
             limit_hours=anchor.max_age_hours,
             weekdays_behind=behind,
             limit_weekdays=anchor.max_weekdays_behind,
-            reason="" if state == "current" else
-            (f"{behind} weekdays behind, limit "
-             f"{anchor.max_weekdays_behind} — {anchor.why}"))
+            missing_days=missing_iso,
+            reason=reason)
 
-    state = "current" if age <= anchor.max_age_hours else "stale"
+    aged = age > anchor.max_age_hours
+    state = "stale" if (aged or gapped) else "current"
     return Finding(
         anchor.job, state, anchor.table, anchor.column,
         observed_at=latest.isoformat(), age_hours=age,
         limit_hours=anchor.max_age_hours,
-        reason="" if state == "current" else anchor.why)
+        missing_days=missing_iso,
+        reason=(anchor.why if aged else _gap_reason() if gapped else ""))
 
 
 def unobservable_findings() -> list[Finding]:

@@ -38,8 +38,8 @@ from compute.engine.canonical_boundary import (                   # noqa: E402
     freshness_relevant_tables,
 )
 from compute.engine.output_freshness import (                      # noqa: E402
-    ANCHORS, classify, coverage, existence_sql, latest_sql, summarise,
-    unobservable_findings,
+    ANCHORS, classify, coverage, existence_sql, latest_sql,
+    observed_days_sql, summarise, unobservable_findings,
 )
 
 
@@ -56,7 +56,17 @@ def evaluate(conn) -> list:
                 cur.execute(latest_sql(anchor))
                 latest = cur.fetchone()[0]
 
-            findings.append(classify(anchor, exists, latest))
+            # Fetched only for anchors that declare a continuity window, and
+            # only when the column exists — a missing column is an instrument
+            # defect that classify() reports as `broken`, and querying it
+            # would raise before the finding could say so.
+            observed = None
+            if exists and anchor.continuity_weekdays is not None:
+                cur.execute(observed_days_sql(anchor))
+                observed = {row[0] for row in cur.fetchall()}
+
+            findings.append(classify(anchor, exists, latest,
+                                     observed_days=observed))
     return findings + unobservable_findings()
 
 
@@ -101,6 +111,15 @@ def main() -> int:
         else:
             detail = f.reason
         print(f"  {label}   {f.job:18s} {detail}")
+        # Printed on every run that checked continuity, including clean ones.
+        # "no gaps" and "nobody looked" must not render identically — that
+        # equivalence is what let a three-day hole read as FRESH.
+        if f.missing_days is not None:
+            if f.missing_days:
+                print(f"           {'':18s} GAP: no rows on "
+                      f"{', '.join(f.missing_days)}")
+            else:
+                print(f"           {'':18s} continuity: window whole")
 
     # How much of the relevant surface is watched at all. Printed every run so
     # that "two anchors are green" can never again be mistaken for "the data is

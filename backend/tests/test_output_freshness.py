@@ -313,13 +313,28 @@ def test_prices_are_anchored_at_all():
         "the served universe is unwatched; every metric could be stale")
 
 
+def _whole_window(anchor, latest):
+    """A continuity window with no holes.
+
+    Supplied by the LAG tests below so each one isolates the verdict it is
+    about. Without it they would be asserting two properties at once, and a
+    continuity regression would surface as a confusing failure in a test
+    whose name promises something else. The gap behaviour has its own file,
+    tests/test_freshness_continuity.py.
+    """
+    from compute.engine.output_freshness import expected_weekdays
+    return set(expected_weekdays(latest, anchor.continuity_weekdays or 0))
+
+
 def test_the_anchor_would_have_caught_the_real_gap():
     """Not a hypothetical. The newest trading day was 23 Sep; the check runs
     at 10:00 UTC daily. By Monday the 28th it must read stale."""
     from datetime import date
     prices = next(a for a in ANCHORS if a.job == "daily_prices")
     monday = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
-    assert classify(prices, True, date(2026, 9, 23), monday).state == "stale"
+    assert classify(prices, True, date(2026, 9, 23), monday,
+                    observed_days=_whole_window(prices, date(2026, 9, 23))
+                    ).state == "stale"
 
 
 def test_a_normal_weekend_does_not_fire():
@@ -328,11 +343,15 @@ def test_a_normal_weekend_does_not_fire():
     from datetime import date
     prices = next(a for a in ANCHORS if a.job == "daily_prices")
     sunday = datetime(2026, 9, 27, 10, 0, tzinfo=timezone.utc)
-    assert classify(prices, True, date(2026, 9, 25), sunday).state == "current"
+    assert classify(prices, True, date(2026, 9, 25), sunday,
+                    observed_days=_whole_window(prices, date(2026, 9, 25))
+                    ).state == "current"
     # A single public holiday on the Monday: checked that Monday, Friday's
     # close is one weekday behind and legitimate.
     monday = datetime(2026, 9, 28, 10, 0, tzinfo=timezone.utc)
-    assert classify(prices, True, date(2026, 9, 25), monday).state == "current"
+    assert classify(prices, True, date(2026, 9, 25), monday,
+                    observed_days=_whole_window(prices, date(2026, 9, 25))
+                    ).state == "current"
 
 
 def test_two_weekdays_behind_is_a_fault_even_after_a_holiday():
@@ -342,7 +361,9 @@ def test_two_weekdays_behind_is_a_fault_even_after_a_holiday():
     from datetime import date
     prices = next(a for a in ANCHORS if a.job == "daily_prices")
     tuesday = datetime(2026, 9, 29, 10, 0, tzinfo=timezone.utc)
-    assert classify(prices, True, date(2026, 9, 25), tuesday).state == "stale"
+    assert classify(prices, True, date(2026, 9, 25), tuesday,
+                    observed_days=_whole_window(prices, date(2026, 9, 25))
+                    ).state == "stale"
 
 
 def test_a_date_column_is_handled_as_midnight_utc():
@@ -351,7 +372,8 @@ def test_a_date_column_is_handled_as_midnight_utc():
     from datetime import date
     prices = next(a for a in ANCHORS if a.job == "daily_prices")
     f = classify(prices, True, date(2026, 10, 2),
-                 datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc))
+                 datetime(2026, 10, 2, 12, 0, tzinfo=timezone.utc),
+                 observed_days=_whole_window(prices, date(2026, 10, 2)))
     assert f.state == "current" and f.age_hours == 12.0
 
 
@@ -492,7 +514,8 @@ def test_the_report_shows_the_rule_that_decided():
     from datetime import date
     prices = next(a for a in ANCHORS if a.job == "daily_prices")
     f = classify(prices, True, date(2026, 10, 2),
-                 datetime(2026, 10, 3, 10, 0, tzinfo=timezone.utc))
+                 datetime(2026, 10, 3, 10, 0, tzinfo=timezone.utc),
+                 observed_days=_whole_window(prices, date(2026, 10, 2)))
     assert f.weekdays_behind == 0 and f.limit_weekdays == 1
     assert f.as_dict()["limit_weekdays"] == 1, (
         "the machine-readable surface omits the governing rule")

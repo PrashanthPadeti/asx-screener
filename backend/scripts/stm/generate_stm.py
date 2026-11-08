@@ -329,13 +329,26 @@ def load_strategy_of(lineage: dict, table: str) -> str:
     # the strategy any single run uses. financials.annual_pnl upserts on the
     # daily path and TRUNCATEs only under --full; reporting just "full reload"
     # would describe a mode that runs rarely as though it were the normal one.
-    if "truncate" in ops and ("update" in ops or "insert" in ops):
-        both = "upsert" if "update" in ops else "insert"
+    # `upsert` and `insert-or-ignore` come from INSERT ... ON CONFLICT, which
+    # matches no UPDATE pattern because there is no UPDATE statement in it.
+    # Checked BEFORE the plain-insert branches, or an upsert reads as append.
+    upserts = "upsert" in ops or "update" in ops
+
+    if "truncate" in ops and (upserts or "insert" in ops):
+        both = "upsert" if upserts else "insert"
         return f"{both} on the incremental path; TRUNCATE + INSERT on a full run"
     if "truncate" in ops and "insert" in ops:
         return "full reload (TRUNCATE + INSERT)"
     if "delete" in ops and "insert" in ops:
         return "delete-and-insert (windowed replace)"
+    if "upsert" in ops and "update" in ops:
+        return ("upsert (INSERT ... ON CONFLICT DO UPDATE), plus a separate "
+                "UPDATE statement")
+    if "upsert" in ops:
+        return "upsert (INSERT ... ON CONFLICT DO UPDATE)"
+    if "insert-or-ignore" in ops:
+        return ("insert-or-ignore (INSERT ... ON CONFLICT DO NOTHING) -- an "
+                "existing row is NOT corrected")
     if "insert" in ops and "update" in ops:
         return "upsert (INSERT + UPDATE)"
     if ops == {"update"}:

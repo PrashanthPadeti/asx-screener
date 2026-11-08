@@ -1,6 +1,6 @@
 {
   "modules_scanned": 157,
-  "modules_touching_tables": 101,
+  "modules_touching_tables": 104,
   "tables_written": 66,
   "layer_conflicts": {},
   "by_table": {
@@ -9,26 +9,30 @@
         {
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_financials.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_eodhd_financials.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_fmp_financials.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -40,26 +44,30 @@
         {
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_financials.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_eodhd_financials.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_fmp_financials.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -78,27 +86,31 @@
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
             "insert",
-            "update"
+            "update",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_financials.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_eodhd_financials.py",
           "operations": [
             "insert",
-            "update"
+            "update",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_fmp_financials.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -111,7 +123,8 @@
           "module": "scripts/eodhd/v2/transforms/transform_earnings.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -123,14 +136,16 @@
         {
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_analyst_ratings.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -143,7 +158,8 @@
           "module": "compute/engine/anomaly_detect.py",
           "operations": [
             "insert",
-            "update"
+            "update",
+            "upsert"
           ]
         }
       ],
@@ -155,13 +171,15 @@
         {
           "module": "scripts/asx/download_announcements.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/seed_announcements.py",
           "operations": [
-            "insert"
+            "insert",
+            "insert-or-ignore"
           ]
         }
       ],
@@ -173,7 +191,8 @@
         {
           "module": "compute/engine/capital_raise_tracker.py",
           "operations": [
-            "insert"
+            "insert",
+            "insert-or-ignore"
           ]
         }
       ],
@@ -185,7 +204,8 @@
         {
           "module": "compute/engine/commodities.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -216,7 +236,8 @@
         {
           "module": "scripts/eodhd/v2/sync_companies_from_exchange.py",
           "operations": [
-            "insert"
+            "insert",
+            "insert-or-ignore"
           ]
         },
         {
@@ -229,7 +250,8 @@
         {
           "module": "scripts/load_asx_companies.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
@@ -247,7 +269,8 @@
         {
           "module": "compute/engine/daily_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -259,7 +282,8 @@
         {
           "module": "compute/engine/technical_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -271,50 +295,58 @@
         {
           "module": "scripts/eodhd/load_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_prices.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_eodhd_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_fmp_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/load_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/update_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/update_prices_eodhd.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/update_prices_fmp.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -326,20 +358,23 @@
         {
           "module": "scripts/eodhd/load_dividends.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_dividends.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -352,7 +387,8 @@
           "module": "scripts/eodhd/v2/transforms/transform_exchange.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -365,7 +401,8 @@
           "module": "compute/engine/market_snapshot.py",
           "operations": [
             "delete",
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -377,7 +414,8 @@
         {
           "module": "compute/engine/fund_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -389,7 +427,8 @@
         {
           "module": "compute/engine/fund_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -401,7 +440,8 @@
         {
           "module": "compute/engine/global_markets.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -413,7 +453,8 @@
         {
           "module": "compute/engine/global_markets.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -425,7 +466,8 @@
         {
           "module": "compute/engine/global_markets.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -437,7 +479,8 @@
         {
           "module": "compute/engine/halfyearly_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -462,7 +505,8 @@
         {
           "module": "compute/engine/heatmap_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -474,7 +518,8 @@
         {
           "module": "compute/engine/index_prices.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
@@ -492,7 +537,8 @@
         {
           "module": "compute/engine/market_snapshot.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -504,7 +550,8 @@
         {
           "module": "compute/engine/mining_metrics.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -516,7 +563,8 @@
         {
           "module": "compute/engine/monthly_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -528,7 +576,8 @@
         {
           "module": "compute/engine/market_snapshot.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -540,7 +589,8 @@
         {
           "module": "compute/engine/period_metrics_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -553,7 +603,8 @@
           "module": "scripts/eodhd/v2/jobs/daily_pipeline.py",
           "operations": [
             "insert",
-            "update"
+            "update",
+            "upsert"
           ]
         }
       ],
@@ -567,7 +618,9 @@
           "module": "scripts/eodhd/v2/jobs/daily_pipeline.py",
           "operations": [
             "insert",
-            "update"
+            "insert-or-ignore",
+            "update",
+            "upsert"
           ]
         }
       ],
@@ -580,7 +633,8 @@
         {
           "module": "compute/engine/price_predictions.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -598,7 +652,8 @@
         {
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -610,7 +665,8 @@
         {
           "module": "compute/engine/reit_metrics.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -622,7 +678,8 @@
         {
           "module": "compute/engine/sector_benchmarks.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -634,7 +691,8 @@
         {
           "module": "compute/engine/market_snapshot.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -646,7 +704,8 @@
         {
           "module": "scripts/eodhd/v2/load_shares_history.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -658,13 +717,15 @@
         {
           "module": "scripts/asic/load_short_positions.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/asic/transforms/transform_short.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -676,13 +737,15 @@
         {
           "module": "compute/engine/short_positions.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/asic/transforms/transform_short.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -694,14 +757,16 @@
         {
           "module": "scripts/eodhd/load_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/eodhd/v2/transforms/transform_splits.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -714,7 +779,8 @@
           "module": "scripts/eodhd/v2/transforms/transform_valuation.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -726,7 +792,8 @@
         {
           "module": "compute/engine/weekly_compute.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -739,7 +806,8 @@
           "module": "compute/engine/yearly_compute.py",
           "operations": [
             "delete",
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -856,7 +924,8 @@
           "operations": [
             "delete",
             "insert",
-            "update"
+            "update",
+            "upsert"
           ]
         },
         {
@@ -874,7 +943,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -886,7 +956,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -898,7 +969,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -910,7 +982,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -923,7 +996,8 @@
           "module": "scripts/eodhd/v2/load_to_staging_dividends.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -935,7 +1009,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -949,7 +1024,8 @@
           "operations": [
             "delete",
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -962,7 +1038,8 @@
           "module": "scripts/eodhd/v2/load_to_staging_exchange_symbols.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -974,7 +1051,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -986,7 +1064,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -999,7 +1078,8 @@
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -1011,7 +1091,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -1023,13 +1104,15 @@
         {
           "module": "compute/engine/short_positions.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         },
         {
           "module": "scripts/asic/load_to_staging_short.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -1042,7 +1125,8 @@
           "module": "scripts/eodhd/v2/load_to_staging_splits.py",
           "operations": [
             "insert",
-            "truncate"
+            "truncate",
+            "upsert"
           ]
         }
       ],
@@ -1054,7 +1138,8 @@
         {
           "module": "scripts/eodhd/v2/load_to_staging_fundamentals.py",
           "operations": [
-            "insert"
+            "insert",
+            "upsert"
           ]
         }
       ],
@@ -1105,7 +1190,8 @@
       "writes": {
         "market.anomalies": [
           "insert",
-          "update"
+          "update",
+          "upsert"
         ]
       },
       "reads": [
@@ -1141,7 +1227,8 @@
     "compute/engine/canonical_readback.py": {
       "writes": {},
       "reads": [
-        "information_schema.columns"
+        "information_schema.columns",
+        "screener.universe"
       ],
       "joins": [],
       "dynamic": []
@@ -1149,7 +1236,8 @@
     "compute/engine/capital_raise_tracker.py": {
       "writes": {
         "market.capital_raises": [
-          "insert"
+          "insert",
+          "insert-or-ignore"
         ]
       },
       "reads": [
@@ -1161,7 +1249,8 @@
     "compute/engine/commodities.py": {
       "writes": {
         "market.commodity_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1183,7 +1272,8 @@
     "compute/engine/daily_compute.py": {
       "writes": {
         "market.computed_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1244,10 +1334,12 @@
     "compute/engine/fund_prices.py": {
       "writes": {
         "market.fund_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.funds": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1257,13 +1349,16 @@
     "compute/engine/global_markets.py": {
       "writes": {
         "market.fx_rates": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.global_index_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.global_indices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1273,7 +1368,8 @@
     "compute/engine/halfyearly_compute.py": {
       "writes": {
         "market.halfyearly_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1289,7 +1385,8 @@
           "insert"
         ],
         "market.heatmap_labels": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1302,7 +1399,8 @@
     "compute/engine/index_prices.py": {
       "writes": {
         "market.index_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1313,16 +1411,20 @@
       "writes": {
         "market.exdiv_snapshots": [
           "delete",
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.index_snapshots": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.mover_snapshots": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.sector_snapshots": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1330,7 +1432,14 @@
         "market.period_metrics",
         "screener.universe"
       ],
-      "joins": [],
+      "joins": [
+        {
+          "table": "market.period_metrics",
+          "alias": "pm",
+          "on": "pm.asx_code = u.asx_code AND pm.computed_date = {...}",
+          "line": 288
+        }
+      ],
       "dynamic": []
     },
     "compute/engine/metric_states.py": {
@@ -1346,7 +1455,8 @@
     "compute/engine/mining_metrics.py": {
       "writes": {
         "market.mining_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1358,7 +1468,8 @@
     "compute/engine/monthly_compute.py": {
       "writes": {
         "market.monthly_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1386,7 +1497,8 @@
     "compute/engine/period_metrics_compute.py": {
       "writes": {
         "market.period_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1398,7 +1510,8 @@
     "compute/engine/price_predictions.py": {
       "writes": {
         "market.price_predictions": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1431,7 +1544,8 @@
     "compute/engine/reit_metrics.py": {
       "writes": {
         "market.reit_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1481,23 +1595,28 @@
     "compute/engine/sector_benchmarks.py": {
       "writes": {
         "market.sector_benchmarks": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
-      "reads": [],
+      "reads": [
+        "screener.universe"
+      ],
       "joins": [],
       "dynamic": []
     },
     "compute/engine/short_positions.py": {
       "writes": {
         "market.short_positions": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "screener.universe": [
           "update"
         ],
         "staging_au.short_positions": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1508,7 +1627,8 @@
       "writes": {},
       "reads": [
         "financials.annual_pnl",
-        "information_schema.columns"
+        "information_schema.columns",
+        "screener.compute_run_stages"
       ],
       "joins": [],
       "dynamic": []
@@ -1516,16 +1636,25 @@
     "compute/engine/technical_compute.py": {
       "writes": {
         "market.daily_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
         "information_schema.columns",
+        "market.companies_current",
         "market.daily_prices",
         "market.splits",
         "staging_au.shares_stats"
       ],
-      "joins": [],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code",
+          "line": 119
+        }
+      ],
       "dynamic": []
     },
     "compute/engine/top5_strategy.py": {
@@ -1569,7 +1698,8 @@
     "compute/engine/weekly_compute.py": {
       "writes": {
         "market.weekly_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1590,7 +1720,8 @@
       "writes": {
         "market.yearly_metrics": [
           "delete",
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1621,7 +1752,8 @@
     "scripts/asic/load_short_positions.py": {
       "writes": {
         "market.short_interest": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1631,7 +1763,8 @@
     "scripts/asic/load_to_staging_short.py": {
       "writes": {
         "staging_au.short_positions": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1641,10 +1774,12 @@
     "scripts/asic/transforms/transform_short.py": {
       "writes": {
         "market.short_interest": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.short_positions": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1672,7 +1807,8 @@
     "scripts/asx/download_announcements.py": {
       "writes": {
         "market.asx_announcements": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -1709,7 +1845,8 @@
       "writes": {},
       "reads": [
         "market.daily_metrics",
-        "market.daily_prices"
+        "market.daily_prices",
+        "screener.universe"
       ],
       "joins": [],
       "dynamic": []
@@ -1770,7 +1907,8 @@
           "update"
         ],
         "market.dividends": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1780,29 +1918,36 @@
     "scripts/eodhd/load_fundamentals.py": {
       "writes": {
         "financials.annual_balance_sheet": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "financials.annual_cashflow": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "financials.annual_pnl": [
           "insert",
-          "update"
+          "update",
+          "upsert"
         ],
         "market.analyst_ratings": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.companies": [
           "update"
         ],
         "market.dividends": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.quarterly_metrics": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "market.splits": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1812,7 +1957,8 @@
     "scripts/eodhd/load_prices.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1824,7 +1970,8 @@
         "screener.universe": [
           "delete",
           "insert",
-          "update"
+          "update",
+          "upsert"
         ]
       },
       "reads": [
@@ -1911,11 +2058,14 @@
       "writes": {
         "market.pipeline_runs": [
           "insert",
-          "update"
+          "update",
+          "upsert"
         ],
         "market.pipeline_step_runs": [
           "insert",
-          "update"
+          "insert-or-ignore",
+          "update",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1935,7 +2085,8 @@
     "scripts/eodhd/v2/load_shares_history.py": {
       "writes": {
         "market.shares_history": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1946,7 +2097,8 @@
       "writes": {
         "staging_au.dividends": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1957,7 +2109,8 @@
       "writes": {
         "staging_au.exchange_symbols": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [],
@@ -1967,35 +2120,45 @@
     "scripts/eodhd/v2/load_to_staging_fundamentals.py": {
       "writes": {
         "staging_au.analyst_ratings": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.balance_sheet": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.cash_flow": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.company_profile": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.earnings": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.fundamentals": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.highlights": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.income_statement": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ],
         "staging_au.shares_stats": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "staging_au.valuation": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -2007,7 +2170,8 @@
         "staging_au.eod_prices": [
           "delete",
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [],
@@ -2018,7 +2182,8 @@
       "writes": {
         "staging_au.splits": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [],
@@ -2028,7 +2193,8 @@
     "scripts/eodhd/v2/sync_companies_from_exchange.py": {
       "writes": {
         "market.companies": [
-          "insert"
+          "insert",
+          "insert-or-ignore"
         ]
       },
       "reads": [
@@ -2041,7 +2207,8 @@
       "writes": {
         "market.analyst_ratings": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2067,7 +2234,8 @@
       "writes": {
         "market.dividends": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2080,7 +2248,8 @@
       "writes": {
         "financials.earnings_quarterly": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2093,7 +2262,8 @@
       "writes": {
         "market.exchange_list": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2106,15 +2276,18 @@
       "writes": {
         "financials.annual_balance_sheet": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ],
         "financials.annual_cashflow": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ],
         "financials.annual_pnl": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2129,7 +2302,8 @@
       "writes": {
         "market.daily_prices": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2142,7 +2316,8 @@
       "writes": {
         "market.splits": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2155,7 +2330,8 @@
       "writes": {
         "market.valuation_snapshot": [
           "insert",
-          "truncate"
+          "truncate",
+          "upsert"
         ]
       },
       "reads": [
@@ -2166,7 +2342,7 @@
         {
           "table": "staging_au.valuation",
           "alias": "v",
-          "on": "v.asx_code = h.asx_code",
+          "on": "v.asx_code = h.asx_code {...}",
           "line": 65
         }
       ],
@@ -2176,6 +2352,22 @@
       "writes": {},
       "reads": [
         "market.index_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/factor_assessment_sizing.py": {
+      "writes": {},
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "scripts/factor_reweight_combinations.py": {
+      "writes": {},
+      "reads": [
+        "screener.universe"
       ],
       "joins": [],
       "dynamic": []
@@ -2240,7 +2432,8 @@
     "scripts/load_asx_companies.py": {
       "writes": {
         "market.companies": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [],
@@ -2250,14 +2443,17 @@
     "scripts/load_eodhd_financials.py": {
       "writes": {
         "financials.annual_balance_sheet": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "financials.annual_cashflow": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "financials.annual_pnl": [
           "insert",
-          "update"
+          "update",
+          "upsert"
         ]
       },
       "reads": [
@@ -2269,7 +2465,8 @@
     "scripts/load_eodhd_prices.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -2281,13 +2478,16 @@
     "scripts/load_fmp_financials.py": {
       "writes": {
         "financials.annual_balance_sheet": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "financials.annual_cashflow": [
-          "insert"
+          "insert",
+          "upsert"
         ],
         "financials.annual_pnl": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -2299,7 +2499,8 @@
     "scripts/load_fmp_prices.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -2311,7 +2512,8 @@
     "scripts/load_prices.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -2395,6 +2597,14 @@
       "joins": [],
       "dynamic": []
     },
+    "scripts/reconcile_contaminated_indices.py": {
+      "writes": {},
+      "reads": [
+        "market.index_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
     "scripts/repair/backfill_structural_flags.py": {
       "writes": {
         "market.companies": [
@@ -2446,7 +2656,8 @@
     "scripts/seed_announcements.py": {
       "writes": {
         "market.asx_announcements": [
-          "insert"
+          "insert",
+          "insert-or-ignore"
         ]
       },
       "reads": [
@@ -2458,7 +2669,8 @@
     "scripts/update_prices.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -2470,7 +2682,8 @@
     "scripts/update_prices_eodhd.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [
@@ -2482,7 +2695,8 @@
     "scripts/update_prices_fmp.py": {
       "writes": {
         "market.daily_prices": [
-          "insert"
+          "insert",
+          "upsert"
         ]
       },
       "reads": [

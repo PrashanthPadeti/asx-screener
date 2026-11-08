@@ -1,0 +1,246 @@
+# market.period_metrics  (Gold)
+#
+# Period high / low / average volume per instrument, in seven windows.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/period_metrics_compute.py
+#
+# Source: market.daily_prices (Silver). One table, no joins. Every column
+# below is a FILTERed aggregate over the same scan:
+#
+#   MAX(high)  FILTER (WHERE time >= CURRENT_DATE - <window>)
+#   MIN(low)   FILTER (WHERE time >= CURRENT_DATE - <window>)
+#   ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - <window>))::BIGINT
+#
+# Grain: one row per (asx_code, computed_date).
+# Population: SELECT DISTINCT asx_code FROM market.daily_prices.
+# Load strategy: upsert on (asx_code, computed_date).
+#
+# ── Two properties that apply to EVERY column in this table ────────────────
+#
+# 1. THE WINDOW NAMES ARE NOT THE WINDOWS. Every window is a count of
+#    CALENDAR days, declared in WINDOWS at the top of the module:
+#
+#        1d  ->   3 calendar days      1w  ->   7
+#        1m  ->  35                    3m  -> 100
+#        6m  -> 185                    1y  -> 365
+#        52w -> 364
+#
+#    So "high_1d" is the highest high over roughly three calendar days, not
+#    today's high, and on a Tuesday it can still include Friday. The 3-day
+#    choice is deliberate and commented ("catches Mon after a weekend"); the
+#    COLUMN NAME is what misleads, not the code.
+#
+#    1y and 52w differ by one single day (365 vs 364). They are two columns
+#    that will almost always carry the same number and will differ
+#    unpredictably when one extra calendar day happens to hold the extremum.
+#
+# 2. THE WINDOWS ARE ANCHORED ON CURRENT_DATE, NOT ON THE DATA. Each filter
+#    is `time >= CURRENT_DATE - interval`, so the window is measured from the
+#    day the job runs rather than from the newest price available.
+#
+#    When price ingestion is behind, the short windows quietly empty: with
+#    prices four days stale, `CURRENT_DATE - 3 days` selects no rows at all
+#    and high_1d / low_1d / avg_volume_1d are written as NULL. That NULL is
+#    indistinguishable from "this instrument did not trade", and the job
+#    reports success either way because its population proof counts ROWS
+#    WRITTEN, not columns populated.
+#
+#    This is the same clock-versus-watermark shape as the incremental window
+#    defect fixed in v11.2.77, in a different place.
+#
+# 3. UNADJUSTED. high/low come from market.daily_prices unchanged, so a
+#    window spanning a split mixes pre- and post-split prices and the
+#    extremum is whichever side is numerically larger. market.splits carries
+#    the ratio; nothing here applies it.
+
+table: market.period_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  source_table: market.daily_prices
+  tables_involved: market.daily_prices
+  writer_job: compute/engine/period_metrics_compute.py
+  load_strategy: upsert on (asx_code, computed_date)
+  grain: asx_code+computed_date
+  join_condition: none - single-table aggregate
+
+columns:
+
+  market.period_metrics:
+
+    asx_code:
+      source_column: asx_code
+      is_key: "yes"
+      transformation_rule: direct copy
+      business_rule: >
+        Population is every DISTINCT asx_code in market.daily_prices, so an
+        instrument with no price history at all gets no row here rather than
+        a row of NULLs.
+      unit: n/a
+
+    computed_date:
+      source_system: internal
+      source_table: n/a
+      source_column: CURRENT_DATE
+      is_key: "yes"
+      derivation_formula: "CURRENT_DATE (column default)"
+      transformation_rule: the date the job ran
+      business_rule: >
+        THE RUN DATE, not the last trading date in the window. The two are
+        the same only when ingestion is current; when it is behind, this
+        column advances while the underlying prices do not, and the row
+        looks fresher than its contents.
+      unit: date
+
+    high_1d:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 3 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: >
+        A THREE-CALENDAR-DAY window, not one day. Widened deliberately so a
+        Monday run still sees Friday; the name is the part that misleads.
+      unit: AUD
+
+    low_1d:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 3 days)"
+      transformation_rule: minimum daily low in the window
+      business_rule: Three calendar days -- see high_1d.
+      unit: AUD
+
+    avg_volume_1d:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 3 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      business_rule: >
+        A MEAN OVER ~3 CALENDAR DAYS, so despite the name it is not one
+        day's volume. Non-trading days contribute no row rather than a zero,
+        so the denominator is sessions present, not days elapsed.
+      unit: shares
+
+    high_1w:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 7 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: Seven calendar days, so roughly five trading sessions.
+      unit: AUD
+
+    low_1w:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 7 days)"
+      transformation_rule: minimum daily low in the window
+      unit: AUD
+
+    avg_volume_1w:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 7 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      unit: shares
+
+    high_1m:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 35 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: >
+        THIRTY-FIVE calendar days, not a calendar month and not 30 days.
+      unit: AUD
+
+    low_1m:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 35 days)"
+      transformation_rule: minimum daily low in the window
+      unit: AUD
+
+    avg_volume_1m:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 35 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      unit: shares
+
+    high_3m:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 100 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: ONE HUNDRED calendar days, not 90 and not three months.
+      unit: AUD
+
+    low_3m:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 100 days)"
+      transformation_rule: minimum daily low in the window
+      unit: AUD
+
+    avg_volume_3m:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 100 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      unit: shares
+
+    high_6m:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 185 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: ONE HUNDRED AND EIGHTY-FIVE calendar days.
+      unit: AUD
+
+    low_6m:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 185 days)"
+      transformation_rule: minimum daily low in the window
+      unit: AUD
+
+    avg_volume_6m:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 185 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      unit: shares
+
+    high_1y:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 365 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: >
+        365 calendar days. ONE DAY WIDER THAN high_52w, which uses 364. The
+        two columns will carry the same value except when the single extra
+        day holds the extremum, and nothing marks which case a given row is.
+      unit: AUD
+
+    low_1y:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 365 days)"
+      transformation_rule: minimum daily low in the window
+      business_rule: See high_1y on the one-day difference from low_52w.
+      unit: AUD
+
+    avg_volume_1y:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 365 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      business_rule: See high_1y; avg_volume_52w differs by one calendar day.
+      unit: shares
+
+    high_52w:
+      source_column: high
+      derivation_formula: "MAX(high) FILTER (WHERE time >= CURRENT_DATE - 364 days)"
+      transformation_rule: maximum daily high in the window
+      business_rule: >
+        364 calendar days -- exactly 52 x 7, which is why it differs from
+        high_1y's 365. Near-duplicate of high_1y by construction.
+      unit: AUD
+
+    low_52w:
+      source_column: low
+      derivation_formula: "MIN(low) FILTER (WHERE time >= CURRENT_DATE - 364 days)"
+      transformation_rule: minimum daily low in the window
+      business_rule: Near-duplicate of low_1y -- see high_52w.
+      unit: AUD
+
+    avg_volume_52w:
+      source_column: volume
+      derivation_formula: "ROUND(AVG(volume) FILTER (WHERE time >= CURRENT_DATE - 364 days))::BIGINT"
+      transformation_rule: mean daily volume in the window, rounded to bigint
+      business_rule: Near-duplicate of avg_volume_1y -- see high_52w.
+      unit: shares

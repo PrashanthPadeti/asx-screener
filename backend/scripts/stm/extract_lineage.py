@@ -196,6 +196,13 @@ WRITE_PATTERNS = [
     ("merge",    re.compile(r"\bMERGE\s+INTO\s+([a-z_]+\.[a-z_]+)", re.I)),
 ]
 
+#: ON CONFLICT turns an INSERT into an upsert (DO UPDATE) or a skip
+#: (DO NOTHING). The two are different load strategies and must not collapse:
+#: DO UPDATE rewrites an existing row, DO NOTHING leaves the first write
+#: standing, so under DO NOTHING a correction never lands.
+ON_CONFLICT = re.compile(r"\bON\s+CONFLICT\b", re.I)
+ON_CONFLICT_DO_UPDATE = re.compile(r"\bON\s+CONFLICT\b.*?\bDO\s+UPDATE\b", re.I | re.S)
+
 READ_PATTERNS = [
     re.compile(r"\bFROM\s+(?:ONLY\s+)?([a-z_]+\.[a-z_]+)", re.I),
     re.compile(r"\bJOIN\s+([a-z_]+\.[a-z_]+)", re.I),
@@ -239,10 +246,53 @@ def layer_of(table: str) -> str:
     return layer or "out-of-scope"
 
 
+def _joined_str_text(node: ast.JoinedStr) -> str:
+    """An f-string reassembled, with each interpolation as a placeholder.
+
+    An f-string is a JoinedStr of Constant fragments and FormattedValue
+    holes, so walking for Constants alone shreds one statement into pieces.
+    That is not cosmetic: technical_compute.py builds
+
+        INSERT INTO market.daily_metrics ({", ".join(INSERT_COLS)})
+        VALUES %s
+        ON CONFLICT (asx_code, date) DO UPDATE SET ...
+
+    as ONE f-string, and the INSERT and the ON CONFLICT land in different
+    fragments. A test asking whether an INSERT carries ON CONFLICT then
+    always fails, and the table reads as append-only while every run
+    rewrites the same keys.
+
+    The interpolations become a marker rather than being dropped, so a
+    column list computed at runtime cannot be mistaken for absent SQL.
+    """
+    parts = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        else:
+            parts.append(" {...} ")
+    return "".join(parts)
+
+
 def _sql_literals(tree: ast.AST):
-    """Every string constant in the module that looks like SQL."""
+    """Every string in the module that looks like SQL, f-strings reassembled.
+
+    JoinedStr is yielded whole and its fragments are NOT yielded again:
+    emitting both would double-count operations on the same statement.
+    """
+    seen_fragments = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        if isinstance(node, ast.JoinedStr):
+            for value in node.values:
+                if isinstance(value, ast.Constant):
+                    seen_fragments.add(id(value))
+            text = _joined_str_text(node)
+            if len(text) >= 20 and SQL_SHAPED.search(text):
+                yield node.lineno, text
+
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in seen_fragments):
             if len(node.value) >= 20 and SQL_SHAPED.search(node.value):
                 yield node.lineno, node.value
 
@@ -273,7 +323,22 @@ def analyse_module(path: Path) -> dict:
         sql = _normalise(raw)
         for op, pattern in WRITE_PATTERNS:
             for m in pattern.finditer(sql):
-                writes[m.group(1).lower()].add(op)
+                table = m.group(1).lower()
+                writes[table].add(op)
+                # An INSERT carrying ON CONFLICT ... DO UPDATE is an UPSERT,
+                # and it matches none of the UPDATE patterns: there is no
+                # `UPDATE <table>` statement anywhere in it.
+                #
+                # Without this, 25 of 42 tables were reported as
+                # "insert-only (append)" -- including market.short_positions
+                # and market.period_metrics, which plainly upsert. A mapping
+                # document that tells a reader a table only ever appends,
+                # when every run rewrites the same keys, is wrong about the
+                # one property that decides whether history exists.
+                if op == "insert" and ON_CONFLICT.search(sql):
+                    writes[table].add(
+                        "upsert" if ON_CONFLICT_DO_UPDATE.search(sql)
+                        else "insert-or-ignore")
         for pattern in READ_PATTERNS:
             for m in pattern.finditer(sql):
                 reads.add(m.group(1).lower())

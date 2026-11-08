@@ -323,10 +323,34 @@ are being restamped as freshly computed while carrying columns no current
 run produced. **A reader has no way to date those values** — the row's own
 timestamp asserts they are current.
 
+**Proven, not inferred.** Of the 6,261 rows carrying a `quick_ratio`:
+
+```
+with_quick   oldest       newest       stamped_today
+     6,261   2026-11-08   2026-11-08           6,261
+```
+
+Every one was rewritten by today's run. `min(computed_at)` equals
+`max(computed_at)` equals today, so there is no population of untouched old
+rows to explain the values: the rows were restamped as freshly computed
+while carrying a column that run did not produce.
+
 This is precisely the mechanism `yearly_compute.py` describes when it
 explains why it writes explicit NULLs for five retired return columns:
 leaving a column unwritten freezes the last value the engine produced. The
 protection was applied to five columns and not to these.
+
+### Census still outstanding
+
+Population was measured for 7 of the 64. The remaining 57 are unknown and
+must not be assumed either way — a column at zero is 6a, a column with rows
+is 6b, and the mapping document needs the per-column answer rather than a
+blanket statement. `database/stm/census_yearly_unwritten.sql` returns one
+row per column:
+
+```bash
+cd /opt/asx-screener && sudo -u postgres psql asx_screener -f /tmp/census.sql
+```
 
 Fix: write explicit NULLs for every retired column, exactly as the five
 return columns already are — not a schema drop, because dropping loses the
@@ -349,4 +373,5 @@ populated on 18% of rows looks like a metric with coverage gaps.
 | 4c | Liquidity filter is twenty DOLLARS — smallest panel constituent A$2.7M | `market.mover_snapshots` | **CONFIRMED by effect** |
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |
 | 6a | Dead schema: `peg_ratio`, `beta_1y` never populated | `market.yearly_metrics` | CONFIRMED |
-| 6b | Frozen values on 10-19% of rows under a fresh `computed_at` | `market.yearly_metrics` | **CONFIRMED** |
+| 6b | Frozen values restamped today — all 6,261 rows `computed_at` = today | `market.yearly_metrics` | **PROVEN** |
+| 6c | Census of the remaining 57 unwritten columns | `market.yearly_metrics` | OPEN — query ready |

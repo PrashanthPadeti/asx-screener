@@ -57,6 +57,28 @@ async def _scalar(db: AsyncSession, sql, params=None):
         return None
 
 
+async def _days(db: AsyncSession, sql):
+    """First column of every row as a set, or DAYS_UNAVAILABLE on failure.
+
+    The SAVEPOINT is here for the same reason it is in _scalar: an error
+    aborts the surrounding transaction in PostgreSQL, and one unreadable
+    panel must not take the rest of /system-health down with it.
+
+    It does NOT return an empty set on failure, which is where this differs
+    from _scalar's `return None`. An empty set is a real answer — "no rows in
+    the window" — and handing that to the classifier would manufacture a gap
+    out of a connection problem. The sentinel says the query did not run, and
+    the classifier reports that as an instrument defect.
+    """
+    from compute.engine.output_freshness import DAYS_UNAVAILABLE
+    try:
+        async with db.begin_nested():
+            result = await db.execute(text(sql))
+            return {r[0] for r in result.fetchall()}
+    except Exception:                                            # noqa: BLE001
+        return DAYS_UNAVAILABLE
+
+
 def _iso(val):
     """Convert datetime to ISO string, or None."""
     return val.isoformat() if val else None
@@ -700,15 +722,26 @@ async def _output_freshness(db: AsyncSession) -> dict:
     endpoint must not let them read as such.
     """
     from compute.engine.output_freshness import (
-        ANCHORS, classify, existence_sql, latest_sql, summarise,
-        unobservable_findings,
+        ANCHORS, DAYS_UNAVAILABLE, classify, existence_sql, latest_sql,
+        observed_days_sql, summarise, unobservable_findings,
     )
 
     findings = []
     for anchor in ANCHORS:
         exists = bool(await _scalar(db, existence_sql(anchor)))
         latest = await _scalar(db, latest_sql(anchor)) if exists else None
-        findings.append(classify(anchor, exists, latest))
+
+        # The continuity window is evaluated HERE too, not only in the cron
+        # gate. Both surfaces answer the same question, so both must answer
+        # it from the same evidence; a panel that checked recency while the
+        # gate checked completeness would be two different verdicts wearing
+        # one name. classify() raises if this is omitted.
+        observed = None
+        if exists and anchor.continuity_weekdays is not None:
+            observed = await _days(db, observed_days_sql(anchor))
+
+        findings.append(classify(anchor, exists, latest,
+                                 observed_days=observed))
     findings += unobservable_findings()
 
     return {

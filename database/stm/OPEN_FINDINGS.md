@@ -239,6 +239,66 @@ constituent lists, and give `asx_indices` an observable output.
 
 ---
 
+## 6. `market.yearly_metrics` — 64 of 188 columns are not written by its only writer
+
+**Table:** `market.yearly_metrics` (188 columns)
+**Writer:** `compute/engine/yearly_compute.py` (the only writer)
+**Status:** OPEN — one query decides which of two findings this is
+
+The INSERT statement names **124 columns**. The table has **188**. The 64
+absent ones include `peg_ratio`, `pcf_ratio`, `p_fcf_ratio`, `ev_fcf`,
+`ncavps`, `pe_5y_avg`, `tbvps`, `dps_grossed_up`, `fcf_per_share`,
+`ocf_per_share`, `revenue_per_share`, `net_debt_per_share`, `roae`, `roaa`,
+`croic`, `pretax_margin`, `tax_rate_effective`, `inventory_turnover`,
+`inventory_days`, `payables_days`, `cash_conversion_cycle`,
+`revenue_per_employee`, `quick_ratio`, `cash_ratio`, `debt_to_ebitda`,
+`net_debt_to_equity`, `equity_multiplier`, `beneish_m_score`,
+`ebit_growth_1y`, both `revenue_growth_median_*`, every `*_cagr_7y` and
+`*_cagr_10y` for net income / EPS / EBITDA, all five `price_cagr_*`,
+`avg_roe_7y/10y`, `avg_roce_7y/10y`, `avg_operating_margin_10y`,
+`avg_net_margin_10y`, `avg_fcf_margin_3y/5y`, `avg_eps_growth_10y`,
+`avg_ebit_5y/10y`, `beta_1y/3y/5y`, `volatility_3y`, `sharpe_3y`,
+`sortino_1y`, `max_drawdown_3y`, `calmar_ratio`, `alpha_1y/3y`, and
+`avg_current_ratio_3y`.
+
+### Why this is not merely "unused columns"
+
+The same file already names this hazard. For five retired price-return
+columns it writes explicit NULLs, and says why:
+
+> Written as NULL rather than simply dropped from the write. The columns
+> still exist in market.yearly_metrics, and leaving them unwritten would
+> freeze the last values this engine produced -- the exact mechanism that
+> kept return_2y/4y/6y/8y/9y alive in screener.universe after their
+> producer was removed.
+
+The 64 columns above are omitted from the write entirely, which is the
+mechanism that comment identifies as the defect.
+
+### The two outcomes
+
+```sql
+SELECT count(*) AS rows,
+       count(peg_ratio) AS peg, count(quick_ratio) AS quick,
+       count(croic) AS croic, count(beta_1y) AS beta_1y,
+       count(price_cagr_3y) AS price_cagr_3y,
+       count(avg_roe_7y) AS avg_roe_7y,
+       count(beneish_m_score) AS beneish,
+       max(computed_at)::date AS last_write
+FROM market.yearly_metrics;
+```
+
+- **All zero** -> the columns are reliably NULL. They are dead schema: a
+  consumer gets nothing, which is at least honest. The finding becomes
+  "remove or populate", and `beta_1y` being barren is explained.
+- **Any non-zero** -> those are FROZEN values from a retired code path,
+  still being served, sitting on rows whose `computed_at` asserts they were
+  produced by the latest run. A reader cannot tell a current value from one
+  left behind years ago. That is a correctness finding, not a tidiness one.
+
+**Until this is answered, no `*_7y` / `*_10y` average, no `beta_*`, no
+`price_cagr_*` and none of the other 64 should be treated as current.**
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -250,3 +310,4 @@ constituent lists, and give `asx_indices` an observable output.
 | 4b | Frontend comment says "millions", also wrong, contradicts its own formula | `IndexDetailContent.tsx:67` | CONFIRMED |
 | 4c | Liquidity filter is twenty DOLLARS — smallest panel constituent A$2.7M | `market.mover_snapshots` | **CONFIRMED by effect** |
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |
+| 6 | 64 of 188 columns absent from the only writer's INSERT | `market.yearly_metrics` | OPEN — NULL or frozen? one query decides |

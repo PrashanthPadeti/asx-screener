@@ -187,3 +187,134 @@ columns:
         When this row was last written. Says nothing about how current ASIC's
         data is -- report_date is the column that does.
       unit: timestamptz
+
+  # ── market.short_interest ─────────────────────────────────────────────────
+  # Authored 9 November 2026, from the same transform as short_positions.
+  #
+  # This table was MISSING from the Bronze->Silver mapping until today, not
+  # because anyone judged it out of scope but because extract_lineage.py
+  # defaulted every undeclared market.* table to Gold. It is written by
+  # transform_short.py, in the same function and the same transaction as
+  # market.short_positions.
+  #
+  # Grain: one row per (time, asx_code). A TimescaleDB hypertable holding THE
+  # SAME ASIC OBSERVATIONS as market.short_positions, written from the same
+  # loop in the same transaction.
+  #
+  # NOTHING READS IT. Verified 9 November 2026: every reference to
+  # `market.short_interest` in the backend is a write or a comment --
+  # load_short_positions.py and transform_short.py write it, and no module,
+  # route or SQL file selects from it.
+  #
+  # Both surviving justifications are stale:
+  #   transform_short.py           "the hypertable used by the existing
+  #                                 short_pct join in
+  #                                 build_screener_universe.py"
+  #   build_screener_universe.py   "Prefer market.short_positions (has WoW
+  #                                 change); fall back to short_interest."
+  # The lateral join beneath that second comment reads market.short_positions
+  # and has no fallback branch at all. The table is maintained for a consumer
+  # that no longer exists, which is why it is documented here rather than
+  # quietly dropped: retiring it is a decision someone should take on the
+  # evidence, not a thing that happens because nobody noticed.
+  #
+  # Only the most recent report_date in staging is processed per run, so the
+  # series grows one snapshot at a time and a missed run leaves a hole that
+  # nothing goes back for.
+  market.short_interest:
+
+    time:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: report_date
+      writer_job: scripts/asic/transforms/transform_short.py
+      is_key: "yes"
+      derivation_formula: >
+        now_utc.replace(year=report_date.year, month=report_date.month,
+        day=report_date.day, hour=0, minute=0, second=0, microsecond=0)
+      transformation_rule: >
+        The ASIC report date, placed at MIDNIGHT UTC. Built by replacing the
+        date parts of an aware UTC `now`, so the offset is +00:00.
+      business_rule: >
+        DIFFERENT CONVENTION FROM market.daily_prices, which stores its
+        observations at 16:00+10 so the trading date is recovered at a fixed
+        +10 offset. Here the date is already midnight UTC, so `time::date`
+        under a UTC session returns the report date directly and a +10
+        conversion would move it back a day. A query joining the two tables
+        on a derived date must use each table's own convention.
+
+        It is also the date ASIC's report REFERS TO, not when ASIC published
+        it or when this row was written. ASIC publishes with several days'
+        lag, so a row timed 2026-11-06 typically appeared days later.
+      unit: timestamptz
+
+    asx_code:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: asx_code
+      writer_job: scripts/asic/transforms/transform_short.py
+      is_key: "yes"
+      transformation_rule: direct copy
+      unit: n/a
+
+    gross_short_position:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: short_shares
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy
+      business_rule: >
+        Reported short SHARES, not a percentage and not a dollar value. The
+        column name says "position", which in market usage often means value;
+        here it is a share count.
+      unit: shares
+
+    total_product_short_pct:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: short_pct
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy
+      business_rule: >
+        Short shares as a percentage of total issued product, as ASIC
+        reports it. Carries the SAME VALUE as reported_short_pct below --
+        see that column.
+      unit: percent
+
+    gross_short_sales:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: NEVER WRITTEN — the literal None is inserted
+      business_rule: >
+        ALWAYS NULL. The transform passes `None` with the comment "not in
+        ASIC aggregated CSV", and the ON CONFLICT clause does not list the
+        column either, so neither an insert nor an update can ever set it.
+
+        This is a CANNOT-EXIST, not a failed-to-obtain: the aggregated ASIC
+        report does not carry short sales volume at all. Any consumer
+        reading it will find NULL for every row of the table's history, and
+        must not interpret that as "no short sales".
+      derivation_formula: "NULL"
+      unit: shares
+      status: dead column
+
+    reported_short_pct:
+      source_system: ASIC
+      source_table: staging_au.short_positions
+      source_column: short_pct
+      writer_job: scripts/asic/transforms/transform_short.py
+      transformation_rule: direct copy of the same source column
+      business_rule: >
+        IDENTICAL TO total_product_short_pct BY CONSTRUCTION. The transform
+        passes `short_pct` into both columns from one tuple, so the two can
+        never disagree and a consumer comparing them is comparing a value
+        with itself.
+
+        Two names for one value is a schema that promises a distinction the
+        pipeline does not make. If ASIC's "% of total product" and "reported
+        %" are meant to differ, only one of them is currently populated
+        correctly and the other is a copy.
+      derivation_formula: "reported_short_pct = total_product_short_pct = staging_au.short_positions.short_pct"
+      unit: percent

@@ -1,0 +1,352 @@
+# market.valuation_snapshot  (Silver)
+#
+# VENDOR-SUPPLIED valuation figures, copied rather than computed. This is the
+# distinction that matters about this table: almost every column here has a
+# namesake in market.computed_metrics (Gold) that the pipeline DERIVES from
+# financials. The two will disagree, and neither is wrong -- one is EODHD's
+# number and one is ours.
+#
+# Authored 9 November 2026 from:
+#   backend/scripts/eodhd/v2/transforms/transform_valuation.py
+#
+# This table was MISSING from the Bronze->Silver mapping until today, because
+# extract_lineage.py defaulted every undeclared market.* table to Gold.
+#
+# Source and join
+# ---------------
+#   FROM staging_au.highlights h
+#   LEFT JOIN staging_au.valuation v ON v.asx_code = h.asx_code
+#
+# The join carries NO date predicate, which is safe only because both staging
+# tables are UNIQUE (asx_code) -- they hold the latest vendor snapshot per
+# code, not a history. If either ever gained a second row per code the LEFT
+# JOIN would fan out and the batched ON CONFLICT (asx_code) DO UPDATE would
+# raise outright ("cannot affect row a second time") rather than silently
+# duplicating. A loud failure, but on the next run after a schema change
+# rather than at the change itself.
+#
+# Grain: one row per asx_code. No history: the table is a point-in-time
+# replacement, so a figure that was true last month is simply gone.
+#
+# Load strategy: TRUNCATE + INSERT on a full run; upsert on --codes.
+
+table: market.valuation_snapshot
+layer: Silver
+source_layer: Bronze
+
+defaults:
+  source_system: EODHD
+  writer_job: scripts/eodhd/v2/transforms/transform_valuation.py
+  load_strategy: upsert on --codes; TRUNCATE + INSERT on a full run
+  join_condition: staging_au.valuation v ON v.asx_code = staging_au.highlights h.asx_code
+  tables_involved: staging_au.highlights, staging_au.valuation
+  grain: asx_code
+
+columns:
+
+  market.valuation_snapshot:
+
+    asx_code:
+      source_table: staging_au.highlights
+      source_column: asx_code
+      is_key: "yes"
+      transformation_rule: direct copy
+      business_rule: >
+        Driven by highlights, not valuation. A code present in
+        staging_au.valuation but absent from staging_au.highlights produces
+        NO ROW here -- the join is a LEFT JOIN from highlights, so highlights
+        decides the population.
+      unit: n/a
+
+    market_cap:
+      source_table: staging_au.highlights
+      source_column: market_capitalization
+      transformation_rule: direct copy, no unit conversion
+      business_rule: >
+        EODHD's own market capitalisation, in FULL CURRENCY UNITS -- not the
+        millions used across financials.*. Compare with
+        market.computed_metrics.market_cap, which the pipeline derives from
+        price x shares and which will not match exactly.
+      unit: AUD (full units)
+
+    pe_ratio:
+      source_table: staging_au.highlights
+      source_column: pe_ratio
+      transformation_rule: direct copy
+      business_rule: >
+        EODHD's headline P/E. SEPARATE FROM trailing_pe below, which comes
+        from staging_au.valuation and is also a trailing P/E. Two vendor
+        fields for one concept, both stored, neither reconciled.
+      unit: ratio
+
+    peg_ratio:
+      source_table: staging_au.highlights
+      source_column: peg_ratio
+      transformation_rule: direct copy
+      business_rule: >
+        Vendor-supplied. The growth rate behind it is EODHD's and is not
+        disclosed in the feed, so this cannot be reconciled against our own
+        growth columns.
+      unit: ratio
+
+    price_to_book:
+      source_table: staging_au.valuation
+      source_column: price_book_mrq
+      transformation_rule: direct copy
+      business_rule: >
+        MOST RECENT QUARTER basis (the source column is price_book_mrq),
+        while price_to_sales beside it is TTM. The two sit together under
+        names that suggest a common basis and do not share one.
+      unit: ratio
+
+    price_to_sales:
+      source_table: staging_au.valuation
+      source_column: price_sales_ttm
+      transformation_rule: direct copy
+      business_rule: TRAILING TWELVE MONTHS basis -- see price_to_book above.
+      unit: ratio
+
+    dividend_yield:
+      source_table: staging_au.highlights
+      source_column: dividend_yield
+      transformation_rule: direct copy, no scaling
+      business_rule: >
+        A RATIO as EODHD supplies it (0.0421 = 4.21%), not a percentage,
+        despite sitting beside percent-valued columns elsewhere in the
+        schema. Unfranked: no Australian franking adjustment is applied here.
+      unit: ratio
+
+    dividend_per_share:
+      source_table: staging_au.highlights
+      source_column: dividend_share
+      transformation_rule: direct copy
+      business_rule: Trailing dividend per share, per vendor. Unfranked.
+      unit: AUD per share
+
+    eps_ttm:
+      source_table: staging_au.highlights
+      source_column: earnings_share
+      transformation_rule: direct copy
+      business_rule: >
+        Source column is named `earnings_share` with no TTM marker; the TTM
+        claim is this table's, taken from EODHD's documented meaning of the
+        Highlights field rather than from anything in the feed itself.
+      unit: AUD per share
+
+    eps_est_current_year:
+      source_table: staging_au.highlights
+      source_column: eps_estimate_current_year
+      transformation_rule: direct copy
+      business_rule: >
+        ANALYST ESTIMATE, not an observation. One of the few forward-looking
+        values in the Silver layer.
+      unit: AUD per share
+
+    eps_est_next_year:
+      source_table: staging_au.highlights
+      source_column: eps_estimate_next_year
+      transformation_rule: direct copy
+      business_rule: Analyst estimate -- see eps_est_current_year.
+      unit: AUD per share
+
+    revenue_ttm:
+      source_table: staging_au.highlights
+      source_column: revenue_ttm
+      transformation_rule: direct copy, no unit conversion
+      business_rule: >
+        FULL CURRENCY UNITS, unlike financials.annual_pnl.revenue which is
+        stored in millions. A comparison across the two without scaling is
+        out by 1,000,000.
+      unit: AUD (full units)
+
+    gross_profit_ttm:
+      source_table: staging_au.highlights
+      source_column: gross_profit_ttm
+      transformation_rule: direct copy, no unit conversion
+      unit: AUD (full units)
+
+    ebitda_ttm:
+      source_table: staging_au.highlights
+      source_column: ebitda
+      transformation_rule: direct copy, no unit conversion
+      business_rule: >
+        The source column is `ebitda`, with no period marker. The "_ttm" in
+        the target name is an assertion this transform makes, not something
+        the feed states.
+      unit: AUD (full units)
+
+    profit_margin:
+      source_table: staging_au.highlights
+      source_column: profit_margin
+      transformation_rule: direct copy
+      business_rule: A ratio, not a percentage.
+      unit: ratio
+
+    operating_margin:
+      source_table: staging_au.highlights
+      source_column: operating_margin_ttm
+      transformation_rule: direct copy
+      business_rule: >
+        TTM in the source, period-less in the target name. A ratio, not a
+        percentage.
+      unit: ratio
+
+    roe_ttm:
+      source_table: staging_au.highlights
+      source_column: return_on_equity_ttm
+      transformation_rule: direct copy
+      business_rule: >
+        Vendor ROE. market.yearly_metrics.roe and
+        market.computed_metrics.roe are computed from financials and use our
+        own equity basis; the three will differ.
+      unit: ratio
+
+    roa_ttm:
+      source_table: staging_au.highlights
+      source_column: return_on_assets_ttm
+      transformation_rule: direct copy
+      unit: ratio
+
+    quarterly_earnings_growth_yoy:
+      source_table: staging_au.highlights
+      source_column: quarterly_earnings_growth_yoy
+      transformation_rule: direct copy
+      business_rule: >
+        Most recent quarter against the same quarter a year earlier, per
+        vendor. Australian issuers mostly report half-yearly, so for much of
+        the ASX this field is sparse or reflects a half rather than a
+        quarter.
+      unit: ratio
+
+    quarterly_revenue_growth_yoy:
+      source_table: staging_au.highlights
+      source_column: quarterly_revenue_growth_yoy
+      transformation_rule: direct copy
+      business_rule: See quarterly_earnings_growth_yoy on ASX reporting cadence.
+      unit: ratio
+
+    most_recent_quarter:
+      source_table: staging_au.highlights
+      source_column: most_recent_quarter
+      transformation_rule: direct copy
+      business_rule: >
+        The period the quarterly growth columns refer to. The only column
+        that dates them -- without it those two figures are undated.
+      unit: date
+
+    wall_street_target_price:
+      source_table: staging_au.highlights
+      source_column: wall_street_target_price
+      transformation_rule: direct copy
+      business_rule: >
+        Consensus analyst target, vendor-supplied. No contributor count or
+        dispersion travels with it, so a target backed by one broker is
+        indistinguishable from one backed by twenty.
+      unit: AUD per share
+
+    book_value_per_share:
+      source_table: staging_au.highlights
+      source_column: book_value
+      transformation_rule: direct copy
+      business_rule: >
+        The source column is named `book_value`; the per-share reading is
+        this transform's interpretation of EODHD's Highlights field. If the
+        feed ever supplies a total rather than a per-share figure, this
+        column is out by the share count and nothing here would detect it.
+      unit: AUD per share
+
+    revenue_per_share:
+      source_table: staging_au.highlights
+      source_column: revenue_per_share_ttm
+      transformation_rule: direct copy
+      unit: AUD per share
+
+    trailing_pe:
+      source_table: staging_au.valuation
+      source_column: trailing_pe
+      transformation_rule: direct copy
+      business_rule: >
+        Second trailing P/E in this table -- see pe_ratio, which comes from
+        staging_au.highlights. Different vendor endpoints, stored side by
+        side, never reconciled against one another.
+      unit: ratio
+
+    forward_pe:
+      source_table: staging_au.valuation
+      source_column: forward_pe
+      transformation_rule: direct copy
+      business_rule: >
+        Built on an analyst estimate, so it is forward-looking and carries
+        the estimate's uncertainty.
+      unit: ratio
+
+    enterprise_value:
+      source_table: staging_au.valuation
+      source_column: enterprise_value
+      transformation_rule: direct copy, no unit conversion
+      business_rule: >
+        Vendor EV, full currency units. The components (debt, cash,
+        minorities) are not supplied, so it cannot be decomposed or checked.
+      unit: AUD (full units)
+
+    ev_to_revenue:
+      source_table: staging_au.valuation
+      source_column: enterprise_value_revenue
+      transformation_rule: direct copy
+      unit: ratio
+
+    ev_to_ebitda:
+      source_table: staging_au.valuation
+      source_column: enterprise_value_ebitda
+      transformation_rule: direct copy
+      unit: ratio
+
+    snapshot_date:
+      source_table: staging_au.highlights
+      source_column: snapshot_date
+      derivation_formula: "snapshot_date = h.snapshot_date or date.today()"
+      transformation_rule: >
+        Vendor snapshot date, falling back to the DATE THE TRANSFORM RAN
+        when the source value is NULL.
+      business_rule: >
+        THE FALLBACK DESTROYS THE DISTINCTION IT EXISTS TO RECORD. A row
+        whose vendor snapshot date is unknown is written with today's date,
+        so an undated figure becomes indistinguishable from one EODHD
+        stamped this morning -- and the column consumers would use to judge
+        currency is the one that cannot be trusted to show staleness.
+
+        A failed-to-obtain rendered as a confident value. NULL would have
+        been the honest outcome; the column is already nullable.
+
+        Note also that `or` substitutes on any falsy value, not only None.
+        For a date type NULL is the only falsy case, so the behaviour is
+        correct today and would stop being correct if the column's type
+        changed.
+      unit: date
+
+    data_source:
+      source_system: internal
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "'eodhd'"
+      transformation_rule: literal, appended to every row as it is inserted
+      business_rule: >
+        ALWAYS 'eodhd'. The column has a default of 'eodhd' as well, so both
+        paths agree, but it is a constant in a column whose name promises
+        provenance. If a second vendor ever lands here the value will still
+        read 'eodhd' unless this literal is changed.
+      valid_values: "eodhd (the only value ever written)"
+      unit: n/a
+      status: constant
+
+    updated_at:
+      source_system: internal
+      source_table: n/a
+      source_column: NOW()
+      transformation_rule: column default now() on insert, NOW() on upsert
+      business_rule: >
+        When this row was last written -- which, because a full run
+        TRUNCATEs and re-inserts, is the last full-run time for every row at
+        once. It measures the PIPELINE, not the vendor data; snapshot_date
+        is meant to measure the vendor, with the caveat recorded above.
+      unit: timestamptz

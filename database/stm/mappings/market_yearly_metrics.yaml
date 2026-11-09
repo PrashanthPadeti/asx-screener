@@ -1,0 +1,1211 @@
+# market.yearly_metrics  (Gold)
+#
+# The fundamental core of the screener: one row per company-fiscal-year,
+# 188 columns, feeding most of screener.universe.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/yearly_compute.py   (the ONLY writer)
+#   backend/compute/engine/periods.py          (average_over)
+#
+# ── Source ─────────────────────────────────────────────────────────────────
+#   FROM financials.annual_pnl p
+#   LEFT JOIN financials.annual_balance_sheet b
+#          ON b.asx_code = p.asx_code AND b.fiscal_year = p.fiscal_year
+#   LEFT JOIN financials.annual_cashflow cf
+#          ON cf.asx_code = p.asx_code AND cf.fiscal_year = p.fiscal_year
+#   LEFT JOIN LATERAL (
+#       SELECT SUM(d.amount_per_share) AS total_dps,
+#              AVG(d.franking_pct)     AS avg_franking_pct
+#       FROM market.dividends d
+#       WHERE d.asx_code = p.asx_code
+#         AND d.ex_date >  p.period_end_date - INTERVAL '1 year'
+#         AND d.ex_date <= p.period_end_date
+#         AND LOWER(d.dividend_type) NOT LIKE '%special%'
+#   ) div ON TRUE
+#
+# plus two per-company fetches outside that statement:
+#   market.daily_prices        all closes, DATE(time AT TIME ZONE 'Australia/Sydney')
+#   staging_au.shares_stats    current shares outstanding (a PROXY - see below)
+#
+# P&L drives the population: a fiscal year present in the balance sheet or
+# cashflow but absent from annual_pnl produces no row at all.
+#
+# Grain: one row per (asx_code, fiscal_year).
+# Load:  upsert (INSERT ... ON CONFLICT DO UPDATE).
+#
+# ── Units, and they are not uniform ────────────────────────────────────────
+#   monetary from financials.*   AUD MILLIONS
+#   market_cap, enterprise_value AUD MILLIONS  (px * shares / 1e6)
+#   per-share (eps/bvps/dps)     AUD per share
+#   price_at_compute             AUD
+#   ratios                       RATIO (0-1), not percent
+#   franking_pct                 PERCENT (0-100) - the one exception
+#
+# market_cap here is in MILLIONS. screener.universe.market_cap, which comes
+# from market.valuation_snapshot, is RAW AUD. Two columns of the same name,
+# in tables joined downstream, differing by 1e6. See OPEN_FINDINGS.md s.4.
+#
+# ── Rules that apply to EVERY derived column ───────────────────────────────
+#
+# _div(num, den)            NULL when the denominator is 0, NULL or NaN.
+#                           Rounded to 4dp by default.
+# _clamp(val, 9999)         NULL when |val| > 9,999. An overflow guard for
+#                           NUMERIC columns, so a NULL can mean "the ratio
+#                           was absurd", not only "unavailable".
+# _plausible_per_share(v)   NULL when |v| > 10,000 AUD/share. WITHHELD, not
+#                           clamped: no ASX security has traded near that,
+#                           so the value is arithmetic on a broken share
+#                           count, and there is no nearest sensible value.
+# _cagr(end, start, n)      NULL when start is 0, or when start and end
+#                           STRADDLE ZERO. A company recovering from a loss
+#                           gets no growth rate rather than a misleading
+#                           one. Both-negative uses |end|/|start|, so a loss
+#                           narrowing from -100 to -50 reports a NEGATIVE
+#                           rate - arithmetically consistent, and the
+#                           opposite sign to the improvement it describes.
+# cn(field, n)              CAGR resolved by FISCAL YEAR (fy - n), never by
+#                           list position. A company reporting 2016, 2017,
+#                           2019, 2020 cannot have a "3-year" rate computed
+#                           across four.
+# average_over(series,fy,n) The mean of EXACTLY n named fiscal years, or
+#                           NULL. No dropna, no partial mean. Replaced a
+#                           values[-n:] form under which avg_roe_3y could be
+#                           one year's ROE labelled as three.
+#
+# A NULL in this table therefore carries at least five possible meanings,
+# none of them distinguishable from the column alone: source missing, zero
+# denominator, clamped as absurd, withheld as implausible, or insufficient
+# history. The state layer downstream (metric_states) is where that
+# distinction is recovered.
+#
+# ── 124 of 188 columns are written; 64 are not ─────────────────────────────
+# The INSERT names 124 columns. The remaining 64 are listed at the end of
+# this file with status `not written`. Two different problems live there -
+# dead schema and FROZEN values restamped as current - and neither should
+# be read as a coverage gap. See OPEN_FINDINGS.md section 6.
+
+table: market.yearly_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  writer_job: compute/engine/yearly_compute.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  grain: asx_code+fiscal_year
+  tables_involved: >
+    financials.annual_pnl, financials.annual_balance_sheet,
+    financials.annual_cashflow, market.dividends, market.daily_prices,
+    staging_au.shares_stats
+  join_condition: >
+    annual_pnl p LEFT JOIN annual_balance_sheet b ON (asx_code, fiscal_year)
+    LEFT JOIN annual_cashflow cf ON (asx_code, fiscal_year)
+    LEFT JOIN LATERAL (market.dividends summed over
+    period_end_date - 1 year < ex_date <= period_end_date, specials excluded)
+
+columns:
+
+  market.yearly_metrics:
+
+    # ── Identity ──────────────────────────────────────────────────────────
+    asx_code:
+      source_table: financials.annual_pnl
+      source_column: asx_code
+      is_key: "yes"
+      transformation_rule: direct copy
+      unit: n/a
+
+    fiscal_year:
+      source_table: financials.annual_pnl
+      source_column: fiscal_year
+      is_key: "yes"
+      transformation_rule: direct copy
+      business_rule: >
+        The company's own fiscal year, not a calendar year. ASX issuers
+        commonly end in June, so FY2026 typically covers Jul 2025 - Jun 2026.
+        Every horizon metric in this table is resolved against THIS value,
+        not against row position.
+      unit: year
+
+    period_end_date:
+      source_table: financials.annual_pnl
+      source_column: period_end_date
+      transformation_rule: direct copy
+      business_rule: >
+        The balance date. Anchors the price lookup, the dividend window and
+        the risk window, so all three are as-at the company's own year end
+        rather than as-at today. A row with a NULL period_end_date is SKIPPED
+        entirely - no row is produced for that fiscal year.
+      unit: date
+
+    # ── Price and size ────────────────────────────────────────────────────
+    price_at_compute:
+      source_table: market.daily_prices
+      source_column: close
+      derivation_formula: "price_at(prices, period_end_date) = last close on or before period_end_date"
+      transformation_rule: last traded close at or before the fiscal year end
+      business_rule: >
+        Despite the column name this is NOT the price when the row was
+        computed: it is the close at the FISCAL YEAR END, which for a
+        historical row is years ago. Every valuation multiple below is built
+        on it, so pe_ratio on the FY2019 row is FY2019's P/E, not today's.
+
+        Dates are derived with DATE(time AT TIME ZONE 'Australia/Sydney'),
+        while transform_prices stores rows at a fixed 16:00+10. The two agree
+        because 16:00+10 falls on the same calendar day under both AEST and
+        AEDT - but they are different conventions, and the agreement is a
+        property of the storage time, not of the code.
+
+        UNADJUSTED for splits, like everything else reading daily_prices.
+      unit: AUD
+
+    market_cap:
+      source_table: market.daily_prices, financials.annual_balance_sheet
+      source_column: close, shares_outstanding
+      derivation_formula: "round(price_at_compute * shares_outstanding / 1e6, 2)"
+      transformation_rule: price at year end times shares, expressed in millions
+      business_rule: >
+        IN MILLIONS, unlike screener.universe.market_cap which is raw AUD.
+
+        NULL whenever either input is missing. The share count may be the
+        CURRENT one rather than the year's - see shares_outstanding - so a
+        historical market cap can be today's share count at an old price.
+      unit: AUD millions
+
+    shares_outstanding:
+      source_table: financials.annual_balance_sheet, staging_au.shares_stats
+      source_column: shares_outstanding
+      derivation_formula: "b.shares_outstanding, else staging_au.shares_stats.shares_outstanding (CURRENT)"
+      transformation_rule: balance-sheet count, falling back to the current count
+      business_rule: >
+        THE PROXY THAT PROPAGATES. EODHD does not supply shares in the ASX
+        income-statement feed, so when the balance sheet has no count this
+        falls back to the company's CURRENT share count from
+        staging_au.shares_stats - the same number for every fiscal year.
+
+        For a company that has issued stock, every per-share figure on the
+        historical rows is then computed against a share count that did not
+        exist in that year: eps, bvps, market_cap, and everything derived
+        from them (pe_ratio, pb_ratio, graham_number, the EPS and BVPS
+        CAGRs). The error grows with the dilution and with the age of the
+        row.
+
+        Nothing on the row records whether the count is the year's or
+        today's, so a consumer cannot tell the two apart.
+      unit: shares
+
+    # ── Valuation ─────────────────────────────────────────────────────────
+    pe_ratio:
+      source_column: close, net_profit, shares_outstanding
+      derivation_formula: "_clamp(_div(price_at_compute, eps))"
+      transformation_rule: price over EPS at the fiscal year end, clamped at 9,999
+      business_rule: >
+        Inherits the eps proxy caveat. NULL when EPS is zero, negative-free
+        division fails, or the ratio exceeds 9,999 - so a loss-making company
+        and an absurdly-priced one are both NULL here and indistinguishable.
+      unit: ratio
+
+    pb_ratio:
+      source_column: close, total_equity, shares_outstanding
+      derivation_formula: "_clamp(_div(price_at_compute, bvps))"
+      transformation_rule: price over book value per share, clamped at 9,999
+      unit: ratio
+
+    ps_ratio:
+      source_column: close, shares_outstanding, revenue
+      derivation_formula: "_clamp(_div(market_cap, revenue))"
+      transformation_rule: market cap over revenue, both in millions
+      unit: ratio
+
+    enterprise_value:
+      source_column: close, shares_outstanding, net_debt
+      derivation_formula: "round(market_cap + net_debt, 2)"
+      transformation_rule: market cap plus net debt, in millions
+      business_rule: >
+        NULL when either term is missing - no partial EV is formed. net_debt
+        comes from the balance sheet as reported and is not recomputed from
+        debt minus cash here.
+      unit: AUD millions
+
+    ev_ebitda:
+      source_column: enterprise_value, ebitda
+      derivation_formula: "_clamp(_div(enterprise_value, ebitda))"
+      transformation_rule: EV over EBITDA, clamped at 9,999
+      unit: ratio
+
+    ev_ebit:
+      source_column: enterprise_value, ebit
+      derivation_formula: "_clamp(_div(enterprise_value, ebit))"
+      transformation_rule: EV over EBIT, clamped at 9,999
+      unit: ratio
+
+    ev_revenue:
+      source_column: enterprise_value, revenue
+      derivation_formula: "_clamp(_div(enterprise_value, revenue))"
+      transformation_rule: EV over revenue, clamped at 9,999
+      unit: ratio
+
+    earnings_yield:
+      source_column: net_profit, shares_outstanding, close
+      derivation_formula: "_clamp(_div(eps, price_at_compute))"
+      transformation_rule: EPS over price - the reciprocal of pe_ratio
+      business_rule: >
+        Not exactly 1/pe_ratio: each is clamped independently, so one can be
+        NULL while the other is populated.
+      unit: ratio
+
+    fcf_yield:
+      source_column: fcf, shares_outstanding, close
+      derivation_formula: "_clamp(_div(_div(fcf, shares_outstanding / 1e6), price_at_compute))"
+      transformation_rule: free cash flow per share over price
+      business_rule: >
+        FCF is in millions and shares are a raw count, so the inner division
+        scales shares to millions first. Inherits the share-count proxy.
+      unit: ratio
+
+    graham_number:
+      source_column: net_profit, total_equity, shares_outstanding
+      derivation_formula: "sqrt(22.5 * eps * bvps), only when eps > 0 AND bvps > 0"
+      transformation_rule: Benjamin Graham's fair-value estimate
+      business_rule: >
+        Computed ONLY when both EPS and BVPS are strictly positive, so every
+        loss-making or negative-equity company is NULL here by construction
+        rather than by missing data. 22.5 is Graham's 15 x 1.5 constant,
+        hardcoded.
+      unit: AUD per share
+
+    # ── Per share ─────────────────────────────────────────────────────────
+    eps:
+      source_table: financials.annual_pnl, financials.annual_balance_sheet
+      source_column: eps, net_profit, shares_outstanding
+      derivation_formula: "p.eps, else round(net_profit / (shares_outstanding / 1e6), 4); then withheld if |eps| > 10,000"
+      transformation_rule: reported EPS, else derived from net profit and shares
+      business_rule: >
+        ALWAYS DERIVED IN PRACTICE. annual_pnl.eps is NULL for every ASX
+        stock - EODHD does not provide per-share data in the income-statement
+        endpoint - so this is net profit over shares, with the share count
+        subject to the current-count proxy.
+
+        The implausibility bound is applied BEFORE the value is written back
+        into the working frame, deliberately: otherwise an impossible EPS
+        would propagate into eps_growth_1y and the EPS CAGRs even after the
+        stored eps itself was withheld.
+      unit: AUD per share
+
+    eps_diluted:
+      source_table: financials.annual_pnl
+      source_column: eps_diluted
+      transformation_rule: direct copy, no derivation and no fallback
+      business_rule: >
+        Taken straight from the feed with no proxy behind it. Where the feed
+        is empty this is NULL even though `eps` beside it is populated, so
+        the two columns have different coverage for the same company-year.
+      unit: AUD per share
+
+    bvps:
+      source_table: financials.annual_balance_sheet
+      source_column: book_value_per_share, total_equity, shares_outstanding
+      derivation_formula: "b.book_value_per_share, else round(total_equity / (shares_outstanding / 1e6), 4); withheld if |bvps| > 10,000"
+      transformation_rule: reported BVPS, else equity over shares
+      business_rule: >
+        Mirrors eps: the feed's own column is NULL, so this is equity over
+        shares with the same proxy caveat. The implausibility bound applies
+        to the feed's value too, not only the derived one - it is a statement
+        about what a per-share figure can be, not about where it came from.
+      unit: AUD per share
+
+    dps:
+      source_table: market.dividends
+      source_column: amount_per_share
+      derivation_formula: "SUM(amount_per_share) over period_end_date - 1 year < ex_date <= period_end_date, excluding specials"
+      transformation_rule: dividends summed over the 12 months to the year end
+      business_rule: >
+        REBUILT FROM market.dividends, not taken from the P&L - annual_pnl.dps
+        is NULL across the feed.
+
+        Three consequences. The window is on EX-DATE, so a dividend declared
+        in the year but going ex after the balance date falls into the next
+        row. SPECIAL DIVIDENDS ARE EXCLUDED by a
+        `dividend_type NOT LIKE '%special%'` match, so the figure is the
+        ordinary dividend and will not reconcile to cash actually paid. And
+        the window is a rolling 12 months to period_end_date, which is only
+        the fiscal year when the company's year is 12 months long.
+      unit: AUD per share
+
+    franking_pct:
+      source_table: market.dividends
+      source_column: franking_pct
+      derivation_formula: "AVG(franking_pct) over the same dividend window, else annual_pnl.dps_franking_pct"
+      transformation_rule: mean franking across the year's dividends
+      business_rule: >
+        An UNWEIGHTED mean across the dividends in the window, so a small
+        fully-franked dividend counts as much as a large unfranked one.
+        PERCENT (0-100), unlike the ratio-valued columns around it.
+      unit: percent
+
+    # ── Dividend ──────────────────────────────────────────────────────────
+    dividend_yield:
+      source_column: amount_per_share, close
+      derivation_formula: "_clamp(_div(dps, price_at_compute))"
+      transformation_rule: dividend per share over price at year end
+      business_rule: Unfranked. A ratio, not a percent.
+      unit: ratio
+
+    franked_yield:
+      source_column: amount_per_share, franking_pct, close
+      derivation_formula: "_clamp(round(dividend_yield * (1 + (franking_pct / 100) * 0.4286), 4))"
+      transformation_rule: dividend yield grossed up for franking credits
+      business_rule: >
+        0.4286 IS A HARDCODED 30% COMPANY TAX RATE (0.30 / 0.70 = 0.4286).
+        Base-rate entities - broadly, companies under A$50m turnover - are
+        taxed at 25%, where the correct factor is 0.3333. For those
+        companies this column understates the grossed-up yield, and nothing
+        on the row records which rate was applied.
+      unit: ratio
+
+    payout_ratio:
+      source_column: amount_per_share, net_profit, shares_outstanding
+      derivation_formula: "_clamp(_div(dps, eps)) when eps > 0, else NULL"
+      transformation_rule: dividends over earnings, positive earnings only
+      business_rule: >
+        NULL for every loss-making year BY CONSTRUCTION, not by missing data.
+        A company paying a dividend out of reserves while loss-making - which
+        is exactly when a payout ratio is interesting - shows nothing here.
+      unit: ratio
+
+    dividend_cagr_3y:
+      source_column: amount_per_share
+      derivation_formula: "_cagr(dps, yearly[i-3].dps, 3)"
+      transformation_rule: 3-year compound growth in dividend per share
+      business_rule: >
+        POSITIONAL, not year-resolved: it reads three LIST ENTRIES back, not
+        fiscal_year - 3. The CAGR columns below were repaired to resolve by
+        year; these two were not, so for a company with a gap in its reported
+        years the span is longer than three and the rate is overstated.
+      unit: ratio
+
+    dividend_cagr_5y:
+      source_column: amount_per_share
+      derivation_formula: "_cagr(dps, yearly[i-5].dps, 5)"
+      transformation_rule: 5-year compound growth in dividend per share
+      business_rule: Positional - see dividend_cagr_3y.
+      unit: ratio
+
+    dividend_consecutive_yrs:
+      source_column: amount_per_share
+      derivation_formula: "consecutive_div_years(fin), computed ONLY for the latest fiscal year"
+      transformation_rule: run of consecutive years with a dividend
+      business_rule: >
+        WRITTEN ONLY ON THE MOST RECENT ROW; every historical row carries
+        NULL, marked in the code as "expensive". So this column cannot be
+        used to ask what the streak was in any past year - only the newest
+        row has a value.
+      unit: years
+
+    # ── Returns on capital ────────────────────────────────────────────────
+    roe:
+      source_column: net_profit, total_equity
+      derivation_formula: "_div(net_profit, (total_equity + prior.total_equity) / 2)"
+      transformation_rule: net profit over AVERAGE equity
+      business_rule: >
+        Average of opening and closing equity - EXCEPT on the first reported
+        year, where there is no prior row and CLOSING equity is used instead.
+        The earliest row of every company therefore uses a different
+        denominator from the rest of its series, and nothing marks it.
+      unit: ratio
+
+    roa:
+      source_column: net_profit, total_assets
+      derivation_formula: "_div(net_profit, (total_assets + prior.total_assets) / 2)"
+      transformation_rule: net profit over average total assets
+      business_rule: Same first-year caveat as roe.
+      unit: ratio
+
+    roce:
+      source_column: ebit, total_assets, total_current_liab
+      derivation_formula: "_div(ebit, total_assets - total_current_liab)"
+      transformation_rule: EBIT over capital employed
+      business_rule: >
+        Capital employed is CLOSING assets less current liabilities, not an
+        average - so roce and roe use different conventions for the same
+        year. NULL when either balance-sheet term is missing.
+      unit: ratio
+
+    roic:
+      source_column: net_profit, total_equity, net_debt
+      derivation_formula: "_div(net_profit, total_equity + net_debt)"
+      transformation_rule: net profit over invested capital
+      business_rule: >
+        USES NET PROFIT, NOT NOPAT. The conventional ROIC numerator is
+        after-tax operating profit, which excludes interest and one-offs;
+        net profit includes both. For a geared company this understates
+        return on capital, and it is not comparable with a published ROIC.
+
+        Invested capital is closing equity plus net debt, again unaveraged.
+      unit: ratio
+
+    # ── Margins ───────────────────────────────────────────────────────────
+    gross_margin:
+      source_table: financials.annual_pnl
+      source_column: gpm, gross_profit, revenue
+      derivation_formula: "p.gpm, else _div(gross_profit, revenue)"
+      transformation_rule: stored margin preferred, else computed
+      business_rule: >
+        The `or` fallback treats a stored margin of exactly 0.0 as missing
+        and recomputes it. The recomputation yields 0.0 again, so the value
+        is unaffected - but the same pattern on a column where zero is
+        meaningful would silently substitute.
+      unit: ratio
+
+    ebitda_margin:
+      source_table: financials.annual_pnl
+      source_column: ebitda_margin, ebitda, revenue
+      derivation_formula: "p.ebitda_margin, else _div(ebitda, revenue)"
+      transformation_rule: stored margin preferred, else computed
+      unit: ratio
+
+    ebit_margin:
+      source_table: financials.annual_pnl
+      source_column: opm, ebit, revenue
+      derivation_formula: "p.opm, else _div(ebit, revenue)"
+      transformation_rule: stored operating margin preferred, else computed
+      business_rule: >
+        Sourced from `opm` (operating margin) and stored as ebit_margin. The
+        two names travel together through this pipeline; the metric series
+        that feeds avg_operating_margin_* is keyed "operating_margin" and
+        carries this same value.
+      unit: ratio
+
+    net_margin:
+      source_table: financials.annual_pnl
+      source_column: npm, net_profit, revenue
+      derivation_formula: "p.npm, else _div(net_profit, revenue)"
+      transformation_rule: stored margin preferred, else computed
+      unit: ratio
+
+    ocf_margin:
+      source_table: financials.annual_cashflow
+      source_column: cfo, revenue
+      derivation_formula: "_div(cfo, revenue)"
+      transformation_rule: operating cash flow over revenue
+      business_rule: Always computed - the feed supplies no stored equivalent.
+      unit: ratio
+
+    fcf_margin:
+      source_table: financials.annual_cashflow
+      source_column: fcf, revenue
+      derivation_formula: "_div(fcf, revenue)"
+      transformation_rule: free cash flow over revenue
+      unit: ratio
+
+    # ── Efficiency ────────────────────────────────────────────────────────
+    asset_turnover:
+      source_column: revenue, total_assets
+      derivation_formula: "_div(revenue, (total_assets + prior.total_assets) / 2)"
+      transformation_rule: revenue over average total assets
+      unit: ratio
+
+    receivables_turnover:
+      source_column: revenue, trade_receivables
+      derivation_formula: "_div(revenue, trade_receivables)"
+      transformation_rule: revenue over closing trade receivables
+      business_rule: Closing receivables, not average - unlike asset_turnover beside it.
+      unit: ratio
+
+    receivables_days:
+      source_column: revenue, trade_receivables
+      derivation_formula: "_clamp(round(365 / receivables_turnover, 2), 9999) when turnover > 0"
+      transformation_rule: days sales outstanding
+      business_rule: >
+        365 CALENDAR DAYS, not trading days. Clamped at 9,999 days (27
+        years) after the column overflowed NUMERIC(8,2) for companies with
+        near-zero revenue - so NULL here can mean "absurd", not "unknown".
+      unit: days
+
+    capex_intensity:
+      source_table: financials.annual_cashflow
+      source_column: capex, revenue
+      derivation_formula: "_div(abs(capex), revenue)"
+      transformation_rule: absolute capex over revenue
+      business_rule: >
+        ABSOLUTE VALUE of capex, because cash-flow statements report it
+        negative. Always non-negative here.
+      unit: ratio
+
+    # ── Leverage and liquidity ────────────────────────────────────────────
+    current_ratio:
+      source_column: total_current_assets, total_current_liab
+      derivation_formula: "_div(total_current_assets, total_current_liab)"
+      transformation_rule: current assets over current liabilities
+      unit: ratio
+
+    debt_to_equity:
+      source_column: total_debt, total_equity
+      derivation_formula: "_div(total_debt, total_equity)"
+      transformation_rule: total debt over equity
+      business_rule: >
+        Negative where equity is negative, which is a real state and not an
+        error - but it sorts below zero-debt companies in a screen.
+      unit: ratio
+
+    debt_to_assets:
+      source_column: total_debt, total_assets
+      derivation_formula: "_div(total_debt, total_assets)"
+      transformation_rule: total debt over total assets
+      unit: ratio
+
+    net_debt_to_ebitda:
+      source_column: net_debt, ebitda
+      derivation_formula: "_div(net_debt, ebitda)"
+      transformation_rule: net debt over EBITDA
+      business_rule: >
+        NULL when EBITDA is zero. Negative when the company is net cash, and
+        also negative when EBITDA is negative - two opposite situations
+        producing the same sign.
+      unit: ratio
+
+    interest_coverage:
+      source_column: ebit, interest_expense
+      derivation_formula: "_div(ebit, interest_expense)"
+      transformation_rule: EBIT over interest expense
+      business_rule: NULL for a company with no interest expense, not infinity.
+      unit: ratio
+
+    lt_debt_to_capital:
+      source_column: long_term_debt, total_equity
+      derivation_formula: "_div(long_term_debt, long_term_debt + total_equity)"
+      transformation_rule: long-term debt over total capital
+      unit: ratio
+
+    # ── Quality scores ────────────────────────────────────────────────────
+    piotroski_f_score:
+      source_column: n/a
+      derivation_formula: "NULL - f_score is set to None unconditionally"
+      transformation_rule: NOT COMPUTED
+      business_rule: >
+        DELIBERATELY NOT COMPUTED. piotroski_f_score() raises
+        UnsupportedComputation, and calling it would end the run rather than
+        withhold one metric, so the column is written NULL on every row.
+
+        The applicability contract supplies the reason downstream -
+        UNAVAILABLE / COMPUTATION_UNSUPPORTED - so the absence states
+        "nobody can compute this", not "this company has no value". This is
+        the distinction that a bare NULL would destroy, and it is why the
+        column is written rather than skipped.
+      unit: score 0-9
+      status: written NULL by design
+
+    altman_z_score:
+      source_column: multiple balance-sheet and P&L fields, market_cap
+      derivation_formula: "altman_z_score(row, market_cap)"
+      transformation_rule: Altman Z bankruptcy score
+      business_rule: >
+        Depends on market_cap, so it inherits the share-count proxy. Not
+        meaningful for financial institutions, whose balance sheets break the
+        model's assumptions; nothing here excludes them.
+      unit: score
+
+    # ── Year-on-year growth ───────────────────────────────────────────────
+    # All eight use _cagr(current, prior_row, 1) - the immediately preceding
+    # LIST ENTRY, not fiscal_year - 1. For a company with a reporting gap the
+    # "1-year" growth spans the gap.
+    revenue_growth_1y:
+      source_column: revenue
+      derivation_formula: "_cagr(revenue, prior_row.revenue, 1)"
+      transformation_rule: year-on-year revenue growth
+      business_rule: >
+        Positional. NULL when the prior value is zero or the two straddle
+        zero, so a company returning to revenue from nothing shows no growth
+        rate.
+      unit: ratio
+
+    gross_profit_growth_1y:
+      source_column: gross_profit
+      derivation_formula: "_cagr(gross_profit, prior_row.gross_profit, 1)"
+      transformation_rule: year-on-year gross profit growth
+      unit: ratio
+
+    ebitda_growth_1y:
+      source_column: ebitda
+      derivation_formula: "_cagr(ebitda, prior_row.ebitda, 1)"
+      transformation_rule: year-on-year EBITDA growth
+      unit: ratio
+
+    net_income_growth_1y:
+      source_column: net_profit
+      derivation_formula: "_cagr(net_profit, prior_row.net_profit, 1)"
+      transformation_rule: year-on-year net profit growth
+      business_rule: >
+        NULL whenever the company crossed between profit and loss in either
+        direction - the sign-straddle rule. The years a reader most wants a
+        growth number are the years this is empty.
+      unit: ratio
+
+    eps_growth_1y:
+      source_column: eps
+      derivation_formula: "_cagr(eps, prior_row.eps, 1)"
+      transformation_rule: year-on-year EPS growth
+      business_rule: >
+        Reads the WRITTEN-BACK eps, so it is built on the derived,
+        proxy-share value and on the implausibility bound applied before
+        write-back.
+      unit: ratio
+
+    ocf_growth_1y:
+      source_column: cfo
+      derivation_formula: "_cagr(cfo, prior_row.cfo, 1)"
+      transformation_rule: year-on-year operating cash flow growth
+      unit: ratio
+
+    fcf_growth_1y:
+      source_column: fcf
+      derivation_formula: "_cagr(fcf, prior_row.fcf, 1)"
+      transformation_rule: year-on-year free cash flow growth
+      unit: ratio
+
+    bvps_growth_1y:
+      source_column: book_value_per_share
+      derivation_formula: "_cagr(bvps, prior_row.book_value_per_share, 1)"
+      transformation_rule: year-on-year book value per share growth
+      unit: ratio
+
+    # ── Multi-year CAGRs ──────────────────────────────────────────────────
+    # All use cn(field, n), which resolves by_year[fiscal_year - n]. The
+    # horizon is the YEAR NAMED, so a missing intervening year yields NULL
+    # rather than a rate over the wrong span. The previous positional form
+    # reported MNE eps_3y as 29.6% over a real 8-year span (true 10.2%).
+    revenue_cagr_3y:
+      source_column: revenue
+      derivation_formula: "_cagr(revenue, by_year[fiscal_year - 3].revenue, 3)"
+      transformation_rule: 3-year compound revenue growth, year-resolved
+      unit: ratio
+
+    revenue_cagr_5y:
+      source_column: revenue
+      derivation_formula: "_cagr(revenue, by_year[fiscal_year - 5].revenue, 5)"
+      transformation_rule: 5-year compound revenue growth, year-resolved
+      unit: ratio
+
+    revenue_cagr_7y:
+      source_column: revenue
+      derivation_formula: "_cagr(revenue, by_year[fiscal_year - 7].revenue, 7)"
+      transformation_rule: 7-year compound revenue growth, year-resolved
+      unit: ratio
+
+    revenue_cagr_10y:
+      source_column: revenue
+      derivation_formula: "_cagr(revenue, by_year[fiscal_year - 10].revenue, 10)"
+      transformation_rule: 10-year compound revenue growth, year-resolved
+      unit: ratio
+
+    net_income_cagr_3y:
+      source_column: net_profit
+      derivation_formula: "_cagr(net_profit, by_year[fiscal_year - 3].net_profit, 3)"
+      transformation_rule: 3-year compound net profit growth, year-resolved
+      unit: ratio
+
+    net_income_cagr_5y:
+      source_column: net_profit
+      derivation_formula: "_cagr(net_profit, by_year[fiscal_year - 5].net_profit, 5)"
+      transformation_rule: 5-year compound net profit growth, year-resolved
+      unit: ratio
+
+    eps_cagr_3y:
+      source_column: eps
+      derivation_formula: "_cagr(eps, by_year[fiscal_year - 3].eps, 3)"
+      transformation_rule: 3-year compound EPS growth, year-resolved
+      unit: ratio
+
+    eps_cagr_5y:
+      source_column: eps
+      derivation_formula: "_cagr(eps, by_year[fiscal_year - 5].eps, 5)"
+      transformation_rule: 5-year compound EPS growth, year-resolved
+      unit: ratio
+
+    ebitda_cagr_3y:
+      source_column: ebitda
+      derivation_formula: "_cagr(ebitda, by_year[fiscal_year - 3].ebitda, 3)"
+      transformation_rule: 3-year compound EBITDA growth, year-resolved
+      unit: ratio
+
+    ebitda_cagr_5y:
+      source_column: ebitda
+      derivation_formula: "_cagr(ebitda, by_year[fiscal_year - 5].ebitda, 5)"
+      transformation_rule: 5-year compound EBITDA growth, year-resolved
+      unit: ratio
+
+    fcf_cagr_3y:
+      source_column: fcf
+      derivation_formula: "_cagr(fcf, by_year[fiscal_year - 3].fcf, 3)"
+      transformation_rule: 3-year compound free cash flow growth, year-resolved
+      unit: ratio
+
+    fcf_cagr_5y:
+      source_column: fcf
+      derivation_formula: "_cagr(fcf, by_year[fiscal_year - 5].fcf, 5)"
+      transformation_rule: 5-year compound free cash flow growth, year-resolved
+      unit: ratio
+
+    gross_profit_cagr_3y:
+      source_column: gross_profit
+      derivation_formula: "_cagr(gross_profit, by_year[fiscal_year - 3].gross_profit, 3)"
+      transformation_rule: 3-year compound gross profit growth, year-resolved
+      unit: ratio
+
+    gross_profit_cagr_5y:
+      source_column: gross_profit
+      derivation_formula: "_cagr(gross_profit, by_year[fiscal_year - 5].gross_profit, 5)"
+      transformation_rule: 5-year compound gross profit growth, year-resolved
+      unit: ratio
+
+    bvps_cagr_3y:
+      source_column: book_value_per_share
+      derivation_formula: "_cagr(bvps, by_year[fiscal_year - 3].book_value_per_share, 3)"
+      transformation_rule: 3-year compound BVPS growth, year-resolved
+      unit: ratio
+
+    bvps_cagr_5y:
+      source_column: book_value_per_share
+      derivation_formula: "_cagr(bvps, by_year[fiscal_year - 5].book_value_per_share, 5)"
+      transformation_rule: 5-year compound BVPS growth, year-resolved
+      unit: ratio
+
+    # ── Rolling averages ──────────────────────────────────────────────────
+    # All use average_over(series, fiscal_year, n): the mean of EXACTLY n
+    # named fiscal years, or NULL. A None in the series is recorded rather
+    # than dropped, so "this year has no ROIC" prevents a one-year mean from
+    # calling itself three.
+    avg_roe_3y:
+      source_column: net_profit, total_equity
+      derivation_formula: "average_over(roe series, fiscal_year, 3)"
+      transformation_rule: mean ROE over exactly three named fiscal years
+      unit: ratio
+
+    avg_roe_5y:
+      source_column: net_profit, total_equity
+      derivation_formula: "average_over(roe series, fiscal_year, 5)"
+      transformation_rule: mean ROE over exactly five named fiscal years
+      unit: ratio
+
+    avg_roa_3y:
+      source_column: net_profit, total_assets
+      derivation_formula: "average_over(roa series, fiscal_year, 3)"
+      transformation_rule: mean ROA over exactly three named fiscal years
+      unit: ratio
+
+    avg_roa_5y:
+      source_column: net_profit, total_assets
+      derivation_formula: "average_over(roa series, fiscal_year, 5)"
+      transformation_rule: mean ROA over exactly five named fiscal years
+      unit: ratio
+
+    avg_roce_3y:
+      source_column: ebit, total_assets, total_current_liab
+      derivation_formula: "average_over(roce series, fiscal_year, 3)"
+      transformation_rule: mean ROCE over exactly three named fiscal years
+      unit: ratio
+
+    avg_roce_5y:
+      source_column: ebit, total_assets, total_current_liab
+      derivation_formula: "average_over(roce series, fiscal_year, 5)"
+      transformation_rule: mean ROCE over exactly five named fiscal years
+      unit: ratio
+
+    avg_gross_margin_3y:
+      source_column: gross_profit, revenue
+      derivation_formula: "average_over(gross_margin series, fiscal_year, 3)"
+      transformation_rule: mean gross margin over exactly three named fiscal years
+      unit: ratio
+
+    avg_gross_margin_5y:
+      source_column: gross_profit, revenue
+      derivation_formula: "average_over(gross_margin series, fiscal_year, 5)"
+      transformation_rule: mean gross margin over exactly five named fiscal years
+      unit: ratio
+
+    avg_ebitda_margin_3y:
+      source_column: ebitda, revenue
+      derivation_formula: "average_over(ebitda_margin series, fiscal_year, 3)"
+      transformation_rule: mean EBITDA margin over exactly three named fiscal years
+      unit: ratio
+
+    avg_ebitda_margin_5y:
+      source_column: ebitda, revenue
+      derivation_formula: "average_over(ebitda_margin series, fiscal_year, 5)"
+      transformation_rule: mean EBITDA margin over exactly five named fiscal years
+      unit: ratio
+
+    avg_operating_margin_3y:
+      source_column: opm, ebit, revenue
+      derivation_formula: "average_over(operating_margin series, fiscal_year, 3)"
+      transformation_rule: mean operating margin over exactly three named fiscal years
+      business_rule: The series holds the same value stored as ebit_margin.
+      unit: ratio
+
+    avg_operating_margin_5y:
+      source_column: opm, ebit, revenue
+      derivation_formula: "average_over(operating_margin series, fiscal_year, 5)"
+      transformation_rule: mean operating margin over exactly five named fiscal years
+      unit: ratio
+
+    avg_net_margin_3y:
+      source_column: net_profit, revenue
+      derivation_formula: "average_over(net_margin series, fiscal_year, 3)"
+      transformation_rule: mean net margin over exactly three named fiscal years
+      unit: ratio
+
+    avg_net_margin_5y:
+      source_column: net_profit, revenue
+      derivation_formula: "average_over(net_margin series, fiscal_year, 5)"
+      transformation_rule: mean net margin over exactly five named fiscal years
+      unit: ratio
+
+    avg_eps_growth_3y:
+      source_column: eps
+      derivation_formula: "average_over(eps_growth series, fiscal_year, 3)"
+      transformation_rule: mean of three years of YoY EPS growth
+      business_rule: >
+        A MEAN OF GROWTH RATES, not a CAGR - arithmetic rather than
+        geometric, so it exceeds the equivalent compound rate whenever the
+        rates vary. eps_cagr_3y beside it is the geometric measure.
+      unit: ratio
+
+    avg_eps_growth_5y:
+      source_column: eps
+      derivation_formula: "average_over(eps_growth series, fiscal_year, 5)"
+      transformation_rule: mean of five years of YoY EPS growth
+      business_rule: Arithmetic mean of rates - see avg_eps_growth_3y.
+      unit: ratio
+
+    avg_roic_3y:
+      source_column: net_profit, total_equity, net_debt
+      derivation_formula: "average_over(roic series, fiscal_year, 3)"
+      transformation_rule: mean ROIC over exactly three named fiscal years
+      business_rule: >
+        Sparse by nature: 537 of 1,594 contiguous three-year windows hold
+        fewer than three ROIC observations, so this is NULL far more often
+        than its siblings. That is the metric's own thinness, not a defect -
+        and the contract refuses to manufacture a three-year average from
+        one observation.
+      unit: ratio
+
+    avg_roic_5y:
+      source_column: net_profit, total_equity, net_debt
+      derivation_formula: "average_over(roic series, fiscal_year, 5)"
+      transformation_rule: mean ROIC over exactly five named fiscal years
+      unit: ratio
+
+    # ── Risk (price-derived) ──────────────────────────────────────────────
+    volatility_1y:
+      source_table: market.daily_prices
+      source_column: close
+      derivation_formula: "sharpe_drawdown_vol(price_window(prices, period_end_date))"
+      transformation_rule: annualised volatility over the window ending at the year end
+      business_rule: >
+        Measured to the FISCAL YEAR END, not to today. Unadjusted prices, so
+        a split inside the window registers as a large return.
+      unit: ratio
+
+    sharpe_1y:
+      source_table: market.daily_prices
+      source_column: close
+      derivation_formula: "sharpe_drawdown_vol(price_window(prices, period_end_date))"
+      transformation_rule: Sharpe ratio over the window ending at the year end
+      unit: ratio
+
+    max_drawdown_1y:
+      source_table: market.daily_prices
+      source_column: close
+      derivation_formula: "sharpe_drawdown_vol(price_window(prices, period_end_date))"
+      transformation_rule: maximum peak-to-trough decline in the window
+      unit: ratio
+
+    # ── Raw financials, denormalised ──────────────────────────────────────
+    # Copied unchanged so history queries need no join back to financials.*.
+    # All in AUD millions.
+    revenue:
+      source_table: financials.annual_pnl
+      source_column: revenue
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    ebitda:
+      source_table: financials.annual_pnl
+      source_column: ebitda
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    net_profit:
+      source_table: financials.annual_pnl
+      source_column: net_profit
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    cfo:
+      source_table: financials.annual_cashflow
+      source_column: cfo
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    capex:
+      source_table: financials.annual_cashflow
+      source_column: capex
+      transformation_rule: direct copy, sign preserved
+      business_rule: >
+        NEGATIVE as the cash-flow statement reports it. capex_intensity above
+        takes the absolute value; this column does not.
+      unit: AUD millions
+
+    cfi:
+      source_table: financials.annual_cashflow
+      source_column: cfi
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    fcf:
+      source_table: financials.annual_cashflow
+      source_column: fcf
+      transformation_rule: direct copy
+      business_rule: As the feed supplies it; not recomputed as cfo - capex here.
+      unit: AUD millions
+
+    total_debt:
+      source_table: financials.annual_balance_sheet
+      source_column: total_debt
+      transformation_rule: direct copy
+      business_rule: >
+        Inherits annual_balance_sheet.total_debt, which FABRICATES A ZERO
+        when short-term debt is missing - see the Bronze->Silver mapping for
+        that table. A zero here may mean "no debt" or "not reported".
+      unit: AUD millions
+
+    working_capital:
+      source_column: total_current_assets, total_current_liab
+      derivation_formula: "round(total_current_assets - total_current_liab, 2)"
+      transformation_rule: current assets less current liabilities
+      business_rule: >
+        RECOMPUTED here rather than copied, even though
+        annual_balance_sheet.working_capital exists and was fetched. The two
+        can disagree if the feed's own figure uses a different definition.
+      unit: AUD millions
+
+    cash:
+      source_table: financials.annual_balance_sheet
+      source_column: cash_equivalents
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    total_equity:
+      source_table: financials.annual_balance_sheet
+      source_column: total_equity
+      transformation_rule: direct copy
+      unit: AUD millions
+
+    inventory:
+      source_table: financials.annual_balance_sheet
+      source_column: inventory
+      transformation_rule: direct copy
+      business_rule: >
+        Copied through but USED BY NO RATIO in this engine - the code notes
+        "inventory was fetched and never used". inventory_turnover,
+        inventory_days and cash_conversion_cycle all exist as columns and
+        none is written.
+      unit: AUD millions
+
+    # ── Retired price returns, written NULL on purpose ────────────────────
+    return_3y:
+      source_column: n/a
+      derivation_formula: "NULL"
+      transformation_rule: RETIRED - moved to technical_compute in v11.2.63
+      business_rule: >
+        WRITTEN AS EXPLICIT NULL, not dropped from the INSERT. The column
+        still exists, and leaving it unwritten would freeze the last value
+        this engine produced - the mechanism that kept return_2y/4y/6y/8y/9y
+        alive in screener.universe after their producer was removed.
+
+        Replaced by market.daily_metrics.return_3y, which is anchored with a
+        grace bound, measured to today rather than to the fiscal period end,
+        and withheld across corporate actions that cannot be adjusted out.
+
+        Contrast the 64 columns at the end of this file, which are omitted
+        from the write entirely and are therefore frozen. The protection
+        applied here was not applied to those.
+      unit: ratio
+      status: written NULL by design (retired)
+
+    return_5y:
+      source_column: n/a
+      derivation_formula: "NULL"
+      transformation_rule: RETIRED - see return_3y
+      business_rule: Written as explicit NULL. See return_3y.
+      unit: ratio
+      status: written NULL by design (retired)
+
+    return_7y:
+      source_column: n/a
+      derivation_formula: "NULL"
+      transformation_rule: RETIRED - see return_3y
+      business_rule: Written as explicit NULL. See return_3y.
+      unit: ratio
+      status: written NULL by design (retired)
+
+    return_10y:
+      source_column: n/a
+      derivation_formula: "NULL"
+      transformation_rule: RETIRED - see return_3y
+      business_rule: Written as explicit NULL. See return_3y.
+      unit: ratio
+      status: written NULL by design (retired)
+
+    return_15y:
+      source_column: n/a
+      derivation_formula: "NULL"
+      transformation_rule: RETIRED - see return_3y
+      business_rule: Written as explicit NULL. See return_3y.
+      unit: ratio
+      status: written NULL by design (retired)
+
+    # ── Cash-quality and dilution ─────────────────────────────────────────
+    ocf_to_net_profit:
+      source_column: cfo, net_profit
+      derivation_formula: "_clamp(_div(cfo, net_profit))"
+      transformation_rule: operating cash flow over net profit
+      business_rule: >
+        Earnings quality. Above 1 means profit is backed by cash. NEGATIVE
+        when either term is negative, so a loss-making company with positive
+        cash flow and a profitable one burning cash both show negative.
+      unit: ratio
+
+    fcf_payout_ratio:
+      source_column: dividends_paid, fcf
+      derivation_formula: "_clamp(_div(abs(dividends_paid), abs(fcf))) when abs(fcf) > 0"
+      transformation_rule: dividends paid over free cash flow, both absolute
+      business_rule: >
+        BOTH TERMS ABSOLUTE, because dividends_paid is negative in the cash
+        flow statement. A consequence: a company with NEGATIVE free cash flow
+        paying a dividend produces a positive, ordinary-looking ratio, when
+        the fact worth seeing is that the dividend was not funded by
+        operations at all.
+      unit: ratio
+
+    shares_dilution_3y:
+      source_column: shares_outstanding
+      derivation_formula: "_cagr(shares_outstanding, yearly[i-3].shares_outstanding, 3) when both > 0"
+      transformation_rule: 3-year compound growth in share count
+      business_rule: >
+        Positive means dilution, negative means buyback. POSITIONAL - reads
+        three list entries back, not fiscal_year - 3.
+
+        Where the current-share-count proxy is in use, both ends of this
+        comparison are the SAME number and the result is 0.0 - reported as
+        "no dilution" for precisely the companies whose share count is
+        unknown.
+      unit: ratio
+
+    eps_volatility_5y:
+      source_column: eps
+      derivation_formula: "_clamp(std(eps[-5:], ddof=1) / abs(mean(eps[-5:]))) when >= 3 non-null"
+      transformation_rule: coefficient of variation of EPS over five list entries
+      business_rule: >
+        Needs at least THREE non-null values but is named 5y, and takes the
+        last five LIST ENTRIES rather than five named fiscal years - so it
+        does not follow the average_over contract the avg_* columns do.
+        Sample standard deviation (ddof=1). NULL when mean EPS is zero.
+      unit: ratio
+
+    fcf_positive_years:
+      source_column: fcf
+      derivation_formula: "count of consecutive positive fcf values, newest first, stopping at the first non-positive"
+      transformation_rule: run length of positive free cash flow
+      business_rule: >
+        A CONSECUTIVE RUN counted backwards from the current year, so it
+        resets to 0 on any year with NULL or non-positive FCF. A NULL year
+        breaks the run exactly as a negative year does - absence and
+        negativity are treated identically.
+
+        Never NULL: the column is 0 where there is no run.
+      unit: years
+
+    # ── Composite proxy scores ────────────────────────────────────────────
+    # Each is 0-3, +1 per threshold met, and is NULL only when ALL of its
+    # inputs are NULL. So a score of 0 can mean "met no threshold" or "met
+    # none of the thresholds it could evaluate" - a company with one input
+    # present and two missing scores 0 the same as one that failed all three.
+    asset_light_score:
+      source_column: capex, revenue, fcf, total_assets
+      derivation_formula: "+1 if capex_intensity < 0.05; +1 if fcf_margin > 0.10; +1 if asset_turnover > 0.5"
+      transformation_rule: 0-3 composite, NULL only when all three inputs are NULL
+      business_rule: >
+        Partial evaluation is invisible: see the group note above.
+      unit: score 0-3
+
+    brand_proxy_score:
+      source_column: net_profit, total_equity, net_debt, fcf, revenue
+      derivation_formula: "+1 if avg_roe_5y > 0.15; +1 if avg_roic_5y > 0.12; +1 if fcf_margin > 0.10"
+      transformation_rule: 0-3 pricing-power proxy
+      business_rule: >
+        Two of the three inputs are 5-year averages under the exactly-n
+        contract, so they are NULL for any company without five contiguous
+        years - and the score then rests on fcf_margin alone while still
+        presenting as a 0-3 composite.
+      unit: score 0-3
+
+    capital_efficiency_score:
+      source_column: revenue, capex, net_profit, total_equity, net_debt
+      derivation_formula: "+1 if revenue_cagr_5y > 0.10; +1 if capex_intensity < 0.05; +1 if roic > 0.15"
+      transformation_rule: 0-3 scalability proxy
+      unit: score 0-3
+
+    earnings_stability_score:
+      source_column: eps, fcf, revenue
+      derivation_formula: "+1 if eps_volatility_5y < 0.20; +1 if fcf_positive_years >= 4; +1 if revenue_cagr_5y > 0"
+      transformation_rule: 0-3 predictability proxy
+      business_rule: >
+        fcf_positive_years is never NULL, so this score always has at least
+        one evaluable input and is therefore never NULL - unlike its three
+        siblings.
+      unit: score 0-3
+
+    gross_margin_stability:
+      source_column: gross_profit, revenue
+      derivation_formula: "_clamp(std(gross_margin[-5:], ddof=1)) when >= 3 non-null"
+      transformation_rule: standard deviation of gross margin over five list entries
+      business_rule: >
+        A DISPERSION, so LOWER is more stable - the opposite direction to
+        every score beside it, where higher is better. Positional five, not
+        five named fiscal years.
+      unit: ratio (standard deviation)
+
+    revenue_predictability:
+      source_column: revenue
+      derivation_formula: "_clamp(std(revenue_growth_1y[-5:], ddof=1) / abs(mean(...))) when >= 3 non-null"
+      transformation_rule: coefficient of variation of revenue growth
+      business_rule: >
+        LOWER is more predictable, again the opposite direction to the
+        scores. Built on revenue_growth_1y, so it inherits that column's
+        NULLs wherever growth straddled zero - and a company that swung
+        through zero revenue is excluded from the sample rather than
+        counted as volatile.
+      unit: ratio
+
+    # ── Provenance ────────────────────────────────────────────────────────
+    compute_version:
+      source_system: internal
+      source_column: COMPUTE_VERSION
+      transformation_rule: module constant
+      business_rule: >
+        Which version of this engine produced the row. The only on-row
+        signal that the computation rules may differ between rows.
+      unit: n/a
+
+    computed_at:
+      source_system: internal
+      source_column: datetime.now(timezone.utc)
+      transformation_rule: run timestamp, identical for every row in a run
+      business_rule: >
+        LOAD TIME. It asserts the row was produced by the run at that
+        timestamp - which is TRUE for the 124 written columns and FALSE for
+        the frozen ones listed below. See OPEN_FINDINGS.md section 6b: all
+        6,261 rows carrying a stale quick_ratio are stamped with today's
+        date.
+      unit: timestamptz

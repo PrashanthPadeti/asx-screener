@@ -1,8 +1,11 @@
 {
-  "modules_scanned": 157,
-  "modules_touching_tables": 104,
-  "tables_written": 66,
-  "layer_conflicts": {},
+  "modules_scanned": 242,
+  "modules_touching_tables": 142,
+  "tables_written": 85,
+  "layer_conflicts": {
+    "market.ai_summaries": "market.ai_summaries is written by companies.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed.",
+    "market.scheduler_job_runs": "market.scheduler_job_runs is written by pipeline_tracker.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed."
+  },
   "by_table": {
     "financials.annual_balance_sheet": {
       "written_by": [
@@ -131,6 +134,20 @@
       "layer": "Silver",
       "layer_source": "schema"
     },
+    "market.ai_summaries": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/companies.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        }
+      ],
+      "layer": "UNCLASSIFIED",
+      "layer_source": "none",
+      "layer_conflict": "market.ai_summaries is written by companies.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed."
+    },
     "market.analyst_ratings": {
       "written_by": [
         {
@@ -168,6 +185,20 @@
     },
     "market.asx_announcements": {
       "written_by": [
+        {
+          "module": "app/api/v1/routes/companies.py",
+          "operations": [
+            "insert",
+            "insert-or-ignore"
+          ]
+        },
+        {
+          "module": "app/workers/announcement_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
         {
           "module": "scripts/asx/download_announcements.py",
           "operations": [
@@ -673,6 +704,20 @@
       "layer": "Gold",
       "layer_source": "declared"
     },
+    "market.scheduler_job_runs": {
+      "written_by": [
+        {
+          "module": "app/workers/pipeline_tracker.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "UNCLASSIFIED",
+      "layer_source": "none",
+      "layer_conflict": "market.scheduler_job_runs is written by pipeline_tracker.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed."
+    },
     "market.sector_benchmarks": {
       "written_by": [
         {
@@ -814,6 +859,81 @@
       "layer": "Gold",
       "layer_source": "declared"
     },
+    "meta.job_heartbeat": {
+      "written_by": [
+        {
+          "module": "app/workers/alert_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/announcement_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/asx_indices_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/commodities_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/global_markets_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/index_prices_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/market_snapshot_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        },
+        {
+          "module": "app/workers/short_positions_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "ops.job_executions": {
+      "written_by": [
+        {
+          "module": "app/core/job_instrumentation.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
     "screener.compute_run_finalizations": {
       "written_by": [
         {
@@ -868,6 +988,20 @@
         {
           "module": "scripts/p0a_adversarial_assertions.py",
           "operations": [
+            "update"
+          ]
+        }
+      ],
+      "layer": "Universe",
+      "layer_source": "schema"
+    },
+    "screener.saved_screens": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/saved_screens.py",
+          "operations": [
+            "delete",
+            "insert",
             "update"
           ]
         }
@@ -1160,10 +1294,188 @@
       "layer": "out-of-scope",
       "layer_source": "schema"
     },
+    "support.tickets": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/support.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.alert_triggers": {
+      "written_by": [
+        {
+          "module": "app/workers/alert_worker.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.alerts": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/alerts.py",
+          "operations": [
+            "delete",
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "app/workers/alert_worker.py",
+          "operations": [
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
     "users.audit_log": {
       "written_by": [
         {
+          "module": "app/api/v1/routes/notifications.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "app/api/v1/routes/users.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
           "module": "scripts/campaigns/founding_offer_reminder.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.notification_history": {
+      "written_by": [
+        {
+          "module": "app/services/notification_service.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "app/workers/anomaly_alert_worker.py",
+          "operations": [
+            "insert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.notification_preferences": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/notifications.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.portfolio_insights": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/ai.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.portfolio_notification_state": {
+      "written_by": [
+        {
+          "module": "app/workers/portfolio_worker.py",
+          "operations": [
+            "insert",
+            "upsert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.portfolio_transactions": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/portfolio.py",
+          "operations": [
+            "delete",
+            "insert"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.portfolios": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/portfolio.py",
+          "operations": [
+            "delete",
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.sessions": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/auth.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "app/workers/cleanup_worker.py",
+          "operations": [
+            "delete"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.subscription_events": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/admin.py",
+          "operations": [
+            "insert"
+          ]
+        },
+        {
+          "module": "app/api/v1/routes/stripe_routes.py",
           "operations": [
             "insert"
           ]
@@ -1175,6 +1487,12 @@
     "users.unsubscribe_tokens": {
       "written_by": [
         {
+          "module": "app/api/v1/routes/notifications.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
           "module": "scripts/campaigns/founding_offer_reminder.py",
           "operations": [
             "insert"
@@ -1183,9 +1501,970 @@
       ],
       "layer": "out-of-scope",
       "layer_source": "schema"
+    },
+    "users.users": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/admin.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "app/api/v1/routes/auth.py",
+          "operations": [
+            "insert",
+            "update"
+          ]
+        },
+        {
+          "module": "app/api/v1/routes/notifications.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "app/api/v1/routes/stripe_routes.py",
+          "operations": [
+            "update"
+          ]
+        },
+        {
+          "module": "app/api/v1/routes/users.py",
+          "operations": [
+            "delete",
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.watchlist_items": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/watchlist.py",
+          "operations": [
+            "delete",
+            "insert",
+            "insert-or-ignore"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
+    },
+    "users.watchlists": {
+      "written_by": [
+        {
+          "module": "app/api/v1/routes/watchlist.py",
+          "operations": [
+            "delete",
+            "insert",
+            "update"
+          ]
+        }
+      ],
+      "layer": "out-of-scope",
+      "layer_source": "schema"
     }
   },
   "by_module": {
+    "app/api/v1/routes/admin.py": {
+      "writes": {
+        "users.subscription_events": [
+          "insert"
+        ],
+        "users.users": [
+          "update"
+        ]
+      },
+      "reads": [
+        "information_schema.tables",
+        "market.anomalies",
+        "market.asx_announcements",
+        "market.commodity_prices",
+        "market.computed_metrics",
+        "market.daily_prices",
+        "market.fund_prices",
+        "market.global_index_prices",
+        "market.index_prices",
+        "market.mover_snapshots",
+        "market.period_metrics",
+        "market.pipeline_runs",
+        "market.pipeline_step_runs",
+        "market.price_predictions",
+        "market.scheduler_job_runs",
+        "meta.job_heartbeat",
+        "ops.job_executions",
+        "screener.saved_screens",
+        "screener.universe",
+        "support.tickets",
+        "users.alert_triggers",
+        "users.alerts",
+        "users.notification_history",
+        "users.portfolios",
+        "users.sessions",
+        "users.watchlists"
+      ],
+      "joins": [
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = nh.user_id",
+          "line": 1184
+        },
+        {
+          "table": "users.alerts",
+          "alias": "a",
+          "on": "at.alert_id = a.id",
+          "line": 1214
+        },
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = a.user_id",
+          "line": 1214
+        },
+        {
+          "table": "screener.universe",
+          "alias": "s",
+          "on": "s.asx_code = a.asx_code",
+          "line": 1214
+        },
+        {
+          "table": "screener.universe",
+          "alias": "s",
+          "on": "s.asx_code = aa.asx_code",
+          "line": 1246
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/admin_billing.py": {
+      "writes": {},
+      "reads": [
+        "users.users"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/ai.py": {
+      "writes": {
+        "users.portfolio_insights": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [
+        "market.anomalies",
+        "screener.universe",
+        "users.portfolio_transactions",
+        "users.portfolios"
+      ],
+      "joins": [
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = a.asx_code",
+          "line": 913
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/alerts.py": {
+      "writes": {
+        "users.alerts": [
+          "delete",
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "screener.universe",
+        "users.alert_triggers"
+      ],
+      "joins": [
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = a.asx_code",
+          "line": 63
+        },
+        {
+          "table": "users.alerts",
+          "alias": "a",
+          "on": "at.alert_id = a.id",
+          "line": 131
+        },
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = a.asx_code",
+          "line": 131
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/announcements.py": {
+      "writes": {},
+      "reads": [
+        "market.asx_announcements",
+        "market.companies_current",
+        "users.watchlist_items",
+        "users.watchlists"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = a.asx_code",
+          "line": 168
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = a.asx_code",
+          "line": 187
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = a.asx_code",
+          "line": 220
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = a.asx_code",
+          "line": 253
+        },
+        {
+          "table": "users.watchlists",
+          "alias": "w",
+          "on": "w.id = wi.watchlist_id",
+          "line": 120
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/auth.py": {
+      "writes": {
+        "users.sessions": [
+          "insert",
+          "update"
+        ],
+        "users.users": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = s.user_id",
+          "line": 324
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/commodities.py": {
+      "writes": {},
+      "reads": [
+        "market.commodity_prices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/companies.py": {
+      "writes": {
+        "market.ai_summaries": [
+          "insert",
+          "upsert"
+        ],
+        "market.asx_announcements": [
+          "insert",
+          "insert-or-ignore"
+        ]
+      },
+      "reads": [
+        "financials.annual_balance_sheet",
+        "financials.annual_cashflow",
+        "financials.annual_pnl",
+        "market.capital_raises",
+        "market.companies_current",
+        "market.daily_prices",
+        "market.dividends",
+        "market.halfyearly_metrics",
+        "market.mining_metrics",
+        "market.reit_metrics",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = u.asx_code",
+          "line": 554
+        },
+        {
+          "table": "financials.annual_balance_sheet",
+          "alias": "b",
+          "on": "b.asx_code = p.asx_code AND b.fiscal_year = p.fiscal_year",
+          "line": 320
+        },
+        {
+          "table": "financials.annual_cashflow",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code AND c.fiscal_year = p.fiscal_year",
+          "line": 320
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = u.asx_code",
+          "line": 861
+        },
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = m.asx_code",
+          "line": 1034
+        },
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = r.asx_code",
+          "line": 1086
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/global_markets.py": {
+      "writes": {},
+      "reads": [
+        "market.fx_rates",
+        "market.global_index_prices",
+        "market.global_indices"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/indices_funds.py": {
+      "writes": {},
+      "reads": [
+        "market.companies_current",
+        "market.fund_prices",
+        "market.funds",
+        "market.index_prices",
+        "market.indices",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/market.py": {
+      "writes": {},
+      "reads": [
+        "market.daily_prices",
+        "market.exdiv_snapshots",
+        "market.heatmap_cache",
+        "market.heatmap_labels",
+        "market.index_snapshots",
+        "market.mover_snapshots",
+        "market.period_metrics",
+        "market.sector_snapshots",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/notifications.py": {
+      "writes": {
+        "users.audit_log": [
+          "insert"
+        ],
+        "users.notification_preferences": [
+          "insert",
+          "upsert"
+        ],
+        "users.unsubscribe_tokens": [
+          "update"
+        ],
+        "users.users": [
+          "update"
+        ]
+      },
+      "reads": [
+        "users.notification_history"
+      ],
+      "joins": [
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = u.id",
+          "line": 296
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/portfolio.py": {
+      "writes": {
+        "users.portfolio_transactions": [
+          "delete",
+          "insert"
+        ],
+        "users.portfolios": [
+          "delete",
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "market.daily_prices",
+        "market.dividends",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = d.asx_code",
+          "line": 704
+        },
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = d.asx_code",
+          "line": 716
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/predictions.py": {
+      "writes": {},
+      "reads": [
+        "market.companies_current",
+        "market.daily_prices",
+        "market.price_predictions",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code",
+          "line": 178
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = p.asx_code",
+          "line": 209
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/research.py": {
+      "writes": {},
+      "reads": [
+        "market.companies_current",
+        "market.daily_prices",
+        "market.dividends",
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/saved_screens.py": {
+      "writes": {
+        "screener.saved_screens": [
+          "delete",
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "users.users"
+      ],
+      "joins": [
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = s.user_id",
+          "line": 107
+        },
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = s.user_id",
+          "line": 135
+        },
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = s.user_id",
+          "line": 175
+        },
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = s.user_id",
+          "line": 228
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/screener.py": {
+      "writes": {},
+      "reads": [
+        "screener.compute_run_finalizations",
+        "screener.compute_runs",
+        "screener.universe"
+      ],
+      "joins": [
+        {
+          "table": "screener.compute_run_finalizations",
+          "alias": "f",
+          "on": "f.run_id = r.id",
+          "line": 84
+        }
+      ],
+      "dynamic": []
+    },
+    "app/api/v1/routes/stripe_routes.py": {
+      "writes": {
+        "users.subscription_events": [
+          "insert"
+        ],
+        "users.users": [
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/support.py": {
+      "writes": {
+        "support.tickets": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/top5.py": {
+      "writes": {},
+      "reads": [
+        "strategy.monthly_picks"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/users.py": {
+      "writes": {
+        "users.audit_log": [
+          "insert"
+        ],
+        "users.users": [
+          "delete",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/api/v1/routes/watchlist.py": {
+      "writes": {
+        "users.watchlist_items": [
+          "delete",
+          "insert",
+          "insert-or-ignore"
+        ],
+        "users.watchlists": [
+          "delete",
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/core/job_instrumentation.py": {
+      "writes": {
+        "ops.job_executions": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/core/screen_diagnosis.py": {
+      "writes": {},
+      "reads": [
+        "screener.universe"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/services/notification_service.py": {
+      "writes": {
+        "users.notification_history": [
+          "insert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/alert_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ],
+        "users.alert_triggers": [
+          "insert"
+        ],
+        "users.alerts": [
+          "update"
+        ]
+      },
+      "reads": [
+        "market.companies_current",
+        "screener.universe",
+        "users.notification_preferences",
+        "users.users"
+      ],
+      "joins": [
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = a.user_id",
+          "line": 75
+        },
+        {
+          "table": "screener.universe",
+          "alias": "s",
+          "on": "s.asx_code = a.asx_code",
+          "line": 75
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = a.asx_code",
+          "line": 75
+        },
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = a.user_id",
+          "line": 75
+        }
+      ],
+      "dynamic": []
+    },
+    "app/workers/announcement_worker.py": {
+      "writes": {
+        "market.asx_announcements": [
+          "insert",
+          "upsert"
+        ],
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [
+        "market.companies_current",
+        "screener.universe",
+        "users.announcement_subscriptions",
+        "users.notification_preferences",
+        "users.users",
+        "users.watchlist_items",
+        "users.watchlists"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = u.asx_code",
+          "line": 209
+        },
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = u.id",
+          "line": 350
+        },
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = :code",
+          "line": 350
+        },
+        {
+          "table": "users.watchlists",
+          "alias": "w",
+          "on": "w.id = wi.watchlist_id",
+          "line": 350
+        }
+      ],
+      "dynamic": []
+    },
+    "app/workers/anomaly_alert_worker.py": {
+      "writes": {
+        "users.notification_history": [
+          "insert"
+        ]
+      },
+      "reads": [
+        "market.anomalies",
+        "screener.universe",
+        "users.notification_preferences",
+        "users.users",
+        "users.watchlist_items",
+        "users.watchlists"
+      ],
+      "joins": [
+        {
+          "table": "screener.universe",
+          "alias": "u",
+          "on": "u.asx_code = a.asx_code",
+          "line": 63
+        },
+        {
+          "table": "users.watchlists",
+          "alias": "wl",
+          "on": "wl.user_id = usr.id",
+          "line": 90
+        },
+        {
+          "table": "users.watchlist_items",
+          "alias": "wi",
+          "on": "wi.watchlist_id = wl.id",
+          "line": 90
+        },
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = usr.id",
+          "line": 90
+        },
+        {
+          "table": "users.watchlist_items",
+          "alias": "wi",
+          "on": "wi.watchlist_id = wl.id",
+          "line": 137
+        }
+      ],
+      "dynamic": []
+    },
+    "app/workers/asx_indices_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/cleanup_worker.py": {
+      "writes": {
+        "users.sessions": [
+          "delete"
+        ]
+      },
+      "reads": [
+        "users.users"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/commodities_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/global_markets_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/index_prices_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/market_snapshot_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/pipeline_tracker.py": {
+      "writes": {
+        "market.scheduler_job_runs": [
+          "insert",
+          "update"
+        ]
+      },
+      "reads": [
+        "market.pipeline_runs"
+      ],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/portfolio_worker.py": {
+      "writes": {
+        "users.portfolio_notification_state": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [
+        "screener.universe",
+        "users.notification_preferences",
+        "users.portfolio_transactions",
+        "users.portfolios",
+        "users.users"
+      ],
+      "joins": [
+        {
+          "table": "users.users",
+          "alias": "u",
+          "on": "u.id = p.user_id",
+          "line": 57
+        },
+        {
+          "table": "screener.universe",
+          "alias": "s",
+          "on": "s.asx_code = h.asx_code",
+          "line": 57
+        },
+        {
+          "table": "users.portfolio_notification_state",
+          "alias": "pns",
+          "on": "pns.portfolio_id = p.id",
+          "line": 57
+        },
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = p.user_id",
+          "line": 57
+        },
+        {
+          "table": "screener.universe",
+          "alias": "s",
+          "on": "s.asx_code = h.asx_code",
+          "line": 210
+        },
+        {
+          "table": "screener.universe",
+          "alias": "s",
+          "on": "s.asx_code = h.asx_code",
+          "line": 192
+        },
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = u.id",
+          "line": 151
+        },
+        {
+          "table": "users.portfolios",
+          "alias": "p2",
+          "on": "p2.id = pns2.portfolio_id",
+          "line": 151
+        }
+      ],
+      "dynamic": []
+    },
+    "app/workers/short_positions_worker.py": {
+      "writes": {
+        "meta.job_heartbeat": [
+          "insert",
+          "upsert"
+        ]
+      },
+      "reads": [],
+      "joins": [],
+      "dynamic": []
+    },
+    "app/workers/watchlist_digest_worker.py": {
+      "writes": {},
+      "reads": [
+        "market.anomalies",
+        "market.companies_current",
+        "screener.universe",
+        "users.notification_preferences",
+        "users.users",
+        "users.watchlist_items",
+        "users.watchlists"
+      ],
+      "joins": [
+        {
+          "table": "market.companies_current",
+          "alias": "c",
+          "on": "c.asx_code = u.asx_code",
+          "line": 113
+        },
+        {
+          "table": "users.watchlists",
+          "alias": "wl",
+          "on": "wl.user_id = u.id",
+          "line": 48
+        },
+        {
+          "table": "users.notification_preferences",
+          "alias": "np",
+          "on": "np.user_id = u.id",
+          "line": 48
+        },
+        {
+          "table": "users.watchlist_items",
+          "alias": "wi",
+          "on": "wi.watchlist_id = wl.id",
+          "line": 86
+        }
+      ],
+      "dynamic": []
+    },
     "compute/engine/anomaly_detect.py": {
       "writes": {
         "market.anomalies": [
@@ -2708,8 +3987,10 @@
   },
   "read_but_never_written": [
     "information_schema.columns",
+    "information_schema.tables",
     "market.companies_current",
-    "users.users"
+    "market.indices",
+    "users.announcement_subscriptions"
   ],
   "parse_errors": []
 }

@@ -267,6 +267,33 @@ def _merge_conditional_branches(steps: list) -> list:
 
 # ── Scheduler registry ───────────────────────────────────────────────────────
 
+def scheduler_imports() -> dict:
+    """Imported callable -> the module file that defines it.
+
+    The registry imports its workers INSIDE a function, deliberately, so a
+    module-level walk of `tree.body` misses every one of them. ast.walk is
+    used instead.
+
+    Without this the twenty scheduler rows carried no layer, no reads and no
+    writes -- a fifth of the run sheet describing jobs by name only, which
+    reads as "these jobs touch nothing" rather than "this parse did not
+    look".
+    """
+    if not REGISTRY.exists():
+        return {}
+    tree = ast.parse(REGISTRY.read_text(encoding="utf-8"))
+    out = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom) or not node.module:
+            continue
+        if not node.module.startswith("app."):
+            continue
+        path = node.module.replace(".", "/") + ".py"
+        for alias in node.names:
+            out[alias.asname or alias.name] = path
+    return out
+
+
 def scheduler_jobs() -> list:
     """Every scheduler.add_job, with its trigger rendered as text."""
     if not REGISTRY.exists():
@@ -314,22 +341,84 @@ def scheduler_jobs() -> list:
 
 # ── Canonical plans ──────────────────────────────────────────────────────────
 
+class _Unresolved:
+    """A field this parse could not evaluate.
+
+    Deliberately NOT a string. The previous sentinel was the literal
+    "<computed>", and a caller that iterates a field it believes is a tuple
+    walked that string CHARACTER BY CHARACTER -- emitting ten run-sheet rows
+    named `stage <`, `stage c`, `stage o` ... one per letter. They read as
+    stages and were letters.
+
+    It also broke membership. `required` fell back to the same string, so
+    `stage in required` became a SUBSTRING test: any single-letter stage name
+    would have tested True against "<computed>".
+
+    An object that is not iterable and not a container makes both failures
+    raise at the point of the mistake instead of producing plausible output.
+    """
+
+    def __repr__(self) -> str:
+        return "<unresolved>"
+
+
+UNRESOLVED = _Unresolved()
+
+
+def _module_constants(tree: ast.AST) -> dict:
+    """Module-level NAME = <literal> bindings, for resolving references.
+
+    run_plans.py factors its stage list into _DAILY_PRODUCERS and builds the
+    plans from it, which is good code and defeats a bare literal_eval.
+    """
+    env = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        try:
+            env[target.id] = ast.literal_eval(node.value)
+        except (ValueError, TypeError, SyntaxError):
+            continue
+    return env
+
+
+def _evaluate(node: ast.AST, env: dict):
+    """Literals, references to module constants, and their concatenation.
+
+    Anything else returns UNRESOLVED rather than a guess. Supporting exactly
+    the forms the file uses is the point: a general evaluator here would be a
+    second Python, free to disagree with the first about what a plan says.
+    """
+    try:
+        return ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError):
+        pass
+    if isinstance(node, ast.Name):
+        return env.get(node.id, UNRESOLVED)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _evaluate(node.left, env)
+        right = _evaluate(node.right, env)
+        if isinstance(left, (tuple, list)) and isinstance(right, (tuple, list)):
+            return tuple(left) + tuple(right)
+    return UNRESOLVED
+
+
 def canonical_plans() -> dict:
     """Plan name -> {stages, required, reuses, executable}."""
     if not RUN_PLANS.exists():
         return {}
     tree = ast.parse(RUN_PLANS.read_text(encoding="utf-8"))
+    env = _module_constants(tree)
     plans = {}
     for node in tree.body:
         if not (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
                 and getattr(node.value.func, "id", "") == "RunPlan"):
             continue
-        fields = {}
-        for kw in node.value.keywords:
-            try:
-                fields[kw.arg] = ast.literal_eval(kw.value)
-            except ValueError:
-                fields[kw.arg] = "<computed>"
+        fields = {kw.arg: _evaluate(kw.value, env)
+                  for kw in node.value.keywords}
         target = node.targets[0]
         if isinstance(target, ast.Name):
             plans[target.id] = fields
@@ -358,6 +447,38 @@ def stage_commands() -> dict:
                         script = s
                         break
             out[stage] = script
+
+    # The LAST stage is not dispatched through STAGE_COMMANDS.
+    #
+    #     for stage in plan.stages[:-1]:  ... dispatch(stage, run_id)
+    #     run_stage("composite_score (canonical commit)", [PYBIN, "..."])
+    #
+    # composite_score performs the canonical commit, so the driver runs it
+    # explicitly rather than from the table. Reading only STAGE_COMMANDS left
+    # the tail stage of BOTH plans with no script, no layer and no writes --
+    # the run sheet going quiet at exactly the step that publishes.
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call)
+                and getattr(node.func, "id", "") == "run_stage"
+                and len(node.args) >= 2):
+            continue
+        label = _str_of(node.args[0]) or ""
+        argv = node.args[1]
+        if not isinstance(argv, ast.List):
+            continue
+        script = next((t for t in (_str_of(e) for e in argv.elts)
+                       if t and t.endswith(".py")), None)
+        if not script:
+            continue
+        for stage in list(out):
+            if label.startswith(stage):
+                break
+        else:
+            # A label that names a stage the table does not list: that is
+            # the explicit tail invocation this block exists for.
+            stage = label.split(" ")[0].strip()
+            if stage:
+                out.setdefault(stage, script)
     return out
 
 
@@ -460,9 +581,18 @@ def main() -> int:
         reads  = info["reads"] if info else []
         layers = {lineage["by_table"].get(t, {}).get("layer") for t in writes}
         layers.discard(None)
+        if layers:
+            layer = "/".join(sorted(layers))
+        elif module is None:
+            # No module resolved: the data effects are unknown, which is not
+            # the same claim as "this job writes nothing".
+            layer = "(unresolved)" if script else ""
+        else:
+            # Resolved, and genuinely writes no table -- a downloader writing
+            # files, or an assertion that only reads.
+            layer = "(writes no table)"
         return {"module": module, "writes": writes, "reads": reads,
-                "layer": "/".join(sorted(layers)) if layers else "",
-                "level": levels.get(module, "")}
+                "layer": layer, "level": levels.get(module, "")}
 
     rows, seq = [], 0
 
@@ -489,11 +619,36 @@ def main() -> int:
     for plan_name, plan in plans.items():
         if plan.get("executable") is False:
             continue
-        for order, stage in enumerate(plan.get("stages", ()), start=1):
+        stages_declared = plan.get("stages", ())
+        if not isinstance(stages_declared, (tuple, list)):
+            # One row saying so, never N rows invented from a sentinel.
+            seq += 1
+            rows.append({
+                "seq": seq, "cadence": f"plan:{plan_name}", "step": "",
+                "layer": "UNRESOLVED", "job_name": "(stages not resolvable)",
+                "script": "", "schedule_or_trigger": "canonical driver",
+                "status": "UNKNOWN",
+                "on_failure": "unknown — the plan could not be read",
+                "reads": "", "writes": "", "depends_on_data": "",
+                "parallel_level": "",
+                "notes": f"compute/engine/run_plans.py declares {plan_name} "
+                         f"stages in a form this parse does not evaluate. "
+                         f"The run sheet is INCOMPLETE for this plan and says "
+                         f"so rather than inventing its steps.",
+            })
+            continue
+        required_declared = plan.get("required", ())
+        if not isinstance(required_declared, (tuple, list)):
+            required_declared = ()
+        reuses_declared = plan.get("reuses", ())
+        if not isinstance(reuses_declared, (tuple, list)):
+            reuses_declared = ()
+
+        for order, stage in enumerate(stages_declared, start=1):
             seq += 1
             script = stages.get(stage)
             f = facts(script)
-            required = stage in plan.get("required", ())
+            required = stage in required_declared
             rows.append({
                 "seq": seq, "cadence": f"plan:{plan_name}", "step": order,
                 "layer": f["layer"], "job_name": f"stage {stage}",
@@ -508,18 +663,31 @@ def main() -> int:
                     sorted(Path(d).name for d in deps.get(f["module"], ()))),
                 "parallel_level": f["level"],
                 "notes": ("reused, not recomputed"
-                          if stage in plan.get("reuses", ()) else ""),
+                          if stage in reuses_declared else ""),
             })
 
+    imports = scheduler_imports()
     for job in sched:
         seq += 1
+        callable_name = (job["target"] or "").lstrip("$")
+        defining = imports.get(callable_name)
+        f = facts(defining)
         rows.append({
             "seq": seq, "cadence": "scheduler", "step": "",
-            "layer": "", "job_name": job["name"], "script": job["target"] or "",
+            "layer": f["layer"], "job_name": job["name"],
+            "script": defining or (job["target"] or ""),
             "schedule_or_trigger": job["trigger"], "status": "runs",
-            "on_failure": "see job telemetry", "reads": "", "writes": "",
-            "depends_on_data": "", "parallel_level": "",
-            "notes": f"app/scheduler_registry.py:{job['line']}",
+            "on_failure": "see job telemetry",
+            "reads": "; ".join(f["reads"][:12]),
+            "writes": "; ".join(f["writes"]),
+            "depends_on_data": "; ".join(
+                sorted(Path(d).name for d in deps.get(f["module"], ()))),
+            "parallel_level": f["level"],
+            "notes": f"app/scheduler_registry.py:{job['line']}"
+                     + ("" if defining
+                        else f"; callable {callable_name!r} is not imported "
+                             f"from an app.* module in the registry, so its "
+                             f"data effects are UNKNOWN rather than none"),
         })
 
     out_dir = Path(args.out_dir)

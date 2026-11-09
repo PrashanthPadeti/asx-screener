@@ -66,6 +66,18 @@ BACKEND = Path(__file__).resolve().parents[2]
 SOURCE_TREES = (
     BACKEND / "scripts",
     BACKEND / "compute",
+    # app/ was omitted, and the omission was invisible in the output. Twenty
+    # scheduled workers live under app/workers/ and every one of them came
+    # out of the run sheet with no layer, no reads and no writes -- which
+    # reads as "these jobs touch no data" rather than "this scan did not look
+    # at them".
+    #
+    # It also undercut every "nothing writes this column" claim made from
+    # this graph: a write from an API route or a worker was outside the
+    # population being searched, so an absence proved nothing. The trees are
+    # an allowlist, so the note below about including new directories by
+    # default only ever applied BELOW these roots.
+    BACKEND / "app",
 )
 
 #: Directories under the scanned trees that are not pipeline code. Excluded

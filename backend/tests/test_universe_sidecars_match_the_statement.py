@@ -61,13 +61,22 @@ EMITTED = (
 EXPECT_TOTAL_COLUMNS = 401
 
 
-def _regenerate() -> Path:
+def _regenerate() -> tuple[Path, str]:
     """Run the emitter with its output redirected to a temp copy.
 
     The emitter writes to database/stm/mappings by construction, so the
     committed files are copied aside, the emitter runs, the fresh output is
     moved to a temp directory and the originals are restored. A test that
     left the working tree modified would be its own defect.
+
+    It returns the emitter's stdout as well as the directory, so that
+    every test in this file goes through ONE guarded run. An earlier
+    version had a second test invoke the emitter directly: tests run in
+    sorted order, that one ran first, and it overwrote the working tree
+    before the drift comparison read it -- so a YAML edited by hand was
+    silently repaired and the drift test passed over it. The instrument
+    was modifying the system it was measuring, which is the one thing an
+    instrument must not do.
     """
     tmp = Path(tempfile.mkdtemp(prefix="stm_sidecars_"))
     backup = tmp / "committed"
@@ -97,11 +106,11 @@ def _regenerate() -> Path:
         for name in EMITTED:
             shutil.copy2(backup / name, MAPPINGS / name)
 
-    return fresh
+    return fresh, result.stdout
 
 
 def test_the_emitted_sidecars_are_current():
-    fresh = _regenerate()
+    fresh, _ = _regenerate()
     stale = []
     for name in EMITTED:
         committed = (MAPPINGS / name).read_text(encoding="utf-8")
@@ -135,14 +144,9 @@ def test_the_document_still_covers_every_target_column():
     file, a prose key deleted -- would otherwise leave the YAML smaller and
     this file still green.
     """
-    env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(EMITTER)], cwd=str(ROOT), env=env,
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-    assert result.returncode == 0, result.stdout + result.stderr
-
-    line = [ln for ln in result.stdout.splitlines() if "columns emitted" in ln]
-    assert line, f"the emitter printed no total:\n{result.stdout}"
+    _, stdout = _regenerate()
+    line = [ln for ln in stdout.splitlines() if "columns emitted" in ln]
+    assert line, f"the emitter printed no total:\n{stdout}"
     total = int(line[-1].split()[0])
     assert total == EXPECT_TOTAL_COLUMNS, (
         f"the emitter now covers {total} columns, expected "

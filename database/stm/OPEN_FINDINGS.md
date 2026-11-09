@@ -526,7 +526,7 @@ on 28 October 2026.
 **Tables:** `market.halfyearly_metrics` (28 cols), `market.quarterly_metrics`
 **Writers:** `compute/engine/halfyearly_compute.py`,
 `scripts/eodhd/load_fundamentals.py`
-**Status:** OPEN — mechanism established from code, consequence NOT measured
+**Status:** MEASURED 9 Nov 2026 — smaller than predicted, and my prediction was wrong
 
 ### Established from the code
 
@@ -563,6 +563,98 @@ asserted "its second half is published as its first", which was wrong: in a
 four-quarter year Q2 belongs to H1. The demonstrated defect is **assignment
 by row position rather than from verified reporting periods** — the rest is
 hypothesis.
+
+### Measured — and the prediction above was WRONG
+
+Three queries were run. Both halves of the hypothesis failed.
+
+**Wrong 1: `half = 2` is not rare.**
+
+```
+half | rows   | companies | with_hoh | with_yoy
+   1 | 32,263 |     1,797 |   21,480 |   21,064
+   2 | 31,026 |     1,792 |   22,352 |   21,182
+```
+
+**Wrong 2: a June-year-end half-yearly reporter does NOT split across
+groups.** Because `fiscal_year` is the *calendar* year of the balance date,
+a Jun/Dec reporter has both halves in the same group. That is the `{2,4}`
+pattern — 4,658 company-years, 1,544 companies — and the positional
+assignment is **correct** for it (Q2→H1, Q4→H2).
+
+The cadence query also contradicts the premise: this is genuine quarterly
+reporting at calendar quarter-ends, with 1,603–1,768 companies at each of
+March, June, September and December. `quarter` is derived correctly, since
+calendar quarter-end months map cleanly onto calendar quarters.
+
+### What IS wrong
+
+```
+company-years                     32,263
+  take the positional branch       6,858   21.3%
+  MISASSIGNED                      1,827    5.7%
+
+  {4}    1,110 cy  1,024 companies   Q4 -> H1   (Q4 belongs to H2)
+  {3,4}    636 cy    579 companies   Q3 -> H1   (Q3 belongs to H2)
+  {1,2}     59 cy     54 companies   Q2 -> H2   (Q2 belongs to H1)
+  {3}       22 cy     22 companies   Q3 -> H1
+```
+
+Correct by coincidence in the same branch: `{2,4}` 4,658, `{1,3}` 256,
+`{2}` 68, `{1}` 37, `{2,3}` 7, `{1,4}` 5.
+
+The dominant case is a **single December period labelled H1**: 1,110
+company-years across 1,024 companies. A row holding Jul–Dec is published as
+the first half of the year.
+
+### Consequence, and why it is not a coverage problem
+
+HoH is populated on 43,832 of 63,289 rows (69%), so values are being served
+rather than withheld. For a misassigned row both lookups mis-pair:
+
+- `revenue_growth_hoh` looks up `(fy-1, half 2)`
+- `revenue_growth_yoy` looks up `(fy-1, half)`
+
+A `{4}`-only year labelled `half = 1` therefore pairs its December figure
+against the *prior year's* H2 for "half-on-half" — twelve months apart — and
+against the prior year's H1 for "year-on-year" — eighteen months apart.
+Neither interval matches its column name.
+
+### Severity
+
+5.7% of company-years, reaching the surfaces listed below. Not a reason to
+withhold the whole column set; it IS a reason to fix the grouping before
+anyone relies on HoH for screening.
+
+**Still unmeasured:** how many companies' *latest* half row — the one the
+universe's `ORDER BY period_end_date DESC LIMIT 1` actually serves — comes
+from a misassigned company-year. That is the number that decides whether
+the two starred screener filters need containment now or at the fix.
+
+```sql
+WITH latest AS (
+  SELECT DISTINCT ON (asx_code) asx_code, fiscal_year, half, period_end_date
+  FROM market.halfyearly_metrics
+  ORDER BY asx_code, period_end_date DESC
+), q AS (
+  SELECT asx_code, fiscal_year, array_agg(quarter ORDER BY quarter) AS qtrs
+  FROM market.quarterly_metrics
+  WHERE fiscal_year IS NOT NULL AND quarter IS NOT NULL
+  GROUP BY asx_code, fiscal_year
+)
+SELECT q.qtrs, count(*) AS companies
+FROM latest l JOIN q USING (asx_code, fiscal_year)
+GROUP BY q.qtrs ORDER BY companies DESC;
+```
+
+Small tables; safe.
+
+### Acceptance criterion for any fix, restated
+
+Derive the half from the **quarter number or the period end date**, never
+from row position. A sparse quarterly reporter must stay classified as
+quarterly: `{3,4}` is a year with no first half, not a year whose first
+half is Q3.
 
 ### Customer exposure — traced, and it is broad
 
@@ -672,5 +764,5 @@ newly listed stock is being excluded from bullish screens by a measured
 | 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
 | 7b | 103 of 147 columns dead (all zero); covering index includes two | `market.computed_metrics` | CONFIRMED |
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
-| 9 | Halves grouped by a CALENDAR year; half assigned by row position | `market.halfyearly_metrics` | OPEN — mechanism proven, consequence unmeasured, exposure traced |
+| 9 | Half assigned by row position: 1,827 of 32,263 company-years (5.7%) misassigned, 1,024 companies on `{4}` alone | `market.halfyearly_metrics` | MEASURED — fix before HoH is relied on |
 | 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |

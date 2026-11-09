@@ -173,22 +173,26 @@ columns:
         unique key) LIMIT 1 -> the determined row; WHERE asx_code = c.asx_code LIMIT 1'
       writer_job: build_screener_universe.py (INSERT)
     short_pct:
-      transformation_rule: Latest ASIC report per stock, by its own lateral ordered on the report date.
-      business_rule: Short positions as at the LATEST ASIC report date, which lags the trading day by
-        several business days and is not the price date on the same row. The two as-at dates on this row
-        differ.
+      transformation_rule: Short positions as a percentage of issued capital, as at the latest ASIC report
+        date.
+      business_rule: ASIC publishes short positions with a lag of several business days, so this figure's
+        as-at date is NOT the price_date on the same row. The report date is not carried onto the row,
+        so a consumer cannot tell how old it is.
       grain: one row per asx_code at the latest ASIC report date
-      unit: percent of issued capital; share count for the position
-      applicability: short_pct and short_interest_chg_1w are refreshed afterwards by compute/engine/short_positions.py,
-        so the builder's values are provisional. The report date itself is NOT carried onto this row,
-        so a consumer cannot tell how old the figure is.
+      unit: percent of issued capital
+      applicability: short_pct is also written by the builder's INSERT, so this module OVERWRITES it and
+        the module's value is what a customer reads. Finding 2 is open against market.short_interest,
+        a different table for which no backend reader has been found -- that finding is not about this
+        column. UPDATE-IN-PLACE. The builder's INSERT does not list this column, so a newly inserted row
+        holds NULL until the module below commits. If that module does not run, an EXISTING row keeps
+        the value from the last run that did -- an UPDATE that is never issued does not fail, it leaves
+        yesterday's number in place beside today's.
       derivation_formula: si.short_pct
       source_table: market.short_positions
       source_column: market.short_positions.short_pct
       tables_involved: market.short_positions
-      join_condition: 'LEFT JOIN LATERAL (market.short_positions) AS si: ORDER BY report_date DESC LIMIT
-        1 -> the named row; WHERE asx_code = c.asx_code ORDER BY report_date DESC LIMIT 1'
-      writer_job: build_screener_universe.py (INSERT); short_positions.py (UPDATE @233)
+      join_condition: 'No join in the UPDATE: assigned by asx_code from the latest report.'
+      writer_job: compute/engine/short_positions.py (UPDATE @233)
     short_position_shares:
       transformation_rule: Latest ASIC report per stock, by its own lateral ordered on the report date.
       business_rule: Short positions as at the LATEST ASIC report date, which lags the trading day by
@@ -207,22 +211,26 @@ columns:
         1 -> the named row; WHERE asx_code = c.asx_code ORDER BY report_date DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT)
     short_interest_chg_1w:
-      transformation_rule: Latest ASIC report per stock, by its own lateral ordered on the report date.
-      business_rule: Short positions as at the LATEST ASIC report date, which lags the trading day by
-        several business days and is not the price date on the same row. The two as-at dates on this row
-        differ.
+      transformation_rule: Week-over-week change in short interest, in PERCENTAGE POINTS -- not a percentage
+        change of the percentage.
+      business_rule: ASIC publishes short positions with a lag of several business days, so this figure's
+        as-at date is NOT the price_date on the same row. The report date is not carried onto the row,
+        so a consumer cannot tell how old it is.
       grain: one row per asx_code at the latest ASIC report date
-      unit: percent of issued capital; share count for the position
-      applicability: short_pct and short_interest_chg_1w are refreshed afterwards by compute/engine/short_positions.py,
-        so the builder's values are provisional. The report date itself is NOT carried onto this row,
-        so a consumer cannot tell how old the figure is.
+      unit: percentage points
+      applicability: short_pct is also written by the builder's INSERT, so this module OVERWRITES it and
+        the module's value is what a customer reads. Finding 2 is open against market.short_interest,
+        a different table for which no backend reader has been found -- that finding is not about this
+        column. UPDATE-IN-PLACE. The builder's INSERT does not list this column, so a newly inserted row
+        holds NULL until the module below commits. If that module does not run, an EXISTING row keeps
+        the value from the last run that did -- an UPDATE that is never issued does not fail, it leaves
+        yesterday's number in place beside today's.
       derivation_formula: si.short_pct_chg_1w AS short_interest_chg_1w
       source_table: market.short_positions
       source_column: market.short_positions.short_pct_chg_1w
       tables_involved: market.short_positions
-      join_condition: 'LEFT JOIN LATERAL (market.short_positions) AS si: ORDER BY report_date DESC LIMIT
-        1 -> the named row; WHERE asx_code = c.asx_code ORDER BY report_date DESC LIMIT 1'
-      writer_job: build_screener_universe.py (INSERT); short_positions.py (UPDATE @233)
+      join_condition: 'No join in the UPDATE: assigned by asx_code from the latest report.'
+      writer_job: compute/engine/short_positions.py (UPDATE @233)
     analyst_count:
       transformation_rule: Computed inline from the five recommendation counts, with COALESCE(count, 0)
         on each so a missing count contributes zero to the total, and a CASE guarding division by a zero

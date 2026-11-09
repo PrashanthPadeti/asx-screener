@@ -207,9 +207,12 @@ columns:
         action. momentum_3m counts bars. The two can disagree for the same company on the same day.'
       grain: one row per asx_code, as at the latest trading day
       unit: decimal ratios (0.05 = +5%), not percentages
-      applicability: Double-counting is a confirmed product defect only where a score or ranking combines
-        BOTH. momentum_score's inputs must be read from compute/engine/composite_score.py directly --
-        the column comment says '1M/3M/6M returns' and a comment is not the implementation.
+      applicability: NOT double-counted, checked. The momentum factor is declared in compute/engine/factor_model.py
+        as return_1m, return_3m, return_6m, rsi_14 and adx_14 -- the return_* family only. No momentum_*
+        column is a constituent of any factor in V1, V2 or V3, so no score or ranking combines the two
+        spellings and the alias is a presentation duplicate rather than a weighting defect. Both ARE exposed
+        as screener fields, so a user can still filter on both and believe they have applied two independent
+        conditions.
       derivation_formula: mm.momentum_3m AS momentum_3m
       source_table: market.monthly_metrics
       source_column: market.monthly_metrics.momentum_3m

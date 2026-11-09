@@ -235,110 +235,110 @@ columns:
       join_condition: FROM market.companies_current AS c ON
       writer_job: build_screener_universe.py (INSERT)
     is_asx20:
-      transformation_rule: 'Carried unchanged from the conformed company record. The only renames are
-        GICS: gics_sector -> sector, gics_industry_group -> industry_group, gics_industry -> industry,
-        gics_sub_industry -> sub_industry, company_type -> stock_type.'
-      business_rule: Identity and classification as of the CURRENT company record. `market.companies`
-        is SCD Type 2 and `companies_current` is the is_current slice, so this row describes the company
-        as it is now, not as it was when a historical figure beside it was reported. A reclassification
-        rewrites the sector on every historical metric's row without restating the metric.
+      transformation_rule: Set from the index constituent lists after the builder has inserted the row.
+        The builder also carries a value for these from market.companies_current, so this module OVERWRITES
+        it -- the module's value is the one a customer reads.
+      business_rule: Membership of the named S&P/ASX index as at the latest constituent list. Membership
+        changes on rebalance dates and the row does not publish which list it reflects.
       grain: one row per asx_code
-      unit: n/a (identifiers and classification labels)
-      applicability: Uniqueness is enforced by a UNIQUE PARTIAL index on market.companies(asx_code) WHERE
-        is_current = true, not by the view definition. The index is what makes one row per company true;
-        without it the driving relation could return two current rows and every figure on this row would
-        come from whichever the planner emitted last. The six index membership flags are refreshed afterwards
-        by compute/engine/asx_indices.py, so the builder's value for them is provisional.
+      unit: boolean
+      applicability: 'FALSE means ''not in the list'', which also covers ''the list was not loaded''.
+        Finding 5 is open against the constituent counts: stock_count reads 189 and 277 against nominal
+        200 and 300, unexplained -- so a FALSE here may reflect an incomplete list rather than a non-member.
+        UPDATE-IN-PLACE. The builder''s INSERT does not list this column, so a newly inserted row holds
+        NULL until the module below commits. If that module does not run, an EXISTING row keeps the value
+        from the last run that did -- an UPDATE that is never issued does not fail, it leaves yesterday''s
+        number in place beside today''s.'
       derivation_formula: c.is_asx20
-      source_table: market.companies_current
+      source_table: market.index_constituents (via asx_indices.py)
       source_column: market.companies_current.is_asx20
       tables_involved: market.companies_current
-      join_condition: FROM market.companies_current AS c ON
-      writer_job: build_screener_universe.py (INSERT); asx_indices.py (UPDATE @139)
+      join_condition: 'No join in the UPDATE: keyed on asx_code against the loaded constituent set.'
+      writer_job: compute/engine/asx_indices.py (UPDATE @139, @224)
     is_asx50:
-      transformation_rule: 'Carried unchanged from the conformed company record. The only renames are
-        GICS: gics_sector -> sector, gics_industry_group -> industry_group, gics_industry -> industry,
-        gics_sub_industry -> sub_industry, company_type -> stock_type.'
-      business_rule: Identity and classification as of the CURRENT company record. `market.companies`
-        is SCD Type 2 and `companies_current` is the is_current slice, so this row describes the company
-        as it is now, not as it was when a historical figure beside it was reported. A reclassification
-        rewrites the sector on every historical metric's row without restating the metric.
+      transformation_rule: Set from the index constituent lists after the builder has inserted the row.
+        The builder also carries a value for these from market.companies_current, so this module OVERWRITES
+        it -- the module's value is the one a customer reads.
+      business_rule: Membership of the named S&P/ASX index as at the latest constituent list. Membership
+        changes on rebalance dates and the row does not publish which list it reflects.
       grain: one row per asx_code
-      unit: n/a (identifiers and classification labels)
-      applicability: Uniqueness is enforced by a UNIQUE PARTIAL index on market.companies(asx_code) WHERE
-        is_current = true, not by the view definition. The index is what makes one row per company true;
-        without it the driving relation could return two current rows and every figure on this row would
-        come from whichever the planner emitted last. The six index membership flags are refreshed afterwards
-        by compute/engine/asx_indices.py, so the builder's value for them is provisional.
+      unit: boolean
+      applicability: 'FALSE means ''not in the list'', which also covers ''the list was not loaded''.
+        Finding 5 is open against the constituent counts: stock_count reads 189 and 277 against nominal
+        200 and 300, unexplained -- so a FALSE here may reflect an incomplete list rather than a non-member.
+        UPDATE-IN-PLACE. The builder''s INSERT does not list this column, so a newly inserted row holds
+        NULL until the module below commits. If that module does not run, an EXISTING row keeps the value
+        from the last run that did -- an UPDATE that is never issued does not fail, it leaves yesterday''s
+        number in place beside today''s.'
       derivation_formula: c.is_asx50
-      source_table: market.companies_current
+      source_table: market.index_constituents (via asx_indices.py)
       source_column: market.companies_current.is_asx50
       tables_involved: market.companies_current
-      join_condition: FROM market.companies_current AS c ON
-      writer_job: build_screener_universe.py (INSERT); asx_indices.py (UPDATE @139)
+      join_condition: 'No join in the UPDATE: keyed on asx_code against the loaded constituent set.'
+      writer_job: compute/engine/asx_indices.py (UPDATE @139, @224)
     is_asx100:
-      transformation_rule: 'Carried unchanged from the conformed company record. The only renames are
-        GICS: gics_sector -> sector, gics_industry_group -> industry_group, gics_industry -> industry,
-        gics_sub_industry -> sub_industry, company_type -> stock_type.'
-      business_rule: Identity and classification as of the CURRENT company record. `market.companies`
-        is SCD Type 2 and `companies_current` is the is_current slice, so this row describes the company
-        as it is now, not as it was when a historical figure beside it was reported. A reclassification
-        rewrites the sector on every historical metric's row without restating the metric.
+      transformation_rule: Set from the index constituent lists after the builder has inserted the row.
+        The builder also carries a value for these from market.companies_current, so this module OVERWRITES
+        it -- the module's value is the one a customer reads.
+      business_rule: Membership of the named S&P/ASX index as at the latest constituent list. Membership
+        changes on rebalance dates and the row does not publish which list it reflects.
       grain: one row per asx_code
-      unit: n/a (identifiers and classification labels)
-      applicability: Uniqueness is enforced by a UNIQUE PARTIAL index on market.companies(asx_code) WHERE
-        is_current = true, not by the view definition. The index is what makes one row per company true;
-        without it the driving relation could return two current rows and every figure on this row would
-        come from whichever the planner emitted last. The six index membership flags are refreshed afterwards
-        by compute/engine/asx_indices.py, so the builder's value for them is provisional.
+      unit: boolean
+      applicability: 'FALSE means ''not in the list'', which also covers ''the list was not loaded''.
+        Finding 5 is open against the constituent counts: stock_count reads 189 and 277 against nominal
+        200 and 300, unexplained -- so a FALSE here may reflect an incomplete list rather than a non-member.
+        UPDATE-IN-PLACE. The builder''s INSERT does not list this column, so a newly inserted row holds
+        NULL until the module below commits. If that module does not run, an EXISTING row keeps the value
+        from the last run that did -- an UPDATE that is never issued does not fail, it leaves yesterday''s
+        number in place beside today''s.'
       derivation_formula: c.is_asx100
-      source_table: market.companies_current
+      source_table: market.index_constituents (via asx_indices.py)
       source_column: market.companies_current.is_asx100
       tables_involved: market.companies_current
-      join_condition: FROM market.companies_current AS c ON
-      writer_job: build_screener_universe.py (INSERT); asx_indices.py (UPDATE @139)
+      join_condition: 'No join in the UPDATE: keyed on asx_code against the loaded constituent set.'
+      writer_job: compute/engine/asx_indices.py (UPDATE @139, @224)
     is_asx200:
-      transformation_rule: 'Carried unchanged from the conformed company record. The only renames are
-        GICS: gics_sector -> sector, gics_industry_group -> industry_group, gics_industry -> industry,
-        gics_sub_industry -> sub_industry, company_type -> stock_type.'
-      business_rule: Identity and classification as of the CURRENT company record. `market.companies`
-        is SCD Type 2 and `companies_current` is the is_current slice, so this row describes the company
-        as it is now, not as it was when a historical figure beside it was reported. A reclassification
-        rewrites the sector on every historical metric's row without restating the metric.
+      transformation_rule: Set from the index constituent lists after the builder has inserted the row.
+        The builder also carries a value for these from market.companies_current, so this module OVERWRITES
+        it -- the module's value is the one a customer reads.
+      business_rule: Membership of the named S&P/ASX index as at the latest constituent list. Membership
+        changes on rebalance dates and the row does not publish which list it reflects.
       grain: one row per asx_code
-      unit: n/a (identifiers and classification labels)
-      applicability: Uniqueness is enforced by a UNIQUE PARTIAL index on market.companies(asx_code) WHERE
-        is_current = true, not by the view definition. The index is what makes one row per company true;
-        without it the driving relation could return two current rows and every figure on this row would
-        come from whichever the planner emitted last. The six index membership flags are refreshed afterwards
-        by compute/engine/asx_indices.py, so the builder's value for them is provisional.
+      unit: boolean
+      applicability: 'FALSE means ''not in the list'', which also covers ''the list was not loaded''.
+        Finding 5 is open against the constituent counts: stock_count reads 189 and 277 against nominal
+        200 and 300, unexplained -- so a FALSE here may reflect an incomplete list rather than a non-member.
+        UPDATE-IN-PLACE. The builder''s INSERT does not list this column, so a newly inserted row holds
+        NULL until the module below commits. If that module does not run, an EXISTING row keeps the value
+        from the last run that did -- an UPDATE that is never issued does not fail, it leaves yesterday''s
+        number in place beside today''s.'
       derivation_formula: c.is_asx200
-      source_table: market.companies_current
+      source_table: market.index_constituents (via asx_indices.py)
       source_column: market.companies_current.is_asx200
       tables_involved: market.companies_current
-      join_condition: FROM market.companies_current AS c ON
-      writer_job: build_screener_universe.py (INSERT); asx_indices.py (UPDATE @139)
+      join_condition: 'No join in the UPDATE: keyed on asx_code against the loaded constituent set.'
+      writer_job: compute/engine/asx_indices.py (UPDATE @139, @224)
     is_asx300:
-      transformation_rule: 'Carried unchanged from the conformed company record. The only renames are
-        GICS: gics_sector -> sector, gics_industry_group -> industry_group, gics_industry -> industry,
-        gics_sub_industry -> sub_industry, company_type -> stock_type.'
-      business_rule: Identity and classification as of the CURRENT company record. `market.companies`
-        is SCD Type 2 and `companies_current` is the is_current slice, so this row describes the company
-        as it is now, not as it was when a historical figure beside it was reported. A reclassification
-        rewrites the sector on every historical metric's row without restating the metric.
+      transformation_rule: Set from the index constituent lists after the builder has inserted the row.
+        The builder also carries a value for these from market.companies_current, so this module OVERWRITES
+        it -- the module's value is the one a customer reads.
+      business_rule: Membership of the named S&P/ASX index as at the latest constituent list. Membership
+        changes on rebalance dates and the row does not publish which list it reflects.
       grain: one row per asx_code
-      unit: n/a (identifiers and classification labels)
-      applicability: Uniqueness is enforced by a UNIQUE PARTIAL index on market.companies(asx_code) WHERE
-        is_current = true, not by the view definition. The index is what makes one row per company true;
-        without it the driving relation could return two current rows and every figure on this row would
-        come from whichever the planner emitted last. The six index membership flags are refreshed afterwards
-        by compute/engine/asx_indices.py, so the builder's value for them is provisional.
+      unit: boolean
+      applicability: 'FALSE means ''not in the list'', which also covers ''the list was not loaded''.
+        Finding 5 is open against the constituent counts: stock_count reads 189 and 277 against nominal
+        200 and 300, unexplained -- so a FALSE here may reflect an incomplete list rather than a non-member.
+        UPDATE-IN-PLACE. The builder''s INSERT does not list this column, so a newly inserted row holds
+        NULL until the module below commits. If that module does not run, an EXISTING row keeps the value
+        from the last run that did -- an UPDATE that is never issued does not fail, it leaves yesterday''s
+        number in place beside today''s.'
       derivation_formula: c.is_asx300
-      source_table: market.companies_current
+      source_table: market.index_constituents (via asx_indices.py)
       source_column: market.companies_current.is_asx300
       tables_involved: market.companies_current
-      join_condition: FROM market.companies_current AS c ON
-      writer_job: build_screener_universe.py (INSERT); asx_indices.py (UPDATE @139)
+      join_condition: 'No join in the UPDATE: keyed on asx_code against the loaded constituent set.'
+      writer_job: compute/engine/asx_indices.py (UPDATE @139, @224)
     is_all_ords:
       transformation_rule: 'Carried unchanged from the conformed company record. The only renames are
         GICS: gics_sector -> sector, gics_industry_group -> industry_group, gics_industry -> industry,

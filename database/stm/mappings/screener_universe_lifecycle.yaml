@@ -1,0 +1,421 @@
+# The compute-run lifecycle tables. Not metrics: the evidence that
+# decides whether a universe row may be served at all.
+# GENERATED from backend/scripts/stm/universe_prose_extra.py.
+columns:
+  screener.compute_runs:
+    id:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: Surrogate key from a sequence.
+      business_rule: 'The identity a universe row is attributed to. These tables are not metrics. They
+        are the evidence that decides whether a universe row may be served at all: a resolver requires
+        a finalization row plus a success row for every stage the run''s plan declares. Append-only --
+        a retry is a NEW run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (identifier)
+      source_column: screener.compute_runs.id
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    run_at:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: Set to now() when the run opens.
+      business_rule: 'When the run STARTED, not when it published. Finalisation carries the publication
+        time. These tables are not metrics. They are the evidence that decides whether a universe row
+        may be served at all: a resolver requires a finalization row plus a success row for every stage
+        the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable run stays
+        unfinalised rather than being downgraded.'
+      unit: timestamptz
+      source_column: screener.compute_runs.run_at
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    engine:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: The engine that opened the run.
+      business_rule: 'Which producer this run belongs to. These tables are not metrics. They are the evidence
+        that decides whether a universe row may be served at all: a resolver requires a finalization row
+        plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run,
+        and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (label)
+      source_column: screener.compute_runs.engine
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    factor_model_version:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: The factor model the run scored under.
+      business_rule: 'Scores from two versions are not comparable, and this column is the only thing on
+        a universe row that says which produced it. These tables are not metrics. They are the evidence
+        that decides whether a universe row may be served at all: a resolver requires a finalization row
+        plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run,
+        and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (version label)
+      source_column: screener.compute_runs.factor_model_version
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    unhealthy_sources:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: The feeds that were not usable during the run.
+      business_rule: 'This is what lets a consumer tell ''this company pays no dividend'' from ''we could
+        not compute a dividend'' without inspecting every metric. DEFAULT ''{}'' -- an empty array means
+        no feed was reported unhealthy. These tables are not metrics. They are the evidence that decides
+        whether a universe row may be served at all: a resolver requires a finalization row plus a success
+        row for every stage the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable
+        run stays unfinalised rather than being downgraded.'
+      unit: array of text
+      source_column: screener.compute_runs.unhealthy_sources
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    detail:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: Free-form run detail.
+      business_rule: 'Diagnostic payload; not a contract surface. These tables are not metrics. They are
+        the evidence that decides whether a universe row may be served at all: a resolver requires a finalization
+        row plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW
+        run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: jsonb
+      source_column: screener.compute_runs.detail
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    rows_written:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: Rows the run wrote.
+      business_rule: 'Nullable, unlike the finalisation''s own count -- a run that never reached a write
+        has no number here, which is not zero. These tables are not metrics. They are the evidence that
+        decides whether a universe row may be served at all: a resolver requires a finalization row plus
+        a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run, and
+        an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: count of rows
+      source_column: screener.compute_runs.rows_written
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    plan_name:
+      source_table: screener.compute_runs
+      grain: one row per compute run
+      writer_job: compute/engine/universe_writer.py; scripts/gate_seed_run.py; scripts/p0a_adversarial_assertions.py
+      join_condition: PRIMARY KEY (id); screener.universe.compute_run_id references it.
+      transformation_rule: The run plan the run was opened under. Immutable.
+      business_rule: 'Decides which stage evidence the run''s publication requires and which the resolver
+        validates. LEGACY_CANONICAL marks runs published before plans existed, under the historical three-stage
+        contract -- so a legacy run is not missing evidence, it is held to a different declared contract.
+        These tables are not metrics. They are the evidence that decides whether a universe row may be
+        served at all: a resolver requires a finalization row plus a success row for every stage the run''s
+        plan declares. Append-only -- a retry is a NEW run, and an unpublishable run stays unfinalised
+        rather than being downgraded.'
+      unit: n/a (plan label)
+      source_column: screener.compute_runs.plan_name
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+  screener.compute_run_stages:
+    run_id:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: The run this stage belongs to.
+      business_rule: 'ON DELETE RESTRICT: a run cannot be deleted while its evidence exists, so evidence
+        cannot be orphaned or quietly removed. These tables are not metrics. They are the evidence that
+        decides whether a universe row may be served at all: a resolver requires a finalization row plus
+        a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run, and
+        an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (foreign key)
+      source_column: screener.compute_run_stages.run_id
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    stage_name:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: The stage.
+      business_rule: 'One terminal row per (run_id, stage_name). A retry is a new run, not a second row,
+        so a stage''s outcome cannot be overwritten. These tables are not metrics. They are the evidence
+        that decides whether a universe row may be served at all: a resolver requires a finalization row
+        plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run,
+        and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (stage label)
+      source_column: screener.compute_run_stages.stage_name
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    status:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: success or failed, enforced by CHECK.
+      business_rule: 'status = ''success'' REQUIRES expected_set_hash = written_set_hash. A stage that
+        ran without covering its source population is not a success, and the hash is what makes that checkable
+        rather than asserted. These tables are not metrics. They are the evidence that decides whether
+        a universe row may be served at all: a resolver requires a finalization row plus a success row
+        for every stage the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable
+        run stays unfinalised rather than being downgraded.'
+      unit: n/a; CHECK (status IN ('success','failed'))
+      source_column: screener.compute_run_stages.status
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    expected_count:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Entities the stage was required to cover.
+      business_rule: 'Drawn from the SOURCE population, not from the target -- a selector reading the
+        target cannot see an entity with zero target rows. These tables are not metrics. They are the
+        evidence that decides whether a universe row may be served at all: a resolver requires a finalization
+        row plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW
+        run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: count of entities
+      source_column: screener.compute_run_stages.expected_count
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    written_count:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Entities the stage actually wrote.
+      business_rule: 'Counts ENTITIES, not rows. These tables are not metrics. They are the evidence that
+        decides whether a universe row may be served at all: a resolver requires a finalization row plus
+        a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run, and
+        an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: count of entities
+      source_column: screener.compute_run_stages.written_count
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    missing_count:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Expected and not written.
+      business_rule: 'Non-zero with status success would be a contradiction the hash equality already
+        forbids. These tables are not metrics. They are the evidence that decides whether a universe row
+        may be served at all: a resolver requires a finalization row plus a success row for every stage
+        the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable run stays
+        unfinalised rather than being downgraded.'
+      unit: count of entities
+      source_column: screener.compute_run_stages.missing_count
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    extra_count:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Written and not expected.
+      business_rule: 'Non-zero means the stage covered something outside its declared population, which
+        is as much a contract breach as missing one. These tables are not metrics. They are the evidence
+        that decides whether a universe row may be served at all: a resolver requires a finalization row
+        plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW run,
+        and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: count of entities
+      source_column: screener.compute_run_stages.extra_count
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    expected_set_hash:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Hash of the expected entity SET.
+      business_rule: 'A hash rather than a count because two sets of equal size can differ. Comparing
+        counts alone would admit a stage that wrote the right NUMBER of the wrong entities. These tables
+        are not metrics. They are the evidence that decides whether a universe row may be served at all:
+        a resolver requires a finalization row plus a success row for every stage the run''s plan declares.
+        Append-only -- a retry is a NEW run, and an unpublishable run stays unfinalised rather than being
+        downgraded.'
+      unit: n/a (hash)
+      source_column: screener.compute_run_stages.expected_set_hash
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    written_set_hash:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Hash of the written entity set.
+      business_rule: 'Equality with expected_set_hash is the success condition. These tables are not metrics.
+        They are the evidence that decides whether a universe row may be served at all: a resolver requires
+        a finalization row plus a success row for every stage the run''s plan declares. Append-only --
+        a retry is a NEW run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (hash)
+      source_column: screener.compute_run_stages.written_set_hash
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    details:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Per-stage detail. DEFAULT '{}'.
+      business_rule: 'Diagnostic payload; not a contract surface. These tables are not metrics. They are
+        the evidence that decides whether a universe row may be served at all: a resolver requires a finalization
+        row plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW
+        run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: jsonb
+      source_column: screener.compute_run_stages.details
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    completed_at:
+      source_table: screener.compute_run_stages
+      grain: one terminal row per (run_id, stage_name)
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id, stage_name); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Set to now() when the terminal row is written.
+      business_rule: 'When the stage ENDED. Note this is the stage''s own time, not the run''s publication
+        time. These tables are not metrics. They are the evidence that decides whether a universe row
+        may be served at all: a resolver requires a finalization row plus a success row for every stage
+        the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable run stays
+        unfinalised rather than being downgraded.'
+      unit: timestamptz
+      source_column: screener.compute_run_stages.completed_at
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+  screener.compute_run_finalizations:
+    run_id:
+      source_table: screener.compute_run_finalizations
+      grain: one row per PUBLISHED run
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: The run being published.
+      business_rule: 'The PRESENCE of this row is the publication boundary. Nothing else marks a run as
+        published, and there is no status column to set wrongly. These tables are not metrics. They are
+        the evidence that decides whether a universe row may be served at all: a resolver requires a finalization
+        row plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW
+        run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (primary and foreign key)
+      source_column: screener.compute_run_finalizations.run_id
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    validated_at:
+      source_table: screener.compute_run_finalizations
+      grain: one row per PUBLISHED run
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Set to now() at finalisation.
+      business_rule: 'When the run was PUBLISHED, as distinct from compute_runs.run_at, which is when
+        it started. These tables are not metrics. They are the evidence that decides whether a universe
+        row may be served at all: a resolver requires a finalization row plus a success row for every
+        stage the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable run
+        stays unfinalised rather than being downgraded.'
+      unit: timestamptz
+      source_column: screener.compute_run_finalizations.validated_at
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    rows_written:
+      source_table: screener.compute_run_finalizations
+      grain: one row per PUBLISHED run
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Rows in the published universe.
+      business_rule: 'NOT NULL here, unlike compute_runs.rows_written -- a run that finalises has necessarily
+        written. These tables are not metrics. They are the evidence that decides whether a universe row
+        may be served at all: a resolver requires a finalization row plus a success row for every stage
+        the run''s plan declares. Append-only -- a retry is a NEW run, and an unpublishable run stays
+        unfinalised rather than being downgraded.'
+      unit: count of rows
+      source_column: screener.compute_run_finalizations.rows_written
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    persistence_violations:
+      source_table: screener.compute_run_finalizations
+      grain: one row per PUBLISHED run
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Violations detected at finalisation.
+      business_rule: 'NOT NULL. A non-zero value on a finalised run is a published run that knew about
+        its own violations, which is a state worth being able to find. These tables are not metrics. They
+        are the evidence that decides whether a universe row may be served at all: a resolver requires
+        a finalization row plus a success row for every stage the run''s plan declares. Append-only --
+        a retry is a NEW run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: count
+      source_column: screener.compute_run_finalizations.persistence_violations
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    snapshot_id:
+      source_table: screener.compute_run_finalizations
+      grain: one row per PUBLISHED run
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: The snapshot this finalisation published.
+      business_rule: 'Nullable -- not every finalisation carries one. These tables are not metrics. They
+        are the evidence that decides whether a universe row may be served at all: a resolver requires
+        a finalization row plus a success row for every stage the run''s plan declares. Append-only --
+        a retry is a NEW run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: n/a (identifier)
+      source_column: screener.compute_run_finalizations.snapshot_id
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.
+    details:
+      source_table: screener.compute_run_finalizations
+      grain: one row per PUBLISHED run
+      writer_job: compute/engine/run_stages.py; scripts/gate_seed_run.py
+      join_condition: PRIMARY KEY (run_id); FOREIGN KEY (run_id) REFERENCES screener.compute_runs(id)
+        ON DELETE RESTRICT.
+      transformation_rule: Finalisation detail. DEFAULT '{}'.
+      business_rule: 'Diagnostic payload; not a contract surface. These tables are not metrics. They are
+        the evidence that decides whether a universe row may be served at all: a resolver requires a finalization
+        row plus a success row for every stage the run''s plan declares. Append-only -- a retry is a NEW
+        run, and an unpublishable run stays unfinalised rather than being downgraded.'
+      unit: jsonb
+      source_column: screener.compute_run_finalizations.details
+      derivation_formula: Written by the orchestration, not derived from a source column.
+      applicability: Append-only. An absent row is not a failed run -- it is a run that did not reach
+        this point, and the distinction is the whole contract.

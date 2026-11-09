@@ -1,0 +1,4220 @@
+{
+ "columns": [
+  {
+   "ordinal": 1,
+   "column": "asx_code",
+   "insert_expr": "c.asx_code",
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 2,
+   "column": "company_name",
+   "insert_expr": "c.company_name",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 3,
+   "column": "short_name",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 4,
+   "column": "sector",
+   "insert_expr": "c.gics_sector",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 5,
+   "column": "industry_group",
+   "insert_expr": "c.gics_industry_group",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 6,
+   "column": "industry",
+   "insert_expr": "c.gics_industry",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 7,
+   "column": "sub_industry",
+   "insert_expr": "c.gics_sub_industry",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 8,
+   "column": "stock_type",
+   "insert_expr": "c.company_type",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 9,
+   "column": "status",
+   "insert_expr": "c.status",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 10,
+   "column": "listing_date",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 11,
+   "column": "fiscal_year_end_month",
+   "insert_expr": "c.fiscal_year_end_month",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 12,
+   "column": "is_reit",
+   "insert_expr": "c.is_reit",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 13,
+   "column": "is_miner",
+   "insert_expr": "c.is_miner",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 14,
+   "column": "is_asx20",
+   "insert_expr": "c.is_asx20",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "asx_indices.py (UPDATE @139)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 15,
+   "column": "is_asx50",
+   "insert_expr": "c.is_asx50",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "asx_indices.py (UPDATE @139)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 16,
+   "column": "is_asx100",
+   "insert_expr": "c.is_asx100",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "asx_indices.py (UPDATE @139)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 17,
+   "column": "is_asx200",
+   "insert_expr": "c.is_asx200",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "asx_indices.py (UPDATE @139)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 18,
+   "column": "is_asx300",
+   "insert_expr": "c.is_asx300",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "asx_indices.py (UPDATE @139)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 19,
+   "column": "is_all_ords",
+   "insert_expr": "c.is_all_ords",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 20,
+   "column": "isin",
+   "insert_expr": "c.isin",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 21,
+   "column": "website",
+   "insert_expr": "c.website",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 22,
+   "column": "description",
+   "insert_expr": "c.description",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 23,
+   "column": "price",
+   "insert_expr": "dp.close          AS price",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 24,
+   "column": "price_date",
+   "insert_expr": "dp.price_date     AS price_date",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 25,
+   "column": "open",
+   "insert_expr": "dp.open           AS open",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 26,
+   "column": "high_52w",
+   "insert_expr": "dp52.high_52w",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 27,
+   "column": "low_52w",
+   "insert_expr": "dp52.low_52w",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 28,
+   "column": "volume",
+   "insert_expr": "dp.volume         AS volume",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 29,
+   "column": "avg_volume_20d",
+   "insert_expr": "dp20.avg_volume_20d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 30,
+   "column": "market_cap",
+   "insert_expr": "vs.market_cap",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 31,
+   "column": "pe_ratio",
+   "insert_expr": "COALESCE(vs.pe_ratio, CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0 AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999 THEN ROUND((dp.close / COALESCE(pnl0.eps, ym.eps))::numeric, 4) END) AS pe_ratio",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 32,
+   "column": "forward_pe",
+   "insert_expr": "vs.forward_pe",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 33,
+   "column": "peg_ratio",
+   "insert_expr": "COALESCE(vs.peg_ratio, CASE WHEN COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) > 0 AND COALESCE(pnl0.eps, ym.eps) > 0 AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999 THEN ROUND(((dp.close / COALESCE(pnl0.eps, ym.eps)) / (COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) * 100))::numeric, 4) END) AS peg_ratio",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 34,
+   "column": "price_to_book",
+   "insert_expr": "vs.price_to_book",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 35,
+   "column": "price_to_sales",
+   "insert_expr": "vs.price_to_sales",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 36,
+   "column": "price_to_cash_flow",
+   "insert_expr": "CASE WHEN cf0.cfo > 0 THEN ROUND((vs.market_cap / (cf0.cfo * 1000000.0))::numeric, 4) END AS price_to_cash_flow",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 37,
+   "column": "price_to_fcf",
+   "insert_expr": "ym.p_fcf_ratio          AS price_to_fcf",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 38,
+   "column": "ev",
+   "insert_expr": "vs.enterprise_value     AS ev",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 39,
+   "column": "ev_to_ebitda",
+   "insert_expr": "CASE WHEN ym.ev_ebitda > 0 THEN ym.ev_ebitda END AS ev_to_ebitda",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 40,
+   "column": "ev_to_ebit",
+   "insert_expr": "CASE WHEN ym.ev_ebit <> 0 THEN ym.ev_ebit END AS ev_to_ebit",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 41,
+   "column": "ev_to_revenue",
+   "insert_expr": "vs.ev_to_revenue",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 42,
+   "column": "graham_number",
+   "insert_expr": "CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0 AND (bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0)) > 0 THEN ROUND(sqrt(22.5 * COALESCE(pnl0.eps, ym.eps) * (bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0)))::numeric, 4) END AS graham_number",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 43,
+   "column": "dps_ttm",
+   "insert_expr": "cm.dividend_per_share   AS dps_ttm",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 44,
+   "column": "dividend_yield",
+   "insert_expr": "CASE WHEN ABS(cm.dividend_yield) < 100 THEN cm.dividend_yield END AS dividend_yield",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 45,
+   "column": "franking_pct",
+   "insert_expr": "cm.franking_pct",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 46,
+   "column": "franking_credit_per_share",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 47,
+   "column": "grossed_up_yield",
+   "insert_expr": "CASE WHEN ABS(cm.grossed_up_yield) < 100 THEN cm.grossed_up_yield END AS grossed_up_yield",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 48,
+   "column": "ex_div_date",
+   "insert_expr": "div_latest.ex_date",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 49,
+   "column": "pay_date",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 50,
+   "column": "payout_ratio",
+   "insert_expr": "CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL AND COALESCE(pnl0.eps, ym.eps) > 0 AND cm.dividend_per_share IS NOT NULL AND ABS(cm.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 9999 THEN ROUND((cm.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4) END AS payout_ratio",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 51,
+   "column": "revenue_ttm",
+   "insert_expr": "vs.revenue_ttm",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 52,
+   "column": "gross_profit_ttm",
+   "insert_expr": "vs.gross_profit_ttm",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 53,
+   "column": "ebitda_ttm",
+   "insert_expr": "vs.ebitda_ttm",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 54,
+   "column": "net_profit_ttm",
+   "insert_expr": "pnl0.net_profit AS net_profit_ttm",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 55,
+   "column": "gross_margin",
+   "insert_expr": "COALESCE(cm.gpm,           NULL)                         AS gross_margin",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 56,
+   "column": "ebitda_margin",
+   "insert_expr": "COALESCE(cm.ebitda_margin, NULL)                         AS ebitda_margin",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 57,
+   "column": "net_margin",
+   "insert_expr": "COALESCE(cm.npm,           vs.profit_margin)             AS net_margin",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 58,
+   "column": "operating_margin",
+   "insert_expr": "COALESCE(cm.opm,           vs.operating_margin)          AS operating_margin",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 59,
+   "column": "roe",
+   "insert_expr": "COALESCE(cm.roe,  ym.roe,  vs.roe_ttm)                  AS roe",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 60,
+   "column": "roa",
+   "insert_expr": "COALESCE(cm.roa,  ym.roa,  vs.roa_ttm)                  AS roa",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 61,
+   "column": "roce",
+   "insert_expr": "COALESCE(cm.roce, ym.roce)                               AS roce",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 62,
+   "column": "revenue_fy0",
+   "insert_expr": "pnl0.revenue    AS revenue_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 63,
+   "column": "revenue_fy1",
+   "insert_expr": "pnl1.revenue    AS revenue_fy1",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 64,
+   "column": "revenue_fy2",
+   "insert_expr": "pnl2.revenue    AS revenue_fy2",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 65,
+   "column": "ebitda_fy0",
+   "insert_expr": "pnl0.ebitda     AS ebitda_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 66,
+   "column": "ebitda_fy1",
+   "insert_expr": "pnl1.ebitda     AS ebitda_fy1",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 67,
+   "column": "net_profit_fy0",
+   "insert_expr": "pnl0.net_profit AS net_profit_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 68,
+   "column": "net_profit_fy1",
+   "insert_expr": "pnl1.net_profit AS net_profit_fy1",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 69,
+   "column": "eps_fy0",
+   "insert_expr": "COALESCE(pnl0.eps, ym.eps)  AS eps_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 70,
+   "column": "eps_fy1",
+   "insert_expr": "pnl1.eps                    AS eps_fy1",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 71,
+   "column": "dps_fy0",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 72,
+   "column": "dps_fy1",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 73,
+   "column": "total_assets",
+   "insert_expr": "bs0.total_assets",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 74,
+   "column": "total_equity",
+   "insert_expr": "bs0.total_equity",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 75,
+   "column": "total_debt",
+   "insert_expr": "bs0.total_debt",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 76,
+   "column": "net_debt",
+   "insert_expr": "bs0.net_debt",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 77,
+   "column": "cash",
+   "insert_expr": "bs0.cash_equivalents    AS cash",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 78,
+   "column": "book_value_per_share",
+   "insert_expr": "ROUND((bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0))::numeric, 4) AS book_value_per_share",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 79,
+   "column": "debt_to_equity",
+   "insert_expr": "CASE WHEN bs0.total_equity <> 0 AND bs0.total_equity IS NOT NULL THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END AS debt_to_equity",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 80,
+   "column": "current_ratio",
+   "insert_expr": "CASE WHEN bs0.total_current_liab <> 0 AND bs0.total_current_liab IS NOT NULL THEN ROUND(bs0.total_current_assets / bs0.total_current_liab, 4) END AS current_ratio",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 81,
+   "column": "cfo_fy0",
+   "insert_expr": "cf0.cfo         AS cfo_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 82,
+   "column": "capex_fy0",
+   "insert_expr": "cf0.capex       AS capex_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 83,
+   "column": "fcf_fy0",
+   "insert_expr": "cf0.fcf         AS fcf_fy0",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 84,
+   "column": "fcf_yield",
+   "insert_expr": "COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 85,
+   "column": "revenue_growth_1y",
+   "insert_expr": "COALESCE(cm.revenue_growth_1y,  ym.revenue_growth_1y)        AS revenue_growth_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 86,
+   "column": "revenue_growth_3y_cagr",
+   "insert_expr": "COALESCE(cm.revenue_growth_3y,  ym.revenue_cagr_3y)          AS revenue_growth_3y_cagr",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 87,
+   "column": "earnings_growth_1y",
+   "insert_expr": "COALESCE(cm.profit_growth_1y,   ym.net_income_growth_1y)     AS earnings_growth_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 88,
+   "column": "earnings_growth_3y_cagr",
+   "insert_expr": "COALESCE(cm.profit_growth_3y,   ym.net_income_cagr_3y)       AS earnings_growth_3y_cagr",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 89,
+   "column": "rsi_14",
+   "insert_expr": "dm.rsi_14         AS rsi_14",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 90,
+   "column": "macd",
+   "insert_expr": "dm.macd_line      AS macd",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 91,
+   "column": "macd_signal",
+   "insert_expr": "dm.macd_signal    AS macd_signal",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 92,
+   "column": "sma_20",
+   "insert_expr": "dm.sma_20           AS sma_20",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 93,
+   "column": "sma_50",
+   "insert_expr": "dm.sma_50           AS sma_50",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 94,
+   "column": "sma_200",
+   "insert_expr": "dm.sma_200           AS sma_200",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 95,
+   "column": "ema_20",
+   "insert_expr": "dm.ema_20           AS ema_20",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 96,
+   "column": "bb_upper",
+   "insert_expr": "dm.bb_upper          AS bb_upper",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 97,
+   "column": "bb_lower",
+   "insert_expr": "dm.bb_lower          AS bb_lower",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 98,
+   "column": "atr_14",
+   "insert_expr": "dm.atr_14            AS atr_14",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 99,
+   "column": "adx_14",
+   "insert_expr": "dm.adx_14",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 100,
+   "column": "obv",
+   "insert_expr": "dm.obv               AS obv",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 101,
+   "column": "return_1w",
+   "insert_expr": "dm.return_1w  AS return_1w",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 102,
+   "column": "return_1m",
+   "insert_expr": "dm.return_1m AS return_1m",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 103,
+   "column": "return_3m",
+   "insert_expr": "dm.return_3m      AS return_3m",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 104,
+   "column": "return_6m",
+   "insert_expr": "dm.return_6m      AS return_6m",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 105,
+   "column": "return_1y",
+   "insert_expr": "dm.return_1y     AS return_1y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 106,
+   "column": "return_3y",
+   "insert_expr": "dm.return_3y      AS return_3y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 107,
+   "column": "return_ytd",
+   "insert_expr": "dm.return_ytd     AS return_ytd",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 108,
+   "column": "momentum_3m",
+   "insert_expr": "mm.momentum_3m      AS momentum_3m",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 109,
+   "column": "momentum_6m",
+   "insert_expr": "mm.momentum_6m      AS momentum_6m",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 110,
+   "column": "momentum_12m",
+   "insert_expr": "mm.momentum_12m     AS momentum_12m",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 111,
+   "column": "volatility_20d",
+   "insert_expr": "dm.hv_20d      AS volatility_20d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 112,
+   "column": "volatility_60d",
+   "insert_expr": "dm.hv_60d      AS volatility_60d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 113,
+   "column": "sharpe_1y",
+   "insert_expr": "ym.sharpe_1y        AS sharpe_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 114,
+   "column": "drawdown_from_ath",
+   "insert_expr": "dm.pct_from_ath AS drawdown_from_ath",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 115,
+   "column": "analyst_rating",
+   "insert_expr": "ar.rating           AS analyst_rating",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 116,
+   "column": "analyst_target_price",
+   "insert_expr": "ar.target_price     AS analyst_target_price",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 117,
+   "column": "analyst_upside",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 118,
+   "column": "analyst_strong_buy",
+   "insert_expr": "ar.strong_buy",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 119,
+   "column": "analyst_buy",
+   "insert_expr": "ar.buy",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 120,
+   "column": "analyst_hold",
+   "insert_expr": "ar.hold",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 121,
+   "column": "analyst_sell",
+   "insert_expr": "ar.sell",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 122,
+   "column": "analyst_strong_sell",
+   "insert_expr": "ar.strong_sell",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 123,
+   "column": "shares_outstanding",
+   "insert_expr": "ss.shares_outstanding",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 124,
+   "column": "shares_float",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 125,
+   "column": "percent_insiders",
+   "insert_expr": "ss.percent_insiders",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 126,
+   "column": "percent_institutions",
+   "insert_expr": "ss.percent_institutions",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 127,
+   "column": "short_pct",
+   "insert_expr": "si.short_pct",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "short_positions.py (UPDATE @233)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 128,
+   "column": "short_position_shares",
+   "insert_expr": "si.short_shares            AS short_position_shares",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 129,
+   "column": "universe_built_at",
+   "insert_expr": "NOW()",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 130,
+   "column": "piotroski_f_score",
+   "insert_expr": "ym.piotroski_f_score",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 131,
+   "column": "altman_z_score",
+   "insert_expr": "ym.altman_z_score",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 132,
+   "column": "revenue_cagr_5y",
+   "insert_expr": "ym.revenue_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 133,
+   "column": "eps_growth_3y_cagr",
+   "insert_expr": "ym.eps_cagr_3y          AS eps_growth_3y_cagr",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 134,
+   "column": "avg_roe_3y",
+   "insert_expr": "ym.avg_roe_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 135,
+   "column": "beta_1y",
+   "insert_expr": "ym.beta_1y          AS beta_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 136,
+   "column": "dividend_cagr_3y",
+   "insert_expr": "ym.dividend_cagr_3y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 137,
+   "column": "dividend_consecutive_yrs",
+   "insert_expr": "ym.dividend_consecutive_yrs",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 138,
+   "column": "revenue_growth_yoy_q",
+   "insert_expr": "qm.revenue_growth_yoy    AS revenue_growth_yoy_q",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 139,
+   "column": "eps_growth_yoy_q",
+   "insert_expr": "qm.eps_growth_yoy        AS eps_growth_yoy_q",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 140,
+   "column": "net_income_growth_yoy_q",
+   "insert_expr": "qm.net_income_growth_yoy AS net_income_growth_yoy_q",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 141,
+   "column": "return_5y",
+   "insert_expr": "dm.return_5y      AS return_5y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 142,
+   "column": "return_7y",
+   "insert_expr": "dm.return_7y      AS return_7y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 143,
+   "column": "return_10y",
+   "insert_expr": "dm.return_10y     AS return_10y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 144,
+   "column": "return_15y",
+   "insert_expr": "dm.return_15y     AS return_15y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 145,
+   "column": "revenue_growth_hoh",
+   "insert_expr": "hym.revenue_growth_hoh",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 146,
+   "column": "net_income_growth_hoh",
+   "insert_expr": "hym.net_income_growth_hoh",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 147,
+   "column": "eps_growth_hoh",
+   "insert_expr": "hym.eps_growth_hoh",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 148,
+   "column": "short_interest_chg_1w",
+   "insert_expr": "si.short_pct_chg_1w        AS short_interest_chg_1w",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "short_positions.py (UPDATE @233)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 149,
+   "column": "value_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": true,
+   "writers": [
+    "composite_score.py (UPDATE @846)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 150,
+   "column": "quality_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": true,
+   "writers": [
+    "composite_score.py (UPDATE @846)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 151,
+   "column": "growth_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": true,
+   "writers": [
+    "composite_score.py (UPDATE @846)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 152,
+   "column": "momentum_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": true,
+   "writers": [
+    "composite_score.py (UPDATE @846)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 153,
+   "column": "income_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": true,
+   "writers": [
+    "composite_score.py (UPDATE @846)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 154,
+   "column": "composite_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": true,
+   "writers": [
+    "composite_score.py (UPDATE @846)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 155,
+   "column": "pros",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "pros_cons.py (UPDATE @354)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 156,
+   "column": "cons",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "pros_cons.py (UPDATE @354)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 157,
+   "column": "ocf_to_net_profit",
+   "insert_expr": "ym.ocf_to_net_profit",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 158,
+   "column": "fcf_payout_ratio",
+   "insert_expr": "ym.fcf_payout_ratio",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 159,
+   "column": "shares_dilution_3y",
+   "insert_expr": "ym.shares_dilution_3y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 160,
+   "column": "eps_volatility_5y",
+   "insert_expr": "ym.eps_volatility_5y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 161,
+   "column": "fcf_positive_years",
+   "insert_expr": "ym.fcf_positive_years",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 162,
+   "column": "above_vwap",
+   "insert_expr": "dm.above_vwap",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 163,
+   "column": "dollar_volume_avg_20d",
+   "insert_expr": "dm.dollar_volume_avg_20d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 164,
+   "column": "avg_roic_3y",
+   "insert_expr": "ym.avg_roic_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 165,
+   "column": "avg_roic_5y",
+   "insert_expr": "ym.avg_roic_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 166,
+   "column": "asset_light_score",
+   "insert_expr": "ym.asset_light_score",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 167,
+   "column": "analyst_count",
+   "insert_expr": "NULLIF( COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0), 0 )::SMALLINT                                                             AS analyst_count",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 168,
+   "column": "analyst_buy_pct",
+   "insert_expr": "CASE WHEN (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)) > 0 THEN ROUND( (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0))::NUMERIC / (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)), 4) END                                                                     AS analyst_buy_pct",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 169,
+   "column": "analyst_consensus_score",
+   "insert_expr": "CASE WHEN (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)) > 0 THEN ROUND( (COALESCE(ar.strong_buy,0)*2 + COALESCE(ar.buy,0) - COALESCE(ar.sell,0) - COALESCE(ar.strong_sell,0)*2)::NUMERIC / (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)), 4) END                                                                     AS analyst_consensus_score",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 170,
+   "column": "brand_proxy_score",
+   "insert_expr": "ym.brand_proxy_score",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 171,
+   "column": "capital_efficiency_score",
+   "insert_expr": "ym.capital_efficiency_score",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 172,
+   "column": "earnings_stability_score",
+   "insert_expr": "ym.earnings_stability_score",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 173,
+   "column": "business_model_tag",
+   "insert_expr": "mc.business_model_tag",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 174,
+   "column": "commodity_exposure",
+   "insert_expr": "mc.commodity_exposure",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 175,
+   "column": "is_mega",
+   "insert_expr": "COALESCE(vs.market_cap >= 50000000000, FALSE)                                           AS is_mega",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 176,
+   "column": "is_large",
+   "insert_expr": "COALESCE(vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000, FALSE)          AS is_large",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 177,
+   "column": "is_mid",
+   "insert_expr": "COALESCE(vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000, FALSE)          AS is_mid",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 178,
+   "column": "is_small",
+   "insert_expr": "COALESCE(vs.market_cap >= 300000000   AND vs.market_cap < 2000000000, FALSE)           AS is_small",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 179,
+   "column": "is_micro",
+   "insert_expr": "COALESCE(vs.market_cap >= 50000000    AND vs.market_cap < 300000000, FALSE)            AS is_micro",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 180,
+   "column": "is_nano",
+   "insert_expr": "COALESCE(vs.market_cap > 0            AND vs.market_cap < 50000000, FALSE)             AS is_nano",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 181,
+   "column": "market_cap_tier",
+   "insert_expr": "CASE WHEN vs.market_cap >= 50000000000                              THEN 'mega' WHEN vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000 THEN 'large' WHEN vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000 THEN 'mid' WHEN vs.market_cap >= 300000000   AND vs.market_cap < 2000000000  THEN 'small' WHEN vs.market_cap >= 50000000    AND vs.market_cap < 300000000   THEN 'micro' WHEN vs.market_cap > 0                                            THEN 'nano' ELSE NULL END                                                                      AS market_cap_tier",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 182,
+   "column": "roic",
+   "insert_expr": "ym.roic                                                  AS roic",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 183,
+   "column": "asset_turnover",
+   "insert_expr": "ym.asset_turnover                                        AS asset_turnover",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 184,
+   "column": "net_debt_to_ebitda",
+   "insert_expr": "ym.net_debt_to_ebitda                                    AS net_debt_to_ebitda",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 185,
+   "column": "interest_coverage",
+   "insert_expr": "ym.interest_coverage                                     AS interest_coverage",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 186,
+   "column": "ocf_margin",
+   "insert_expr": "ym.ocf_margin                                            AS ocf_margin",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 187,
+   "column": "fcf_margin",
+   "insert_expr": "ym.fcf_margin                                            AS fcf_margin",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 188,
+   "column": "capex_intensity",
+   "insert_expr": "ym.capex_intensity                                       AS capex_intensity",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 189,
+   "column": "debt_to_assets",
+   "insert_expr": "ym.debt_to_assets                                        AS debt_to_assets",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 190,
+   "column": "lt_debt_to_capital",
+   "insert_expr": "ym.lt_debt_to_capital                                    AS lt_debt_to_capital",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 191,
+   "column": "ebitda_growth_1y",
+   "insert_expr": "ym.ebitda_growth_1y                                          AS ebitda_growth_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 192,
+   "column": "fcf_growth_1y",
+   "insert_expr": "ym.fcf_growth_1y                                             AS fcf_growth_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 193,
+   "column": "eps_growth_1y",
+   "insert_expr": "ym.eps_growth_1y                                             AS eps_growth_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 194,
+   "column": "revenue_cagr_7y",
+   "insert_expr": "ym.revenue_cagr_7y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 195,
+   "column": "revenue_cagr_10y",
+   "insert_expr": "ym.revenue_cagr_10y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 196,
+   "column": "net_income_cagr_5y",
+   "insert_expr": "ym.net_income_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 197,
+   "column": "eps_cagr_5y",
+   "insert_expr": "ym.eps_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 198,
+   "column": "ebitda_cagr_3y",
+   "insert_expr": "ym.ebitda_cagr_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 199,
+   "column": "ebitda_cagr_5y",
+   "insert_expr": "ym.ebitda_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 200,
+   "column": "fcf_cagr_3y",
+   "insert_expr": "ym.fcf_cagr_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 201,
+   "column": "fcf_cagr_5y",
+   "insert_expr": "ym.fcf_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 202,
+   "column": "dividend_cagr_5y",
+   "insert_expr": "ym.dividend_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 203,
+   "column": "bvps_cagr_3y",
+   "insert_expr": "ym.bvps_cagr_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 204,
+   "column": "bvps_cagr_5y",
+   "insert_expr": "ym.bvps_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 205,
+   "column": "avg_roe_5y",
+   "insert_expr": "ym.avg_roe_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 206,
+   "column": "avg_roa_3y",
+   "insert_expr": "ym.avg_roa_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 207,
+   "column": "avg_roa_5y",
+   "insert_expr": "ym.avg_roa_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 208,
+   "column": "avg_roce_3y",
+   "insert_expr": "ym.avg_roce_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 209,
+   "column": "avg_roce_5y",
+   "insert_expr": "ym.avg_roce_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 210,
+   "column": "avg_gross_margin_3y",
+   "insert_expr": "ym.avg_gross_margin_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 211,
+   "column": "avg_gross_margin_5y",
+   "insert_expr": "ym.avg_gross_margin_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 212,
+   "column": "avg_ebitda_margin_3y",
+   "insert_expr": "ym.avg_ebitda_margin_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 213,
+   "column": "avg_ebitda_margin_5y",
+   "insert_expr": "ym.avg_ebitda_margin_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 214,
+   "column": "avg_operating_margin_3y",
+   "insert_expr": "ym.avg_operating_margin_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 215,
+   "column": "avg_operating_margin_5y",
+   "insert_expr": "ym.avg_operating_margin_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 216,
+   "column": "avg_net_margin_3y",
+   "insert_expr": "ym.avg_net_margin_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 217,
+   "column": "avg_net_margin_5y",
+   "insert_expr": "ym.avg_net_margin_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 218,
+   "column": "avg_eps_growth_3y",
+   "insert_expr": "ym.avg_eps_growth_3y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 219,
+   "column": "avg_eps_growth_5y",
+   "insert_expr": "ym.avg_eps_growth_5y",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 220,
+   "column": "dma50_ratio",
+   "insert_expr": "dm.dma50_ratio",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 221,
+   "column": "dma200_ratio",
+   "insert_expr": "dm.dma200_ratio",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 222,
+   "column": "above_sma50",
+   "insert_expr": "dm.above_sma50",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 223,
+   "column": "above_sma200",
+   "insert_expr": "dm.above_sma200",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 224,
+   "column": "golden_cross",
+   "insert_expr": "dm.golden_cross",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 225,
+   "column": "death_cross",
+   "insert_expr": "dm.death_cross",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 226,
+   "column": "new_52w_high",
+   "insert_expr": "CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 227,
+   "column": "new_52w_low",
+   "insert_expr": "CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 228,
+   "column": "relative_volume",
+   "insert_expr": "dm.relative_volume",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 229,
+   "column": "bb_pct",
+   "insert_expr": "dm.bb_pct",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 230,
+   "column": "rsi_21",
+   "insert_expr": "dm.rsi_21",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 231,
+   "column": "stoch_k",
+   "insert_expr": "dm.stoch_k",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 232,
+   "column": "stoch_d",
+   "insert_expr": "dm.stoch_d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 233,
+   "column": "rsi_overbought",
+   "insert_expr": "dm.rsi_overbought",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 234,
+   "column": "rsi_oversold",
+   "insert_expr": "dm.rsi_oversold",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 235,
+   "column": "macd_bullish_cross",
+   "insert_expr": "dm.macd_bullish_cross",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 236,
+   "column": "macd_bearish_cross",
+   "insert_expr": "dm.macd_bearish_cross",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 237,
+   "column": "price_to_52w_high",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 238,
+   "column": "price_to_52w_low",
+   "insert_expr": "CASE WHEN dp52.low_52w > 0 THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 239,
+   "column": "fcf_per_share",
+   "insert_expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((cf0.fcf * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS fcf_per_share",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 240,
+   "column": "ocf_per_share",
+   "insert_expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((cf0.cfo * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS ocf_per_share",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 241,
+   "column": "revenue_per_share",
+   "insert_expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((vs.revenue_ttm / ss.shares_outstanding)::numeric, 4) END AS revenue_per_share",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 242,
+   "column": "working_capital",
+   "insert_expr": "(bs0.total_current_assets - bs0.total_current_liab) AS working_capital",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 243,
+   "column": "gross_profit_fy0",
+   "insert_expr": "pnl0.gross_profit  AS gross_profit_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 244,
+   "column": "gross_profit_fy1",
+   "insert_expr": "pnl1.gross_profit  AS gross_profit_fy1",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 245,
+   "column": "gross_profit_fy3",
+   "insert_expr": "pnl3.gross_profit  AS gross_profit_fy3",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 246,
+   "column": "gross_profit_fy5",
+   "insert_expr": "pnl5.gross_profit  AS gross_profit_fy5",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 247,
+   "column": "gross_profit_fy7",
+   "insert_expr": "pnl7.gross_profit  AS gross_profit_fy7",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 248,
+   "column": "gross_profit_fy10",
+   "insert_expr": "pnl10.gross_profit AS gross_profit_fy10",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 249,
+   "column": "pbt_fy0",
+   "insert_expr": "pnl0.pbt           AS pbt_fy0",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 250,
+   "column": "pbt_fy1",
+   "insert_expr": "pnl1.pbt           AS pbt_fy1",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 251,
+   "column": "pbt_fy3",
+   "insert_expr": "pnl3.pbt           AS pbt_fy3",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 252,
+   "column": "pbt_fy5",
+   "insert_expr": "pnl5.pbt           AS pbt_fy5",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 253,
+   "column": "pbt_fy7",
+   "insert_expr": "pnl7.pbt           AS pbt_fy7",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 254,
+   "column": "pbt_fy10",
+   "insert_expr": "pnl10.pbt          AS pbt_fy10",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 255,
+   "column": "revenue_fy3",
+   "insert_expr": "pnl3.revenue       AS revenue_fy3",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 256,
+   "column": "revenue_fy5",
+   "insert_expr": "pnl5.revenue       AS revenue_fy5",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 257,
+   "column": "revenue_fy7",
+   "insert_expr": "pnl7.revenue       AS revenue_fy7",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 258,
+   "column": "revenue_fy10",
+   "insert_expr": "pnl10.revenue      AS revenue_fy10",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 259,
+   "column": "net_profit_fy3",
+   "insert_expr": "pnl3.net_profit    AS net_profit_fy3",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 260,
+   "column": "net_profit_fy5",
+   "insert_expr": "pnl5.net_profit    AS net_profit_fy5",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 261,
+   "column": "net_profit_fy7",
+   "insert_expr": "pnl7.net_profit    AS net_profit_fy7",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 262,
+   "column": "net_profit_fy10",
+   "insert_expr": "pnl10.net_profit   AS net_profit_fy10",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 263,
+   "column": "sales_growth_prev_y",
+   "insert_expr": "CASE WHEN pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0 THEN ROUND(((pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))::numeric, 4) END AS sales_growth_prev_y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 264,
+   "column": "pbt_growth_1y",
+   "insert_expr": "CASE WHEN pnl1.pbt IS NOT NULL AND pnl1.pbt <> 0 THEN ROUND(((pnl0.pbt - pnl1.pbt) / ABS(pnl1.pbt))::numeric, 4) END AS pbt_growth_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 265,
+   "column": "pbt_growth_prev_y",
+   "insert_expr": "CASE WHEN pnl2.pbt IS NOT NULL AND pnl2.pbt <> 0 THEN ROUND(((pnl1.pbt - pnl2.pbt) / ABS(pnl2.pbt))::numeric, 4) END AS pbt_growth_prev_y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 266,
+   "column": "pbt_cagr_3y",
+   "insert_expr": "CASE WHEN pnl0.pbt > 0 AND pnl3.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl3.pbt, 1.0/3) - 1)::numeric, 4) END AS pbt_cagr_3y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 267,
+   "column": "pbt_cagr_5y",
+   "insert_expr": "CASE WHEN pnl0.pbt > 0 AND pnl5.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl5.pbt, 1.0/5) - 1)::numeric, 4) END AS pbt_cagr_5y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 268,
+   "column": "pbt_cagr_7y",
+   "insert_expr": "CASE WHEN pnl0.pbt > 0 AND pnl7.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl7.pbt, 1.0/7) - 1)::numeric, 4) END AS pbt_cagr_7y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 269,
+   "column": "pbt_cagr_10y",
+   "insert_expr": "CASE WHEN pnl0.pbt > 0 AND pnl10.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl10.pbt, 1.0/10) - 1)::numeric, 4) END AS pbt_cagr_10y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 270,
+   "column": "cogs",
+   "insert_expr": "pnl0.cost_of_sales      AS cogs",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 271,
+   "column": "ebit",
+   "insert_expr": "pnl0.ebit               AS ebit",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 272,
+   "column": "income_tax_expense",
+   "insert_expr": "pnl0.tax                AS income_tax_expense",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 273,
+   "column": "interest_expense",
+   "insert_expr": "pnl0.interest_expense   AS interest_expense",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 274,
+   "column": "depreciation",
+   "insert_expr": "pnl0.depreciation       AS depreciation",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 275,
+   "column": "trade_receivables",
+   "insert_expr": "bs0.trade_receivables   AS trade_receivables",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 276,
+   "column": "inventory",
+   "insert_expr": "bs0.inventory           AS inventory",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 277,
+   "column": "goodwill",
+   "insert_expr": "bs0.goodwill            AS goodwill",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 278,
+   "column": "intangibles",
+   "insert_expr": "bs0.intangibles         AS intangibles",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 279,
+   "column": "ppe_net",
+   "insert_expr": "bs0.gross_block         AS ppe_net",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 280,
+   "column": "total_current_assets",
+   "insert_expr": "bs0.total_current_assets   AS total_current_assets",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 281,
+   "column": "total_current_liabilities",
+   "insert_expr": "bs0.total_current_liab     AS total_current_liabilities",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 282,
+   "column": "total_liabilities",
+   "insert_expr": "bs0.total_liabilities      AS total_liabilities",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 283,
+   "column": "long_term_debt",
+   "insert_expr": "bs0.long_term_debt      AS long_term_debt",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 284,
+   "column": "retained_earnings",
+   "insert_expr": "bs0.retained_earnings   AS retained_earnings",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 285,
+   "column": "cfi",
+   "insert_expr": "cf0.cfi                 AS cfi",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 286,
+   "column": "dividends_paid",
+   "insert_expr": "cf0.dividends_paid      AS dividends_paid",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 287,
+   "column": "quick_ratio",
+   "insert_expr": "CASE WHEN bs0.total_current_liab > 0 THEN ROUND(((bs0.total_current_assets - COALESCE(bs0.inventory,0)) / bs0.total_current_liab)::numeric, 4) END AS quick_ratio",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 288,
+   "column": "cash_ratio",
+   "insert_expr": "CASE WHEN bs0.total_current_liab > 0 THEN ROUND((bs0.cash_equivalents / bs0.total_current_liab)::numeric, 4) END AS cash_ratio",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 289,
+   "column": "debt_to_ebitda",
+   "insert_expr": "CASE WHEN pnl0.ebitda > 0 THEN ROUND((bs0.total_debt / pnl0.ebitda)::numeric, 4) END AS debt_to_ebitda",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 290,
+   "column": "days_sales_outstanding",
+   "insert_expr": "CASE WHEN pnl0.revenue > 0 THEN ROUND((bs0.trade_receivables / pnl0.revenue * 365)::numeric, 2) END AS days_sales_outstanding",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 291,
+   "column": "days_inventory_outstanding",
+   "insert_expr": "CASE WHEN pnl0.cost_of_sales > 0 THEN ROUND((bs0.inventory / pnl0.cost_of_sales * 365)::numeric, 2) END AS days_inventory_outstanding",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 292,
+   "column": "inventory_turnover",
+   "insert_expr": "CASE WHEN bs0.inventory > 0 THEN ROUND((pnl0.cost_of_sales / bs0.inventory)::numeric, 4) END AS inventory_turnover",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 293,
+   "column": "receivables_turnover",
+   "insert_expr": "CASE WHEN bs0.trade_receivables > 0 THEN ROUND((pnl0.revenue / bs0.trade_receivables)::numeric, 4) END AS receivables_turnover",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 294,
+   "column": "pretax_margin",
+   "insert_expr": "CASE WHEN pnl0.revenue > 0 THEN ROUND((pnl0.pbt / pnl0.revenue)::numeric, 4) END AS pretax_margin",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 295,
+   "column": "nopat",
+   "insert_expr": "CASE WHEN pnl0.pbt <> 0 AND pnl0.pbt IS NOT NULL THEN ROUND((pnl0.ebit * (1 - pnl0.tax / pnl0.pbt))::numeric, 2) END AS nopat",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 296,
+   "column": "ebitda_interest_coverage",
+   "insert_expr": "CASE WHEN ABS(pnl0.interest_expense) > 0 THEN ROUND((pnl0.ebitda / ABS(pnl0.interest_expense))::numeric, 4) END AS ebitda_interest_coverage",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 297,
+   "column": "equity_ratio",
+   "insert_expr": "CASE WHEN bs0.total_assets > 0 THEN ROUND((bs0.total_equity / bs0.total_assets)::numeric, 4) END AS equity_ratio",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 298,
+   "column": "liabilities_to_assets",
+   "insert_expr": "CASE WHEN bs0.total_assets > 0 THEN ROUND((bs0.total_liabilities / bs0.total_assets)::numeric, 4) END AS liabilities_to_assets",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 299,
+   "column": "fixed_asset_turnover",
+   "insert_expr": "CASE WHEN bs0.gross_block > 0 THEN ROUND((pnl0.revenue / bs0.gross_block)::numeric, 4) END AS fixed_asset_turnover",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 300,
+   "column": "capex_to_revenue",
+   "insert_expr": "CASE WHEN pnl0.revenue > 0 THEN ROUND((ABS(cf0.capex) / pnl0.revenue)::numeric, 4) END AS capex_to_revenue",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 301,
+   "column": "tangible_book_value_per_share",
+   "insert_expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND(((bs0.total_equity - COALESCE(bs0.goodwill,0) - COALESCE(bs0.intangibles,0)) * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS tangible_book_value_per_share",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 302,
+   "column": "cash_per_share",
+   "insert_expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((bs0.cash_equivalents * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS cash_per_share",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 303,
+   "column": "avg_volume_50d",
+   "insert_expr": "dm.volume_avg_50d         AS avg_volume_50d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 304,
+   "column": "cmf_20",
+   "insert_expr": "dm.cmf_20",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 305,
+   "column": "adl",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [],
+   "unclaimed": true
+  },
+  {
+   "ordinal": 306,
+   "column": "up_down_vol_ratio_20d",
+   "insert_expr": "dm.up_down_vol_ratio_20d",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 307,
+   "column": "obv_rising",
+   "insert_expr": "dm.obv_rising",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 308,
+   "column": "volume_breakout",
+   "insert_expr": "dm.volume_breakout",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 309,
+   "column": "revenue_growth_accelerating",
+   "insert_expr": "CASE WHEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL AND pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0 THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) > ((pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue)) END AS revenue_growth_accelerating",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 310,
+   "column": "revenue_growth_delta",
+   "insert_expr": "CASE WHEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL AND pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0 THEN ROUND((COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) - (pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))::numeric, 4) END AS revenue_growth_delta",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 311,
+   "column": "revenue_growth_consistency",
+   "insert_expr": "CASE WHEN pnl0.revenue IS NOT NULL AND pnl1.revenue IS NOT NULL THEN ( CASE WHEN pnl0.revenue > pnl1.revenue THEN 1 ELSE 0 END + CASE WHEN pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl1.revenue > pnl2.revenue THEN 1 ELSE 0 END + CASE WHEN pnl2.revenue IS NOT NULL AND pnl3.revenue IS NOT NULL AND pnl2.revenue > pnl3.revenue THEN 1 ELSE 0 END )::smallint END AS revenue_growth_consistency",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 312,
+   "column": "operating_margin_expanding",
+   "insert_expr": "CASE WHEN ym.avg_operating_margin_3y BETWEEN -100 AND 100 AND ym.avg_operating_margin_5y BETWEEN -100 AND 100 THEN (ym.avg_operating_margin_3y - ym.avg_operating_margin_5y) > 0 END AS operating_margin_expanding",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 313,
+   "column": "gross_margin_expanding",
+   "insert_expr": "CASE WHEN ym.avg_gross_margin_3y BETWEEN -100 AND 100 AND ym.avg_gross_margin_5y BETWEEN -100 AND 100 THEN (ym.avg_gross_margin_3y - ym.avg_gross_margin_5y) > 0 END AS gross_margin_expanding",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 314,
+   "column": "fcf_conversion",
+   "insert_expr": "CASE WHEN pnl0.net_profit IS NOT NULL AND pnl0.net_profit > 0 AND cf0.fcf IS NOT NULL THEN ROUND((cf0.fcf / pnl0.net_profit)::numeric, 4) END AS fcf_conversion",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 315,
+   "column": "eps_beats_revenue_growth",
+   "insert_expr": "CASE WHEN ym.eps_growth_1y IS NOT NULL AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN ym.eps_growth_1y > COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) END AS eps_beats_revenue_growth",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 316,
+   "column": "operating_leverage",
+   "insert_expr": "CASE WHEN ym.ebitda_growth_1y IS NOT NULL AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN ROUND((ym.ebitda_growth_1y - COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y))::numeric, 4) END AS operating_leverage",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 317,
+   "column": "net_cash",
+   "insert_expr": "CASE WHEN bs0.net_debt IS NOT NULL THEN bs0.net_debt < 0 END AS net_cash",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 318,
+   "column": "cash_to_debt",
+   "insert_expr": "CASE WHEN bs0.total_debt IS NOT NULL AND bs0.total_debt > 0 AND bs0.cash_equivalents IS NOT NULL THEN ROUND((bs0.cash_equivalents / bs0.total_debt)::numeric, 4) END AS cash_to_debt",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 319,
+   "column": "fcf_to_debt",
+   "insert_expr": "CASE WHEN bs0.total_debt IS NOT NULL AND bs0.total_debt > 0 AND cf0.fcf IS NOT NULL THEN ROUND((cf0.fcf / bs0.total_debt)::numeric, 4) END AS fcf_to_debt",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 320,
+   "column": "working_capital_to_sales",
+   "insert_expr": "CASE WHEN pnl0.revenue IS NOT NULL AND pnl0.revenue > 0 AND bs0.total_current_assets IS NOT NULL AND bs0.total_current_liab IS NOT NULL THEN ROUND(((bs0.total_current_assets - bs0.total_current_liab) / pnl0.revenue)::numeric, 4) END AS working_capital_to_sales",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 321,
+   "column": "debt_growing_slower_than_profit",
+   "insert_expr": "CASE WHEN bs0.total_debt IS NOT NULL AND bs1.total_debt IS NOT NULL AND bs1.total_debt <> 0 AND COALESCE(cm.profit_growth_1y, ym.net_income_growth_1y) IS NOT NULL THEN COALESCE(cm.profit_growth_1y, ym.net_income_growth_1y) > (bs0.total_debt - bs1.total_debt) / ABS(bs1.total_debt) END AS debt_growing_slower_than_profit",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 322,
+   "column": "inventory_growing_slower_than_sales",
+   "insert_expr": "CASE WHEN bs0.inventory IS NOT NULL AND bs1.inventory IS NOT NULL AND bs1.inventory > 0 AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) >= (bs0.inventory - bs1.inventory) / ABS(bs1.inventory) END AS inventory_growing_slower_than_sales",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 323,
+   "column": "receivables_growing_slower_than_sales",
+   "insert_expr": "CASE WHEN bs0.trade_receivables IS NOT NULL AND bs1.trade_receivables IS NOT NULL AND bs1.trade_receivables > 0 AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) >= (bs0.trade_receivables - bs1.trade_receivables) / ABS(bs1.trade_receivables) END AS receivables_growing_slower_than_sales",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 324,
+   "column": "ocf_beats_net_income",
+   "insert_expr": "CASE WHEN ym.ocf_to_net_profit IS NOT NULL THEN ym.ocf_to_net_profit >= 1.0 END AS ocf_beats_net_income",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 325,
+   "column": "capex_to_ocf",
+   "insert_expr": "CASE WHEN cf0.cfo IS NOT NULL AND cf0.cfo > 0 AND cf0.capex IS NOT NULL THEN ROUND((ABS(cf0.capex) / cf0.cfo)::numeric, 4) END AS capex_to_ocf",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 326,
+   "column": "fcf_growing_faster_than_revenue",
+   "insert_expr": "CASE WHEN ym.fcf_growth_1y IS NOT NULL AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN ym.fcf_growth_1y > COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) END AS fcf_growing_faster_than_revenue",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 327,
+   "column": "ocf_positive",
+   "insert_expr": "CASE WHEN cf0.cfo IS NOT NULL THEN cf0.cfo > 0 END AS ocf_positive",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 328,
+   "column": "ocf_growing",
+   "insert_expr": "CASE WHEN cf0.cfo IS NOT NULL AND cf1.cfo IS NOT NULL THEN cf0.cfo > cf1.cfo END AS ocf_growing",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 329,
+   "column": "earning_power",
+   "insert_expr": "CASE WHEN pnl0.ebit IS NOT NULL AND bs0.total_assets IS NOT NULL AND bs0.total_assets > 0 THEN ROUND((pnl0.ebit / bs0.total_assets)::numeric, 4) END AS earning_power",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 330,
+   "column": "financial_leverage",
+   "insert_expr": "CASE WHEN bs0.total_assets IS NOT NULL AND bs0.total_equity IS NOT NULL AND bs0.total_equity > 0 THEN ROUND((bs0.total_assets / bs0.total_equity)::numeric, 4) END AS financial_leverage",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 331,
+   "column": "days_payable_outstanding",
+   "insert_expr": "CASE WHEN bs0.trade_payables IS NOT NULL AND bs0.trade_payables > 0 AND pnl0.cost_of_sales IS NOT NULL AND pnl0.cost_of_sales > 0 THEN ROUND((bs0.trade_payables / pnl0.cost_of_sales * 365)::numeric, 2) END AS days_payable_outstanding",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 332,
+   "column": "cash_conversion_cycle",
+   "insert_expr": "CASE WHEN bs0.inventory IS NOT NULL AND pnl0.cost_of_sales IS NOT NULL AND pnl0.cost_of_sales > 0 AND bs0.trade_receivables IS NOT NULL AND pnl0.revenue IS NOT NULL AND pnl0.revenue > 0 AND bs0.trade_payables IS NOT NULL AND bs0.trade_payables > 0 THEN ROUND(( (bs0.inventory / pnl0.cost_of_sales * 365) + (bs0.trade_receivables / pnl0.revenue * 365) - (bs0.trade_payables / pnl0.cost_of_sales * 365) )::numeric, 2) END AS cash_conversion_cycle",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 333,
+   "column": "roe_improving",
+   "insert_expr": "CASE WHEN COALESCE(cm.roe, ym.roe) IS NOT NULL AND ym.avg_roe_3y IS NOT NULL THEN COALESCE(cm.roe, ym.roe) > ym.avg_roe_3y END AS roe_improving",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 334,
+   "column": "roce_improving",
+   "insert_expr": "CASE WHEN COALESCE(cm.roce, ym.roce) IS NOT NULL AND ym.avg_roce_3y IS NOT NULL THEN COALESCE(cm.roce, ym.roce) > ym.avg_roce_3y END AS roce_improving",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 335,
+   "column": "gross_margin_stability",
+   "insert_expr": "ym.gross_margin_stability                              AS gross_margin_stability",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 336,
+   "column": "revenue_predictability",
+   "insert_expr": "ym.revenue_predictability                             AS revenue_predictability",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 337,
+   "column": "revenue_above_sector_median",
+   "insert_expr": "NULL::boolean                                         AS revenue_above_sector_median",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "build_screener_universe.py (UPDATE @2135)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 338,
+   "column": "eps_beat_rate_4q",
+   "insert_expr": "eq.eps_beat_rate_4q",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 339,
+   "column": "eps_beat_rate_8q",
+   "insert_expr": "eq.eps_beat_rate_8q",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 340,
+   "column": "consecutive_eps_beats",
+   "insert_expr": "eq.consecutive_eps_beats::SMALLINT AS consecutive_eps_beats",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 341,
+   "column": "analyst_upside_pct",
+   "insert_expr": "CASE WHEN ar.target_price IS NOT NULL AND dp.close IS NOT NULL AND dp.close > 0 THEN ROUND(((ar.target_price / dp.close) - 1) * 100, 4) END AS analyst_upside_pct",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 342,
+   "column": "short_ratio",
+   "insert_expr": "CASE WHEN ss.shares_short IS NOT NULL AND dm.volume_avg_50d IS NOT NULL AND dm.volume_avg_50d > 0 THEN ROUND((ss.shares_short / dm.volume_avg_50d)::numeric, 4) END AS short_ratio",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 343,
+   "column": "years_listed",
+   "insert_expr": "CASE WHEN cp.ipo_date IS NOT NULL THEN ROUND(((CURRENT_DATE - cp.ipo_date) / 365.25)::numeric, 2) END AS years_listed",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 344,
+   "column": "capital_raise_count_1y",
+   "insert_expr": "ann.capital_raise_count_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 345,
+   "column": "recent_capital_raise",
+   "insert_expr": "ann.recent_capital_raise",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 346,
+   "column": "trading_halt_count_1y",
+   "insert_expr": "ann.trading_halt_count_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 347,
+   "column": "director_change_count_1y",
+   "insert_expr": "ann.director_change_count_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 348,
+   "column": "days_since_last_announcement",
+   "insert_expr": "ann.days_since_last_announcement",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 349,
+   "column": "announcement_count_1y",
+   "insert_expr": "ann.announcement_count_1y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 350,
+   "column": "return_2y",
+   "insert_expr": "dm.return_2y      AS return_2y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 351,
+   "column": "return_9y",
+   "insert_expr": "dm.return_9y      AS return_9y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 352,
+   "column": "return_4y",
+   "insert_expr": "dm.return_4y      AS return_4y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 353,
+   "column": "return_6y",
+   "insert_expr": "dm.return_6y      AS return_6y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 354,
+   "column": "return_8y",
+   "insert_expr": "dm.return_8y      AS return_8y",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 355,
+   "column": "multibagger_potential_score",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 356,
+   "column": "multibagger_version",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 357,
+   "column": "mb_growth_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 358,
+   "column": "mb_capital_efficiency_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 359,
+   "column": "mb_earnings_stability_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 360,
+   "column": "mb_margin_expansion_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 361,
+   "column": "mb_dilution_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 362,
+   "column": "mb_momentum_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 363,
+   "column": "mb_insider_alignment_component",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 364,
+   "column": "mb_valid_weight_pct",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "composite_score.py (UPDATE @886)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 365,
+   "column": "gross_margin_expansion",
+   "insert_expr": "CASE WHEN ym.avg_gross_margin_3y BETWEEN -100 AND 100 AND ym.avg_gross_margin_5y BETWEEN -100 AND 100 THEN ROUND((ym.avg_gross_margin_3y - ym.avg_gross_margin_5y)::numeric, 4) END AS gross_margin_expansion",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 366,
+   "column": "operating_margin_expansion",
+   "insert_expr": "CASE WHEN ym.avg_operating_margin_3y BETWEEN -100 AND 100 AND ym.avg_operating_margin_5y BETWEEN -100 AND 100 THEN ROUND((ym.avg_operating_margin_3y - ym.avg_operating_margin_5y)::numeric, 4) END AS operating_margin_expansion",
+   "refreshed_on_conflict": true,
+   "governed": true,
+   "writers": [
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 367,
+   "column": "shares_outstanding_cagr_3y",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "dilution_metrics.py (UPDATE @127)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 368,
+   "column": "shares_change_1y",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "dilution_metrics.py (UPDATE @127)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 369,
+   "column": "dilution_years_3y",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "dilution_metrics.py (UPDATE @127)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 370,
+   "column": "max_annual_dilution_3y",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "dilution_metrics.py (UPDATE @127)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 371,
+   "column": "shares_history_years",
+   "insert_expr": null,
+   "refreshed_on_conflict": false,
+   "governed": false,
+   "writers": [
+    "dilution_metrics.py (UPDATE @127)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 372,
+   "column": "metric_states",
+   "insert_expr": null,
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "metric_states.py (UPDATE @152)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 373,
+   "column": "compute_run_id",
+   "insert_expr": null,
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "metric_states.py (UPDATE @152)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 374,
+   "column": "annual_periods",
+   "insert_expr": "hist.annual_periods",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 375,
+   "column": "reporting_currency",
+   "insert_expr": "fx.reporting_currency",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  },
+  {
+   "ordinal": 376,
+   "column": "window_states",
+   "insert_expr": "dm.metric_states  AS window_states",
+   "refreshed_on_conflict": true,
+   "governed": false,
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
+  }
+ ],
+ "unclaimed": [
+  "short_name",
+  "listing_date",
+  "franking_credit_per_share",
+  "pay_date",
+  "dps_fy0",
+  "dps_fy1",
+  "analyst_upside",
+  "shares_float",
+  "price_to_52w_high",
+  "adl"
+ ]
+}

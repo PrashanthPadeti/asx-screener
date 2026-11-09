@@ -1,0 +1,2063 @@
+{
+ "insert_line": 82,
+ "select_line": 287,
+ "from_line": 1105,
+ "conflict_line": 1610,
+ "alias_tables": {
+  "c": "market.companies_current",
+  "vs": "market.valuation_snapshot",
+  "ar": "market.analyst_ratings"
+ },
+ "lateral_count": 30,
+ "do_update_set": [
+  "company_name",
+  "sector",
+  "industry_group",
+  "industry",
+  "sub_industry",
+  "stock_type",
+  "reporting_currency",
+  "status",
+  "fiscal_year_end_month",
+  "is_reit",
+  "is_miner",
+  "is_mega",
+  "is_large",
+  "is_mid",
+  "is_small",
+  "is_micro",
+  "is_nano",
+  "market_cap_tier",
+  "is_asx20",
+  "is_asx50",
+  "is_asx100",
+  "is_asx200",
+  "is_asx300",
+  "is_all_ords",
+  "isin",
+  "website",
+  "description",
+  "price",
+  "price_date",
+  "open",
+  "volume",
+  "avg_volume_20d",
+  "market_cap",
+  "high_52w",
+  "low_52w",
+  "pe_ratio",
+  "forward_pe",
+  "peg_ratio",
+  "price_to_book",
+  "price_to_sales",
+  "ev",
+  "ev_to_ebitda",
+  "ev_to_revenue",
+  "ev_to_ebit",
+  "price_to_fcf",
+  "graham_number",
+  "dividend_yield",
+  "dps_ttm",
+  "ex_div_date",
+  "franking_pct",
+  "payout_ratio",
+  "revenue_ttm",
+  "gross_profit_ttm",
+  "ebitda_ttm",
+  "gross_margin",
+  "ebitda_margin",
+  "net_margin",
+  "operating_margin",
+  "roe",
+  "roa",
+  "roce",
+  "roic",
+  "asset_turnover",
+  "ocf_margin",
+  "fcf_margin",
+  "capex_intensity",
+  "grossed_up_yield",
+  "fcf_yield",
+  "eps_fy0",
+  "eps_fy1",
+  "revenue_fy0",
+  "revenue_fy1",
+  "ebitda_fy0",
+  "ebitda_fy1",
+  "net_profit_fy0",
+  "net_profit_fy1",
+  "total_assets",
+  "total_equity",
+  "total_debt",
+  "net_debt",
+  "cash",
+  "book_value_per_share",
+  "debt_to_equity",
+  "current_ratio",
+  "net_debt_to_ebitda",
+  "interest_coverage",
+  "debt_to_assets",
+  "lt_debt_to_capital",
+  "cfo_fy0",
+  "capex_fy0",
+  "fcf_fy0",
+  "annual_periods",
+  "revenue_growth_1y",
+  "revenue_growth_3y_cagr",
+  "earnings_growth_1y",
+  "earnings_growth_3y_cagr",
+  "ebitda_growth_1y",
+  "fcf_growth_1y",
+  "eps_growth_1y",
+  "return_1w",
+  "return_1m",
+  "return_3m",
+  "return_6m",
+  "return_1y",
+  "return_ytd",
+  "momentum_3m",
+  "momentum_6m",
+  "momentum_12m",
+  "volatility_20d",
+  "volatility_60d",
+  "sharpe_1y",
+  "drawdown_from_ath",
+  "beta_1y",
+  "rsi_14",
+  "macd",
+  "macd_signal",
+  "sma_20",
+  "sma_50",
+  "sma_200",
+  "ema_20",
+  "bb_upper",
+  "bb_lower",
+  "atr_14",
+  "adx_14",
+  "obv",
+  "piotroski_f_score",
+  "altman_z_score",
+  "revenue_cagr_5y",
+  "eps_growth_3y_cagr",
+  "revenue_cagr_7y",
+  "revenue_cagr_10y",
+  "net_income_cagr_5y",
+  "eps_cagr_5y",
+  "ebitda_cagr_3y",
+  "ebitda_cagr_5y",
+  "fcf_cagr_3y",
+  "fcf_cagr_5y",
+  "avg_roe_3y",
+  "avg_roe_5y",
+  "avg_roa_3y",
+  "avg_roa_5y",
+  "avg_roce_3y",
+  "avg_roce_5y",
+  "avg_gross_margin_3y",
+  "avg_gross_margin_5y",
+  "avg_ebitda_margin_3y",
+  "avg_ebitda_margin_5y",
+  "avg_operating_margin_3y",
+  "avg_operating_margin_5y",
+  "avg_net_margin_3y",
+  "avg_net_margin_5y",
+  "avg_eps_growth_3y",
+  "avg_eps_growth_5y",
+  "dividend_cagr_3y",
+  "dividend_consecutive_yrs",
+  "dividend_cagr_5y",
+  "bvps_cagr_3y",
+  "bvps_cagr_5y",
+  "return_2y",
+  "return_3y",
+  "return_4y",
+  "return_5y",
+  "return_6y",
+  "return_7y",
+  "return_8y",
+  "return_9y",
+  "return_10y",
+  "return_15y",
+  "window_states",
+  "revenue_growth_yoy_q",
+  "eps_growth_yoy_q",
+  "net_income_growth_yoy_q",
+  "revenue_growth_hoh",
+  "net_income_growth_hoh",
+  "eps_growth_hoh",
+  "analyst_rating",
+  "analyst_target_price",
+  "analyst_strong_buy",
+  "analyst_buy",
+  "analyst_hold",
+  "analyst_sell",
+  "analyst_strong_sell",
+  "short_pct",
+  "short_position_shares",
+  "short_interest_chg_1w",
+  "shares_outstanding",
+  "percent_insiders",
+  "percent_institutions",
+  "eps_beat_rate_4q",
+  "eps_beat_rate_8q",
+  "consecutive_eps_beats",
+  "analyst_upside_pct",
+  "short_ratio",
+  "years_listed",
+  "capital_raise_count_1y",
+  "recent_capital_raise",
+  "trading_halt_count_1y",
+  "director_change_count_1y",
+  "days_since_last_announcement",
+  "announcement_count_1y",
+  "ocf_to_net_profit",
+  "fcf_payout_ratio",
+  "shares_dilution_3y",
+  "eps_volatility_5y",
+  "fcf_positive_years",
+  "above_vwap",
+  "dollar_volume_avg_20d",
+  "avg_roic_3y",
+  "avg_volume_50d",
+  "cmf_20",
+  "up_down_vol_ratio_20d",
+  "obv_rising",
+  "volume_breakout",
+  "avg_roic_5y",
+  "asset_light_score",
+  "analyst_count",
+  "analyst_buy_pct",
+  "analyst_consensus_score",
+  "brand_proxy_score",
+  "capital_efficiency_score",
+  "earnings_stability_score",
+  "business_model_tag",
+  "commodity_exposure",
+  "dma50_ratio",
+  "dma200_ratio",
+  "above_sma50",
+  "above_sma200",
+  "golden_cross",
+  "death_cross",
+  "new_52w_high",
+  "new_52w_low",
+  "relative_volume",
+  "bb_pct",
+  "rsi_21",
+  "stoch_k",
+  "stoch_d",
+  "rsi_overbought",
+  "rsi_oversold",
+  "macd_bullish_cross",
+  "macd_bearish_cross",
+  "ocf_per_share",
+  "fcf_per_share",
+  "revenue_per_share",
+  "working_capital",
+  "price_to_52w_low",
+  "gross_profit_fy0",
+  "gross_profit_fy1",
+  "gross_profit_fy3",
+  "gross_profit_fy5",
+  "gross_profit_fy7",
+  "gross_profit_fy10",
+  "pbt_fy0",
+  "pbt_fy1",
+  "pbt_fy3",
+  "pbt_fy5",
+  "pbt_fy7",
+  "pbt_fy10",
+  "revenue_fy3",
+  "revenue_fy5",
+  "revenue_fy7",
+  "revenue_fy10",
+  "net_profit_fy3",
+  "net_profit_fy5",
+  "net_profit_fy7",
+  "net_profit_fy10",
+  "sales_growth_prev_y",
+  "pbt_growth_1y",
+  "pbt_growth_prev_y",
+  "pbt_cagr_3y",
+  "pbt_cagr_5y",
+  "pbt_cagr_7y",
+  "pbt_cagr_10y",
+  "cogs",
+  "ebit",
+  "income_tax_expense",
+  "interest_expense",
+  "depreciation",
+  "trade_receivables",
+  "inventory",
+  "goodwill",
+  "intangibles",
+  "ppe_net",
+  "total_current_assets",
+  "total_current_liabilities",
+  "total_liabilities",
+  "long_term_debt",
+  "retained_earnings",
+  "cfi",
+  "dividends_paid",
+  "quick_ratio",
+  "cash_ratio",
+  "debt_to_ebitda",
+  "days_sales_outstanding",
+  "days_inventory_outstanding",
+  "inventory_turnover",
+  "receivables_turnover",
+  "pretax_margin",
+  "nopat",
+  "ebitda_interest_coverage",
+  "equity_ratio",
+  "liabilities_to_assets",
+  "fixed_asset_turnover",
+  "capex_to_revenue",
+  "tangible_book_value_per_share",
+  "cash_per_share",
+  "revenue_fy2",
+  "net_profit_ttm",
+  "price_to_cash_flow",
+  "operating_margin_expansion",
+  "gross_margin_expansion",
+  "operating_margin_expanding",
+  "gross_margin_expanding",
+  "fcf_conversion",
+  "eps_beats_revenue_growth",
+  "operating_leverage",
+  "revenue_growth_accelerating",
+  "revenue_growth_delta",
+  "revenue_growth_consistency",
+  "net_cash",
+  "cash_to_debt",
+  "fcf_to_debt",
+  "working_capital_to_sales",
+  "debt_growing_slower_than_profit",
+  "inventory_growing_slower_than_sales",
+  "receivables_growing_slower_than_sales",
+  "ocf_beats_net_income",
+  "capex_to_ocf",
+  "fcf_growing_faster_than_revenue",
+  "ocf_positive",
+  "ocf_growing",
+  "gross_margin_stability",
+  "revenue_predictability",
+  "revenue_above_sector_median",
+  "earning_power",
+  "financial_leverage",
+  "days_payable_outstanding",
+  "cash_conversion_cycle",
+  "roe_improving",
+  "roce_improving",
+  "universe_built_at",
+  "metric_states",
+  "compute_run_id"
+ ],
+ "columns": [
+  {
+   "ordinal": 1,
+   "column": "asx_code",
+   "expr": "c.asx_code"
+  },
+  {
+   "ordinal": 2,
+   "column": "company_name",
+   "expr": "c.company_name"
+  },
+  {
+   "ordinal": 3,
+   "column": "sector",
+   "expr": "c.gics_sector"
+  },
+  {
+   "ordinal": 4,
+   "column": "industry_group",
+   "expr": "c.gics_industry_group"
+  },
+  {
+   "ordinal": 5,
+   "column": "industry",
+   "expr": "c.gics_industry"
+  },
+  {
+   "ordinal": 6,
+   "column": "sub_industry",
+   "expr": "c.gics_sub_industry"
+  },
+  {
+   "ordinal": 7,
+   "column": "stock_type",
+   "expr": "c.company_type"
+  },
+  {
+   "ordinal": 8,
+   "column": "status",
+   "expr": "c.status"
+  },
+  {
+   "ordinal": 9,
+   "column": "fiscal_year_end_month",
+   "expr": "c.fiscal_year_end_month"
+  },
+  {
+   "ordinal": 10,
+   "column": "is_reit",
+   "expr": "c.is_reit"
+  },
+  {
+   "ordinal": 11,
+   "column": "is_miner",
+   "expr": "c.is_miner"
+  },
+  {
+   "ordinal": 12,
+   "column": "is_asx20",
+   "expr": "c.is_asx20"
+  },
+  {
+   "ordinal": 13,
+   "column": "is_asx50",
+   "expr": "c.is_asx50"
+  },
+  {
+   "ordinal": 14,
+   "column": "is_asx100",
+   "expr": "c.is_asx100"
+  },
+  {
+   "ordinal": 15,
+   "column": "is_asx200",
+   "expr": "c.is_asx200"
+  },
+  {
+   "ordinal": 16,
+   "column": "is_asx300",
+   "expr": "c.is_asx300"
+  },
+  {
+   "ordinal": 17,
+   "column": "is_all_ords",
+   "expr": "c.is_all_ords"
+  },
+  {
+   "ordinal": 18,
+   "column": "is_mega",
+   "expr": "COALESCE(vs.market_cap >= 50000000000, FALSE)                                           AS is_mega"
+  },
+  {
+   "ordinal": 19,
+   "column": "is_large",
+   "expr": "COALESCE(vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000, FALSE)          AS is_large"
+  },
+  {
+   "ordinal": 20,
+   "column": "is_mid",
+   "expr": "COALESCE(vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000, FALSE)          AS is_mid"
+  },
+  {
+   "ordinal": 21,
+   "column": "is_small",
+   "expr": "COALESCE(vs.market_cap >= 300000000   AND vs.market_cap < 2000000000, FALSE)           AS is_small"
+  },
+  {
+   "ordinal": 22,
+   "column": "is_micro",
+   "expr": "COALESCE(vs.market_cap >= 50000000    AND vs.market_cap < 300000000, FALSE)            AS is_micro"
+  },
+  {
+   "ordinal": 23,
+   "column": "is_nano",
+   "expr": "COALESCE(vs.market_cap > 0            AND vs.market_cap < 50000000, FALSE)             AS is_nano"
+  },
+  {
+   "ordinal": 24,
+   "column": "market_cap_tier",
+   "expr": "CASE WHEN vs.market_cap >= 50000000000                              THEN 'mega' WHEN vs.market_cap >= 10000000000 AND vs.market_cap < 50000000000 THEN 'large' WHEN vs.market_cap >= 2000000000  AND vs.market_cap < 10000000000 THEN 'mid' WHEN vs.market_cap >= 300000000   AND vs.market_cap < 2000000000  THEN 'small' WHEN vs.market_cap >= 50000000    AND vs.market_cap < 300000000   THEN 'micro' WHEN vs.market_cap > 0                                            THEN 'nano' ELSE NULL END                                                                      AS market_cap_tier"
+  },
+  {
+   "ordinal": 25,
+   "column": "isin",
+   "expr": "c.isin"
+  },
+  {
+   "ordinal": 26,
+   "column": "website",
+   "expr": "c.website"
+  },
+  {
+   "ordinal": 27,
+   "column": "description",
+   "expr": "c.description"
+  },
+  {
+   "ordinal": 28,
+   "column": "reporting_currency",
+   "expr": "fx.reporting_currency"
+  },
+  {
+   "ordinal": 29,
+   "column": "price",
+   "expr": "dp.close          AS price"
+  },
+  {
+   "ordinal": 30,
+   "column": "price_date",
+   "expr": "dp.price_date     AS price_date"
+  },
+  {
+   "ordinal": 31,
+   "column": "open",
+   "expr": "dp.open           AS open"
+  },
+  {
+   "ordinal": 32,
+   "column": "volume",
+   "expr": "dp.volume         AS volume"
+  },
+  {
+   "ordinal": 33,
+   "column": "avg_volume_20d",
+   "expr": "dp20.avg_volume_20d"
+  },
+  {
+   "ordinal": 34,
+   "column": "market_cap",
+   "expr": "vs.market_cap"
+  },
+  {
+   "ordinal": 35,
+   "column": "high_52w",
+   "expr": "dp52.high_52w"
+  },
+  {
+   "ordinal": 36,
+   "column": "low_52w",
+   "expr": "dp52.low_52w"
+  },
+  {
+   "ordinal": 37,
+   "column": "pe_ratio",
+   "expr": "COALESCE(vs.pe_ratio, CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0 AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999 THEN ROUND((dp.close / COALESCE(pnl0.eps, ym.eps))::numeric, 4) END) AS pe_ratio"
+  },
+  {
+   "ordinal": 38,
+   "column": "forward_pe",
+   "expr": "vs.forward_pe"
+  },
+  {
+   "ordinal": 39,
+   "column": "peg_ratio",
+   "expr": "COALESCE(vs.peg_ratio, CASE WHEN COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) > 0 AND COALESCE(pnl0.eps, ym.eps) > 0 AND dp.close / COALESCE(pnl0.eps, ym.eps) < 9999 THEN ROUND(((dp.close / COALESCE(pnl0.eps, ym.eps)) / (COALESCE(cm.profit_growth_3y, ym.net_income_cagr_3y) * 100))::numeric, 4) END) AS peg_ratio"
+  },
+  {
+   "ordinal": 40,
+   "column": "price_to_book",
+   "expr": "vs.price_to_book"
+  },
+  {
+   "ordinal": 41,
+   "column": "price_to_sales",
+   "expr": "vs.price_to_sales"
+  },
+  {
+   "ordinal": 42,
+   "column": "ev",
+   "expr": "vs.enterprise_value     AS ev"
+  },
+  {
+   "ordinal": 43,
+   "column": "ev_to_ebitda",
+   "expr": "CASE WHEN ym.ev_ebitda > 0 THEN ym.ev_ebitda END AS ev_to_ebitda"
+  },
+  {
+   "ordinal": 44,
+   "column": "ev_to_revenue",
+   "expr": "vs.ev_to_revenue"
+  },
+  {
+   "ordinal": 45,
+   "column": "ev_to_ebit",
+   "expr": "CASE WHEN ym.ev_ebit <> 0 THEN ym.ev_ebit END AS ev_to_ebit"
+  },
+  {
+   "ordinal": 46,
+   "column": "price_to_fcf",
+   "expr": "ym.p_fcf_ratio          AS price_to_fcf"
+  },
+  {
+   "ordinal": 47,
+   "column": "graham_number",
+   "expr": "CASE WHEN COALESCE(pnl0.eps, ym.eps) > 0 AND (bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0)) > 0 THEN ROUND(sqrt(22.5 * COALESCE(pnl0.eps, ym.eps) * (bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0)))::numeric, 4) END AS graham_number"
+  },
+  {
+   "ordinal": 48,
+   "column": "dividend_yield",
+   "expr": "CASE WHEN ABS(cm.dividend_yield) < 100 THEN cm.dividend_yield END AS dividend_yield"
+  },
+  {
+   "ordinal": 49,
+   "column": "dps_ttm",
+   "expr": "cm.dividend_per_share   AS dps_ttm"
+  },
+  {
+   "ordinal": 50,
+   "column": "ex_div_date",
+   "expr": "div_latest.ex_date"
+  },
+  {
+   "ordinal": 51,
+   "column": "franking_pct",
+   "expr": "cm.franking_pct"
+  },
+  {
+   "ordinal": 52,
+   "column": "payout_ratio",
+   "expr": "CASE WHEN COALESCE(pnl0.eps, ym.eps) IS NOT NULL AND COALESCE(pnl0.eps, ym.eps) > 0 AND cm.dividend_per_share IS NOT NULL AND ABS(cm.dividend_per_share / COALESCE(pnl0.eps, ym.eps)) < 9999 THEN ROUND((cm.dividend_per_share / COALESCE(pnl0.eps, ym.eps))::numeric, 4) END AS payout_ratio"
+  },
+  {
+   "ordinal": 53,
+   "column": "revenue_ttm",
+   "expr": "vs.revenue_ttm"
+  },
+  {
+   "ordinal": 54,
+   "column": "gross_profit_ttm",
+   "expr": "vs.gross_profit_ttm"
+  },
+  {
+   "ordinal": 55,
+   "column": "ebitda_ttm",
+   "expr": "vs.ebitda_ttm"
+  },
+  {
+   "ordinal": 56,
+   "column": "gross_margin",
+   "expr": "COALESCE(cm.gpm,           NULL)                         AS gross_margin"
+  },
+  {
+   "ordinal": 57,
+   "column": "ebitda_margin",
+   "expr": "COALESCE(cm.ebitda_margin, NULL)                         AS ebitda_margin"
+  },
+  {
+   "ordinal": 58,
+   "column": "net_margin",
+   "expr": "COALESCE(cm.npm,           vs.profit_margin)             AS net_margin"
+  },
+  {
+   "ordinal": 59,
+   "column": "operating_margin",
+   "expr": "COALESCE(cm.opm,           vs.operating_margin)          AS operating_margin"
+  },
+  {
+   "ordinal": 60,
+   "column": "roe",
+   "expr": "COALESCE(cm.roe,  ym.roe,  vs.roe_ttm)                  AS roe"
+  },
+  {
+   "ordinal": 61,
+   "column": "roa",
+   "expr": "COALESCE(cm.roa,  ym.roa,  vs.roa_ttm)                  AS roa"
+  },
+  {
+   "ordinal": 62,
+   "column": "roce",
+   "expr": "COALESCE(cm.roce, ym.roce)                               AS roce"
+  },
+  {
+   "ordinal": 63,
+   "column": "roic",
+   "expr": "ym.roic                                                  AS roic"
+  },
+  {
+   "ordinal": 64,
+   "column": "asset_turnover",
+   "expr": "ym.asset_turnover                                        AS asset_turnover"
+  },
+  {
+   "ordinal": 65,
+   "column": "ocf_margin",
+   "expr": "ym.ocf_margin                                            AS ocf_margin"
+  },
+  {
+   "ordinal": 66,
+   "column": "fcf_margin",
+   "expr": "ym.fcf_margin                                            AS fcf_margin"
+  },
+  {
+   "ordinal": 67,
+   "column": "capex_intensity",
+   "expr": "ym.capex_intensity                                       AS capex_intensity"
+  },
+  {
+   "ordinal": 68,
+   "column": "grossed_up_yield",
+   "expr": "CASE WHEN ABS(cm.grossed_up_yield) < 100 THEN cm.grossed_up_yield END AS grossed_up_yield"
+  },
+  {
+   "ordinal": 69,
+   "column": "fcf_yield",
+   "expr": "COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield"
+  },
+  {
+   "ordinal": 70,
+   "column": "eps_fy0",
+   "expr": "COALESCE(pnl0.eps, ym.eps)  AS eps_fy0"
+  },
+  {
+   "ordinal": 71,
+   "column": "eps_fy1",
+   "expr": "pnl1.eps                    AS eps_fy1"
+  },
+  {
+   "ordinal": 72,
+   "column": "annual_periods",
+   "expr": "hist.annual_periods"
+  },
+  {
+   "ordinal": 73,
+   "column": "revenue_fy0",
+   "expr": "pnl0.revenue    AS revenue_fy0"
+  },
+  {
+   "ordinal": 74,
+   "column": "revenue_fy1",
+   "expr": "pnl1.revenue    AS revenue_fy1"
+  },
+  {
+   "ordinal": 75,
+   "column": "ebitda_fy0",
+   "expr": "pnl0.ebitda     AS ebitda_fy0"
+  },
+  {
+   "ordinal": 76,
+   "column": "ebitda_fy1",
+   "expr": "pnl1.ebitda     AS ebitda_fy1"
+  },
+  {
+   "ordinal": 77,
+   "column": "net_profit_fy0",
+   "expr": "pnl0.net_profit AS net_profit_fy0"
+  },
+  {
+   "ordinal": 78,
+   "column": "net_profit_fy1",
+   "expr": "pnl1.net_profit AS net_profit_fy1"
+  },
+  {
+   "ordinal": 79,
+   "column": "total_assets",
+   "expr": "bs0.total_assets"
+  },
+  {
+   "ordinal": 80,
+   "column": "total_equity",
+   "expr": "bs0.total_equity"
+  },
+  {
+   "ordinal": 81,
+   "column": "total_debt",
+   "expr": "bs0.total_debt"
+  },
+  {
+   "ordinal": 82,
+   "column": "net_debt",
+   "expr": "bs0.net_debt"
+  },
+  {
+   "ordinal": 83,
+   "column": "cash",
+   "expr": "bs0.cash_equivalents    AS cash"
+  },
+  {
+   "ordinal": 84,
+   "column": "book_value_per_share",
+   "expr": "ROUND((bs0.total_equity * 1000000.0 / NULLIF(ss.shares_outstanding, 0))::numeric, 4) AS book_value_per_share"
+  },
+  {
+   "ordinal": 85,
+   "column": "debt_to_equity",
+   "expr": "CASE WHEN bs0.total_equity <> 0 AND bs0.total_equity IS NOT NULL THEN ROUND(bs0.total_debt / bs0.total_equity, 4) END AS debt_to_equity"
+  },
+  {
+   "ordinal": 86,
+   "column": "current_ratio",
+   "expr": "CASE WHEN bs0.total_current_liab <> 0 AND bs0.total_current_liab IS NOT NULL THEN ROUND(bs0.total_current_assets / bs0.total_current_liab, 4) END AS current_ratio"
+  },
+  {
+   "ordinal": 87,
+   "column": "net_debt_to_ebitda",
+   "expr": "ym.net_debt_to_ebitda                                    AS net_debt_to_ebitda"
+  },
+  {
+   "ordinal": 88,
+   "column": "interest_coverage",
+   "expr": "ym.interest_coverage                                     AS interest_coverage"
+  },
+  {
+   "ordinal": 89,
+   "column": "debt_to_assets",
+   "expr": "ym.debt_to_assets                                        AS debt_to_assets"
+  },
+  {
+   "ordinal": 90,
+   "column": "lt_debt_to_capital",
+   "expr": "ym.lt_debt_to_capital                                    AS lt_debt_to_capital"
+  },
+  {
+   "ordinal": 91,
+   "column": "cfo_fy0",
+   "expr": "cf0.cfo         AS cfo_fy0"
+  },
+  {
+   "ordinal": 92,
+   "column": "capex_fy0",
+   "expr": "cf0.capex       AS capex_fy0"
+  },
+  {
+   "ordinal": 93,
+   "column": "fcf_fy0",
+   "expr": "cf0.fcf         AS fcf_fy0"
+  },
+  {
+   "ordinal": 94,
+   "column": "revenue_growth_1y",
+   "expr": "COALESCE(cm.revenue_growth_1y,  ym.revenue_growth_1y)        AS revenue_growth_1y"
+  },
+  {
+   "ordinal": 95,
+   "column": "revenue_growth_3y_cagr",
+   "expr": "COALESCE(cm.revenue_growth_3y,  ym.revenue_cagr_3y)          AS revenue_growth_3y_cagr"
+  },
+  {
+   "ordinal": 96,
+   "column": "earnings_growth_1y",
+   "expr": "COALESCE(cm.profit_growth_1y,   ym.net_income_growth_1y)     AS earnings_growth_1y"
+  },
+  {
+   "ordinal": 97,
+   "column": "earnings_growth_3y_cagr",
+   "expr": "COALESCE(cm.profit_growth_3y,   ym.net_income_cagr_3y)       AS earnings_growth_3y_cagr"
+  },
+  {
+   "ordinal": 98,
+   "column": "ebitda_growth_1y",
+   "expr": "ym.ebitda_growth_1y                                          AS ebitda_growth_1y"
+  },
+  {
+   "ordinal": 99,
+   "column": "fcf_growth_1y",
+   "expr": "ym.fcf_growth_1y                                             AS fcf_growth_1y"
+  },
+  {
+   "ordinal": 100,
+   "column": "eps_growth_1y",
+   "expr": "ym.eps_growth_1y                                             AS eps_growth_1y"
+  },
+  {
+   "ordinal": 101,
+   "column": "return_1w",
+   "expr": "dm.return_1w  AS return_1w"
+  },
+  {
+   "ordinal": 102,
+   "column": "return_1m",
+   "expr": "dm.return_1m AS return_1m"
+  },
+  {
+   "ordinal": 103,
+   "column": "return_3m",
+   "expr": "dm.return_3m      AS return_3m"
+  },
+  {
+   "ordinal": 104,
+   "column": "return_6m",
+   "expr": "dm.return_6m      AS return_6m"
+  },
+  {
+   "ordinal": 105,
+   "column": "return_1y",
+   "expr": "dm.return_1y     AS return_1y"
+  },
+  {
+   "ordinal": 106,
+   "column": "return_ytd",
+   "expr": "dm.return_ytd     AS return_ytd"
+  },
+  {
+   "ordinal": 107,
+   "column": "momentum_3m",
+   "expr": "mm.momentum_3m      AS momentum_3m"
+  },
+  {
+   "ordinal": 108,
+   "column": "momentum_6m",
+   "expr": "mm.momentum_6m      AS momentum_6m"
+  },
+  {
+   "ordinal": 109,
+   "column": "momentum_12m",
+   "expr": "mm.momentum_12m     AS momentum_12m"
+  },
+  {
+   "ordinal": 110,
+   "column": "volatility_20d",
+   "expr": "dm.hv_20d      AS volatility_20d"
+  },
+  {
+   "ordinal": 111,
+   "column": "volatility_60d",
+   "expr": "dm.hv_60d      AS volatility_60d"
+  },
+  {
+   "ordinal": 112,
+   "column": "sharpe_1y",
+   "expr": "ym.sharpe_1y        AS sharpe_1y"
+  },
+  {
+   "ordinal": 113,
+   "column": "drawdown_from_ath",
+   "expr": "dm.pct_from_ath AS drawdown_from_ath"
+  },
+  {
+   "ordinal": 114,
+   "column": "beta_1y",
+   "expr": "ym.beta_1y          AS beta_1y"
+  },
+  {
+   "ordinal": 115,
+   "column": "rsi_14",
+   "expr": "dm.rsi_14         AS rsi_14"
+  },
+  {
+   "ordinal": 116,
+   "column": "macd",
+   "expr": "dm.macd_line      AS macd"
+  },
+  {
+   "ordinal": 117,
+   "column": "macd_signal",
+   "expr": "dm.macd_signal    AS macd_signal"
+  },
+  {
+   "ordinal": 118,
+   "column": "sma_20",
+   "expr": "dm.sma_20           AS sma_20"
+  },
+  {
+   "ordinal": 119,
+   "column": "sma_50",
+   "expr": "dm.sma_50           AS sma_50"
+  },
+  {
+   "ordinal": 120,
+   "column": "sma_200",
+   "expr": "dm.sma_200           AS sma_200"
+  },
+  {
+   "ordinal": 121,
+   "column": "ema_20",
+   "expr": "dm.ema_20           AS ema_20"
+  },
+  {
+   "ordinal": 122,
+   "column": "bb_upper",
+   "expr": "dm.bb_upper          AS bb_upper"
+  },
+  {
+   "ordinal": 123,
+   "column": "bb_lower",
+   "expr": "dm.bb_lower          AS bb_lower"
+  },
+  {
+   "ordinal": 124,
+   "column": "atr_14",
+   "expr": "dm.atr_14            AS atr_14"
+  },
+  {
+   "ordinal": 125,
+   "column": "adx_14",
+   "expr": "dm.adx_14"
+  },
+  {
+   "ordinal": 126,
+   "column": "obv",
+   "expr": "dm.obv               AS obv"
+  },
+  {
+   "ordinal": 127,
+   "column": "piotroski_f_score",
+   "expr": "ym.piotroski_f_score"
+  },
+  {
+   "ordinal": 128,
+   "column": "altman_z_score",
+   "expr": "ym.altman_z_score"
+  },
+  {
+   "ordinal": 129,
+   "column": "revenue_cagr_5y",
+   "expr": "ym.revenue_cagr_5y"
+  },
+  {
+   "ordinal": 130,
+   "column": "eps_growth_3y_cagr",
+   "expr": "ym.eps_cagr_3y          AS eps_growth_3y_cagr"
+  },
+  {
+   "ordinal": 131,
+   "column": "revenue_cagr_7y",
+   "expr": "ym.revenue_cagr_7y"
+  },
+  {
+   "ordinal": 132,
+   "column": "revenue_cagr_10y",
+   "expr": "ym.revenue_cagr_10y"
+  },
+  {
+   "ordinal": 133,
+   "column": "net_income_cagr_5y",
+   "expr": "ym.net_income_cagr_5y"
+  },
+  {
+   "ordinal": 134,
+   "column": "eps_cagr_5y",
+   "expr": "ym.eps_cagr_5y"
+  },
+  {
+   "ordinal": 135,
+   "column": "ebitda_cagr_3y",
+   "expr": "ym.ebitda_cagr_3y"
+  },
+  {
+   "ordinal": 136,
+   "column": "ebitda_cagr_5y",
+   "expr": "ym.ebitda_cagr_5y"
+  },
+  {
+   "ordinal": 137,
+   "column": "fcf_cagr_3y",
+   "expr": "ym.fcf_cagr_3y"
+  },
+  {
+   "ordinal": 138,
+   "column": "fcf_cagr_5y",
+   "expr": "ym.fcf_cagr_5y"
+  },
+  {
+   "ordinal": 139,
+   "column": "avg_roe_3y",
+   "expr": "ym.avg_roe_3y"
+  },
+  {
+   "ordinal": 140,
+   "column": "avg_roe_5y",
+   "expr": "ym.avg_roe_5y"
+  },
+  {
+   "ordinal": 141,
+   "column": "avg_roa_3y",
+   "expr": "ym.avg_roa_3y"
+  },
+  {
+   "ordinal": 142,
+   "column": "avg_roa_5y",
+   "expr": "ym.avg_roa_5y"
+  },
+  {
+   "ordinal": 143,
+   "column": "avg_roce_3y",
+   "expr": "ym.avg_roce_3y"
+  },
+  {
+   "ordinal": 144,
+   "column": "avg_roce_5y",
+   "expr": "ym.avg_roce_5y"
+  },
+  {
+   "ordinal": 145,
+   "column": "avg_gross_margin_3y",
+   "expr": "ym.avg_gross_margin_3y"
+  },
+  {
+   "ordinal": 146,
+   "column": "avg_gross_margin_5y",
+   "expr": "ym.avg_gross_margin_5y"
+  },
+  {
+   "ordinal": 147,
+   "column": "avg_ebitda_margin_3y",
+   "expr": "ym.avg_ebitda_margin_3y"
+  },
+  {
+   "ordinal": 148,
+   "column": "avg_ebitda_margin_5y",
+   "expr": "ym.avg_ebitda_margin_5y"
+  },
+  {
+   "ordinal": 149,
+   "column": "avg_operating_margin_3y",
+   "expr": "ym.avg_operating_margin_3y"
+  },
+  {
+   "ordinal": 150,
+   "column": "avg_operating_margin_5y",
+   "expr": "ym.avg_operating_margin_5y"
+  },
+  {
+   "ordinal": 151,
+   "column": "avg_net_margin_3y",
+   "expr": "ym.avg_net_margin_3y"
+  },
+  {
+   "ordinal": 152,
+   "column": "avg_net_margin_5y",
+   "expr": "ym.avg_net_margin_5y"
+  },
+  {
+   "ordinal": 153,
+   "column": "avg_eps_growth_3y",
+   "expr": "ym.avg_eps_growth_3y"
+  },
+  {
+   "ordinal": 154,
+   "column": "avg_eps_growth_5y",
+   "expr": "ym.avg_eps_growth_5y"
+  },
+  {
+   "ordinal": 155,
+   "column": "dividend_cagr_3y",
+   "expr": "ym.dividend_cagr_3y"
+  },
+  {
+   "ordinal": 156,
+   "column": "dividend_consecutive_yrs",
+   "expr": "ym.dividend_consecutive_yrs"
+  },
+  {
+   "ordinal": 157,
+   "column": "dividend_cagr_5y",
+   "expr": "ym.dividend_cagr_5y"
+  },
+  {
+   "ordinal": 158,
+   "column": "bvps_cagr_3y",
+   "expr": "ym.bvps_cagr_3y"
+  },
+  {
+   "ordinal": 159,
+   "column": "bvps_cagr_5y",
+   "expr": "ym.bvps_cagr_5y"
+  },
+  {
+   "ordinal": 160,
+   "column": "return_2y",
+   "expr": "dm.return_2y      AS return_2y"
+  },
+  {
+   "ordinal": 161,
+   "column": "return_3y",
+   "expr": "dm.return_3y      AS return_3y"
+  },
+  {
+   "ordinal": 162,
+   "column": "return_4y",
+   "expr": "dm.return_4y      AS return_4y"
+  },
+  {
+   "ordinal": 163,
+   "column": "return_5y",
+   "expr": "dm.return_5y      AS return_5y"
+  },
+  {
+   "ordinal": 164,
+   "column": "return_6y",
+   "expr": "dm.return_6y      AS return_6y"
+  },
+  {
+   "ordinal": 165,
+   "column": "return_7y",
+   "expr": "dm.return_7y      AS return_7y"
+  },
+  {
+   "ordinal": 166,
+   "column": "return_8y",
+   "expr": "dm.return_8y      AS return_8y"
+  },
+  {
+   "ordinal": 167,
+   "column": "return_9y",
+   "expr": "dm.return_9y      AS return_9y"
+  },
+  {
+   "ordinal": 168,
+   "column": "return_10y",
+   "expr": "dm.return_10y     AS return_10y"
+  },
+  {
+   "ordinal": 169,
+   "column": "return_15y",
+   "expr": "dm.return_15y     AS return_15y"
+  },
+  {
+   "ordinal": 170,
+   "column": "window_states",
+   "expr": "dm.metric_states  AS window_states"
+  },
+  {
+   "ordinal": 171,
+   "column": "revenue_growth_yoy_q",
+   "expr": "qm.revenue_growth_yoy    AS revenue_growth_yoy_q"
+  },
+  {
+   "ordinal": 172,
+   "column": "eps_growth_yoy_q",
+   "expr": "qm.eps_growth_yoy        AS eps_growth_yoy_q"
+  },
+  {
+   "ordinal": 173,
+   "column": "net_income_growth_yoy_q",
+   "expr": "qm.net_income_growth_yoy AS net_income_growth_yoy_q"
+  },
+  {
+   "ordinal": 174,
+   "column": "revenue_growth_hoh",
+   "expr": "hym.revenue_growth_hoh"
+  },
+  {
+   "ordinal": 175,
+   "column": "net_income_growth_hoh",
+   "expr": "hym.net_income_growth_hoh"
+  },
+  {
+   "ordinal": 176,
+   "column": "eps_growth_hoh",
+   "expr": "hym.eps_growth_hoh"
+  },
+  {
+   "ordinal": 177,
+   "column": "analyst_rating",
+   "expr": "ar.rating           AS analyst_rating"
+  },
+  {
+   "ordinal": 178,
+   "column": "analyst_target_price",
+   "expr": "ar.target_price     AS analyst_target_price"
+  },
+  {
+   "ordinal": 179,
+   "column": "analyst_strong_buy",
+   "expr": "ar.strong_buy"
+  },
+  {
+   "ordinal": 180,
+   "column": "analyst_buy",
+   "expr": "ar.buy"
+  },
+  {
+   "ordinal": 181,
+   "column": "analyst_hold",
+   "expr": "ar.hold"
+  },
+  {
+   "ordinal": 182,
+   "column": "analyst_sell",
+   "expr": "ar.sell"
+  },
+  {
+   "ordinal": 183,
+   "column": "analyst_strong_sell",
+   "expr": "ar.strong_sell"
+  },
+  {
+   "ordinal": 184,
+   "column": "short_pct",
+   "expr": "si.short_pct"
+  },
+  {
+   "ordinal": 185,
+   "column": "short_position_shares",
+   "expr": "si.short_shares            AS short_position_shares"
+  },
+  {
+   "ordinal": 186,
+   "column": "short_interest_chg_1w",
+   "expr": "si.short_pct_chg_1w        AS short_interest_chg_1w"
+  },
+  {
+   "ordinal": 187,
+   "column": "shares_outstanding",
+   "expr": "ss.shares_outstanding"
+  },
+  {
+   "ordinal": 188,
+   "column": "percent_insiders",
+   "expr": "ss.percent_insiders"
+  },
+  {
+   "ordinal": 189,
+   "column": "percent_institutions",
+   "expr": "ss.percent_institutions"
+  },
+  {
+   "ordinal": 190,
+   "column": "eps_beat_rate_4q",
+   "expr": "eq.eps_beat_rate_4q"
+  },
+  {
+   "ordinal": 191,
+   "column": "eps_beat_rate_8q",
+   "expr": "eq.eps_beat_rate_8q"
+  },
+  {
+   "ordinal": 192,
+   "column": "consecutive_eps_beats",
+   "expr": "eq.consecutive_eps_beats::SMALLINT AS consecutive_eps_beats"
+  },
+  {
+   "ordinal": 193,
+   "column": "analyst_upside_pct",
+   "expr": "CASE WHEN ar.target_price IS NOT NULL AND dp.close IS NOT NULL AND dp.close > 0 THEN ROUND(((ar.target_price / dp.close) - 1) * 100, 4) END AS analyst_upside_pct"
+  },
+  {
+   "ordinal": 194,
+   "column": "short_ratio",
+   "expr": "CASE WHEN ss.shares_short IS NOT NULL AND dm.volume_avg_50d IS NOT NULL AND dm.volume_avg_50d > 0 THEN ROUND((ss.shares_short / dm.volume_avg_50d)::numeric, 4) END AS short_ratio"
+  },
+  {
+   "ordinal": 195,
+   "column": "years_listed",
+   "expr": "CASE WHEN cp.ipo_date IS NOT NULL THEN ROUND(((CURRENT_DATE - cp.ipo_date) / 365.25)::numeric, 2) END AS years_listed"
+  },
+  {
+   "ordinal": 196,
+   "column": "capital_raise_count_1y",
+   "expr": "ann.capital_raise_count_1y"
+  },
+  {
+   "ordinal": 197,
+   "column": "recent_capital_raise",
+   "expr": "ann.recent_capital_raise"
+  },
+  {
+   "ordinal": 198,
+   "column": "trading_halt_count_1y",
+   "expr": "ann.trading_halt_count_1y"
+  },
+  {
+   "ordinal": 199,
+   "column": "director_change_count_1y",
+   "expr": "ann.director_change_count_1y"
+  },
+  {
+   "ordinal": 200,
+   "column": "days_since_last_announcement",
+   "expr": "ann.days_since_last_announcement"
+  },
+  {
+   "ordinal": 201,
+   "column": "announcement_count_1y",
+   "expr": "ann.announcement_count_1y"
+  },
+  {
+   "ordinal": 202,
+   "column": "ocf_to_net_profit",
+   "expr": "ym.ocf_to_net_profit"
+  },
+  {
+   "ordinal": 203,
+   "column": "fcf_payout_ratio",
+   "expr": "ym.fcf_payout_ratio"
+  },
+  {
+   "ordinal": 204,
+   "column": "shares_dilution_3y",
+   "expr": "ym.shares_dilution_3y"
+  },
+  {
+   "ordinal": 205,
+   "column": "eps_volatility_5y",
+   "expr": "ym.eps_volatility_5y"
+  },
+  {
+   "ordinal": 206,
+   "column": "fcf_positive_years",
+   "expr": "ym.fcf_positive_years"
+  },
+  {
+   "ordinal": 207,
+   "column": "above_vwap",
+   "expr": "dm.above_vwap"
+  },
+  {
+   "ordinal": 208,
+   "column": "dollar_volume_avg_20d",
+   "expr": "dm.dollar_volume_avg_20d"
+  },
+  {
+   "ordinal": 209,
+   "column": "avg_roic_3y",
+   "expr": "ym.avg_roic_3y"
+  },
+  {
+   "ordinal": 210,
+   "column": "avg_roic_5y",
+   "expr": "ym.avg_roic_5y"
+  },
+  {
+   "ordinal": 211,
+   "column": "asset_light_score",
+   "expr": "ym.asset_light_score"
+  },
+  {
+   "ordinal": 212,
+   "column": "avg_volume_50d",
+   "expr": "dm.volume_avg_50d         AS avg_volume_50d"
+  },
+  {
+   "ordinal": 213,
+   "column": "cmf_20",
+   "expr": "dm.cmf_20"
+  },
+  {
+   "ordinal": 214,
+   "column": "up_down_vol_ratio_20d",
+   "expr": "dm.up_down_vol_ratio_20d"
+  },
+  {
+   "ordinal": 215,
+   "column": "obv_rising",
+   "expr": "dm.obv_rising"
+  },
+  {
+   "ordinal": 216,
+   "column": "volume_breakout",
+   "expr": "dm.volume_breakout"
+  },
+  {
+   "ordinal": 217,
+   "column": "analyst_count",
+   "expr": "NULLIF( COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0), 0 )::SMALLINT                                                             AS analyst_count"
+  },
+  {
+   "ordinal": 218,
+   "column": "analyst_buy_pct",
+   "expr": "CASE WHEN (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)) > 0 THEN ROUND( (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0))::NUMERIC / (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)), 4) END                                                                     AS analyst_buy_pct"
+  },
+  {
+   "ordinal": 219,
+   "column": "analyst_consensus_score",
+   "expr": "CASE WHEN (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)) > 0 THEN ROUND( (COALESCE(ar.strong_buy,0)*2 + COALESCE(ar.buy,0) - COALESCE(ar.sell,0) - COALESCE(ar.strong_sell,0)*2)::NUMERIC / (COALESCE(ar.strong_buy,0) + COALESCE(ar.buy,0) + COALESCE(ar.hold,0) + COALESCE(ar.sell,0) + COALESCE(ar.strong_sell,0)), 4) END                                                                     AS analyst_consensus_score"
+  },
+  {
+   "ordinal": 220,
+   "column": "brand_proxy_score",
+   "expr": "ym.brand_proxy_score"
+  },
+  {
+   "ordinal": 221,
+   "column": "capital_efficiency_score",
+   "expr": "ym.capital_efficiency_score"
+  },
+  {
+   "ordinal": 222,
+   "column": "earnings_stability_score",
+   "expr": "ym.earnings_stability_score"
+  },
+  {
+   "ordinal": 223,
+   "column": "business_model_tag",
+   "expr": "mc.business_model_tag"
+  },
+  {
+   "ordinal": 224,
+   "column": "commodity_exposure",
+   "expr": "mc.commodity_exposure"
+  },
+  {
+   "ordinal": 225,
+   "column": "dma50_ratio",
+   "expr": "dm.dma50_ratio"
+  },
+  {
+   "ordinal": 226,
+   "column": "dma200_ratio",
+   "expr": "dm.dma200_ratio"
+  },
+  {
+   "ordinal": 227,
+   "column": "above_sma50",
+   "expr": "dm.above_sma50"
+  },
+  {
+   "ordinal": 228,
+   "column": "above_sma200",
+   "expr": "dm.above_sma200"
+  },
+  {
+   "ordinal": 229,
+   "column": "golden_cross",
+   "expr": "dm.golden_cross"
+  },
+  {
+   "ordinal": 230,
+   "column": "death_cross",
+   "expr": "dm.death_cross"
+  },
+  {
+   "ordinal": 231,
+   "column": "new_52w_high",
+   "expr": "CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high"
+  },
+  {
+   "ordinal": 232,
+   "column": "new_52w_low",
+   "expr": "CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low"
+  },
+  {
+   "ordinal": 233,
+   "column": "relative_volume",
+   "expr": "dm.relative_volume"
+  },
+  {
+   "ordinal": 234,
+   "column": "bb_pct",
+   "expr": "dm.bb_pct"
+  },
+  {
+   "ordinal": 235,
+   "column": "rsi_21",
+   "expr": "dm.rsi_21"
+  },
+  {
+   "ordinal": 236,
+   "column": "stoch_k",
+   "expr": "dm.stoch_k"
+  },
+  {
+   "ordinal": 237,
+   "column": "stoch_d",
+   "expr": "dm.stoch_d"
+  },
+  {
+   "ordinal": 238,
+   "column": "rsi_overbought",
+   "expr": "dm.rsi_overbought"
+  },
+  {
+   "ordinal": 239,
+   "column": "rsi_oversold",
+   "expr": "dm.rsi_oversold"
+  },
+  {
+   "ordinal": 240,
+   "column": "macd_bullish_cross",
+   "expr": "dm.macd_bullish_cross"
+  },
+  {
+   "ordinal": 241,
+   "column": "macd_bearish_cross",
+   "expr": "dm.macd_bearish_cross"
+  },
+  {
+   "ordinal": 242,
+   "column": "ocf_per_share",
+   "expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((cf0.cfo * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS ocf_per_share"
+  },
+  {
+   "ordinal": 243,
+   "column": "fcf_per_share",
+   "expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((cf0.fcf * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS fcf_per_share"
+  },
+  {
+   "ordinal": 244,
+   "column": "revenue_per_share",
+   "expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((vs.revenue_ttm / ss.shares_outstanding)::numeric, 4) END AS revenue_per_share"
+  },
+  {
+   "ordinal": 245,
+   "column": "working_capital",
+   "expr": "(bs0.total_current_assets - bs0.total_current_liab) AS working_capital"
+  },
+  {
+   "ordinal": 246,
+   "column": "price_to_52w_low",
+   "expr": "CASE WHEN dp52.low_52w > 0 THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low"
+  },
+  {
+   "ordinal": 247,
+   "column": "gross_profit_fy0",
+   "expr": "pnl0.gross_profit  AS gross_profit_fy0"
+  },
+  {
+   "ordinal": 248,
+   "column": "gross_profit_fy1",
+   "expr": "pnl1.gross_profit  AS gross_profit_fy1"
+  },
+  {
+   "ordinal": 249,
+   "column": "gross_profit_fy3",
+   "expr": "pnl3.gross_profit  AS gross_profit_fy3"
+  },
+  {
+   "ordinal": 250,
+   "column": "gross_profit_fy5",
+   "expr": "pnl5.gross_profit  AS gross_profit_fy5"
+  },
+  {
+   "ordinal": 251,
+   "column": "gross_profit_fy7",
+   "expr": "pnl7.gross_profit  AS gross_profit_fy7"
+  },
+  {
+   "ordinal": 252,
+   "column": "gross_profit_fy10",
+   "expr": "pnl10.gross_profit AS gross_profit_fy10"
+  },
+  {
+   "ordinal": 253,
+   "column": "pbt_fy0",
+   "expr": "pnl0.pbt           AS pbt_fy0"
+  },
+  {
+   "ordinal": 254,
+   "column": "pbt_fy1",
+   "expr": "pnl1.pbt           AS pbt_fy1"
+  },
+  {
+   "ordinal": 255,
+   "column": "pbt_fy3",
+   "expr": "pnl3.pbt           AS pbt_fy3"
+  },
+  {
+   "ordinal": 256,
+   "column": "pbt_fy5",
+   "expr": "pnl5.pbt           AS pbt_fy5"
+  },
+  {
+   "ordinal": 257,
+   "column": "pbt_fy7",
+   "expr": "pnl7.pbt           AS pbt_fy7"
+  },
+  {
+   "ordinal": 258,
+   "column": "pbt_fy10",
+   "expr": "pnl10.pbt          AS pbt_fy10"
+  },
+  {
+   "ordinal": 259,
+   "column": "revenue_fy3",
+   "expr": "pnl3.revenue       AS revenue_fy3"
+  },
+  {
+   "ordinal": 260,
+   "column": "revenue_fy5",
+   "expr": "pnl5.revenue       AS revenue_fy5"
+  },
+  {
+   "ordinal": 261,
+   "column": "revenue_fy7",
+   "expr": "pnl7.revenue       AS revenue_fy7"
+  },
+  {
+   "ordinal": 262,
+   "column": "revenue_fy10",
+   "expr": "pnl10.revenue      AS revenue_fy10"
+  },
+  {
+   "ordinal": 263,
+   "column": "net_profit_fy3",
+   "expr": "pnl3.net_profit    AS net_profit_fy3"
+  },
+  {
+   "ordinal": 264,
+   "column": "net_profit_fy5",
+   "expr": "pnl5.net_profit    AS net_profit_fy5"
+  },
+  {
+   "ordinal": 265,
+   "column": "net_profit_fy7",
+   "expr": "pnl7.net_profit    AS net_profit_fy7"
+  },
+  {
+   "ordinal": 266,
+   "column": "net_profit_fy10",
+   "expr": "pnl10.net_profit   AS net_profit_fy10"
+  },
+  {
+   "ordinal": 267,
+   "column": "sales_growth_prev_y",
+   "expr": "CASE WHEN pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0 THEN ROUND(((pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))::numeric, 4) END AS sales_growth_prev_y"
+  },
+  {
+   "ordinal": 268,
+   "column": "pbt_growth_1y",
+   "expr": "CASE WHEN pnl1.pbt IS NOT NULL AND pnl1.pbt <> 0 THEN ROUND(((pnl0.pbt - pnl1.pbt) / ABS(pnl1.pbt))::numeric, 4) END AS pbt_growth_1y"
+  },
+  {
+   "ordinal": 269,
+   "column": "pbt_growth_prev_y",
+   "expr": "CASE WHEN pnl2.pbt IS NOT NULL AND pnl2.pbt <> 0 THEN ROUND(((pnl1.pbt - pnl2.pbt) / ABS(pnl2.pbt))::numeric, 4) END AS pbt_growth_prev_y"
+  },
+  {
+   "ordinal": 270,
+   "column": "pbt_cagr_3y",
+   "expr": "CASE WHEN pnl0.pbt > 0 AND pnl3.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl3.pbt, 1.0/3) - 1)::numeric, 4) END AS pbt_cagr_3y"
+  },
+  {
+   "ordinal": 271,
+   "column": "pbt_cagr_5y",
+   "expr": "CASE WHEN pnl0.pbt > 0 AND pnl5.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl5.pbt, 1.0/5) - 1)::numeric, 4) END AS pbt_cagr_5y"
+  },
+  {
+   "ordinal": 272,
+   "column": "pbt_cagr_7y",
+   "expr": "CASE WHEN pnl0.pbt > 0 AND pnl7.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl7.pbt, 1.0/7) - 1)::numeric, 4) END AS pbt_cagr_7y"
+  },
+  {
+   "ordinal": 273,
+   "column": "pbt_cagr_10y",
+   "expr": "CASE WHEN pnl0.pbt > 0 AND pnl10.pbt > 0 THEN ROUND((power(pnl0.pbt / pnl10.pbt, 1.0/10) - 1)::numeric, 4) END AS pbt_cagr_10y"
+  },
+  {
+   "ordinal": 274,
+   "column": "cogs",
+   "expr": "pnl0.cost_of_sales      AS cogs"
+  },
+  {
+   "ordinal": 275,
+   "column": "ebit",
+   "expr": "pnl0.ebit               AS ebit"
+  },
+  {
+   "ordinal": 276,
+   "column": "income_tax_expense",
+   "expr": "pnl0.tax                AS income_tax_expense"
+  },
+  {
+   "ordinal": 277,
+   "column": "interest_expense",
+   "expr": "pnl0.interest_expense   AS interest_expense"
+  },
+  {
+   "ordinal": 278,
+   "column": "depreciation",
+   "expr": "pnl0.depreciation       AS depreciation"
+  },
+  {
+   "ordinal": 279,
+   "column": "trade_receivables",
+   "expr": "bs0.trade_receivables   AS trade_receivables"
+  },
+  {
+   "ordinal": 280,
+   "column": "inventory",
+   "expr": "bs0.inventory           AS inventory"
+  },
+  {
+   "ordinal": 281,
+   "column": "goodwill",
+   "expr": "bs0.goodwill            AS goodwill"
+  },
+  {
+   "ordinal": 282,
+   "column": "intangibles",
+   "expr": "bs0.intangibles         AS intangibles"
+  },
+  {
+   "ordinal": 283,
+   "column": "ppe_net",
+   "expr": "bs0.gross_block         AS ppe_net"
+  },
+  {
+   "ordinal": 284,
+   "column": "total_current_assets",
+   "expr": "bs0.total_current_assets   AS total_current_assets"
+  },
+  {
+   "ordinal": 285,
+   "column": "total_current_liabilities",
+   "expr": "bs0.total_current_liab     AS total_current_liabilities"
+  },
+  {
+   "ordinal": 286,
+   "column": "total_liabilities",
+   "expr": "bs0.total_liabilities      AS total_liabilities"
+  },
+  {
+   "ordinal": 287,
+   "column": "long_term_debt",
+   "expr": "bs0.long_term_debt      AS long_term_debt"
+  },
+  {
+   "ordinal": 288,
+   "column": "retained_earnings",
+   "expr": "bs0.retained_earnings   AS retained_earnings"
+  },
+  {
+   "ordinal": 289,
+   "column": "cfi",
+   "expr": "cf0.cfi                 AS cfi"
+  },
+  {
+   "ordinal": 290,
+   "column": "dividends_paid",
+   "expr": "cf0.dividends_paid      AS dividends_paid"
+  },
+  {
+   "ordinal": 291,
+   "column": "quick_ratio",
+   "expr": "CASE WHEN bs0.total_current_liab > 0 THEN ROUND(((bs0.total_current_assets - COALESCE(bs0.inventory,0)) / bs0.total_current_liab)::numeric, 4) END AS quick_ratio"
+  },
+  {
+   "ordinal": 292,
+   "column": "cash_ratio",
+   "expr": "CASE WHEN bs0.total_current_liab > 0 THEN ROUND((bs0.cash_equivalents / bs0.total_current_liab)::numeric, 4) END AS cash_ratio"
+  },
+  {
+   "ordinal": 293,
+   "column": "debt_to_ebitda",
+   "expr": "CASE WHEN pnl0.ebitda > 0 THEN ROUND((bs0.total_debt / pnl0.ebitda)::numeric, 4) END AS debt_to_ebitda"
+  },
+  {
+   "ordinal": 294,
+   "column": "days_sales_outstanding",
+   "expr": "CASE WHEN pnl0.revenue > 0 THEN ROUND((bs0.trade_receivables / pnl0.revenue * 365)::numeric, 2) END AS days_sales_outstanding"
+  },
+  {
+   "ordinal": 295,
+   "column": "days_inventory_outstanding",
+   "expr": "CASE WHEN pnl0.cost_of_sales > 0 THEN ROUND((bs0.inventory / pnl0.cost_of_sales * 365)::numeric, 2) END AS days_inventory_outstanding"
+  },
+  {
+   "ordinal": 296,
+   "column": "inventory_turnover",
+   "expr": "CASE WHEN bs0.inventory > 0 THEN ROUND((pnl0.cost_of_sales / bs0.inventory)::numeric, 4) END AS inventory_turnover"
+  },
+  {
+   "ordinal": 297,
+   "column": "receivables_turnover",
+   "expr": "CASE WHEN bs0.trade_receivables > 0 THEN ROUND((pnl0.revenue / bs0.trade_receivables)::numeric, 4) END AS receivables_turnover"
+  },
+  {
+   "ordinal": 298,
+   "column": "pretax_margin",
+   "expr": "CASE WHEN pnl0.revenue > 0 THEN ROUND((pnl0.pbt / pnl0.revenue)::numeric, 4) END AS pretax_margin"
+  },
+  {
+   "ordinal": 299,
+   "column": "nopat",
+   "expr": "CASE WHEN pnl0.pbt <> 0 AND pnl0.pbt IS NOT NULL THEN ROUND((pnl0.ebit * (1 - pnl0.tax / pnl0.pbt))::numeric, 2) END AS nopat"
+  },
+  {
+   "ordinal": 300,
+   "column": "ebitda_interest_coverage",
+   "expr": "CASE WHEN ABS(pnl0.interest_expense) > 0 THEN ROUND((pnl0.ebitda / ABS(pnl0.interest_expense))::numeric, 4) END AS ebitda_interest_coverage"
+  },
+  {
+   "ordinal": 301,
+   "column": "equity_ratio",
+   "expr": "CASE WHEN bs0.total_assets > 0 THEN ROUND((bs0.total_equity / bs0.total_assets)::numeric, 4) END AS equity_ratio"
+  },
+  {
+   "ordinal": 302,
+   "column": "liabilities_to_assets",
+   "expr": "CASE WHEN bs0.total_assets > 0 THEN ROUND((bs0.total_liabilities / bs0.total_assets)::numeric, 4) END AS liabilities_to_assets"
+  },
+  {
+   "ordinal": 303,
+   "column": "fixed_asset_turnover",
+   "expr": "CASE WHEN bs0.gross_block > 0 THEN ROUND((pnl0.revenue / bs0.gross_block)::numeric, 4) END AS fixed_asset_turnover"
+  },
+  {
+   "ordinal": 304,
+   "column": "capex_to_revenue",
+   "expr": "CASE WHEN pnl0.revenue > 0 THEN ROUND((ABS(cf0.capex) / pnl0.revenue)::numeric, 4) END AS capex_to_revenue"
+  },
+  {
+   "ordinal": 305,
+   "column": "tangible_book_value_per_share",
+   "expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND(((bs0.total_equity - COALESCE(bs0.goodwill,0) - COALESCE(bs0.intangibles,0)) * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS tangible_book_value_per_share"
+  },
+  {
+   "ordinal": 306,
+   "column": "cash_per_share",
+   "expr": "CASE WHEN ss.shares_outstanding > 0 THEN ROUND((bs0.cash_equivalents * 1000000.0 / ss.shares_outstanding)::numeric, 4) END AS cash_per_share"
+  },
+  {
+   "ordinal": 307,
+   "column": "revenue_fy2",
+   "expr": "pnl2.revenue    AS revenue_fy2"
+  },
+  {
+   "ordinal": 308,
+   "column": "net_profit_ttm",
+   "expr": "pnl0.net_profit AS net_profit_ttm"
+  },
+  {
+   "ordinal": 309,
+   "column": "price_to_cash_flow",
+   "expr": "CASE WHEN cf0.cfo > 0 THEN ROUND((vs.market_cap / (cf0.cfo * 1000000.0))::numeric, 4) END AS price_to_cash_flow"
+  },
+  {
+   "ordinal": 310,
+   "column": "operating_margin_expansion",
+   "expr": "CASE WHEN ym.avg_operating_margin_3y BETWEEN -100 AND 100 AND ym.avg_operating_margin_5y BETWEEN -100 AND 100 THEN ROUND((ym.avg_operating_margin_3y - ym.avg_operating_margin_5y)::numeric, 4) END AS operating_margin_expansion"
+  },
+  {
+   "ordinal": 311,
+   "column": "gross_margin_expansion",
+   "expr": "CASE WHEN ym.avg_gross_margin_3y BETWEEN -100 AND 100 AND ym.avg_gross_margin_5y BETWEEN -100 AND 100 THEN ROUND((ym.avg_gross_margin_3y - ym.avg_gross_margin_5y)::numeric, 4) END AS gross_margin_expansion"
+  },
+  {
+   "ordinal": 312,
+   "column": "operating_margin_expanding",
+   "expr": "CASE WHEN ym.avg_operating_margin_3y BETWEEN -100 AND 100 AND ym.avg_operating_margin_5y BETWEEN -100 AND 100 THEN (ym.avg_operating_margin_3y - ym.avg_operating_margin_5y) > 0 END AS operating_margin_expanding"
+  },
+  {
+   "ordinal": 313,
+   "column": "gross_margin_expanding",
+   "expr": "CASE WHEN ym.avg_gross_margin_3y BETWEEN -100 AND 100 AND ym.avg_gross_margin_5y BETWEEN -100 AND 100 THEN (ym.avg_gross_margin_3y - ym.avg_gross_margin_5y) > 0 END AS gross_margin_expanding"
+  },
+  {
+   "ordinal": 314,
+   "column": "fcf_conversion",
+   "expr": "CASE WHEN pnl0.net_profit IS NOT NULL AND pnl0.net_profit > 0 AND cf0.fcf IS NOT NULL THEN ROUND((cf0.fcf / pnl0.net_profit)::numeric, 4) END AS fcf_conversion"
+  },
+  {
+   "ordinal": 315,
+   "column": "eps_beats_revenue_growth",
+   "expr": "CASE WHEN ym.eps_growth_1y IS NOT NULL AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN ym.eps_growth_1y > COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) END AS eps_beats_revenue_growth"
+  },
+  {
+   "ordinal": 316,
+   "column": "operating_leverage",
+   "expr": "CASE WHEN ym.ebitda_growth_1y IS NOT NULL AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN ROUND((ym.ebitda_growth_1y - COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y))::numeric, 4) END AS operating_leverage"
+  },
+  {
+   "ordinal": 317,
+   "column": "revenue_growth_accelerating",
+   "expr": "CASE WHEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL AND pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0 THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) > ((pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue)) END AS revenue_growth_accelerating"
+  },
+  {
+   "ordinal": 318,
+   "column": "revenue_growth_delta",
+   "expr": "CASE WHEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL AND pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl2.revenue <> 0 THEN ROUND((COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) - (pnl1.revenue - pnl2.revenue) / ABS(pnl2.revenue))::numeric, 4) END AS revenue_growth_delta"
+  },
+  {
+   "ordinal": 319,
+   "column": "revenue_growth_consistency",
+   "expr": "CASE WHEN pnl0.revenue IS NOT NULL AND pnl1.revenue IS NOT NULL THEN ( CASE WHEN pnl0.revenue > pnl1.revenue THEN 1 ELSE 0 END + CASE WHEN pnl1.revenue IS NOT NULL AND pnl2.revenue IS NOT NULL AND pnl1.revenue > pnl2.revenue THEN 1 ELSE 0 END + CASE WHEN pnl2.revenue IS NOT NULL AND pnl3.revenue IS NOT NULL AND pnl2.revenue > pnl3.revenue THEN 1 ELSE 0 END )::smallint END AS revenue_growth_consistency"
+  },
+  {
+   "ordinal": 320,
+   "column": "net_cash",
+   "expr": "CASE WHEN bs0.net_debt IS NOT NULL THEN bs0.net_debt < 0 END AS net_cash"
+  },
+  {
+   "ordinal": 321,
+   "column": "cash_to_debt",
+   "expr": "CASE WHEN bs0.total_debt IS NOT NULL AND bs0.total_debt > 0 AND bs0.cash_equivalents IS NOT NULL THEN ROUND((bs0.cash_equivalents / bs0.total_debt)::numeric, 4) END AS cash_to_debt"
+  },
+  {
+   "ordinal": 322,
+   "column": "fcf_to_debt",
+   "expr": "CASE WHEN bs0.total_debt IS NOT NULL AND bs0.total_debt > 0 AND cf0.fcf IS NOT NULL THEN ROUND((cf0.fcf / bs0.total_debt)::numeric, 4) END AS fcf_to_debt"
+  },
+  {
+   "ordinal": 323,
+   "column": "working_capital_to_sales",
+   "expr": "CASE WHEN pnl0.revenue IS NOT NULL AND pnl0.revenue > 0 AND bs0.total_current_assets IS NOT NULL AND bs0.total_current_liab IS NOT NULL THEN ROUND(((bs0.total_current_assets - bs0.total_current_liab) / pnl0.revenue)::numeric, 4) END AS working_capital_to_sales"
+  },
+  {
+   "ordinal": 324,
+   "column": "debt_growing_slower_than_profit",
+   "expr": "CASE WHEN bs0.total_debt IS NOT NULL AND bs1.total_debt IS NOT NULL AND bs1.total_debt <> 0 AND COALESCE(cm.profit_growth_1y, ym.net_income_growth_1y) IS NOT NULL THEN COALESCE(cm.profit_growth_1y, ym.net_income_growth_1y) > (bs0.total_debt - bs1.total_debt) / ABS(bs1.total_debt) END AS debt_growing_slower_than_profit"
+  },
+  {
+   "ordinal": 325,
+   "column": "inventory_growing_slower_than_sales",
+   "expr": "CASE WHEN bs0.inventory IS NOT NULL AND bs1.inventory IS NOT NULL AND bs1.inventory > 0 AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) >= (bs0.inventory - bs1.inventory) / ABS(bs1.inventory) END AS inventory_growing_slower_than_sales"
+  },
+  {
+   "ordinal": 326,
+   "column": "receivables_growing_slower_than_sales",
+   "expr": "CASE WHEN bs0.trade_receivables IS NOT NULL AND bs1.trade_receivables IS NOT NULL AND bs1.trade_receivables > 0 AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) >= (bs0.trade_receivables - bs1.trade_receivables) / ABS(bs1.trade_receivables) END AS receivables_growing_slower_than_sales"
+  },
+  {
+   "ordinal": 327,
+   "column": "gross_margin_stability",
+   "expr": "ym.gross_margin_stability                              AS gross_margin_stability"
+  },
+  {
+   "ordinal": 328,
+   "column": "revenue_predictability",
+   "expr": "ym.revenue_predictability                             AS revenue_predictability"
+  },
+  {
+   "ordinal": 329,
+   "column": "revenue_above_sector_median",
+   "expr": "NULL::boolean                                         AS revenue_above_sector_median"
+  },
+  {
+   "ordinal": 330,
+   "column": "earning_power",
+   "expr": "CASE WHEN pnl0.ebit IS NOT NULL AND bs0.total_assets IS NOT NULL AND bs0.total_assets > 0 THEN ROUND((pnl0.ebit / bs0.total_assets)::numeric, 4) END AS earning_power"
+  },
+  {
+   "ordinal": 331,
+   "column": "financial_leverage",
+   "expr": "CASE WHEN bs0.total_assets IS NOT NULL AND bs0.total_equity IS NOT NULL AND bs0.total_equity > 0 THEN ROUND((bs0.total_assets / bs0.total_equity)::numeric, 4) END AS financial_leverage"
+  },
+  {
+   "ordinal": 332,
+   "column": "days_payable_outstanding",
+   "expr": "CASE WHEN bs0.trade_payables IS NOT NULL AND bs0.trade_payables > 0 AND pnl0.cost_of_sales IS NOT NULL AND pnl0.cost_of_sales > 0 THEN ROUND((bs0.trade_payables / pnl0.cost_of_sales * 365)::numeric, 2) END AS days_payable_outstanding"
+  },
+  {
+   "ordinal": 333,
+   "column": "cash_conversion_cycle",
+   "expr": "CASE WHEN bs0.inventory IS NOT NULL AND pnl0.cost_of_sales IS NOT NULL AND pnl0.cost_of_sales > 0 AND bs0.trade_receivables IS NOT NULL AND pnl0.revenue IS NOT NULL AND pnl0.revenue > 0 AND bs0.trade_payables IS NOT NULL AND bs0.trade_payables > 0 THEN ROUND(( (bs0.inventory / pnl0.cost_of_sales * 365) + (bs0.trade_receivables / pnl0.revenue * 365) - (bs0.trade_payables / pnl0.cost_of_sales * 365) )::numeric, 2) END AS cash_conversion_cycle"
+  },
+  {
+   "ordinal": 334,
+   "column": "roe_improving",
+   "expr": "CASE WHEN COALESCE(cm.roe, ym.roe) IS NOT NULL AND ym.avg_roe_3y IS NOT NULL THEN COALESCE(cm.roe, ym.roe) > ym.avg_roe_3y END AS roe_improving"
+  },
+  {
+   "ordinal": 335,
+   "column": "roce_improving",
+   "expr": "CASE WHEN COALESCE(cm.roce, ym.roce) IS NOT NULL AND ym.avg_roce_3y IS NOT NULL THEN COALESCE(cm.roce, ym.roce) > ym.avg_roce_3y END AS roce_improving"
+  },
+  {
+   "ordinal": 336,
+   "column": "ocf_beats_net_income",
+   "expr": "CASE WHEN ym.ocf_to_net_profit IS NOT NULL THEN ym.ocf_to_net_profit >= 1.0 END AS ocf_beats_net_income"
+  },
+  {
+   "ordinal": 337,
+   "column": "capex_to_ocf",
+   "expr": "CASE WHEN cf0.cfo IS NOT NULL AND cf0.cfo > 0 AND cf0.capex IS NOT NULL THEN ROUND((ABS(cf0.capex) / cf0.cfo)::numeric, 4) END AS capex_to_ocf"
+  },
+  {
+   "ordinal": 338,
+   "column": "fcf_growing_faster_than_revenue",
+   "expr": "CASE WHEN ym.fcf_growth_1y IS NOT NULL AND COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) IS NOT NULL THEN ym.fcf_growth_1y > COALESCE(cm.revenue_growth_1y, ym.revenue_growth_1y) END AS fcf_growing_faster_than_revenue"
+  },
+  {
+   "ordinal": 339,
+   "column": "ocf_positive",
+   "expr": "CASE WHEN cf0.cfo IS NOT NULL THEN cf0.cfo > 0 END AS ocf_positive"
+  },
+  {
+   "ordinal": 340,
+   "column": "ocf_growing",
+   "expr": "CASE WHEN cf0.cfo IS NOT NULL AND cf1.cfo IS NOT NULL THEN cf0.cfo > cf1.cfo END AS ocf_growing"
+  },
+  {
+   "ordinal": 341,
+   "column": "universe_built_at",
+   "expr": "NOW()"
+  }
+ ]
+}

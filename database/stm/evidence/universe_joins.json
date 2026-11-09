@@ -1,0 +1,614 @@
+{
+ "sources": [
+  {
+   "kind": "FROM",
+   "alias": "c",
+   "base_tables": [
+    "market.companies_current"
+   ],
+   "on": [],
+   "limit_1": false,
+   "at_most_one_row": null
+  },
+  {
+   "kind": "lateral",
+   "alias": "dp",
+   "base_tables": [
+    "market.daily_prices"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "time DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "dp52",
+   "base_tables": [
+    "market.daily_prices"
+   ],
+   "limit_1": false,
+   "group_by": false,
+   "aggregate_no_group": true,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND time >= NOW() - INTERVAL '365 days' AND {current_source}"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "dp20",
+   "base_tables": [
+    "market.daily_prices"
+   ],
+   "limit_1": false,
+   "group_by": false,
+   "aggregate_no_group": true,
+   "order_by": [
+    "time DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 20 ) v20"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "LEFT JOIN",
+   "alias": "vs",
+   "base_tables": [
+    "market.valuation_snapshot"
+   ],
+   "on": [
+    "vs.asx_code = c.asx_code"
+   ],
+   "limit_1": false,
+   "at_most_one_row": null
+  },
+  {
+   "kind": "lateral",
+   "alias": "div_latest",
+   "base_tables": [
+    "market.dividends"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "ex_date DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY ex_date DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl0",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "fiscal_year DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "hist",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": false,
+   "group_by": false,
+   "aggregate_no_group": true,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year <= pnl0.fiscal_year ) runs WHERE runs.run_key = pnl0.fiscal_year + 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl1",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year = pnl0.fiscal_year - 1    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl2",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year = pnl0.fiscal_year - 2    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl3",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year = pnl0.fiscal_year - 3    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl5",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year = pnl0.fiscal_year - 5    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl7",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year = pnl0.fiscal_year - 7    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "pnl10",
+   "base_tables": [
+    "financials.annual_pnl"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND fiscal_year = pnl0.fiscal_year - 10    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "bs0",
+   "base_tables": [
+    "financials.annual_balance_sheet"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "fiscal_year DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "bs1",
+   "base_tables": [
+    "financials.annual_balance_sheet"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code     AND fiscal_year = bs0.fiscal_year - 1    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "cf0",
+   "base_tables": [
+    "financials.annual_cashflow"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "fiscal_year DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "cf1",
+   "base_tables": [
+    "financials.annual_cashflow"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code     AND fiscal_year = cf0.fiscal_year - 1    LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "fiscal_year"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "cm",
+   "base_tables": [
+    "market.computed_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "time DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY time DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "wm",
+   "base_tables": [
+    "market.weekly_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "week_date DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code          AND week_date >= date_trunc('week', dp.price_date)::date ORDER BY week_date DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "mm",
+   "base_tables": [
+    "market.monthly_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "month_date DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code     AND month_date >= date_trunc('month', dp.price_date)::date ORDER BY month_date DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "dm",
+   "base_tables": [
+    "market.daily_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "date DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "date"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "ym",
+   "base_tables": [
+    "market.yearly_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "fiscal_year DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY fiscal_year DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "qm",
+   "base_tables": [
+    "market.quarterly_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "fiscal_year DESC, quarter DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY fiscal_year DESC, quarter DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "hym",
+   "base_tables": [
+    "market.halfyearly_metrics"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "period_end_date DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY period_end_date DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "LEFT JOIN",
+   "alias": "ar",
+   "base_tables": [
+    "market.analyst_ratings"
+   ],
+   "on": [
+    "ar.asx_code = c.asx_code"
+   ],
+   "limit_1": false,
+   "at_most_one_row": null
+  },
+  {
+   "kind": "lateral",
+   "alias": "ss",
+   "base_tables": [
+    "staging_au.shares_stats"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "cp",
+   "base_tables": [
+    "staging_au.company_profile"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "fx",
+   "base_tables": [
+    "staging_au.fundamentals"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "eq",
+   "base_tables": [
+    "financials.earnings_quarterly"
+   ],
+   "limit_1": false,
+   "group_by": false,
+   "aggregate_no_group": true,
+   "order_by": [],
+   "where": [
+    "rn <= 4), 4) AS eps_beat_rate_4q, ROUND(AVG(CASE WHEN beat_miss = 'beat' THEN 1.0 ELSE 0.0 END) FILTER (WHERE rn <= 8), 4) AS eps_beat_rate_8q, COUNT(*) FILTER "
+   ],
+   "eq_columns": [
+    "miss_before"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "ann",
+   "base_tables": [
+    "market.asx_announcements"
+   ],
+   "limit_1": false,
+   "group_by": false,
+   "aggregate_no_group": true,
+   "order_by": [],
+   "where": [
+    "released_at >= NOW() - INTERVAL '1 year' AND (document_type ILIKE '%%Placement%%' OR document_type ILIKE '%%Capital Raising%%' OR document_type ILIKE '%%Rights "
+   ],
+   "eq_columns": [],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "mc",
+   "base_tables": [
+    "market.companies"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [],
+   "where": [
+    "asx_code = c.asx_code AND is_current = TRUE LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code",
+    "is_current"
+   ],
+   "at_most_one_row": true
+  },
+  {
+   "kind": "lateral",
+   "alias": "si",
+   "base_tables": [
+    "market.short_positions"
+   ],
+   "limit_1": true,
+   "group_by": false,
+   "aggregate_no_group": false,
+   "order_by": [
+    "report_date DESC"
+   ],
+   "where": [
+    "asx_code = c.asx_code ORDER BY report_date DESC LIMIT 1"
+   ],
+   "eq_columns": [
+    "asx_code"
+   ],
+   "at_most_one_row": true
+  }
+ ]
+}

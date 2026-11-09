@@ -1,0 +1,112 @@
+# market.global_indices  (Gold)
+#
+# Reference list of world indices. 8 columns.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/global_markets.py   (the ONLY writer)
+#
+# A REFERENCE TABLE, not a measure table - it holds the definition of each
+# index, while the observations live in market.global_index_prices (Silver).
+# Classified Gold because its only writer is a compute engine, but nothing
+# in it is computed.
+#
+# Grain: one row per index_code. Load: upsert on index_code.
+
+table: market.global_indices
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  source_table: literal definitions in global_markets.py
+  writer_job: compute/engine/global_markets.py
+  load_strategy: upsert on index_code
+  grain: index_code
+  tables_involved: market.global_index_prices
+
+columns:
+
+  market.global_indices:
+
+    index_code:
+      source_column: "literal"
+      transformation_rule: "the internal index identifier"
+      business_rule: >
+        Joins to market.global_index_prices.index_code.
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    index_name:
+      source_column: "literal"
+      transformation_rule: "display name"
+      business_rule: >
+        Declared in the engine, not fetched. Changing it requires a
+        code change, which is appropriate for a reference list and
+        means the table cannot drift from the code.
+      unit: "n/a"
+      status: "written"
+
+    region:
+      source_column: "literal"
+      transformation_rule: "geographic region"
+      business_rule: >
+        Declared in the engine, not fetched. Changing it requires a
+        code change, which is appropriate for a reference list and
+        means the table cannot drift from the code.
+      unit: "n/a"
+      status: "written"
+
+    country:
+      source_column: "literal"
+      transformation_rule: "country"
+      business_rule: >
+        Declared in the engine, not fetched. Changing it requires a
+        code change, which is appropriate for a reference list and
+        means the table cannot drift from the code.
+      unit: "n/a"
+      status: "written"
+
+    currency:
+      source_column: "literal"
+      transformation_rule: "quote currency"
+      business_rule: >
+        Declared in the engine, not fetched. Changing it requires a
+        code change, which is appropriate for a reference list and
+        means the table cannot drift from the code.
+      unit: "n/a"
+      status: "written"
+
+    yf_ticker:
+      source_column: "literal"
+      transformation_rule: "the provider symbol used to fetch prices"
+      business_rule: >
+        THE PROVIDER KEY. Names the symbol the price fetch uses, so a
+        mismatch here silently yields no prices for the index rather
+        than an error - the index row exists and its price series does
+        not.
+      unit: "n/a"
+      status: "written"
+
+    is_active:
+      source_column: "column default"
+      derivation_formula: "DEFAULT true; not in the INSERT column list"
+      transformation_rule: "whether the index is still tracked"
+      business_rule: >
+        NOT WRITTEN BY THE ENGINE - it relies on the column default of
+        true, and the upsert does not set it. So an index can only be
+        deactivated by hand, and retiring one in code leaves is_active
+        = true behind. See the retirement rule: a producer dropping an
+        entity does not retire the row.
+      unit: "boolean"
+      status: "DEFAULT ONLY - never set by the writer"
+
+    created_at:
+      source_column: "column default now()"
+      transformation_rule: "first insert time"
+      business_rule: >
+        Set by the column default and never updated, so it records
+        when the index was first added - not when its definition last
+        changed.
+      unit: "timestamptz"
+      status: "DEFAULT ONLY"

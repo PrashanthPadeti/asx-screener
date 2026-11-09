@@ -1,0 +1,396 @@
+# market.sector_benchmarks  (Gold)
+#
+# GICS sector statistics - median, P25, P75 - rebuilt weekly from the
+# served universe. One row per sector, 32 columns.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/sector_benchmarks.py   (the ONLY writer)
+#
+# Source: screener.universe. Like the market_snapshot family, this is a
+# GOLD table fed from UNIVERSE, so every value it aggregates has already
+# been through the universe build's own coalescing and fallbacks.
+#
+# Grain: one row per gics_sector. Load: upsert on gics_sector.
+#
+# -- It distinguishes governed from ungoverned, and says which ----------
+# The engine splits its metrics in two and labels them in the source:
+# "Governed" benchmarks carry a state in benchmark_states, with the
+# denominator behind every published value; "Ungoverned" ones -
+# return_1y_median, return_ytd_median, market_cap_median - are plain
+# medians with no state.
+#
+# A withheld governed benchmark is NULL *with an entry* saying why. A NULL
+# ungoverned one says nothing. The two look identical in the column and are
+# only distinguishable through benchmark_states.
+#
+# -- compute_run_id is DECLARED AND NEVER WRITTEN -----------------------
+# The column carries a foreign key to screener.compute_runs and this
+# comment in the schema:
+#
+#   "The run that produced this benchmark. Must match the compute_run_id
+#    of the screener.universe rows it contextualises: a factor score and
+#    the peer statistic shown beside it have to come from the same
+#    assessment set and the same model version."
+#
+# sector_benchmarks.py never mentions compute_run_id. It is absent from the
+# INSERT and from the DO UPDATE SET, and no other module writes this table.
+# The contract is stated in the schema and enforced nowhere - so a benchmark
+# and the universe rows it contextualises cannot be shown to come from the
+# same run, which is exactly what the comment requires.
+
+table: market.sector_benchmarks
+layer: Gold
+source_layer: Universe
+
+defaults:
+  source_system: internal
+  source_table: screener.universe
+  writer_job: compute/engine/sector_benchmarks.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  grain: gics_sector
+  tables_involved: screener.universe
+  join_condition: none - grouped within one table
+
+columns:
+
+  market.sector_benchmarks:
+
+    gics_sector:
+      source_column: "sector"
+      transformation_rule: "GROUP BY key"
+      business_rule: >
+        The sector as the universe carries it. A company with no
+        sector contributes to no row, so the sum of stock_count across
+        sectors is less than the universe.
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    stock_count:
+      source_column: "(row count)"
+      derivation_formula: "count of universe rows in the sector"
+      transformation_rule: "peers in the sector"
+      business_rule: >
+        THE GROUP SIZE, not the denominator of any individual
+        benchmark. Each governed metric has its own n_applicable_peers
+        and n_valid_peers in benchmark_states, and those are smaller.
+      unit: "count"
+      status: "written"
+
+    pe_ratio_p25:
+      source_column: "pe_ratio"
+      derivation_formula: "25th percentile of pe_ratio across the sector's peers"
+      transformation_rule: "governed 25th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    pe_ratio_median:
+      source_column: "pe_ratio"
+      derivation_formula: "median of pe_ratio across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    pe_ratio_p75:
+      source_column: "pe_ratio"
+      derivation_formula: "75th percentile of pe_ratio across the sector's peers"
+      transformation_rule: "governed 75th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    price_to_book_p25:
+      source_column: "price_to_book"
+      derivation_formula: "25th percentile of price_to_book across the sector's peers"
+      transformation_rule: "governed 25th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    price_to_book_median:
+      source_column: "price_to_book"
+      derivation_formula: "median of price_to_book across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    price_to_book_p75:
+      source_column: "price_to_book"
+      derivation_formula: "75th percentile of price_to_book across the sector's peers"
+      transformation_rule: "governed 75th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    ev_to_ebitda_p25:
+      source_column: "ev_to_ebitda"
+      derivation_formula: "25th percentile of ev_to_ebitda across the sector's peers"
+      transformation_rule: "governed 25th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    ev_to_ebitda_median:
+      source_column: "ev_to_ebitda"
+      derivation_formula: "median of ev_to_ebitda across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    ev_to_ebitda_p75:
+      source_column: "ev_to_ebitda"
+      derivation_formula: "75th percentile of ev_to_ebitda across the sector's peers"
+      transformation_rule: "governed 75th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    roe_p25:
+      source_column: "roe"
+      derivation_formula: "25th percentile of roe across the sector's peers"
+      transformation_rule: "governed 25th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    roe_median:
+      source_column: "roe"
+      derivation_formula: "median of roe across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    roe_p75:
+      source_column: "roe"
+      derivation_formula: "75th percentile of roe across the sector's peers"
+      transformation_rule: "governed 75th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    net_margin_p25:
+      source_column: "net_margin"
+      derivation_formula: "25th percentile of net_margin across the sector's peers"
+      transformation_rule: "governed 25th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    net_margin_median:
+      source_column: "net_margin"
+      derivation_formula: "median of net_margin across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    net_margin_p75:
+      source_column: "net_margin"
+      derivation_formula: "75th percentile of net_margin across the sector's peers"
+      transformation_rule: "governed 75th percentile"
+      business_rule: >
+        GOVERNED: NULL here carries an entry in benchmark_states
+        giving the reason and the peer counts. A NULL without an entry
+        predates that contract.
+      unit: "ratio"
+      status: "written"
+
+    dividend_yield_median:
+      source_column: "dividend_yield"
+      derivation_formula: "median of dividend_yield across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    grossed_up_yield_median:
+      source_column: "grossed_up_yield"
+      derivation_formula: "median of grossed_up_yield across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    franking_pct_median:
+      source_column: "franking_pct"
+      derivation_formula: "median of franking_pct across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group. franking_pct is a
+        PERCENT while its neighbours are ratios.
+      unit: "percent"
+      status: "written"
+
+    gross_margin_median:
+      source_column: "gross_margin"
+      derivation_formula: "median of gross_margin across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    ebitda_margin_median:
+      source_column: "ebitda_margin"
+      derivation_formula: "median of ebitda_margin across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    revenue_growth_1y_median:
+      source_column: "revenue_growth_1y"
+      derivation_formula: "median of revenue_growth_1y across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    earnings_growth_1y_median:
+      source_column: "earnings_growth_1y"
+      derivation_formula: "median of earnings_growth_1y across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    debt_to_equity_median:
+      source_column: "debt_to_equity"
+      derivation_formula: "median of debt_to_equity across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    current_ratio_median:
+      source_column: "current_ratio"
+      derivation_formula: "median of current_ratio across the sector's peers"
+      transformation_rule: "governed median"
+      business_rule: >
+        GOVERNED - see the p25/median/p75 group.
+      unit: "ratio"
+      status: "written"
+
+    return_1y_median:
+      source_column: "return_1y"
+      derivation_formula: "_med(grp[\"return_1y\"]) - a plain median"
+      transformation_rule: "UNGOVERNED median"
+      business_rule: >
+        UNGOVERNED: labelled so in the source. No entry appears in
+        benchmark_states for it, so a NULL here says nothing at all -
+        neither that it was withheld nor why.
+      unit: "ratio"
+      status: "written"
+
+    return_ytd_median:
+      source_column: "return_ytd"
+      derivation_formula: "_med(grp[\"return_ytd\"]) - a plain median"
+      transformation_rule: "UNGOVERNED median"
+      business_rule: >
+        UNGOVERNED: labelled so in the source. No entry appears in
+        benchmark_states for it, so a NULL here says nothing at all -
+        neither that it was withheld nor why.
+      unit: "ratio"
+      status: "written"
+
+    market_cap_median:
+      source_column: "market_cap"
+      derivation_formula: "_med(grp[\"market_cap\"]) - a plain median"
+      transformation_rule: "UNGOVERNED median"
+      business_rule: >
+        UNGOVERNED: labelled so in the source. No entry appears in
+        benchmark_states for it, so a NULL here says nothing at all -
+        neither that it was withheld nor why. market_cap inherits the
+        universe's raw-AUD basis - see OPEN_FINDINGS.md s.4.
+      unit: "AUD"
+      status: "written"
+
+    updated_at:
+      source_column: "NOW()"
+      transformation_rule: "run timestamp"
+      business_rule: >
+        LOAD TIME. The only currency signal on the row, since
+        compute_run_id is never written.
+      unit: "timestamptz"
+      status: "written"
+
+    benchmark_states:
+      source_column: "n/a"
+      derivation_formula: "jsonb: metric -> {state, reason_code, n_total_peers, n_applicable_peers, n_valid_peers, coverage_pct}"
+      transformation_rule: "per-metric state and denominators"
+      business_rule: >
+        Carries counts for APPLICABLE benchmarks too, not only
+        withheld ones, so the denominator behind a published median is
+        always visible. Covers the GOVERNED metrics only - the three
+        ungoverned medians have no entry.
+      unit: "jsonb"
+      status: "written"
+
+    compute_run_id:
+      source_column: "n/a"
+      derivation_formula: "not written by any module"
+      transformation_rule: "NOT WRITTEN - declared contract, no producer"
+      business_rule: >
+        DECLARED AND NEVER ENFORCED. The column has a foreign key to
+        screener.compute_runs and a schema comment requiring it to
+        match the compute_run_id of the universe rows it
+        contextualises, so that a factor score and the peer statistic
+        beside it come from the same assessment set.
+        sector_benchmarks.py never mentions the column, and no other
+        module writes this table. The pairing the comment demands
+        cannot be demonstrated for any row.
+      unit: "n/a"
+      status: "NOT WRITTEN - declared but no producer"

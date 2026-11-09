@@ -1,0 +1,269 @@
+# market.mining_metrics  (Gold)
+#
+# Mining-specific measures. 19 columns, of which FOUR are written.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/mining_metrics.py   (the ONLY writer)
+#
+# The engine writes exactly one piece of information - the inferred primary
+# commodity - plus its key, provenance and timestamp. Everything a mining
+# analyst would want from this table (AISC, reserves, grade, production,
+# guidance, sustaining capex) has no producer.
+#
+# primary_commodity is inferred by keyword matching over the company NAME
+# and DESCRIPTION. It is a guess from free text, labelled as such by
+# data_source = 'eodhd_inference'.
+#
+# Grain: one row per asx_code. Load: upsert on asx_code, with the same
+# manual-preserving CASE as market.reit_metrics.
+
+table: market.mining_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: EODHD (inferred)
+  source_table: staging_au.fundamentals
+  writer_job: compute/engine/mining_metrics.py
+  load_strategy: upsert on asx_code
+  grain: asx_code
+  tables_involved: staging_au.fundamentals, market.companies_current
+
+columns:
+
+  market.mining_metrics:
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    primary_commodity:
+      source_column: "General.Name, General.Description"
+      derivation_formula: "_infer_commodity(name, description) - keyword match over free text"
+      transformation_rule: "inferred principal commodity"
+      business_rule: >
+        A GUESS FROM FREE TEXT, not a reported figure. A company whose
+        description mentions several commodities, or whose name
+        carries one it no longer mines, is classified on that text.
+        The only substantive column this engine writes.
+      unit: "n/a"
+      status: "written"
+
+    data_source:
+      source_column: "literal"
+      derivation_formula: "'eodhd_inference', or 'manual' preserved by CASE"
+      transformation_rule: "provenance marker"
+      business_rule: >
+        The CASE carries the comment 'never overwrite manually entered
+        data'. Given fifteen of nineteen columns have no producer, a
+        manual row is the only way this table is ever complete.
+      valid_values: "eodhd_inference, manual"
+      unit: "n/a"
+      status: "written"
+
+    updated_at:
+      source_column: "NOW()"
+      transformation_rule: "set on every upsert"
+      business_rule: >
+        Dates the RUN, not the commodity inference, which rarely
+        changes.
+      unit: "timestamptz"
+      status: "written"
+
+    aisc_per_oz:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "USD per ounce"
+      status: "NOT WRITTEN - population unmeasured"
+
+    cash_cost_per_oz:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "USD per ounce"
+      status: "NOT WRITTEN - population unmeasured"
+
+    aisc_per_tonne:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "USD per tonne"
+      status: "NOT WRITTEN - population unmeasured"
+
+    ore_reserves_mt:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "million tonnes"
+      status: "NOT WRITTEN - population unmeasured"
+
+    mineral_resources_mt:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "million tonnes"
+      status: "NOT WRITTEN - population unmeasured"
+
+    reserve_grade:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "grade"
+      status: "NOT WRITTEN - population unmeasured"
+
+    reserve_life_yrs:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "years"
+      status: "NOT WRITTEN - population unmeasured"
+
+    production_oz_ttm:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "ounces"
+      status: "NOT WRITTEN - population unmeasured"
+
+    production_kt_ttm:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "kilotonnes"
+      status: "NOT WRITTEN - population unmeasured"
+
+    production_guidance_low:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "ounces"
+      status: "NOT WRITTEN - population unmeasured"
+
+    production_guidance_high:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "ounces"
+      status: "NOT WRITTEN - population unmeasured"
+
+    sustaining_capex_m:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD millions"
+      status: "NOT WRITTEN - population unmeasured"
+
+    growth_capex_m:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD millions"
+      status: "NOT WRITTEN - population unmeasured"
+
+    commodity_price_ref:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "price"
+      status: "NOT WRITTEN - population unmeasured"
+
+    report_period:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/mining_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "date"
+      status: "NOT WRITTEN - population unmeasured"

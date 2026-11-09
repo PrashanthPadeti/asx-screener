@@ -1,0 +1,256 @@
+# market.heatmap_cache and market.heatmap_labels  (Gold)
+#
+# Pre-rendered heatmap payloads. 13 + 7 columns, all written.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/heatmap_compute.py   (the ONLY writer)
+#
+# -- A GENERIC PAYLOAD, which is why the labels table exists -------------
+# heatmap_cache stores five numeric slots named p1..p5 whose MEANING is not
+# in the row. market.heatmap_labels holds the names, one row per mode, and
+# the two must be read together: p3 for mode A and p3 for mode B are
+# different measures. A query against heatmap_cache alone cannot say what
+# it is reading.
+#
+# Both carry computed_at, and they are written in the same transaction, so
+# a mismatch between a cache row and its labels indicates a partial write.
+#
+# -- The cache is DELETE + INSERT, the labels are an upsert ---------------
+#   DELETE FROM market.heatmap_cache WHERE mode = :mode
+#   INSERT ... (no ON CONFLICT)                      -- chunked at 500
+#   INSERT INTO market.heatmap_labels ... ON CONFLICT (mode) DO UPDATE
+#
+# So a company that drops out of the heatmap LEAVES the cache, which is
+# correct for a rendering cache and the opposite of every other Gold table
+# here. The delete and insert are in one transaction, so the swap is
+# atomic.
+
+table: market.heatmap_cache
+layer: Gold
+source_layer: Universe
+
+defaults:
+  source_system: internal
+  source_table: screener.universe
+  writer_job: compute/engine/heatmap_compute.py
+  grain: mode+asx_code
+  tables_involved: screener.universe, market.daily_metrics
+  load_strategy: DELETE by mode then INSERT (atomic swap, no ON CONFLICT)
+
+columns:
+
+  market.heatmap_cache:
+
+    mode:
+      source_column: "literal"
+      transformation_rule: "which heatmap variant this row belongs to"
+      business_rule: >
+        Part of the key and the join to market.heatmap_labels. The
+        p1..p5 columns mean different things per mode, so mode is
+        required to interpret any of them.
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    company_name:
+      source_column: "company_name"
+      transformation_rule: "direct copy, denormalised for rendering"
+      business_rule: >
+        Frozen at render time. A later rename does not reach rows
+        already cached, which is acceptable for a cache rebuilt each
+        run.
+      unit: "n/a"
+      status: "written"
+
+    sector:
+      source_column: "sector"
+      transformation_rule: "direct copy, denormalised for rendering"
+      business_rule: >
+        Frozen at render time. A later rename does not reach rows
+        already cached, which is acceptable for a cache rebuilt each
+        run.
+      unit: "n/a"
+      status: "written"
+
+    industry:
+      source_column: "industry"
+      transformation_rule: "direct copy, denormalised for rendering"
+      business_rule: >
+        Frozen at render time. A later rename does not reach rows
+        already cached, which is acceptable for a cache rebuilt each
+        run.
+      unit: "n/a"
+      status: "written"
+
+    price:
+      source_column: "price"
+      transformation_rule: "latest price from the universe row"
+      unit: "AUD"
+      status: "written"
+
+    market_cap:
+      source_column: "market_cap"
+      transformation_rule: "market cap from the universe row"
+      business_rule: >
+        Inherits screener.universe.market_cap, which is RAW AUD - see
+        OPEN_FINDINGS.md section 4. NUMERIC(22,2) here, the widest
+        market_cap column in the schema, which is consistent with a
+        raw basis rather than millions.
+      unit: "AUD (raw)"
+      status: "written"
+
+    p1:
+      source_column: "varies by mode"
+      derivation_formula: "the mode's 1th configured measure"
+      transformation_rule: "generic numeric slot"
+      business_rule: >
+        MEANINGLESS WITHOUT market.heatmap_labels. Its name for this
+        mode is label_1 in that table; across modes the same slot
+        carries different measures and different units. Any query
+        reading p1 without joining labels is reading an unnamed
+        number.
+      unit: "varies by mode"
+      status: "written"
+
+    p2:
+      source_column: "varies by mode"
+      derivation_formula: "the mode's 2th configured measure"
+      transformation_rule: "generic numeric slot"
+      business_rule: >
+        MEANINGLESS WITHOUT market.heatmap_labels. Its name for this
+        mode is label_2 in that table; across modes the same slot
+        carries different measures and different units. Any query
+        reading p2 without joining labels is reading an unnamed
+        number.
+      unit: "varies by mode"
+      status: "written"
+
+    p3:
+      source_column: "varies by mode"
+      derivation_formula: "the mode's 3th configured measure"
+      transformation_rule: "generic numeric slot"
+      business_rule: >
+        MEANINGLESS WITHOUT market.heatmap_labels. Its name for this
+        mode is label_3 in that table; across modes the same slot
+        carries different measures and different units. Any query
+        reading p3 without joining labels is reading an unnamed
+        number.
+      unit: "varies by mode"
+      status: "written"
+
+    p4:
+      source_column: "varies by mode"
+      derivation_formula: "the mode's 4th configured measure"
+      transformation_rule: "generic numeric slot"
+      business_rule: >
+        MEANINGLESS WITHOUT market.heatmap_labels. Its name for this
+        mode is label_4 in that table; across modes the same slot
+        carries different measures and different units. Any query
+        reading p4 without joining labels is reading an unnamed
+        number.
+      unit: "varies by mode"
+      status: "written"
+
+    p5:
+      source_column: "varies by mode"
+      derivation_formula: "the mode's 5th configured measure"
+      transformation_rule: "generic numeric slot"
+      business_rule: >
+        MEANINGLESS WITHOUT market.heatmap_labels. Its name for this
+        mode is label_5 in that table; across modes the same slot
+        carries different measures and different units. Any query
+        reading p5 without joining labels is reading an unnamed
+        number.
+      unit: "varies by mode"
+      status: "written"
+
+    computed_at:
+      source_column: "NOW()"
+      transformation_rule: "set on insert"
+      business_rule: >
+        Written in the same transaction as the labels row, so cache
+        and labels sharing a computed_at is the evidence they belong
+        together.
+      unit: "timestamptz"
+      status: "written"
+
+
+  market.heatmap_labels:
+
+# ── market.heatmap_labels ────────────────────────────────────────────────
+# One row per mode, naming what p1..p5 hold for it. Upserted, not swapped,
+# so a mode's labels survive a cache rebuild that writes no rows.
+
+    mode:
+      source_column: "literal"
+      transformation_rule: "the heatmap variant"
+      business_rule: >
+        Joins to market.heatmap_cache.mode.
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    label_1:
+      source_column: "literal"
+      transformation_rule: "display name for heatmap_cache.p1"
+      business_rule: >
+        The ONLY place the meaning of p1 is recorded. Nullable, so a
+        populated p1 with a NULL label_1 is a slot in use with no
+        name.
+      unit: "n/a"
+      status: "written"
+
+    label_2:
+      source_column: "literal"
+      transformation_rule: "display name for heatmap_cache.p2"
+      business_rule: >
+        The ONLY place the meaning of p2 is recorded. Nullable, so a
+        populated p2 with a NULL label_2 is a slot in use with no
+        name.
+      unit: "n/a"
+      status: "written"
+
+    label_3:
+      source_column: "literal"
+      transformation_rule: "display name for heatmap_cache.p3"
+      business_rule: >
+        The ONLY place the meaning of p3 is recorded. Nullable, so a
+        populated p3 with a NULL label_3 is a slot in use with no
+        name.
+      unit: "n/a"
+      status: "written"
+
+    label_4:
+      source_column: "literal"
+      transformation_rule: "display name for heatmap_cache.p4"
+      business_rule: >
+        The ONLY place the meaning of p4 is recorded. Nullable, so a
+        populated p4 with a NULL label_4 is a slot in use with no
+        name.
+      unit: "n/a"
+      status: "written"
+
+    label_5:
+      source_column: "literal"
+      transformation_rule: "display name for heatmap_cache.p5"
+      business_rule: >
+        The ONLY place the meaning of p5 is recorded. Nullable, so a
+        populated p5 with a NULL label_5 is a slot in use with no
+        name.
+      unit: "n/a"
+      status: "written"
+
+    computed_at:
+      source_column: "NOW()"
+      transformation_rule: "set on insert and on conflict"
+      business_rule: >
+        Should match the cache rows for the same mode.
+      unit: "timestamptz"
+      status: "written"

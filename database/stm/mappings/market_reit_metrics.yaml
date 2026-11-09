@@ -1,0 +1,289 @@
+# market.reit_metrics  (Gold)
+#
+# REIT-specific measures. 20 columns, of which SIX are written.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/reit_metrics.py   (the ONLY writer)
+#
+# -- Everything here is INFERRED, and the table says so ------------------
+# data_source is the literal 'eodhd_inference'. reit_sector is derived from
+# the company's name and description, and premium_to_nta is derived from
+# price_to_book on the stated approximation "price_to_book ~ P/NTA for REITs
+# (NTA ~ book value)". No reported REIT disclosure reaches this table.
+#
+# -- Manual entries are protected, and unknowns do not overwrite ---------
+# Two deliberate upsert behaviours worth knowing:
+#
+#   data_source = CASE WHEN existing = 'manual' THEN 'manual' ELSE ... END
+#       a row somebody entered by hand is never downgraded to inference
+#
+#   distribution_yield = COALESCE(EXCLUDED.x, existing.x)
+#       A NULL NEW VALUE KEEPS THE OLD ONE. Recomputation does not replace a
+#       value when the new result is unknown, so a figure can outlive the
+#       data that produced it with nothing on the row to date it. updated_at
+#       still advances, because it is set unconditionally.
+#
+# Grain: one row per asx_code. Load: upsert on asx_code.
+
+table: market.reit_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: EODHD (inferred)
+  source_table: staging_au.fundamentals, market.computed_metrics
+  writer_job: compute/engine/reit_metrics.py
+  load_strategy: upsert on asx_code, with COALESCE preserving prior values
+  grain: asx_code
+  tables_involved: staging_au.fundamentals, market.computed_metrics, market.companies_current
+
+columns:
+
+  market.reit_metrics:
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    reit_sector:
+      source_column: "name, description"
+      derivation_formula: "inferred from the company name and description text"
+      transformation_rule: "REIT sub-sector classification, inferred"
+      business_rule: >
+        Derived from free text, not from a reported classification.
+        Overwritten on every run, unlike the two numeric columns which
+        are COALESCEd.
+      unit: "n/a"
+      status: "written"
+
+    distribution_yield:
+      source_column: "dividend_yield"
+      derivation_formula: "the company's dividend yield, carried through"
+      transformation_rule: "distribution yield"
+      business_rule: >
+        COALESCE(EXCLUDED, existing) on upsert: a NULL new value KEEPS
+        THE OLD. A yield can therefore survive the disappearance of
+        the data behind it, while updated_at advances regardless.
+      unit: "ratio"
+      status: "written"
+
+    premium_to_nta:
+      source_column: "price_to_book"
+      derivation_formula: "(price_to_book - 1.0)"
+      transformation_rule: "premium or discount to net tangible assets"
+      business_rule: >
+        AN APPROXIMATION, stated in the source as 'price_to_book ~
+        P/NTA for REITs (NTA ~ book value)'. It is not computed from a
+        reported NTA; a REIT whose book value and NTA differ -
+        intangibles, right-of-use assets - is misstated by that
+        difference. Also COALESCEd, so a NULL keeps the old value.
+      unit: "ratio"
+      status: "written"
+
+    data_source:
+      source_column: "literal"
+      derivation_formula: "'eodhd_inference', or 'manual' preserved by CASE"
+      transformation_rule: "provenance marker"
+      business_rule: >
+        The CASE never downgrades a 'manual' row. This is the only
+        column in the Gold layer that distinguishes hand-entered data
+        from derived, and it is what makes the COALESCE behaviour
+        defensible rather than accidental.
+      valid_values: "eodhd_inference, manual"
+      unit: "n/a"
+      status: "written"
+
+    updated_at:
+      source_column: "NOW()"
+      transformation_rule: "set unconditionally on every upsert"
+      business_rule: >
+        ADVANCES EVEN WHEN NOTHING CHANGED, because the COALESCEd
+        columns may have kept their prior values. So it dates the RUN,
+        not the data.
+      unit: "timestamptz"
+      status: "written"
+
+    ffo_per_unit:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD per unit"
+      status: "NOT WRITTEN - population unmeasured"
+
+    affo_per_unit:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD per unit"
+      status: "NOT WRITTEN - population unmeasured"
+
+    price_to_ffo:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "ratio"
+      status: "NOT WRITTEN - population unmeasured"
+
+    nta_per_unit:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD per unit"
+      status: "NOT WRITTEN - population unmeasured"
+
+    wale_yrs:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "years"
+      status: "NOT WRITTEN - population unmeasured"
+
+    occupancy_pct:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "percent"
+      status: "NOT WRITTEN - population unmeasured"
+
+    total_assets_bn:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD billions"
+      status: "NOT WRITTEN - population unmeasured"
+
+    gla_sqm:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "square metres"
+      status: "NOT WRITTEN - population unmeasured"
+
+    num_properties:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "count"
+      status: "NOT WRITTEN - population unmeasured"
+
+    distribution_per_unit:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "AUD per unit"
+      status: "NOT WRITTEN - population unmeasured"
+
+    payout_of_ffo:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "ratio"
+      status: "NOT WRITTEN - population unmeasured"
+
+    gearing_pct:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "percent"
+      status: "NOT WRITTEN - population unmeasured"
+
+    interest_cover:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "ratio"
+      status: "NOT WRITTEN - population unmeasured"
+
+    report_period:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN by compute/engine/reit_metrics.py"
+      business_rule: >
+        NOT WRITTEN. Absent from the INSERT column list and from the
+        ON CONFLICT DO UPDATE SET, so no run can set it and no run can
+        clear it. Population unmeasured - use
+        backend/scripts/stm/census_unwritten.py on a dump rather than
+        scanning production.
+      unit: "date"
+      status: "NOT WRITTEN - population unmeasured"

@@ -1,0 +1,124 @@
+# market.anomalies  (Gold)
+#
+# Rule-based flags on companies. 8 columns, all written.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/anomaly_detect.py   (the ONLY writer)
+#
+# A fixed table of rules, each with a flag_type, a severity and a
+# description template. Seven rules exist: PRICE_EARNINGS_DIVERGENCE,
+# VALUE_GROWTH, SHORT_SQUEEZE_RISK, OVERSOLD_QUALITY, OVERBOUGHT_WEAK,
+# HIGH_SHORT_INTEREST, DIVIDEND_YIELD_SPIKE.
+#
+# -- It RESOLVES as well as raises, which is rare here -------------------
+# After writing the flags that still apply, the engine deactivates those
+# that no longer do - setting is_active = FALSE rather than deleting the
+# row. So the table keeps a history of flags that were once true, and
+# `is_active` is the column that separates current from historical. A query
+# omitting it reads every flag ever raised.
+#
+# Grain: one row per (asx_code, flag_type). A company can carry several
+# flags; the same flag cannot appear twice for one company.
+
+table: market.anomalies
+layer: Gold
+source_layer: Universe
+
+defaults:
+  source_system: internal
+  source_table: screener.universe
+  writer_job: compute/engine/anomaly_detect.py
+  load_strategy: upsert on (asx_code, flag_type), with a separate deactivation pass
+  grain: asx_code+flag_type
+  tables_involved: screener.universe
+
+columns:
+
+  market.anomalies:
+
+    id:
+      source_column: "gen_random_uuid()"
+      transformation_rule: "surrogate key"
+      business_rule: >
+        A UUID primary key beside the real identity, the UNIQUE
+        (asx_code, flag_type) the upsert targets.
+      unit: "n/a"
+      status: "written"
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    flag_type:
+      source_column: "literal"
+      transformation_rule: "which rule fired"
+      business_rule: >
+        A fixed set declared in the rules table. Adding a rule adds a
+        value here with no schema change, so the valid_values list is
+        accurate as at the authoring date and not constrained by the
+        database.
+      valid_values: "PRICE_EARNINGS_DIVERGENCE, VALUE_GROWTH, SHORT_SQUEEZE_RISK, OVERSOLD_QUALITY, OVERBOUGHT_WEAK, HIGH_SHORT_INTEREST, DIVIDEND_YIELD_SPIKE"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    description:
+      source_column: "rule template + universe columns"
+      derivation_formula: "desc_tpl.format(**{k: (v or 0) for k, v in row.items()})"
+      transformation_rule: "human-readable explanation, interpolated"
+      business_rule: >
+        NULLS ARE RENDERED AS ZERO. The format substitutes `v or 0`
+        for every field, so a company with an unknown short interest
+        is described as having 0% - a stated figure where the truth is
+        unknown. If the interpolation fails the raw template is stored
+        instead, braces and all.
+      unit: "n/a"
+      status: "written"
+
+    severity:
+      source_column: "literal from the rule"
+      transformation_rule: "rule-declared severity"
+      business_rule: >
+        A PROPERTY OF THE RULE, not of the company: every firing of a
+        given flag_type carries the same severity regardless of how
+        far the threshold was exceeded.
+      valid_values: "high, medium (observed in the rules table)"
+      unit: "n/a"
+      status: "written"
+
+    is_active:
+      source_column: "literal"
+      derivation_formula: "TRUE on raise; set FALSE by the deactivation pass"
+      transformation_rule: "whether the flag currently applies"
+      business_rule: >
+        THE COLUMN THAT SEPARATES CURRENT FROM HISTORICAL. Rows are
+        never deleted, so a query without `is_active = TRUE` returns
+        every flag ever raised for a company. There is a partial index
+        on is_active WHERE is_active = true, which is evidence the
+        filtered read is the intended one.
+      unit: "boolean"
+      status: "written"
+
+    detected_at:
+      source_column: "NOW()"
+      transformation_rule: "set on raise and refreshed on re-raise"
+      business_rule: >
+        REFRESHED EVERY TIME THE FLAG STILL APPLIES, so it is the last
+        confirmation, not the first detection. A flag that has been
+        true for months looks new.
+      unit: "timestamptz"
+      status: "written"
+
+    resolved_at:
+      source_column: "NOW() or NULL"
+      derivation_formula: "NULL on re-raise; set when the deactivation pass runs"
+      transformation_rule: "when the flag stopped applying"
+      business_rule: >
+        Explicitly RESET TO NULL when a flag is re-raised, so a flag
+        that came back does not carry a stale resolution date.
+        Together with is_active it gives the flag's lifecycle.
+      unit: "timestamptz"
+      status: "written"

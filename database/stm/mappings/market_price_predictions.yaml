@@ -1,0 +1,198 @@
+# market.price_predictions  (Gold)
+#
+# Model price forecasts. One row per (asx_code, prediction_date, model,
+# horizon_days), 15 columns, all written.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/price_predictions.py   (the ONLY writer)
+#
+# Grain: four-part key. A single company-date carries one row PER MODEL PER
+# HORIZON, so the table fans out: HORIZONS = [5, 10, 20, 30, 50] trading
+# days, times the models, times the dates. 1.8 million rows at the last
+# snapshot.
+#
+# -- These are FORECASTS, and the only Gold table that is ---------------
+# Every other Gold table records something that happened. This records what
+# a model expects, and three columns qualify it: confidence_score, r2_score
+# and data_points. A consumer that reads predicted_price without them is
+# taking a point estimate from a fit whose quality is on the same row.
+#
+# Load: upsert on the four-part key. created_at is refreshed to NOW() on
+# conflict, so re-running a date restamps it.
+
+table: market.price_predictions
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  source_table: market.daily_prices
+  writer_job: compute/engine/price_predictions.py
+  load_strategy: upsert on (asx_code, prediction_date, model, horizon_days)
+  grain: asx_code+prediction_date+model+horizon_days
+  tables_involved: market.daily_prices
+  join_condition: none - modelled per company from its own price series
+
+columns:
+
+  market.price_predictions:
+
+    id:
+      source_column: "nextval(price_predictions_id_seq)"
+      transformation_rule: "surrogate key"
+      business_rule: >
+        A serial primary key alongside a four-part UNIQUE constraint
+        that is the real identity. The upsert targets the unique
+        constraint, not this.
+      unit: "n/a"
+      status: "written"
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    prediction_date:
+      source_column: "time"
+      transformation_rule: "the date the forecast was made FROM"
+      business_rule: >
+        The anchor date, not the date being forecast. The forecast
+        target is prediction_date plus horizon_days trading days, and
+        no column holds that target date - a consumer must compute it.
+      unit: "date"
+      is_key: "yes"
+      status: "written"
+
+    model:
+      source_column: "literal"
+      derivation_formula: "model_name passed to _rec(), or 'ensemble'"
+      transformation_rule: "which model produced the row"
+      business_rule: >
+        'ensemble' is a COMBINATION of the other rows for the same
+        key, not an independent model. Averaging across all models for
+        a company-date double-counts it.
+      valid_values: "the individual model names, plus 'ensemble'"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    horizon_days:
+      source_column: "HORIZONS"
+      derivation_formula: "one of HORIZONS = [5, 10, 20, 30, 50]"
+      transformation_rule: "forecast horizon"
+      business_rule: >
+        TRADING DAYS, not calendar days - so horizon 20 is about a
+        month and horizon 50 about a quarter. The column name does not
+        carry the unit.
+      valid_values: "5, 10, 20, 30, 50"
+      unit: "trading days"
+      is_key: "yes"
+      status: "written"
+
+    current_price:
+      source_column: "close"
+      transformation_rule: "the close the forecast was made from"
+      business_rule: >
+        NOT NULL. The baseline predicted_change_pct is measured
+        against, frozen at prediction time - so it does not drift as
+        the market moves.
+      unit: "AUD"
+      status: "written"
+
+    predicted_price:
+      source_column: "close"
+      derivation_formula: "current_price * (1 + predicted_change_pct)"
+      transformation_rule: "the model's central estimate"
+      business_rule: >
+        A POINT ESTIMATE whose usefulness depends on r2_score and
+        confidence_score on the same row. NaN and infinities are
+        mapped to NULL by _sanitise before insert, so a NULL here can
+        mean the model produced a non-finite value.
+      unit: "AUD"
+      status: "written"
+
+    lower_bound:
+      source_column: "close"
+      derivation_formula: "lower edge of the interval, widened by spread_factor (default 1.2)"
+      transformation_rule: "lower bound of the forecast interval"
+      business_rule: >
+        The interval is scaled by a spread_factor argument defaulting
+        to 1.2, so it is a widened band rather than a stated
+        confidence level. No column records the level.
+      unit: "AUD"
+      status: "written"
+
+    upper_bound:
+      source_column: "close"
+      derivation_formula: "upper edge of the interval, widened by spread_factor (default 1.2)"
+      transformation_rule: "upper bound of the forecast interval"
+      business_rule: >
+        The interval is scaled by a spread_factor argument defaulting
+        to 1.2, so it is a widened band rather than a stated
+        confidence level. No column records the level.
+      unit: "AUD"
+      status: "written"
+
+    predicted_change_pct:
+      source_column: "close"
+      derivation_formula: "(predicted_price - current_price) / current_price"
+      transformation_rule: "expected change over the horizon"
+      business_rule: >
+        A ratio despite the _pct suffix. Over the horizon, not
+        annualised.
+      unit: "ratio"
+      status: "written"
+
+    direction:
+      source_column: "close"
+      derivation_formula: "sign of predicted_change_pct"
+      transformation_rule: "categorical direction"
+      business_rule: >
+        A restatement of predicted_change_pct's sign, carrying no
+        information the numeric column does not. Nullable, so a NULL
+        direction beside a populated change is possible.
+      unit: "n/a"
+      status: "written"
+
+    confidence_score:
+      source_column: "close"
+      transformation_rule: "the model's own confidence"
+      business_rule: >
+        NUMERIC(5,4), so bounded to about 9.9999 - consistent with a
+        0-1 scale, though nothing in the schema constrains it to one.
+        Read it together with r2_score: they measure different things
+        and either can be absent.
+      unit: "score"
+      status: "written"
+
+    r2_score:
+      source_column: "close"
+      transformation_rule: "goodness of fit of the underlying model"
+      business_rule: >
+        FIT QUALITY ON THE TRAINING SERIES, not forecast accuracy. A
+        high r2 says the model described the past well; nothing in
+        this table records whether any past prediction came true.
+      unit: "score"
+      status: "written"
+
+    data_points:
+      source_column: "close"
+      transformation_rule: "observations the fit was built on"
+      business_rule: >
+        The denominator behind r2_score. A high r2 on a small
+        data_points is the combination to distrust, and this column is
+        the only way to see it.
+      unit: "count"
+      status: "written"
+
+    created_at:
+      source_column: "NOW()"
+      transformation_rule: "column default now(), refreshed to NOW() on conflict"
+      business_rule: >
+        RESTAMPED on every re-run of the same key, so it dates the
+        last write and not the original forecast. prediction_date is
+        the stable one.
+      unit: "timestamptz"
+      status: "written"

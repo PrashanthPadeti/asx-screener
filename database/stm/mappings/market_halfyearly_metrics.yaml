@@ -1,0 +1,371 @@
+# market.halfyearly_metrics  (Gold)
+#
+# Half-year income figures and growth, aggregated from quarterly rows.
+# One row per (asx_code, period_end_date), 28 columns - all written.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/halfyearly_compute.py   (the ONLY writer)
+#
+# -- GOLD FROM GOLD -------------------------------------------------------
+# Its source is market.quarterly_metrics, itself a Gold table. This is the
+# only Silver-to-Gold mapping in this layer whose input is not Silver, and
+# every caveat of quarterly_metrics therefore applies here first - including
+# that the enricher never inserts, so a quarter the loader missed is absent
+# from this aggregation too.
+#
+# Rows with a NULL fiscal_year or quarter are excluded by the fetch.
+#
+# -- How halves are formed, and what that gets wrong ----------------------
+# _agg_halves groups by fiscal year and branches on the NUMBER OF QUARTERS
+# PRESENT in that year:
+#
+#   3 or more quarters  ->  Q1+Q2 = H1,  Q3+Q4 = H2   (summed)
+#   2 or fewer          ->  positional: the first row becomes H1, the
+#                           second becomes H2
+#
+# Two defects follow, and neither is recorded on the row:
+#
+# 1. THE HALF IS ASSIGNED BY POSITION, NOT BY QUARTER NUMBER. In the
+#    two-or-fewer branch the loop is
+#        for q_idx, half in enumerate([1, 2], start=0): row = fy_df.iloc[q_idx]
+#    so a company that filed ONLY Q2 in a year has that row labelled
+#    half = 1. Its second half is published as its first.
+#
+# 2. THE BRANCH IS CHOSEN BY DATA COMPLETENESS, NOT BY REPORTING CADENCE. A
+#    genuine QUARTERLY reporter with only two quarters on file - a partial
+#    year, or a feed gap - falls into the half-yearly branch, so Q1 and Q2
+#    become H1 and H2 instead of being summed into H1. The half-year figures
+#    are then one quarter each, and the HoH and YoY growth computed from
+#    them compares a quarter against a half.
+#
+# The docstring says "Mixed years handled independently", which is true and
+# does not state either consequence.
+#
+# Grain: one row per (asx_code, period_end_date).
+#        For a quarterly reporter period_end_date is the LATER quarter's end
+#        (subset max); for the two-or-fewer branch it is that row's own.
+# Load:  upsert on (asx_code, period_end_date).
+
+table: market.halfyearly_metrics
+layer: Gold
+source_layer: Gold
+
+defaults:
+  source_system: internal
+  source_table: market.quarterly_metrics
+  writer_job: compute/engine/halfyearly_compute.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  grain: asx_code+period_end_date
+  tables_involved: market.quarterly_metrics
+  join_condition: none - grouped and aggregated within one table
+  status: written
+
+columns:
+
+  market.halfyearly_metrics:
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    period_end_date:
+      source_column: "period_end_date"
+      derivation_formula: "max(period_end_date) of the quarters in the half, or the single row's own"
+      transformation_rule: "the half's balance date"
+      business_rule: >
+        THE KEY, unlike market.quarterly_metrics where period_end_date
+        is nullable and not keyed. For a quarterly reporter this is
+        the LATER quarter's end date.
+      unit: "date"
+      is_key: "yes"
+      status: "written"
+
+    fiscal_year:
+      source_column: "fiscal_year"
+      transformation_rule: "the company's fiscal year"
+      unit: "year"
+      status: "written"
+
+    half:
+      source_column: "quarter"
+      derivation_formula: "Q1+Q2 -> 1, Q3+Q4 -> 2; or POSITIONAL in the two-or-fewer branch"
+      transformation_rule: "which half of the fiscal year"
+      business_rule: >
+        ASSIGNED BY POSITION when the year holds two or fewer
+        quarters: the first row present becomes half = 1 regardless of
+        its quarter number, so a company that filed only Q2 has its
+        second half published as its first. See the header.
+      valid_values: "1, 2"
+      unit: "half"
+      status: "written"
+
+    period_label:
+      source_column: "derived"
+      derivation_formula: "f\"{'1H' if half == 1 else '2H'} FY{fiscal_year}\""
+      transformation_rule: "human-readable label"
+      business_rule: >
+        Derived from `half`, so it inherits any mislabelling described
+        above.
+      unit: "n/a"
+      status: "written"
+
+    revenue:
+      source_column: "revenue"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    gross_profit:
+      source_column: "gross_profit"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    ebitda:
+      source_column: "ebitda"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    ebit:
+      source_column: "ebit"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    net_income:
+      source_column: "net_income"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    other_income:
+      source_column: "other_income"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    interest_expense:
+      source_column: "interest_expense"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    tax:
+      source_column: "tax"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    depreciation:
+      source_column: "depreciation"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        Summed across the quarters forming the half. In the two-or-
+        fewer branch no summing happens and the value is a single
+        quarter's, which the column does not distinguish.
+      unit: "AUD millions"
+      status: "written"
+
+    eps:
+      source_column: "eps"
+      derivation_formula: "sum of the quarters in the half, or the single quarter's value"
+      transformation_rule: "half-year total"
+      business_rule: >
+        SUMMED ACROSS QUARTERS like every other income column, which
+        is only valid while the share count is unchanged within the
+        half. A company that issued stock between its quarters has an
+        EPS here that corresponds to no share count that ever existed.
+      unit: "AUD per share"
+      status: "written"
+
+    dps:
+      source_column: "n/a"
+      derivation_formula: "None - written as an explicit NULL"
+      transformation_rule: "NOT AVAILABLE from the source"
+      business_rule: >
+        Written as an EXPLICIT NULL with the reason stated in the
+        code: 'No DPS in quarterly_metrics'. The source table carries
+        no dividend data, so this is a cannot-exist rather than a
+        failure to obtain - and writing it rather than omitting it
+        keeps the column from freezing, which is the protection
+        market.yearly_metrics' 64 unwritten columns did not get.
+      unit: "AUD per share"
+      status: "written NULL by design"
+
+    franking_pct:
+      source_column: "n/a"
+      derivation_formula: "None - written as an explicit NULL"
+      transformation_rule: "NOT AVAILABLE from the source"
+      business_rule: >
+        Written as an EXPLICIT NULL with the reason stated in the
+        code: 'No DPS in quarterly_metrics'. The source table carries
+        no dividend data, so this is a cannot-exist rather than a
+        failure to obtain - and writing it rather than omitting it
+        keeps the column from freezing, which is the protection
+        market.yearly_metrics' 64 unwritten columns did not get.
+      unit: "percent"
+      status: "written NULL by design"
+
+    gross_margin:
+      source_column: "gross_profit, revenue"
+      derivation_formula: "_div(gross_profit, revenue) on the HALF-YEAR totals"
+      transformation_rule: "margin on the aggregated half"
+      business_rule: >
+        Computed from the summed half, not averaged from the quarters'
+        margins - which is the correct order, since a mean of ratios
+        is not the ratio of the sums.
+      unit: "ratio"
+      status: "written"
+
+    ebit_margin:
+      source_column: "ebit, revenue"
+      derivation_formula: "_div(ebit, revenue) on the HALF-YEAR totals"
+      transformation_rule: "margin on the aggregated half"
+      business_rule: >
+        Computed from the summed half, not averaged from the quarters'
+        margins - which is the correct order, since a mean of ratios
+        is not the ratio of the sums.
+      unit: "ratio"
+      status: "written"
+
+    net_margin:
+      source_column: "net_income, revenue"
+      derivation_formula: "_div(net_income, revenue) on the HALF-YEAR totals"
+      transformation_rule: "margin on the aggregated half"
+      business_rule: >
+        Computed from the summed half, not averaged from the quarters'
+        margins - which is the correct order, since a mean of ratios
+        is not the ratio of the sums.
+      unit: "ratio"
+      status: "written"
+
+    revenue_growth_hoh:
+      source_column: "revenue"
+      derivation_formula: "_pct_change(value, prior half) where prior is (fy, half 1) when half = 2, or (fy-1, half 2) when half = 1"
+      transformation_rule: "HOH growth in revenue"
+      business_rule: >
+        SEQUENTIAL half-on-half, resolved by fiscal year and half
+        rather than by position, wrapping correctly across the year
+        boundary. NULL when the prior half is absent. For a seasonal
+        business this compares unlike periods - the YoY column beside
+        it is the like-for-like one.
+      unit: "ratio"
+      status: "written"
+
+    revenue_growth_yoy:
+      source_column: "revenue"
+      derivation_formula: "_pct_change(value, same half of fiscal_year - 1)"
+      transformation_rule: "YOY growth in revenue"
+      business_rule: >
+        Same half, prior fiscal year, so seasonality is controlled
+        for. Resolved by (fy-1, half); a gap yields NULL rather than a
+        rate over the wrong span.
+      unit: "ratio"
+      status: "written"
+
+    net_income_growth_hoh:
+      source_column: "net_income"
+      derivation_formula: "_pct_change(value, prior half) where prior is (fy, half 1) when half = 2, or (fy-1, half 2) when half = 1"
+      transformation_rule: "HOH growth in net_income"
+      business_rule: >
+        SEQUENTIAL half-on-half, resolved by fiscal year and half
+        rather than by position, wrapping correctly across the year
+        boundary. NULL when the prior half is absent. For a seasonal
+        business this compares unlike periods - the YoY column beside
+        it is the like-for-like one.
+      unit: "ratio"
+      status: "written"
+
+    net_income_growth_yoy:
+      source_column: "net_income"
+      derivation_formula: "_pct_change(value, same half of fiscal_year - 1)"
+      transformation_rule: "YOY growth in net_income"
+      business_rule: >
+        Same half, prior fiscal year, so seasonality is controlled
+        for. Resolved by (fy-1, half); a gap yields NULL rather than a
+        rate over the wrong span.
+      unit: "ratio"
+      status: "written"
+
+    eps_growth_hoh:
+      source_column: "eps"
+      derivation_formula: "_pct_change(value, prior half) where prior is (fy, half 1) when half = 2, or (fy-1, half 2) when half = 1"
+      transformation_rule: "HOH growth in eps"
+      business_rule: >
+        SEQUENTIAL half-on-half, resolved by fiscal year and half
+        rather than by position, wrapping correctly across the year
+        boundary. NULL when the prior half is absent. For a seasonal
+        business this compares unlike periods - the YoY column beside
+        it is the like-for-like one.
+      unit: "ratio"
+      status: "written"
+
+    eps_growth_yoy:
+      source_column: "eps"
+      derivation_formula: "_pct_change(value, same half of fiscal_year - 1)"
+      transformation_rule: "YOY growth in eps"
+      business_rule: >
+        Same half, prior fiscal year, so seasonality is controlled
+        for. Resolved by (fy-1, half); a gap yields NULL rather than a
+        rate over the wrong span.
+      unit: "ratio"
+      status: "written"
+
+    compute_version:
+      source_column: "COMPUTE_VERSION"
+      transformation_rule: "module constant"
+      unit: "n/a"
+      status: "written"
+
+    computed_at:
+      source_column: "datetime.now(timezone.utc)"
+      transformation_rule: "run timestamp, identical across the run"
+      business_rule: >
+        LOAD TIME, distinct from period_end_date.
+      unit: "timestamptz"
+      status: "written"

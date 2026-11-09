@@ -1,0 +1,571 @@
+# market.weekly_metrics  (Gold)
+#
+# Weekly OHLCV bars and indicators, resampled from daily prices.
+# One row per (asx_code, week_date), 45 columns.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/weekly_compute.py   (the ONLY writer)
+#
+# Source: market.daily_prices only. No API calls, pure resampling.
+#
+#   w = daily.resample("W-MON", label="left", closed="left").agg(
+#           open=first, high=max, low=min, close=last, volume=SUM)
+#
+# week_date is therefore the MONDAY that OPENS the bar, and the bar covers
+# Monday through Sunday. A consumer treating week_date as the week ENDING is
+# off by six days.
+#
+# Grain: one row per (asx_code, week_date).
+# Load:  upsert on (asx_code, week_date).
+# Floor: fewer than 5 daily rows, or fewer than 2 resulting weekly bars,
+#        produces no rows at all.
+#
+# -- Two conventions this table does NOT share with daily_metrics ---------
+#
+# 1. RETURNS COUNT BARS, NOT CALENDAR TIME. Every return here is
+#    close.pct_change(n) over n WEEKLY BARS. A week in which the stock did
+#    not trade produces no bar, so return_52w spans 52 bars that may cover
+#    far more than 52 weeks. market.daily_metrics replaced exactly this with
+#    calendar offsets and a grace bound; this engine was not changed with it.
+#
+# 2. BOOLEAN SIGNALS DEFAULT TO FALSE, NOT NULL. Each is built as
+#    bool(g(series, False)), and g() maps NaN to None, so a signal that
+#    cannot be computed is written FALSE. market.daily_metrics writes NULL
+#    in the same situation, deliberately, so that a short series is not
+#    reported as a bearish reading. Here a stock with 12 weeks of history
+#    carries above_sma40w = false, which is a claim, not an absence.
+#
+# -- 10 of 45 columns are not written -------------------------------------
+# market_cap and nine trend/oscillator columns. The module docstring lists
+# what it computes and none of them appear in it, so the schema is wider
+# than the engine was ever written to fill.
+
+table: market.weekly_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  source_table: market.daily_prices
+  writer_job: compute/engine/weekly_compute.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  grain: asx_code+week_date
+  tables_involved: market.daily_prices
+  join_condition: none - single-table resample
+
+columns:
+
+  market.weekly_metrics:
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    week_date:
+      source_column: "time"
+      derivation_formula: "resample(\"W-MON\", label=\"left\", closed=\"left\") bin label"
+      transformation_rule: "the MONDAY that opens the weekly bar"
+      business_rule: >
+        THE WEEK START, not the week end. The bar covers Monday
+        through Sunday and is labelled with its left edge. A consumer
+        reading this as the week ending is off by six days, and a join
+        against a week-ending series silently pairs adjacent weeks.
+      unit: "date"
+      is_key: "yes"
+      status: "written"
+
+    open:
+      source_column: "open"
+      derivation_formula: "first daily open in the week"
+      transformation_rule: "weekly bar open"
+      business_rule: >
+        Bars with no close are dropped, so a week with no trading
+        produces no row rather than a null row - which is what makes
+        the bar-counted returns below drift from calendar time.
+      unit: "AUD"
+      status: "written"
+
+    high:
+      source_column: "high"
+      derivation_formula: "maximum daily high in the week"
+      transformation_rule: "weekly bar high"
+      business_rule: >
+        Bars with no close are dropped, so a week with no trading
+        produces no row rather than a null row - which is what makes
+        the bar-counted returns below drift from calendar time.
+      unit: "AUD"
+      status: "written"
+
+    low:
+      source_column: "low"
+      derivation_formula: "minimum daily low in the week"
+      transformation_rule: "weekly bar low"
+      business_rule: >
+        Bars with no close are dropped, so a week with no trading
+        produces no row rather than a null row - which is what makes
+        the bar-counted returns below drift from calendar time.
+      unit: "AUD"
+      status: "written"
+
+    close:
+      source_column: "close"
+      derivation_formula: "last daily close in the week"
+      transformation_rule: "weekly bar close"
+      business_rule: >
+        Bars with no close are dropped, so a week with no trading
+        produces no row rather than a null row - which is what makes
+        the bar-counted returns below drift from calendar time.
+      unit: "AUD"
+      status: "written"
+
+    volume:
+      source_column: "volume"
+      derivation_formula: "SUM of daily volume across the week"
+      transformation_rule: "weekly total volume"
+      business_rule: >
+        SUMMED, unlike market.monthly_metrics.volume_avg which is a
+        MEAN of daily volume. The two tables use different
+        aggregations for the same underlying field.
+      unit: "shares"
+      status: "written"
+
+    weekly_return:
+      source_column: "close"
+      derivation_formula: "close.pct_change(1) over weekly bars"
+      transformation_rule: "return over 1 weekly bar(s)"
+      business_rule: >
+        1 BARS, not 1 calendar weeks. A week without trading produces
+        no bar, so this can span more than 1 weeks with nothing on the
+        row to say so. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_4w:
+      source_column: "close"
+      derivation_formula: "close.pct_change(4) over weekly bars"
+      transformation_rule: "return over 4 weekly bar(s)"
+      business_rule: >
+        4 BARS, not 4 calendar weeks. A week without trading produces
+        no bar, so this can span more than 4 weeks with nothing on the
+        row to say so. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_13w:
+      source_column: "close"
+      derivation_formula: "close.pct_change(13) over weekly bars"
+      transformation_rule: "return over 13 weekly bar(s)"
+      business_rule: >
+        13 BARS, not 13 calendar weeks. A week without trading
+        produces no bar, so this can span more than 13 weeks with
+        nothing on the row to say so. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_52w:
+      source_column: "close"
+      derivation_formula: "close.pct_change(52) over weekly bars"
+      transformation_rule: "return over 52 weekly bar(s)"
+      business_rule: >
+        52 BARS, not 52 calendar weeks. A week without trading
+        produces no bar, so this can span more than 52 weeks with
+        nothing on the row to say so. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    sma_10w:
+      source_column: "close"
+      derivation_formula: "close.rolling(10, min_periods=10).mean()"
+      transformation_rule: "10-week simple moving average"
+      business_rule: >
+        STRICT: min_periods equals the window, so this is NULL until
+        10 bars exist. Contrast volume_avg_4w, which uses
+        min_periods=1 in the same file.
+      unit: "AUD"
+      status: "written"
+
+    sma_20w:
+      source_column: "close"
+      derivation_formula: "close.rolling(20, min_periods=20).mean()"
+      transformation_rule: "20-week simple moving average"
+      business_rule: >
+        STRICT: min_periods equals the window, so this is NULL until
+        20 bars exist. Contrast volume_avg_4w, which uses
+        min_periods=1 in the same file.
+      unit: "AUD"
+      status: "written"
+
+    sma_40w:
+      source_column: "close"
+      derivation_formula: "close.rolling(40, min_periods=40).mean()"
+      transformation_rule: "40-week simple moving average"
+      business_rule: >
+        STRICT: min_periods equals the window, so this is NULL until
+        40 bars exist. Contrast volume_avg_4w, which uses
+        min_periods=1 in the same file.
+      unit: "AUD"
+      status: "written"
+
+    ema_13w:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=13, adjust=False).mean()"
+      transformation_rule: "13-week exponential moving average"
+      business_rule: >
+        Recursive and NOT strict - an EMA produces a value from the
+        first bar, so an early value reflects almost no history while
+        the SMAs beside it are still NULL.
+      unit: "AUD"
+      status: "written"
+
+    ema_26w:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=26, adjust=False).mean()"
+      transformation_rule: "26-week exponential moving average"
+      business_rule: >
+        Recursive and NOT strict - an EMA produces a value from the
+        first bar, so an early value reflects almost no history while
+        the SMAs beside it are still NULL.
+      unit: "AUD"
+      status: "written"
+
+    rsi_14:
+      source_column: "close"
+      derivation_formula: "RSI over 14 weekly bars"
+      transformation_rule: "14-bar RSI on weekly closes"
+      business_rule: >
+        Computed on WEEKLY closes, so it is not comparable with the
+        daily RSI of the same name.
+      unit: "index 0-100"
+      status: "written"
+
+    rsi_7:
+      source_column: "close"
+      derivation_formula: "RSI over 7 weekly bars"
+      transformation_rule: "7-bar RSI on weekly closes"
+      business_rule: >
+        Computed on WEEKLY closes, so it is not comparable with the
+        daily RSI of the same name.
+      unit: "index 0-100"
+      status: "written"
+
+    macd_line:
+      source_column: "close"
+      derivation_formula: "ema_12 - ema_26 of weekly closes"
+      transformation_rule: "MACD on weekly bars"
+      business_rule: >
+        Weekly bars, so the 12/26/9 periods are weeks, not days.
+      unit: "AUD"
+      status: "written"
+
+    macd_signal:
+      source_column: "close"
+      derivation_formula: "9-bar EMA of macd_line"
+      transformation_rule: "MACD on weekly bars"
+      business_rule: >
+        Weekly bars, so the 12/26/9 periods are weeks, not days.
+      unit: "AUD"
+      status: "written"
+
+    macd_hist:
+      source_column: "close"
+      derivation_formula: "macd_line - macd_signal"
+      transformation_rule: "MACD on weekly bars"
+      business_rule: >
+        Weekly bars, so the 12/26/9 periods are weeks, not days.
+      unit: "AUD"
+      status: "written"
+
+    atr_14:
+      source_column: "high, low, close"
+      derivation_formula: "ATR over 14 weekly bars"
+      transformation_rule: "14-bar Average True Range on weekly bars"
+      unit: "AUD"
+      status: "written"
+
+    bb_upper:
+      source_column: "close"
+      derivation_formula: "20-bar mean + 2 standard deviations"
+      transformation_rule: "Bollinger band on 20 weekly bars"
+      business_rule: >
+        bb_mid is used in the width calculation but is NOT a column of
+        this table, unlike market.daily_metrics which stores it.
+      unit: "AUD"
+      status: "written"
+
+    bb_lower:
+      source_column: "close"
+      derivation_formula: "20-bar mean - 2 standard deviations"
+      transformation_rule: "Bollinger band on 20 weekly bars"
+      business_rule: >
+        bb_mid is used in the width calculation but is NOT a column of
+        this table, unlike market.daily_metrics which stores it.
+      unit: "AUD"
+      status: "written"
+
+    bb_pct:
+      source_column: "close"
+      derivation_formula: "(close - bb_lower) / (bb_upper - bb_lower)"
+      transformation_rule: "Bollinger band on 20 weekly bars"
+      business_rule: >
+        bb_mid is used in the width calculation but is NOT a column of
+        this table, unlike market.daily_metrics which stores it.
+      unit: "ratio"
+      status: "written"
+
+    bb_width:
+      source_column: "close"
+      derivation_formula: "(bb_upper - bb_lower) / bb_mid"
+      transformation_rule: "Bollinger band on 20 weekly bars"
+      business_rule: >
+        bb_mid is used in the width calculation but is NOT a column of
+        this table, unlike market.daily_metrics which stores it.
+      unit: "ratio"
+      status: "written"
+
+    volume_avg_4w:
+      source_column: "volume"
+      derivation_formula: "volume.rolling(4, min_periods=1).mean()"
+      transformation_rule: "average weekly volume over up to 4 bars"
+      business_rule: >
+        min_periods=1, so a 'four-week average' can be a single week.
+        Every SMA in this file is strict and this is not, and nothing
+        on the row says how many bars went into it. relative_volume
+        divides by this, so the same looseness propagates.
+      unit: "shares"
+      status: "written"
+
+    relative_volume:
+      source_column: "volume"
+      derivation_formula: "volume / volume_avg_4w, zero denominator to NaN"
+      transformation_rule: "this week's volume against its 4-bar average"
+      business_rule: >
+        Inherits volume_avg_4w's min_periods=1 - see that column.
+      unit: "ratio"
+      status: "written"
+
+    obv:
+      source_column: "close, volume"
+      derivation_formula: "(volume * sign(close.diff())).cumsum()"
+      transformation_rule: "On Balance Volume on weekly bars"
+      business_rule: >
+        CUMULATIVE FROM THE FIRST BAR of the stored series, so the
+        level is meaningless across companies and only direction
+        carries information. The first bar's sign is 0, so it
+        contributes nothing.
+      unit: "shares"
+      status: "written"
+
+    golden_cross:
+      source_column: "close"
+      derivation_formula: "sma_10w > sma_40w AND prior sma_10w <= prior sma_40w"
+      transformation_rule: "boolean crossing event on this bar"
+      business_rule: >
+        An EVENT on one bar, not a state. FALSE rather than NULL when
+        the averages do not exist yet - so a stock with under 40 weeks
+        of history reads as 'no cross' rather than 'cannot tell'.
+      unit: "boolean"
+      status: "written"
+
+    death_cross:
+      source_column: "close"
+      derivation_formula: "sma_10w < sma_40w AND prior sma_10w >= prior sma_40w"
+      transformation_rule: "boolean crossing event on this bar"
+      business_rule: >
+        An EVENT on one bar, not a state. FALSE rather than NULL when
+        the averages do not exist yet - so a stock with under 40 weeks
+        of history reads as 'no cross' rather than 'cannot tell'.
+      unit: "boolean"
+      status: "written"
+
+    above_sma10w:
+      source_column: "close"
+      derivation_formula: "close > sma_10w"
+      transformation_rule: "boolean, close above sma_10w"
+      business_rule: >
+        FALSE, NOT NULL, when sma_10w does not exist yet.
+        market.daily_metrics writes NULL in the same case
+        deliberately, so that a short series is not reported as
+        bearish. This table makes the claim.
+      unit: "boolean"
+      status: "written"
+
+    above_sma40w:
+      source_column: "close"
+      derivation_formula: "close > sma_40w"
+      transformation_rule: "boolean, close above sma_40w"
+      business_rule: >
+        FALSE, NOT NULL, when sma_40w does not exist yet.
+        market.daily_metrics writes NULL in the same case
+        deliberately, so that a short series is not reported as
+        bearish. This table makes the claim.
+      unit: "boolean"
+      status: "written"
+
+    compute_version:
+      source_column: "COMPUTE_VERSION"
+      transformation_rule: "module constant"
+      unit: "n/a"
+      status: "written"
+
+    computed_at:
+      source_column: "datetime.now(timezone.utc)"
+      transformation_rule: "run timestamp"
+      business_rule: >
+        LOAD TIME, distinct from week_date.
+      unit: "timestamptz"
+      status: "written"
+
+    # ======================================================================
+    # NOT WRITTEN - 10 columns
+    # ======================================================================
+    # Absent from the INSERT and from the DO UPDATE SET. The module docstring
+    # enumerates what this engine computes and none of these appear in it, so
+    # the schema is wider than the engine was written to fill.
+    #
+    # Nine of them - adx_14, plus_di, minus_di, aroon_up, aroon_down,
+    # stoch_k, stoch_d, cci_20, williams_r - ARE computed by
+    # technical_compute for market.daily_metrics. The weekly equivalents
+    # exist as columns and have no producer.
+
+    market_cap:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    adx_14:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    plus_di:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    minus_di:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    aroon_up:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    aroon_down:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    stoch_k:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    stoch_d:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    cci_20:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"
+
+    williams_r:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_SQL"
+      transformation_rule: "NOT WRITTEN by compute/engine/weekly_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run: absent from the INSERT
+        column list and from the ON CONFLICT DO UPDATE SET, so a value
+        it holds cannot be removed. Whether it is NULL everywhere or
+        frozen from a retired path is DELIBERATELY UNMEASURED - the
+        census that would answer it OOM-killed production on 9 Nov
+        2026. Use backend/scripts/stm/census_unwritten.py on a dump if
+        it is ever wanted.
+      status: "NOT WRITTEN - population deliberately unmeasured"

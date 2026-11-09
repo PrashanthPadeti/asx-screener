@@ -1,0 +1,446 @@
+# market.quarterly_metrics  (Gold)
+#
+# Quarterly income-statement figures and growth rates.
+# One row per (asx_code, fiscal_year, quarter), 29 columns.
+#
+# Authored 9 November 2026 from:
+#   backend/scripts/eodhd/load_fundamentals.py   (inserts the base row)
+#   backend/compute/engine/quarterly_compute.py  (UPDATEs margins and growth)
+#
+# -- TWO WRITERS, and the second never inserts ----------------------------
+# This is the only Gold table in this layer with a split producer:
+#
+#   load_fundamentals.py   INSERT ... ON CONFLICT (asx_code, fiscal_year,
+#                          quarter) DO UPDATE  -- 20 columns of reported
+#                          figures, straight from the EODHD feed
+#
+#   quarterly_compute.py   UPDATE ... WHERE asx_code = AND fiscal_year =
+#                          AND quarter =  -- 12 columns of margins, growth
+#                          and metadata
+#
+# The enricher is UPDATE-ONLY. It reads market.quarterly_metrics, computes,
+# and writes back to the same table; it can never create a row. So a
+# company-quarter the loader has not inserted gets no growth rates and no
+# computed_at, and the absence is indistinguishable from a quarter whose
+# growth could not be computed.
+#
+# Consequence worth stating: computed_at and compute_version belong to the
+# ENRICHER, not to the loader. A row inserted but never enriched carries
+# NULL in both, so those columns say when the growth rates were computed
+# and nothing about when the reported figures arrived.
+#
+# Grain: one row per (asx_code, fiscal_year, quarter). Note period_end_date
+#        is NULLABLE and is NOT part of the key.
+#
+# -- The margins are written by both --------------------------------------
+# gross_margin, ebit_margin and net_margin are in the loader's INSERT and in
+# the enricher's UPDATE. The enricher fills them only where they are
+# currently None, so the feed's value wins and the computed one is a
+# fallback.
+#
+# -- ASX reporting cadence ------------------------------------------------
+# Most ASX issuers report half-yearly, not quarterly. A "quarterly" row for
+# such a company is a half-year filing occupying a quarter slot, which is
+# what market.halfyearly_metrics then has to reconstruct - see that table
+# for how it decides, and what it gets wrong.
+
+table: market.quarterly_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: EODHD
+  grain: asx_code+fiscal_year+quarter
+  tables_involved: staging_au.fundamentals (raw_json), market.quarterly_metrics
+  join_condition: none - the enricher reads and writes the same table
+
+columns:
+
+  market.quarterly_metrics:
+
+    asx_code:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    fiscal_year:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "date / fiscal period"
+      transformation_rule: "the company's own fiscal year"
+      business_rule: >
+        Part of the key together with quarter. Every growth rate below
+        is resolved against these two fields, not against row
+        position.
+      unit: "year"
+      is_key: "yes"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    quarter:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "date / fiscal period"
+      transformation_rule: "fiscal quarter number"
+      business_rule: >
+        1-4 for a quarterly reporter. A half-yearly reporter - most of
+        the ASX - occupies only two slots, and which two is what
+        market.halfyearly_metrics has to infer.
+      valid_values: "1, 2, 3, 4"
+      unit: "quarter"
+      is_key: "yes"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    period_end_date:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "date"
+      transformation_rule: "the period's balance date"
+      business_rule: >
+        NULLABLE and NOT part of the key, unlike
+        market.halfyearly_metrics where period_end_date IS the key. A
+        row can exist with no date, and the halfyearly aggregation
+        that reads this table excludes such rows explicitly.
+      unit: "date"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    period_label:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "derived"
+      transformation_rule: "human-readable period name"
+      unit: "n/a"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    revenue:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "revenue"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    gross_profit:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "gross_profit"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    ebitda:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "ebitda"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    ebit:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "ebit"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    other_income:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "other_income"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    interest_expense:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "interest_expense"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    depreciation:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "depreciation"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    tax:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "tax"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    net_income:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "net_income"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Reported figure, copied unchanged. In MILLIONS, like
+        financials.*, and not recomputed here.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    extraordinary_items:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "extraordinary_items"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Read by nothing downstream: market.halfyearly_metrics does not
+        fetch it, and no ratio in this layer consumes it.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    equity_capital:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "equity_capital"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        Read by nothing downstream - see extraordinary_items.
+      unit: "AUD millions"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    eps:
+      source_table: "staging_au.fundamentals (raw_json)"
+      source_column: "eps"
+      transformation_rule: "direct copy from the feed"
+      business_rule: >
+        A PER-SHARE figure sitting among millions-denominated columns.
+        market.halfyearly_metrics SUMS this across quarters to form a
+        half, which is only valid while the share count is unchanged
+        within the year.
+      unit: "AUD per share"
+      writer_job: "scripts/eodhd/load_fundamentals.py"
+      load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
+      status: "written by the loader"
+
+    gross_margin:
+      source_table: "staging_au.fundamentals (raw_json), market.quarterly_metrics"
+      source_column: "gross_margin, else gross_profit and revenue"
+      derivation_formula: "feed value, else gross_profit / revenue"
+      transformation_rule: "feed margin preferred; enricher fills only where NULL"
+      business_rule: >
+        WRITTEN BY BOTH PRODUCERS. The loader inserts the feed's
+        value; the enricher computes it ONLY where the stored value is
+        currently None, so the feed wins and the computation is a
+        fallback. A consumer cannot tell which of the two produced any
+        given value.
+      unit: "ratio"
+      writer_job: "scripts/eodhd/load_fundamentals.py; compute/engine/quarterly_compute.py"
+      load_strategy: "inserted by the loader, conditionally filled by the enricher"
+      status: "written by both"
+
+    ebit_margin:
+      source_table: "staging_au.fundamentals (raw_json), market.quarterly_metrics"
+      source_column: "ebit_margin, else ebit and revenue"
+      derivation_formula: "feed value, else ebit / revenue"
+      transformation_rule: "feed margin preferred; enricher fills only where NULL"
+      business_rule: >
+        WRITTEN BY BOTH PRODUCERS. The loader inserts the feed's
+        value; the enricher computes it ONLY where the stored value is
+        currently None, so the feed wins and the computation is a
+        fallback. A consumer cannot tell which of the two produced any
+        given value.
+      unit: "ratio"
+      writer_job: "scripts/eodhd/load_fundamentals.py; compute/engine/quarterly_compute.py"
+      load_strategy: "inserted by the loader, conditionally filled by the enricher"
+      status: "written by both"
+
+    net_margin:
+      source_table: "staging_au.fundamentals (raw_json), market.quarterly_metrics"
+      source_column: "net_margin, else net_income and revenue"
+      derivation_formula: "feed value, else net_income / revenue"
+      transformation_rule: "feed margin preferred; enricher fills only where NULL"
+      business_rule: >
+        WRITTEN BY BOTH PRODUCERS. The loader inserts the feed's
+        value; the enricher computes it ONLY where the stored value is
+        currently None, so the feed wins and the computation is a
+        fallback. A consumer cannot tell which of the two produced any
+        given value.
+      unit: "ratio"
+      writer_job: "scripts/eodhd/load_fundamentals.py; compute/engine/quarterly_compute.py"
+      load_strategy: "inserted by the loader, conditionally filled by the enricher"
+      status: "written by both"
+
+    revenue_growth_qoq:
+      source_table: "market.quarterly_metrics"
+      source_column: "revenue"
+      derivation_formula: "_pct_change(revenue, prior quarter) where prior is (fy, quarter-1), or (fy-1, quarter 4) when quarter = 1"
+      transformation_rule: "QOQ growth in revenue"
+      business_rule: >
+        SEQUENTIAL growth, resolved by fiscal year and quarter rather
+        than by row position - so a missing intervening quarter yields
+        NULL rather than a rate over the wrong span. The Q1 case wraps
+        correctly to Q4 of the prior fiscal year. For a half-yearly
+        reporter the 'quarter' slots are halves, so this is half-on-
+        half growth under a QoQ name.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    net_income_growth_qoq:
+      source_table: "market.quarterly_metrics"
+      source_column: "net_income"
+      derivation_formula: "_pct_change(net_income, prior quarter) where prior is (fy, quarter-1), or (fy-1, quarter 4) when quarter = 1"
+      transformation_rule: "QOQ growth in net_income"
+      business_rule: >
+        SEQUENTIAL growth, resolved by fiscal year and quarter rather
+        than by row position - so a missing intervening quarter yields
+        NULL rather than a rate over the wrong span. The Q1 case wraps
+        correctly to Q4 of the prior fiscal year. For a half-yearly
+        reporter the 'quarter' slots are halves, so this is half-on-
+        half growth under a QoQ name.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    ebit_growth_qoq:
+      source_table: "market.quarterly_metrics"
+      source_column: "ebit"
+      derivation_formula: "_pct_change(ebit, prior quarter) where prior is (fy, quarter-1), or (fy-1, quarter 4) when quarter = 1"
+      transformation_rule: "QOQ growth in ebit"
+      business_rule: >
+        SEQUENTIAL growth, resolved by fiscal year and quarter rather
+        than by row position - so a missing intervening quarter yields
+        NULL rather than a rate over the wrong span. The Q1 case wraps
+        correctly to Q4 of the prior fiscal year. For a half-yearly
+        reporter the 'quarter' slots are halves, so this is half-on-
+        half growth under a QoQ name.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    revenue_growth_yoy:
+      source_table: "market.quarterly_metrics"
+      source_column: "revenue"
+      derivation_formula: "_pct_change(revenue, same quarter of fiscal_year - 1)"
+      transformation_rule: "YOY growth in revenue"
+      business_rule: >
+        Same quarter, prior fiscal year - resolved by (fy-1, quarter),
+        so it is year-anchored and a gap yields NULL. Seasonal
+        businesses are compared like for like, which QoQ does not do.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    net_income_growth_yoy:
+      source_table: "market.quarterly_metrics"
+      source_column: "net_income"
+      derivation_formula: "_pct_change(net_income, same quarter of fiscal_year - 1)"
+      transformation_rule: "YOY growth in net_income"
+      business_rule: >
+        Same quarter, prior fiscal year - resolved by (fy-1, quarter),
+        so it is year-anchored and a gap yields NULL. Seasonal
+        businesses are compared like for like, which QoQ does not do.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    ebit_growth_yoy:
+      source_table: "market.quarterly_metrics"
+      source_column: "ebit"
+      derivation_formula: "_pct_change(ebit, same quarter of fiscal_year - 1)"
+      transformation_rule: "YOY growth in ebit"
+      business_rule: >
+        Same quarter, prior fiscal year - resolved by (fy-1, quarter),
+        so it is year-anchored and a gap yields NULL. Seasonal
+        businesses are compared like for like, which QoQ does not do.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    eps_growth_yoy:
+      source_table: "market.quarterly_metrics"
+      source_column: "eps"
+      derivation_formula: "_pct_change(eps, same quarter of fiscal_year - 1)"
+      transformation_rule: "YOY growth in eps"
+      business_rule: >
+        Same quarter, prior fiscal year - resolved by (fy-1, quarter),
+        so it is year-anchored and a gap yields NULL. Seasonal
+        businesses are compared like for like, which QoQ does not do.
+      unit: "ratio"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    compute_version:
+      source_table: "market.quarterly_metrics"
+      source_column: "COMPUTE_VERSION"
+      transformation_rule: "module constant, set by the ENRICHER"
+      business_rule: >
+        Belongs to the enricher, not the loader. A row inserted but
+        never enriched carries NULL here while holding real reported
+        figures.
+      unit: "n/a"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"
+
+    computed_at:
+      source_table: "market.quarterly_metrics"
+      source_column: "NOW()"
+      transformation_rule: "set by the ENRICHER's UPDATE"
+      business_rule: >
+        When the GROWTH RATES were computed, not when the reported
+        figures arrived. NULL on a row the enricher has not reached.
+      unit: "timestamptz"
+      writer_job: "compute/engine/quarterly_compute.py"
+      load_strategy: "UPDATE-in-place by the enricher; never inserted"
+      status: "written by the enricher"

@@ -1,0 +1,347 @@
+# market.monthly_metrics  (Gold)
+#
+# Monthly bars and indicators, resampled from daily prices.
+# One row per (asx_code, month_date), 28 columns.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/monthly_compute.py   (the ONLY writer)
+#
+# Source: market.daily_prices only.
+#
+#   m = daily.resample("MS").agg(
+#           open=first, high=max, low=min, close=last, volume=MEAN)
+#
+# "MS" is month-START, so month_date is the FIRST of the month the bar
+# covers: 2026-03-01 is the March bar, closing on the last trading day of
+# March.
+#
+# Grain: one row per (asx_code, month_date).
+# Load:  upsert on (asx_code, month_date).
+# Floor: fewer than 22 daily rows, or fewer than 2 monthly bars, produces
+#        no rows.
+#
+# -- A mixed-frequency table ----------------------------------------------
+# Some columns are computed on MONTHLY bars (rsi_14, macd_*, bb_*, sma_12m,
+# and every return) and some on the DAILY series then SAMPLED at month end
+# (volatility_1m/3m/12m, price_to_52w_high, drawdown_from_ath). The second
+# group is therefore a daily-resolution measurement reported monthly, and
+# its windows are trading days: 21, 63 and 252.
+#
+# -- Two columns are deliberately NULL ------------------------------------
+# The module docstring states it: "relative_strength_xjo and market_cap are
+# left NULL (XJO prices not in DB; market cap needs shares outstanding x
+# price)." Both reasons are stated, which is the honest form - contrast the
+# unwritten columns in market.yearly_metrics, where nothing recorded the
+# decision.
+
+table: market.monthly_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  source_table: market.daily_prices
+  writer_job: compute/engine/monthly_compute.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  grain: asx_code+month_date
+  tables_involved: market.daily_prices
+  join_condition: none - single-table resample
+
+columns:
+
+  market.monthly_metrics:
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    month_date:
+      source_column: "time"
+      derivation_formula: "resample(\"MS\") bin label"
+      transformation_rule: "the FIRST of the month the bar covers"
+      business_rule: >
+        MONTH START. The bar's close is the last trading day of that
+        month, so the row is labelled with a date on which the close
+        had not yet happened.
+      unit: "date"
+      is_key: "yes"
+      status: "written"
+
+    close:
+      source_column: "close"
+      derivation_formula: "last daily close in the month"
+      transformation_rule: "month-end close"
+      unit: "AUD"
+      status: "written"
+
+    volume_avg:
+      source_column: "volume"
+      derivation_formula: "MEAN of daily volume across the month"
+      transformation_rule: "average daily volume for the month"
+      business_rule: >
+        A MEAN, unlike market.weekly_metrics.volume which SUMS. The
+        denominator is trading days present, so a month with few
+        sessions is not penalised.
+      unit: "shares"
+      status: "written"
+
+    monthly_return:
+      source_column: "close"
+      derivation_formula: "close.pct_change(1) over monthly bars"
+      transformation_rule: "return over 1 monthly bar(s)"
+      business_rule: >
+        1 BARS, not 1 calendar months. A month with no trading
+        produces no bar. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_3m:
+      source_column: "close"
+      derivation_formula: "close.pct_change(3) over monthly bars"
+      transformation_rule: "return over 3 monthly bar(s)"
+      business_rule: >
+        3 BARS, not 3 calendar months. A month with no trading
+        produces no bar. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_6m:
+      source_column: "close"
+      derivation_formula: "close.pct_change(6) over monthly bars"
+      transformation_rule: "return over 6 monthly bar(s)"
+      business_rule: >
+        6 BARS, not 6 calendar months. A month with no trading
+        produces no bar. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_12m:
+      source_column: "close"
+      derivation_formula: "close.pct_change(12) over monthly bars"
+      transformation_rule: "return over 12 monthly bar(s)"
+      business_rule: >
+        12 BARS, not 12 calendar months. A month with no trading
+        produces no bar. Unadjusted for splits.
+      unit: "ratio"
+      status: "written"
+
+    return_ytd:
+      source_column: "close"
+      derivation_formula: "calc_ytd(close) - from the last close of the previous calendar year"
+      transformation_rule: "year-to-date return"
+      business_rule: >
+        CALENDAR year, not fiscal year.
+      unit: "ratio"
+      status: "written"
+
+    momentum_3m:
+      source_column: "close"
+      derivation_formula: "return_3m.copy() - a literal copy"
+      transformation_rule: "IDENTICAL to return_3m"
+      business_rule: >
+        BYTE-IDENTICAL TO return_3m BY CONSTRUCTION. The code is
+        `mom_3m = ret_3m.copy()` and the docstring says 'same as
+        returns - price change %'. Six columns carry three values, and
+        a screen weighting momentum alongside return is double-
+        counting one signal.
+      unit: "ratio"
+      status: "written"
+
+    momentum_6m:
+      source_column: "close"
+      derivation_formula: "return_6m.copy() - a literal copy"
+      transformation_rule: "IDENTICAL to return_6m"
+      business_rule: >
+        BYTE-IDENTICAL TO return_6m BY CONSTRUCTION. The code is
+        `mom_3m = ret_3m.copy()` and the docstring says 'same as
+        returns - price change %'. Six columns carry three values, and
+        a screen weighting momentum alongside return is double-
+        counting one signal.
+      unit: "ratio"
+      status: "written"
+
+    momentum_12m:
+      source_column: "close"
+      derivation_formula: "return_12m.copy() - a literal copy"
+      transformation_rule: "IDENTICAL to return_12m"
+      business_rule: >
+        BYTE-IDENTICAL TO return_12m BY CONSTRUCTION. The code is
+        `mom_3m = ret_3m.copy()` and the docstring says 'same as
+        returns - price change %'. Six columns carry three values, and
+        a screen weighting momentum alongside return is double-
+        counting one signal.
+      unit: "ratio"
+      status: "written"
+
+    volatility_1m:
+      source_column: "close"
+      derivation_formula: "annualised std of DAILY returns over 21 trading days, sampled at month end"
+      transformation_rule: "one month annualised volatility"
+      business_rule: >
+        Computed on the DAILY series, not on monthly bars, then
+        resampled to month end - so its resolution is daily and its
+        window is 21 TRADING DAYS, an approximation of one month.
+      unit: "ratio annualised"
+      status: "written"
+
+    volatility_3m:
+      source_column: "close"
+      derivation_formula: "annualised std of DAILY returns over 63 trading days, sampled at month end"
+      transformation_rule: "three months annualised volatility"
+      business_rule: >
+        Computed on the DAILY series, not on monthly bars, then
+        resampled to month end - so its resolution is daily and its
+        window is 63 TRADING DAYS, an approximation of three months.
+      unit: "ratio annualised"
+      status: "written"
+
+    volatility_12m:
+      source_column: "close"
+      derivation_formula: "annualised std of DAILY returns over 252 trading days, sampled at month end"
+      transformation_rule: "twelve months annualised volatility"
+      business_rule: >
+        Computed on the DAILY series, not on monthly bars, then
+        resampled to month end - so its resolution is daily and its
+        window is 252 TRADING DAYS, an approximation of twelve months.
+      unit: "ratio annualised"
+      status: "written"
+
+    rsi_14:
+      source_column: "close"
+      derivation_formula: "RSI over 14 monthly bars"
+      transformation_rule: "14-bar RSI on monthly closes"
+      business_rule: >
+        Fourteen MONTHS of history before it exists, and not
+        comparable with the daily or weekly RSI of the same name.
+      unit: "index 0-100"
+      status: "written"
+
+    macd_line:
+      source_column: "close"
+      derivation_formula: "ema_12 - ema_26 of monthly closes"
+      transformation_rule: "MACD on monthly bars"
+      business_rule: >
+        The 12/26/9 periods are MONTHS here, so macd_line needs 26
+        months of history.
+      unit: "AUD"
+      status: "written"
+
+    macd_signal:
+      source_column: "close"
+      derivation_formula: "9-bar EMA of macd_line"
+      transformation_rule: "MACD on monthly bars"
+      business_rule: >
+        The 12/26/9 periods are MONTHS here, so macd_line needs 26
+        months of history.
+      unit: "AUD"
+      status: "written"
+
+    macd_hist:
+      source_column: "close"
+      derivation_formula: "macd_line - macd_signal"
+      transformation_rule: "MACD on monthly bars"
+      business_rule: >
+        The 12/26/9 periods are MONTHS here, so macd_line needs 26
+        months of history.
+      unit: "AUD"
+      status: "written"
+
+    bb_pct:
+      source_column: "close"
+      derivation_formula: "(close - lower) / (upper - lower) over 20 monthly bars"
+      transformation_rule: "Bollinger measure on 20 monthly bars"
+      business_rule: >
+        The bands themselves are computed and DISCARDED - `_, _,
+        bb_pct, bb_width = calc_bollinger(...)` - so this table stores
+        the derived measures without the levels they came from.
+      unit: "ratio"
+      status: "written"
+
+    bb_width:
+      source_column: "close"
+      derivation_formula: "(upper - lower) / mid over 20 monthly bars"
+      transformation_rule: "Bollinger measure on 20 monthly bars"
+      business_rule: >
+        The bands themselves are computed and DISCARDED - `_, _,
+        bb_pct, bb_width = calc_bollinger(...)` - so this table stores
+        the derived measures without the levels they came from.
+      unit: "ratio"
+      status: "written"
+
+    sma_12m:
+      source_column: "close"
+      derivation_formula: "close.rolling(12, min_periods=12).mean()"
+      transformation_rule: "12-month simple moving average"
+      business_rule: >
+        Strict: NULL until twelve monthly bars exist.
+      unit: "AUD"
+      status: "written"
+
+    price_to_52w_high:
+      source_column: "close"
+      derivation_formula: "close / close.rolling(252, min_periods=5).max(), sampled at month end"
+      transformation_rule: "price relative to its 252-day high"
+      business_rule: >
+        min_periods=5, so a '52-week high' can be the maximum of FIVE
+        DAYS. A newly listed stock reads near 1.0 - looking like it
+        sits at its yearly high - when the window holds a week. Uses
+        CLOSE, not the daily high column, so it is a closing-basis
+        high.
+      unit: "ratio"
+      status: "written"
+
+    drawdown_from_ath:
+      source_column: "close"
+      derivation_formula: "(close - close.cummax()) / close.cummax(), sampled at month end"
+      transformation_rule: "drawdown from the running maximum"
+      business_rule: >
+        ALL-TIME means within THIS TABLE's stored history, not the
+        stock's listing history. Unadjusted, so a pre-split close can
+        hold the cummax permanently and every later month reports a
+        large drawdown that is a split, not a decline.
+      unit: "ratio"
+      status: "written"
+
+    compute_version:
+      source_column: "COMPUTE_VERSION"
+      transformation_rule: "module constant"
+      unit: "n/a"
+      status: "written"
+
+    computed_at:
+      source_column: "datetime.now(timezone.utc)"
+      transformation_rule: "run timestamp"
+      unit: "timestamptz"
+      status: "written"
+
+    # ======================================================================
+    # NOT WRITTEN - 2 columns, both with a STATED reason
+    # ======================================================================
+
+    market_cap:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN - reason stated in the module docstring"
+      business_rule: >
+        The docstring says why: 'market cap needs shares outstanding x
+        price'. This engine fetches only prices, so it cannot form it.
+        Recording the reason is what separates this from the unwritten
+        columns in market.yearly_metrics, where nothing documented the
+        decision.
+      unit: "AUD"
+      status: "NOT WRITTEN - reason stated"
+
+    relative_strength_xjo:
+      source_column: "n/a"
+      derivation_formula: "not written"
+      transformation_rule: "NOT WRITTEN - reason stated in the module docstring"
+      business_rule: >
+        The docstring says why: 'XJO prices not in DB'. Note that
+        market.index_prices DOES now carry index series, so the stated
+        blocker may no longer hold - the column is unwritten for a
+        reason that was true when it was written.
+      unit: "ratio"
+      status: "NOT WRITTEN - reason stated"

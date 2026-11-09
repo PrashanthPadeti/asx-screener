@@ -746,6 +746,104 @@ newly listed stock is being excluded from bullish screens by a measured
 
 **Requirement:** unknown must stay distinguishable from a measured false.
 
+## 11. `screener.universe` — ten columns that no statement writes
+
+**Table:** `screener.universe` (376 columns)
+**Writers:** nine, per the lineage graph — one INSERT, eight UPDATE-in-place
+**Status:** CONFIRMED from code; production NULL counts pending
+**Guard:** `backend/tests/test_universe_column_has_a_writer.py` (9 tests)
+
+### How the question was asked
+
+Three writer populations were extracted independently and reconciled against
+the table's own column list, taken from a dated snapshot:
+
+| Population | Count | How |
+|---|---|---|
+| builder `INSERT` column list | 341 | position-paired with its `SELECT` |
+| builder `ON CONFLICT DO UPDATE SET` | 342 | all 341 plus the two it revokes |
+| `UPDATE screener.universe` in engine modules | 25 update-only | AST literals, 6 modules |
+| canonical writer's governed registry | 80 | `persisted_governed()` at runtime |
+
+The union covers 366. Ten columns are claimed by nothing:
+
+```
+adl                        analyst_upside           dps_fy0
+dps_fy1                    franking_credit_per_share listing_date
+pay_date                   price_to_52w_high         shares_float
+short_name
+```
+
+### Why none of them looked wrong
+
+Every one has a written sibling immediately beside it:
+
+| Unwritten | Written, in the same statement |
+|---|---|
+| `price_to_52w_high` | `price_to_52w_low` — `CASE WHEN dp52.low_52w > 0 THEN ...` |
+| `analyst_upside` | `analyst_upside_pct` — computed from `ar.target_price` |
+| `dps_fy0`, `dps_fy1` | `eps_fy0`, `eps_fy1` — `COALESCE(pnl0.eps, ym.eps)`, `pnl1.eps` |
+| `franking_credit_per_share` | `franking_pct`, `grossed_up_yield` |
+| `shares_float` | `shares_outstanding` — `ss.shares_outstanding` |
+| `pay_date` | `ex_div_date` — `div_latest.ex_date` |
+| `adl` | `obv`, `cmf_20` — both `dm.*` |
+| `short_name` | `company_name` — `c.company_name` |
+
+A reader checking "are dividends mapped?" sees `dps_ttm`, `franking_pct`,
+`grossed_up_yield` and `ex_div_date` all present and concludes yes.
+
+### Exposure
+
+`price_to_52w_high` is live on three surfaces:
+
+- a registered filter field — `screener.py:457`, label "Price / 52W High",
+  category "Market Data", `"col": "u.price_to_52w_high"`
+- a sort column — `screener.py:705`
+- a response field — `schemas/screener.py:183`
+
+A filter over an all-NULL column returns zero rows and reports no error. A
+sort by one orders every row by NULL, which after v11.2.76 means membership
+is preserved and the ordering is arbitrary — the correct behaviour for a
+sort, and still not a ranking.
+
+The other nine are not registered filter fields. `franking_credit_per_share`
+and `dps_fy1` appear nowhere under `app/` or `frontend/src/`; the rest are
+referenced, but whether those references read THIS column or a same-named
+column on another table is not established and must not be assumed.
+
+### Why the suite could not see it
+
+`test_universe_insert_alignment.py` asserts the INSERT column list and the
+SELECT expression list have equal arity. That is the right guard for a
+positional shift and it is structurally blind to this defect: a column
+present in the table and absent from every statement changes neither count.
+
+The new guard asserts each of the four populations **before** the property,
+because an extraction that silently returns nothing reports full coverage.
+Four mutants were run and all four were killed; the one that matters is the
+parse breaking, which fails `test_the_updater_population_did_not_collapse`
+and names the seven modules rather than passing.
+
+`KNOWN_UNWRITTEN` holds the ten and may only shrink. A column added to it
+needs its own finding, because adding one is shipping a column the product
+cannot populate.
+
+### Pending
+
+Production NULL counts for all ten, which decide whether `price_to_52w_high`
+needs containment now or at the fix:
+
+```sql
+SELECT count(*) AS rows,
+       count(short_name), count(listing_date),
+       count(franking_credit_per_share), count(pay_date),
+       count(dps_fy0), count(dps_fy1), count(analyst_upside),
+       count(shares_float), count(price_to_52w_high), count(adl)
+  FROM screener.universe;
+```
+
+2,566 rows, ordinary table, one statement: safe.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -766,3 +864,4 @@ newly listed stock is being excluded from bullish screens by a measured
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
 | 9 | Half assigned by row position: 1,827 of 32,263 company-years (5.7%) misassigned, 1,024 companies on `{4}` alone | `market.halfyearly_metrics` | MEASURED — fix before HoH is relied on |
 | 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |
+| 11 | Ten columns no statement writes; `price_to_52w_high` is a live filter, sort and response field | `screener.universe` | **CONFIRMED** from code — NULL counts pending |

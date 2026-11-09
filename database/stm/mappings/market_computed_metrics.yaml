@@ -1,0 +1,634 @@
+# market.computed_metrics  (Gold)
+#
+# CURRENT-VALUATION metrics: today's price against the latest reported
+# financials. One row per (time, asx_code), appended as each new trading
+# date arrives.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/daily_compute.py   (the ONLY writer)
+#   backend/compute/engine/dividends.py       (the five dividend fields)
+#
+# Distinguish it from market.yearly_metrics, which holds one row per
+# company-FISCAL-YEAR with that year's price. Here every row uses the SAME
+# latest financials and a different price, so a series of rows shows the
+# multiple moving with the share price, not with the business.
+#
+# ── Source ─────────────────────────────────────────────────────────────────
+# Four independent per-company fetches, each taking its own latest row:
+#
+#   market.daily_prices            ORDER BY time DESC LIMIT 1   -> close, volume, price_date
+#   financials.annual_pnl          ORDER BY fiscal_year DESC LIMIT 5
+#   financials.annual_balance_sheet ORDER BY fiscal_year DESC LIMIT 1
+#   financials.annual_cashflow     ORDER BY fiscal_year DESC LIMIT 1
+#   market.companies_current       shares_outstanding, is_reit, is_miner
+#   market.dividends               ex_date >= NOW() - INTERVAL '3 years'
+#
+# THE THREE STATEMENTS ARE ORDERED INDEPENDENTLY. Nothing requires the
+# latest balance sheet to be the same fiscal year as the latest P&L. A
+# company whose P&L has landed for FY2026 but whose balance sheet has only
+# FY2025 produces ratios mixing the two - roe is FY2026 profit over FY2025
+# equity - and no column on the row records which years were used.
+#
+# Grain: one row per (time, asx_code).
+# Load:  upsert (INSERT ... ON CONFLICT (time, asx_code) DO UPDATE).
+#
+# ── The write is DYNAMIC, and that is the defect to understand ─────────────
+# upsert_metrics builds BOTH the INSERT column list and the DO UPDATE SET
+# clause from `metrics.keys()` - whatever that company's guards happened to
+# populate on that run:
+#
+#     cols       = ["time", "asx_code"] + list(metrics.keys())
+#     update_str = ", ".join(f"{c} = EXCLUDED.{c}" for c in metrics.keys())
+#
+# So a metric whose guard fails is not merely NULL: it is ABSENT FROM THE
+# STATEMENT. On a re-run against the same (time, asx_code) the column is
+# never touched and KEEPS WHATEVER THE LAST RUN WROTE.
+#
+# This is not hypothetical. dividends.py's own docstring - "The five
+# dividend fields, always all five, never partially written" - exists
+# because of it, and daily_compute.py records the incident: an omitted
+# field "is how OEL carried a 480% grossed-up yield against a zero
+# dividend".
+#
+# The repair was applied to the five dividend fields and to
+# dividend_payout_ratio (which now has an explicit `else: None`). THE OTHER
+# 29 CONDITIONAL COLUMNS STILL CARRY THE DEFECT.
+#
+# When does a re-run against the same key happen? Whenever price ingestion
+# is behind: fetch_latest_price takes the newest price row, so every run
+# while prices are stale lands on the same price_date and rewrites the same
+# row. That is exactly the 30 Oct - 6 Nov window.
+#
+# Column classes used below in `status`:
+#   written             set on every run for every company
+#   written-conditional set only when a guard passes; survives a failed
+#                       guard on re-run against the same key
+#   not written         absent from the code entirely (103 columns)
+#
+# ── Units ──────────────────────────────────────────────────────────────────
+#   market_cap, enterprise_value, *_ttm   AUD MILLIONS
+#   per-share, price                      AUD
+#   ratios                                RATIO (0-1), not percent
+#   franking_pct                          PERCENT (0-100)
+
+table: market.computed_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  writer_job: compute/engine/daily_compute.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE) with a DYNAMIC column list
+  grain: time+asx_code
+  tables_involved: >
+    market.daily_prices, financials.annual_pnl,
+    financials.annual_balance_sheet, financials.annual_cashflow,
+    market.companies_current, market.dividends
+  join_condition: >
+    no SQL join - four independent per-company queries, each taking its own
+    latest row (ORDER BY fiscal_year DESC LIMIT 1 for balance sheet and
+    cashflow, LIMIT 5 for P&L, ORDER BY time DESC LIMIT 1 for price)
+
+columns:
+
+  market.computed_metrics:
+
+    # ── Keys ──────────────────────────────────────────────────────────────
+    time:
+      source_table: market.daily_prices
+      source_column: time
+      is_key: "yes"
+      derivation_formula: "datetime.combine(price_date, midnight).replace(tzinfo=utc), where price_date = time::date of the newest price row"
+      transformation_rule: the newest trading date, at MIDNIGHT UTC
+      business_rule: >
+        THE TRADING DATE OF THE PRICE, not the date the job ran. When price
+        ingestion is behind, consecutive runs produce the SAME time value and
+        upsert into the same row - which is what makes the dynamic-write
+        defect above reachable.
+
+        Midnight UTC, a third convention in this schema:
+        market.daily_prices stores at 16:00+10, market.short_interest at
+        midnight UTC, and this at midnight UTC. A join between this table
+        and daily_prices on a derived date must use each table's own rule.
+      unit: timestamptz
+      status: written
+
+    asx_code:
+      source_table: market.daily_prices
+      source_column: asx_code
+      is_key: "yes"
+      transformation_rule: direct copy
+      unit: n/a
+      status: written
+
+    # ── Always written ────────────────────────────────────────────────────
+    dividend_per_share:
+      source_table: market.dividends
+      source_column: amount_per_share
+      derivation_formula: "dividend_metrics(rows, close, as_of=price_date) - trailing-twelve-month window by PERIOD, not a fixed four payments"
+      transformation_rule: TTM dividend per share from the canonical module
+      business_rule: >
+        ONE OF THE FIVE FIELDS THAT ARE ALWAYS ALL WRITTEN, never partially.
+        That guarantee is the repair for the defect described in the header:
+        an omitted key keeps the previous run's value, which is how a 480%
+        grossed-up yield survived against a zero dividend.
+
+        The module declines to report anything when the feed has not
+        observed the end of the window, and distinguishes a genuine zero
+        dividend from an unobserved one.
+      unit: AUD per share
+      status: written
+
+    dividend_yield:
+      source_table: market.dividends, market.daily_prices
+      source_column: amount_per_share, close
+      derivation_formula: "TTM dividend per share / close"
+      transformation_rule: trailing yield on the latest close
+      business_rule: >
+        One of the always-five. Zero when the company genuinely paid nothing
+        AND a price exists; NULL when unpriced - the two are kept apart.
+      unit: ratio
+      status: written
+
+    franking_pct:
+      source_table: market.dividends
+      source_column: franking_pct
+      derivation_formula: "per-payment, from market.dividends.grossed_up_amount rather than an average across an aggregate"
+      transformation_rule: franking on the TTM dividends
+      business_rule: >
+        One of the always-five. Grossed up PER PAYMENT rather than by
+        averaging franking across the aggregate - contrast
+        market.yearly_metrics.franking_pct, which IS an unweighted mean
+        across the year's dividends. The two columns share a name and use
+        different methods.
+
+        PERCENT (0-100), unlike the ratios around it.
+      unit: percent
+      status: written
+
+    grossed_up_dividend:
+      source_table: market.dividends
+      source_column: grossed_up_amount
+      derivation_formula: "sum of per-payment grossed_up_amount over the TTM window"
+      transformation_rule: TTM dividend including franking credits
+      business_rule: >
+        One of the always-five. Taken from the per-payment grossed-up amount
+        in market.dividends, so the franking rate applied is the one that
+        travelled with each payment rather than a hardcoded company tax rate.
+        Contrast market.yearly_metrics.franked_yield, which multiplies by a
+        hardcoded 0.4286.
+      unit: AUD per share
+      status: written
+
+    grossed_up_yield:
+      source_table: market.dividends, market.daily_prices
+      source_column: grossed_up_amount, close
+      derivation_formula: "grossed_up_dividend / close"
+      transformation_rule: grossed-up trailing yield
+      business_rule: One of the always-five. The field named in the OEL incident.
+      unit: ratio
+      status: written
+
+    dividend_payout_ratio:
+      source_table: market.dividends, financials.annual_pnl
+      source_column: amount_per_share, net_profit
+      derivation_formula: "(ttm_dps * shares / 1e6) / net_profit when ttm_dps, shares and net_profit > 0; else NULL"
+      transformation_rule: TTM dividends over latest-year net profit
+      business_rule: >
+        EXPLICITLY SET TO NULL in the else branch, so it is always written -
+        repaired alongside the dividend fields "so a refused dividend cannot
+        leave a payout ratio behind that implies one".
+
+        NULL for every loss-making company by construction. Mixes a TTM
+        dividend with an ANNUAL net profit, which are different periods
+        whenever the fiscal year is not the trailing twelve months.
+      unit: ratio
+      status: written
+
+    revenue_growth_1y:
+      source_table: financials.annual_pnl
+      source_column: revenue
+      derivation_formula: "growth_over(pnl, 'revenue', 1) - CAGR between the latest fiscal year and latest-1, located BY YEAR"
+      transformation_rule: one-year revenue growth, year-anchored
+      business_rule: >
+        Year-anchored, not positional. The previous form took values[n] from
+        a list that had already dropped every null OR ZERO year, so for a
+        company whose revenue fell to zero it compared two historical
+        non-zero years and served the result as current growth - EXR reported
+        +450.7% where the exact comparison gives -100%.
+
+        The contract now: a missing fiscal year gives NULL; a zero BASE gives
+        NULL (undefined, not "no history"); a zero LATEST gives -1.0, i.e.
+        -100%, because a value that fell to nothing did not go missing.
+      unit: ratio
+      status: written
+
+    revenue_growth_3y:
+      source_table: financials.annual_pnl
+      source_column: revenue
+      derivation_formula: "growth_over(pnl, 'revenue', 3)"
+      transformation_rule: three-year revenue CAGR, year-anchored
+      business_rule: >
+        Requires the fiscal year exactly three years before the latest. Only
+        five years of P&L are fetched, so a horizon beyond that cannot be
+        satisfied regardless of what the company has reported.
+      unit: ratio
+      status: written
+
+    profit_growth_1y:
+      source_table: financials.annual_pnl
+      source_column: net_profit
+      derivation_formula: "growth_over(pnl, 'net_profit', 1)"
+      transformation_rule: one-year net profit growth, year-anchored
+      business_rule: >
+        NULL whenever the base year's profit is zero or negative, or the
+        latest is negative - so every company moving into or out of loss
+        shows nothing here.
+      unit: ratio
+      status: written
+
+    profit_growth_3y:
+      source_table: financials.annual_pnl
+      source_column: net_profit
+      derivation_formula: "growth_over(pnl, 'net_profit', 3)"
+      transformation_rule: three-year net profit CAGR, year-anchored
+      unit: ratio
+      status: written
+
+    piotroski_score:
+      source_column: n/a
+      derivation_formula: "NULL - set unconditionally"
+      transformation_rule: NOT COMPUTED
+      business_rule: >
+        WRITTEN NULL BY DESIGN. The legacy implementation is not a Piotroski
+        F-Score, and continuing to write it would leave "a plausible 2-9
+        integer with nothing to say it is meaningless" in the table. The
+        metric is withheld downstream as UNAVAILABLE /
+        COMPUTATION_UNSUPPORTED.
+
+        NULL is the honest value: no score exists, rather than a score that
+        happens to be missing. Same decision as
+        market.yearly_metrics.piotroski_f_score.
+      unit: score 0-9
+      status: written NULL by design
+
+    compute_version:
+      source_system: internal
+      source_column: COMPUTE_VERSION
+      transformation_rule: module constant ("1.0.0")
+      business_rule: >
+        Has not changed while the computation rules have - growth_over and
+        the dividend module were both replaced without a version bump - so
+        it does not distinguish rows computed under different semantics.
+      unit: n/a
+      status: written
+
+    computed_at:
+      source_system: internal
+      source_column: datetime.now(timezone.utc)
+      transformation_rule: run timestamp
+      business_rule: >
+        LOAD TIME, distinct from `time` which is the trading date. On a
+        re-run against a stale price_date the two drift apart: computed_at
+        advances while time does not.
+
+        It asserts the row was produced by the run at that timestamp, which
+        is true only for the columns that run actually wrote - see the
+        conditional columns below.
+      unit: timestamptz
+      status: written
+
+    # ══════════════════════════════════════════════════════════════════════
+    # WRITTEN CONDITIONALLY — 29 columns
+    # ══════════════════════════════════════════════════════════════════════
+    # Each is assigned only inside an `if` guard. When the guard fails the
+    # key is absent from `metrics`, so the column appears in NEITHER the
+    # INSERT list NOR the DO UPDATE SET, and a re-run against the same
+    # (time, asx_code) leaves the previous value untouched.
+    #
+    # On a NEW trading date the row is a fresh INSERT and the column is
+    # simply NULL. The stale-value risk is specific to repeated runs on one
+    # price_date, which is the normal state whenever price ingestion is
+    # behind.
+    market_cap:
+      source_table: market.daily_prices, financials.annual_balance_sheet
+      source_column: close, shares_outstanding
+      derivation_formula: "round(close * shares / 1e6, 2) when close AND shares are truthy"
+      transformation_rule: latest close times shares, in millions
+      business_rule: >
+        Shares come from the latest balance sheet, falling back to
+        market.companies_current.shares_outstanding. The `or` fallback means
+        a share count of exactly 0 is treated as missing.
+
+        IN MILLIONS, like market.yearly_metrics.market_cap and unlike
+        screener.universe.market_cap, which is raw AUD.
+      unit: AUD millions
+      status: written-conditional
+
+    enterprise_value:
+      source_table: financials.annual_balance_sheet
+      source_column: net_debt
+      derivation_formula: "round(market_cap + net_debt, 2) when market_cap is truthy and net_debt is not None"
+      transformation_rule: market cap plus net debt
+      business_rule: >
+        net_debt is taken from the LATEST BALANCE SHEET, which may be a
+        different fiscal year from the P&L feeding the multiples built on
+        this value.
+      unit: AUD millions
+      status: written-conditional
+
+    pe_ratio:
+      source_table: market.daily_prices, financials.annual_pnl
+      source_column: close, eps
+      derivation_formula: "round(close / eps, 2) when close and eps > 0"
+      transformation_rule: price over latest reported EPS
+      business_rule: >
+        Uses annual_pnl.eps DIRECTLY, with no derivation and no share-count
+        proxy - unlike market.yearly_metrics.eps, which is derived because
+        that column is NULL across the feed. Where the feed is empty this is
+        simply not written.
+
+        Loss-making companies produce no value (eps > 0 guard), so NULL here
+        conflates "loss-making" with "no EPS reported".
+      unit: ratio
+      status: written-conditional
+
+    pb_ratio:
+      source_table: market.daily_prices, financials.annual_balance_sheet
+      source_column: close, book_value_per_share
+      derivation_formula: "round(close / book_value_per_share, 2) when bvps > 0"
+      transformation_rule: price over reported book value per share
+      business_rule: >
+        Uses the balance sheet's own BVPS with no fallback. Negative-equity
+        companies produce no value.
+      unit: ratio
+      status: written-conditional
+
+    ps_ratio:
+      source_table: financials.annual_pnl
+      source_column: revenue
+      derivation_formula: "round(market_cap / revenue, 2) when revenue > 0"
+      transformation_rule: market cap over latest annual revenue
+      unit: ratio
+      status: written-conditional
+
+    ev_ebitda:
+      source_table: financials.annual_pnl
+      source_column: ebitda
+      derivation_formula: "round(enterprise_value / ebitda, 2) when ebitda > 0"
+      transformation_rule: EV over latest annual EBITDA
+      business_rule: Negative EBITDA produces no value, not a negative multiple.
+      unit: ratio
+      status: written-conditional
+
+    ev_ebit:
+      source_table: financials.annual_pnl
+      source_column: ebit
+      derivation_formula: "round(enterprise_value / ebit, 2) when ebit > 0"
+      transformation_rule: EV over latest annual EBIT
+      unit: ratio
+      status: written-conditional
+
+    roe:
+      source_table: financials.annual_pnl, financials.annual_balance_sheet
+      source_column: net_profit, total_equity
+      derivation_formula: "round(net_profit / total_equity, 6) when equity > 0"
+      transformation_rule: net profit over CLOSING equity
+      business_rule: >
+        CLOSING equity, not the opening/closing average that
+        market.yearly_metrics.roe uses. The two columns share a name, a
+        source and a company, and will not agree.
+
+        Negative-equity companies produce no value.
+      unit: ratio
+      status: written-conditional
+
+    roa:
+      source_table: financials.annual_pnl, financials.annual_balance_sheet
+      source_column: net_profit, total_assets
+      derivation_formula: "round(net_profit / total_assets, 6) when assets > 0"
+      transformation_rule: net profit over closing total assets
+      business_rule: Closing, not averaged - see roe.
+      unit: ratio
+      status: written-conditional
+
+    roce:
+      source_table: financials.annual_pnl, financials.annual_balance_sheet
+      source_column: ebit, total_assets, total_current_liab
+      derivation_formula: "round(ebit / (total_assets - COALESCE(total_current_liab, 0)), 6) when capital employed > 0"
+      transformation_rule: EBIT over capital employed
+      business_rule: >
+        A MISSING total_current_liab IS TREATED AS ZERO (`or 0`), so capital
+        employed becomes total assets and ROCE is understated rather than
+        withheld. The guard requires equity and assets to be truthy but
+        never uses equity in the formula.
+      unit: ratio
+      status: written-conditional
+
+    gpm:
+      source_table: financials.annual_pnl
+      source_column: gross_profit, revenue
+      derivation_formula: "round(gross_profit / revenue, 6) when revenue > 0"
+      transformation_rule: gross margin, computed not copied
+      business_rule: >
+        RECOMPUTED here even though annual_pnl.gpm exists and
+        market.yearly_metrics prefers the stored value. Same name, two
+        derivations.
+      unit: ratio
+      status: written-conditional
+
+    opm:
+      source_table: financials.annual_pnl
+      source_column: ebit, revenue
+      derivation_formula: "round(ebit / revenue, 6) when revenue > 0"
+      transformation_rule: operating margin, computed not copied
+      unit: ratio
+      status: written-conditional
+
+    npm:
+      source_table: financials.annual_pnl
+      source_column: net_profit, revenue
+      derivation_formula: "round(net_profit / revenue, 6) when revenue > 0"
+      transformation_rule: net margin, computed not copied
+      unit: ratio
+      status: written-conditional
+
+    ebitda_margin:
+      source_table: financials.annual_pnl
+      source_column: ebitda, revenue
+      derivation_formula: "round(ebitda / revenue, 6) when revenue > 0"
+      transformation_rule: EBITDA margin, computed not copied
+      unit: ratio
+      status: written-conditional
+
+    debt_to_equity:
+      source_table: financials.annual_balance_sheet
+      source_column: total_debt, total_equity
+      derivation_formula: "round(total_debt / total_equity, 4) when equity > 0"
+      transformation_rule: total debt over closing equity
+      business_rule: >
+        Inherits annual_balance_sheet.total_debt, which fabricates a zero
+        when short-term debt is missing, so a 0.0 here may mean "no debt" or
+        "not reported".
+      unit: ratio
+      status: written-conditional
+
+    current_ratio:
+      source_table: financials.annual_balance_sheet
+      source_column: total_current_assets, total_current_liab
+      derivation_formula: "round(total_current_assets / total_current_liab, 4) when current liabilities > 0"
+      transformation_rule: current assets over current liabilities
+      unit: ratio
+      status: written-conditional
+
+    cash_ratio:
+      source_table: financials.annual_balance_sheet
+      source_column: cash_equivalents, total_current_liab
+      derivation_formula: "round(cash_equivalents / total_current_liab, 4) when current liabilities > 0"
+      transformation_rule: cash over current liabilities
+      business_rule: >
+        A company holding exactly zero cash is not written (truthiness on
+        `cash`), so zero cash and unreported cash are indistinguishable.
+      unit: ratio
+      status: written-conditional
+
+    interest_coverage:
+      source_table: financials.annual_pnl
+      source_column: ebit, interest_expense
+      derivation_formula: "round(ebit / abs(interest_expense), 4) when interest_expense > 0"
+      transformation_rule: EBIT over absolute interest expense
+      business_rule: >
+        The guard requires interest_expense > 0 but the formula takes its
+        absolute value, so a negative interest expense is excluded rather
+        than handled. A debt-free company produces no value, not infinity.
+      unit: ratio
+      status: written-conditional
+
+    net_debt_to_ebitda:
+      source_table: financials.annual_balance_sheet, financials.annual_pnl
+      source_column: net_debt, ebitda
+      derivation_formula: "round(net_debt / ebitda, 4) when ebitda > 0"
+      transformation_rule: net debt over EBITDA
+      business_rule: >
+        Negative when the company is net cash. Negative EBITDA is excluded
+        by the guard, so the sign is unambiguous here - unlike
+        market.yearly_metrics.net_debt_to_ebitda, which permits both.
+      unit: ratio
+      status: written-conditional
+
+    fcf_yield:
+      source_table: financials.annual_cashflow
+      source_column: fcf
+      derivation_formula: "round(fcf / market_cap, 6) when fcf is truthy and market_cap > 0"
+      transformation_rule: free cash flow over market capitalisation
+      business_rule: >
+        Both terms in millions. A company with exactly zero FCF is not
+        written (truthiness), so zero and unreported are indistinguishable.
+
+        Defined on MARKET CAP, whereas market.yearly_metrics.fcf_yield is
+        FCF per share over price. Algebraically the same, different
+        rounding and different NULL conditions.
+      unit: ratio
+      status: written-conditional
+
+    ocf_to_net_income:
+      source_table: financials.annual_cashflow, financials.annual_pnl
+      source_column: cfo, net_profit
+      derivation_formula: "round(cfo / abs(net_profit), 4) when net_profit != 0"
+      transformation_rule: operating cash flow over absolute net profit
+      business_rule: >
+        DENOMINATOR IS ABSOLUTE, numerator is not - so a loss-making company
+        with positive operating cash flow yields a POSITIVE ratio, reading
+        like healthy cash conversion when profit is negative. The sign
+        carries no information about profitability here.
+
+        market.yearly_metrics.ocf_to_net_profit does NOT take the absolute
+        value, so the two columns disagree in sign for every loss-making
+        company-year.
+      unit: ratio
+      status: written-conditional
+
+    ocf_margin:
+      source_table: financials.annual_cashflow, financials.annual_pnl
+      source_column: cfo, revenue
+      derivation_formula: "round(cfo / revenue, 6) when revenue > 0"
+      transformation_rule: operating cash flow over revenue
+      unit: ratio
+      status: written-conditional
+
+    revenue_ttm:
+      source_table: financials.annual_pnl
+      source_column: revenue
+      derivation_formula: "float(revenue) when truthy"
+      transformation_rule: latest annual revenue, copied
+      business_rule: >
+        NOT A TRAILING-TWELVE-MONTH FIGURE despite the name. It is the
+        latest reported ANNUAL revenue, which for an ASX issuer reporting
+        half-yearly can be up to a year old. Nothing recomputes a rolling
+        twelve months here.
+      unit: AUD millions
+      status: written-conditional
+
+    ebitda_ttm:
+      source_table: financials.annual_pnl
+      source_column: ebitda
+      derivation_formula: "float(ebitda) when truthy"
+      transformation_rule: latest annual EBITDA, copied
+      business_rule: Annual, not trailing twelve months - see revenue_ttm.
+      unit: AUD millions
+      status: written-conditional
+
+    ebit_ttm:
+      source_table: financials.annual_pnl
+      source_column: ebit
+      derivation_formula: "float(ebit) when truthy"
+      transformation_rule: latest annual EBIT, copied
+      business_rule: Annual, not trailing twelve months - see revenue_ttm.
+      unit: AUD millions
+      status: written-conditional
+
+    net_profit_ttm:
+      source_table: financials.annual_pnl
+      source_column: net_profit
+      derivation_formula: "float(net_profit) when truthy"
+      transformation_rule: latest annual net profit, copied
+      business_rule: Annual, not trailing twelve months - see revenue_ttm.
+      unit: AUD millions
+      status: written-conditional
+
+    eps_ttm:
+      source_table: financials.annual_pnl
+      source_column: eps
+      derivation_formula: "float(eps) when truthy"
+      transformation_rule: latest annual EPS, copied
+      business_rule: >
+        Annual, not trailing twelve months. Taken straight from the feed,
+        which is NULL across the ASX income-statement endpoint - so this is
+        empty for most companies while market.yearly_metrics.eps, which
+        derives it, is populated.
+      unit: AUD per share
+      status: written-conditional
+
+    eps_ttm_ref:
+      source_table: financials.annual_pnl
+      source_column: eps
+      derivation_formula: "float(eps) when truthy"
+      transformation_rule: the SAME value as eps_ttm
+      business_rule: >
+        BYTE-IDENTICAL TO eps_ttm BY CONSTRUCTION - both are `float(eps)`
+        from the same guard on the same variable. Two columns, one value,
+        and no documented reason for the second.
+      unit: AUD per share
+      status: written-conditional
+
+    book_value_per_share:
+      source_table: financials.annual_balance_sheet
+      source_column: book_value_per_share
+      derivation_formula: "float(book_value_per_share) when truthy"
+      transformation_rule: reported BVPS, copied with no derivation
+      business_rule: >
+        No equity/shares fallback, unlike market.yearly_metrics.bvps which
+        derives it. Where the feed is empty this column is absent and
+        pb_ratio above is absent with it.
+      unit: AUD per share
+      status: written-conditional

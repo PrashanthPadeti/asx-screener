@@ -25,21 +25,49 @@
 #
 # Two defects follow, and neither is recorded on the row:
 #
-# 1. THE HALF IS ASSIGNED BY POSITION, NOT BY QUARTER NUMBER. In the
-#    two-or-fewer branch the loop is
+# 1. THE HALF IS ASSIGNED BY ROW POSITION, NOT FROM THE QUARTER NUMBER OR
+#    THE PERIOD END DATE. In the two-or-fewer branch the loop is
 #        for q_idx, half in enumerate([1, 2], start=0): row = fy_df.iloc[q_idx]
-#    so a company that filed ONLY Q2 in a year has that row labelled
-#    half = 1. Its second half is published as its first.
+#    with fy_df sorted by quarter. So the FIRST quarter present in that
+#    group becomes half = 1 whatever its quarter number is: a group holding
+#    only Q3 and Q4 is labelled H1 and H2, and a group holding a single Q4
+#    is labelled H1.
+#
+#    Where the group holds exactly Q1 and Q2 the result agrees with the
+#    quarter numbers by coincidence, not by construction.
 #
 # 2. THE BRANCH IS CHOSEN BY DATA COMPLETENESS, NOT BY REPORTING CADENCE. A
-#    genuine QUARTERLY reporter with only two quarters on file - a partial
-#    year, or a feed gap - falls into the half-yearly branch, so Q1 and Q2
-#    become H1 and H2 instead of being summed into H1. The half-year figures
-#    are then one quarter each, and the HoH and YoY growth computed from
-#    them compares a quarter against a half.
+#    quarterly reporter with only two quarters in a group - a partial year,
+#    or a feed gap - takes the half-yearly branch, so those two quarters
+#    become H1 and H2 instead of summing into one half. The half-year
+#    figures are then one quarter each, and the HoH and YoY growth computed
+#    from them compares a quarter against a half.
+#
+# 3. THE GROUPING KEY IS A CALENDAR YEAR, NOT A FISCAL YEAR. This is the
+#    one that governs the other two. market.quarterly_metrics.fiscal_year
+#    and .quarter are derived in load_fundamentals.py by
+#
+#        def fy_quarter(d): return d.year, (d.month - 1) // 3 + 1
+#
+#    whose own docstring says "using calendar quarters". So `fiscal_year`
+#    is the CALENDAR YEAR OF THE BALANCE DATE and `quarter` is the CALENDAR
+#    quarter - neither is the company's own fiscal period.
+#
+#    For a June-year-end issuer reporting half-yearly, its half ending
+#    31 December falls in (year N, Q4) and its half ending 30 June falls in
+#    (year N+1, Q2). _agg_halves groups by fiscal_year, so the two halves
+#    of one fiscal year land in DIFFERENT groups, each alone, each labelled
+#    half = 1 by rule 1.
+#
+#    PREDICTED, NOT YET MEASURED: half = 2 would then be rare for such
+#    companies, revenue_growth_hoh would be NULL for them (its lookup is
+#    (fy-1, half 2)), and revenue_growth_yoy would pair periods six months
+#    apart rather than twelve. The measurement that settles this is in
+#    OPEN_FINDINGS.md section 9; until it is taken, neither the defect nor
+#    its absence should be asserted.
 #
 # The docstring says "Mixed years handled independently", which is true and
-# does not state either consequence.
+# does not state any of this.
 #
 # Grain: one row per (asx_code, period_end_date).
 #        For a quarterly reporter period_end_date is the LATER quarter's end

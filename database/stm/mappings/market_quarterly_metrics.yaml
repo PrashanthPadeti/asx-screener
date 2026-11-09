@@ -178,7 +178,7 @@ columns:
       unit: "AUD millions"
       writer_job: "scripts/eodhd/load_fundamentals.py"
       load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
-      status: "written by the loader"
+      status: "written NULL by design - the parser passes None"
 
     interest_expense:
       source_table: "staging_au.fundamentals (raw_json)"
@@ -238,18 +238,18 @@ columns:
       unit: "AUD millions"
       writer_job: "scripts/eodhd/load_fundamentals.py"
       load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
-      status: "written by the loader"
+      status: "written NULL by design - the parser passes None"
 
     equity_capital:
       source_table: "staging_au.fundamentals (raw_json)"
       source_column: "equity_capital"
       transformation_rule: "direct copy from the feed"
       business_rule: >
-        Read by nothing downstream - see extraordinary_items.
+        ALWAYS NULL - parse_quarterly_pnl sets it to the literal None. Also read by nothing downstream.
       unit: "AUD millions"
       writer_job: "scripts/eodhd/load_fundamentals.py"
       load_strategy: "upsert (INSERT ... ON CONFLICT DO UPDATE) by the loader"
-      status: "written by the loader"
+      status: "written NULL by design - the parser passes None"
 
     eps:
       source_table: "staging_au.fundamentals (raw_json)"

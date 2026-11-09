@@ -519,6 +519,141 @@ Read-only is not harmless. A measurement is optional; an outage is not.
 This is the second occurrence — a read-only query also OOM-killed production
 on 28 October 2026.
 
+---
+
+## 9. `market.halfyearly_metrics` — halves grouped by a CALENDAR year
+
+**Tables:** `market.halfyearly_metrics` (28 cols), `market.quarterly_metrics`
+**Writers:** `compute/engine/halfyearly_compute.py`,
+`scripts/eodhd/load_fundamentals.py`
+**Status:** OPEN — mechanism established from code, consequence NOT measured
+
+### Established from the code
+
+`load_fundamentals.py` derives both key fields from the balance date:
+
+    def fy_quarter(d: date) -> tuple[int, int]:
+        """(fiscal_year, quarter) using calendar quarters."""
+        q = (d.month - 1) // 3 + 1
+        return d.year, q
+
+So `market.quarterly_metrics.fiscal_year` is the **calendar year of the
+balance date** and `.quarter` is the **calendar quarter**. Neither is the
+company's own fiscal period.
+
+`_agg_halves` then groups by `fiscal_year` and branches on how many quarters
+that group holds:
+
+- 3 or more → Q1+Q2 = H1, Q3+Q4 = H2 (summed)
+- 2 or fewer → **half assigned by row position**: the first row present
+  becomes `half = 1` whatever its quarter number
+
+### Predicted, and explicitly not yet asserted
+
+For a June-year-end issuer reporting half-yearly, the half ending 31 Dec
+falls in `(N, Q4)` and the half ending 30 Jun in `(N+1, Q2)` — different
+groups, each alone, each labelled `half = 1`.
+
+If the data looks like that, then `half = 2` is rare, `revenue_growth_hoh`
+is NULL (its lookup is `(fy-1, half 2)`), and `revenue_growth_yoy` pairs
+periods **six months apart** under a year-on-year name.
+
+**None of that is claimed until measured.** An earlier draft of this finding
+asserted "its second half is published as its first", which was wrong: in a
+four-quarter year Q2 belongs to H1. The demonstrated defect is **assignment
+by row position rather than from verified reporting periods** — the rest is
+hypothesis.
+
+### Customer exposure — traced, and it is broad
+
+| Surface | Columns |
+|---|---|
+| Screener filters, sortable, starred | `revenue_growth_hoh`, `net_income_growth_hoh` |
+| Company page half-yearly table | `period_label`, margins, HoH and YoY growth |
+| Company detail payload | all three HoH columns |
+| AI context string | Revenue HoH and Net Income HoH |
+
+`screener.universe.revenue_growth_hoh` / `net_income_growth_hoh` /
+`eps_growth_hoh` are fed by a lateral join taking the **latest**
+`period_end_date` per company.
+
+### The measurement that decides containment
+
+1. **Cadence** — which months companies report, and the quarter assigned:
+
+       SELECT EXTRACT(MONTH FROM period_end_date)::int AS end_month, quarter,
+              count(*) AS rows, count(DISTINCT asx_code) AS companies
+       FROM market.quarterly_metrics WHERE period_end_date IS NOT NULL
+       GROUP BY 1,2 ORDER BY 1,2;
+
+2. **Grouping** — how many company-years take the positional branch:
+
+       WITH y AS (SELECT asx_code, fiscal_year, count(*) AS n_q,
+                         array_agg(quarter ORDER BY quarter) AS qtrs
+                  FROM market.quarterly_metrics
+                  WHERE fiscal_year IS NOT NULL AND quarter IS NOT NULL
+                  GROUP BY asx_code, fiscal_year)
+       SELECT n_q, qtrs, count(*) AS company_years,
+              count(DISTINCT asx_code) AS companies
+       FROM y GROUP BY n_q, qtrs ORDER BY n_q, qtrs;
+
+3. **Exposure** — does `half = 2` exist, and is HoH populated:
+
+       SELECT half, count(*) AS rows, count(DISTINCT asx_code) AS companies,
+              count(revenue_growth_hoh) AS with_hoh,
+              count(revenue_growth_yoy) AS with_yoy
+       FROM market.halfyearly_metrics GROUP BY half ORDER BY half;
+
+Both tables are small — 111,632 and 63,289 rows — so these are safe, unlike
+the scan that caused finding 8.
+
+Query 3 is the containment answer. If `with_hoh` is near zero the two
+starred screener filters match almost nothing: a coverage problem, not wrong
+numbers served. If `with_hoh` is substantial while `half = 2` is rare, the
+served values need withholding until the grouping is corrected and
+recomputed.
+
+### Acceptance criterion for any fix
+
+A sparse quarterly reporter must stay classified as quarterly. Missing
+quarters produce an **incomplete half**, not a change of reporting cadence.
+
+Establish also whether the source figures are standalone-period or
+cumulative year-to-date before summing them. `parse_quarterly_pnl` takes
+EODHD's `Income_Statement.quarterly` entries as-is, and nothing in the code
+settles that question — if they are cumulative, every half-year sum in
+`market.halfyearly_metrics` double-counts.
+
+---
+
+## 10. Insufficient history written as FALSE
+
+**Table:** `market.weekly_metrics`
+**Writer:** `compute/engine/weekly_compute.py`
+**Status:** OPEN — affected signals listed; consumer impact to confirm
+
+Four boolean signals are built as `bool(g(series, False))`, and `g()` maps
+NaN to None, so a signal that **cannot be computed** is written `FALSE`:
+
+| Signal | Needs | False when |
+|---|---|---|
+| `golden_cross` | `sma_40w` and its prior | under 41 weekly bars |
+| `death_cross` | `sma_40w` and its prior | under 41 weekly bars |
+| `above_sma10w` | `sma_10w` | under 10 weekly bars |
+| `above_sma40w` | `sma_40w` | under 40 weekly bars |
+
+`market.daily_metrics` writes **NULL** in the identical situation,
+deliberately, so that a short series is not reported as a bearish reading.
+The two tables disagree about what an uncomputable signal means.
+
+**Consumer:** `build_screener_universe.py` reads `market.weekly_metrics`
+(line 1343). Which of these four reach `screener.universe`, and whether any
+screen filters on them, still needs confirming — that decides whether a
+newly listed stock is being excluded from bullish screens by a measured
+`false` rather than an honest unknown.
+
+**Requirement:** unknown must stay distinguishable from a measured false.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -537,3 +672,5 @@ on 28 October 2026.
 | 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
 | 7b | 103 of 147 columns dead (all zero); covering index includes two | `market.computed_metrics` | CONFIRMED |
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
+| 9 | Halves grouped by a CALENDAR year; half assigned by row position | `market.halfyearly_metrics` | OPEN — mechanism proven, consequence unmeasured, exposure traced |
+| 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |

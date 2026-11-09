@@ -401,6 +401,69 @@ already served.
 the trap: a column that is NULL everywhere is obviously absent, while one
 populated on 18% of rows looks like a metric with coverage gaps.
 
+---
+
+## 7. `market.computed_metrics` — dynamic write leaves stale values; 103 dead columns
+
+**Table:** `market.computed_metrics` (147 columns)
+**Writer:** `compute/engine/daily_compute.py` (the only writer)
+**Status:** 7a OPEN (correctness) · 7b CONFIRMED (dead schema)
+
+### 7a. The dynamic write — OPEN, and the live one
+
+`upsert_metrics` builds BOTH the INSERT column list and the
+`ON CONFLICT DO UPDATE SET` clause from `metrics.keys()`:
+
+```python
+cols       = ["time", "asx_code"] + list(metrics.keys())
+update_str = ", ".join(f"{c} = EXCLUDED.{c}" for c in metrics.keys())
+```
+
+A metric whose guard fails is not written as NULL — it is **absent from the
+statement**. On a re-run against the same `(time, asx_code)` the column is
+never touched and keeps whatever the previous run wrote.
+
+The project already knows this class of bug. `dividends.py` carries the
+docstring *"The five dividend fields, always all five, never partially
+written"*, and `daily_compute.py` names the incident: an omitted field
+*"is how OEL carried a 480% grossed-up yield against a zero dividend"*.
+
+The repair reached six columns — the five dividend fields and
+`dividend_payout_ratio`, which was given an explicit `else: None`.
+**Twenty-nine conditional columns still carry the defect**, including
+`market_cap`, `pe_ratio`, `pb_ratio`, `roe`, `roa`, `roce` and every
+margin.
+
+The trigger is ordinary, not exotic. `fetch_latest_price` takes the newest
+price row, so **every run while price ingestion is behind lands on the same
+`price_date` and upserts into the same row** — which is exactly the
+30 Oct – 6 Nov window.
+
+**To settle:** whether any row currently holds a value from an earlier run.
+Harder to measure than the `yearly_metrics` case, because a stale value is
+indistinguishable from a correct one by inspection — the evidence would be
+a column inconsistent with the row's own inputs. The structural fix does
+not need the measurement: emit every key on every run, as the dividend
+module already does.
+
+### 7b. 103 of 147 columns are dead — CONFIRMED
+
+Census 9 November 2026: **all 103 unwritten columns are zero**. Nothing has
+ever written them. Unlike `market.yearly_metrics`, this table carries no
+frozen values — every unwritten column is honestly NULL.
+
+Dead columns include `roic`, `earnings_yield`, `ev_sales`,
+`asset_turnover`, `altman_z_score`, `beneish_m_score`, `quick_ratio`,
+`working_capital`, `fcf`, `debt_to_assets`, `short_interest_pct`, all four
+`roe_avg_*` and all four `roce_avg_*`, and every `*_growth_5y/7y/10y`.
+
+So the table is 147 columns with 44 producers.
+
+**Consumer note:** the covering index `idx_cm_screener` INCLUDEs
+`altman_z_score` and `short_interest_pct`, both dead. The index carries
+permanently-NULL columns, and any screen filtering on them matches nothing.
+This connects to the standing "presets still unanswerable" item.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -416,3 +479,5 @@ populated on 18% of rows looks like a metric with coverage gaps.
 | 6b | Frozen values restamped today — all 6,261 rows `computed_at` = today | `market.yearly_metrics` | **PROVEN** |
 | 6c | Census complete: 27 dead, 37 frozen | `market.yearly_metrics` | CONFIRMED |
 | 6d | Frozen values produced by the SUPERSEDED `_avg` (window inversions prove it) | `market.yearly_metrics` | **CONFIRMED** |
+| 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
+| 7b | 103 of 147 columns dead (all zero); covering index includes two | `market.computed_metrics` | CONFIRMED |

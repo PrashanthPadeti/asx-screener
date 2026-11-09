@@ -464,6 +464,61 @@ So the table is 147 columns with 44 producers.
 permanently-NULL columns, and any screen filtering on them matches nothing.
 This connects to the standing "presets still unanswerable" item.
 
+---
+
+## 8. INCIDENT 9 Nov 2026 — a census query OOM-killed PostgreSQL
+
+**Not a finding about the pipeline.** A defect in the inventory work itself,
+recorded here because the artifacts that caused it were committed to this
+directory.
+
+### What happened
+
+A generated census ran seventeen `count(column)` aggregates in one statement
+against `market.daily_metrics`, a TimescaleDB hypertable of several million
+rows, on a 4 GB host. The backend reached 3.5 GB resident and the kernel
+killed it:
+
+```
+Out of memory: Killed process 3218641 (postgres)
+total-vm:5287312kB  anon-rss:3532396kB
+```
+
+PostgreSQL was down until restarted. Recovery: `systemctl start postgresql`,
+then `smoke_primary_features.py` — 13 ok, 0 failed, version 11.2.77.
+
+### Why it was not caught
+
+The same pattern had run safely twice, against `market.yearly_metrics`
+(39,454 rows) and `market.computed_metrics`. It was reused without checking
+the size of the third table.
+
+And the obvious guard would not have helped: **`pg_class.reltuples` is −1 for
+both `market.daily_metrics` and `market.computed_metrics`**, because a
+hypertable's parent relation holds no rows. A row-count check is blind on
+exactly the tables large enough to matter — the same blind-instrument shape
+as findings 1b, 4c and 6.
+
+### What changed
+
+- The three generated `.sql` census files are **deleted**. A raw diagnostic
+  file in a repository is a loaded gun for whoever runs it next.
+- Replaced by `backend/scripts/stm/census_unwritten.py`, which sizes the
+  relation **including its inheritance children**, refuses above a 2 GiB
+  ceiling unless `--force` is passed, counts **one column per statement**,
+  and sets a `statement_timeout`.
+- `market.daily_metrics`' 17 unwritten columns are recorded as **population
+  deliberately unmeasured**, with the reason. That statement is accurate and
+  costs the mapping nothing.
+
+### The rule, restated
+
+An instrument must not consume the resources of the system it observes.
+Read-only is not harmless. A measurement is optional; an outage is not.
+
+This is the second occurrence — a read-only query also OOM-killed production
+on 28 October 2026.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -481,3 +536,4 @@ This connects to the standing "presets still unanswerable" item.
 | 6d | Frozen values produced by the SUPERSEDED `_avg` (window inversions prove it) | `market.yearly_metrics` | **CONFIRMED** |
 | 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
 | 7b | 103 of 147 columns dead (all zero); covering index includes two | `market.computed_metrics` | CONFIRMED |
+| 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |

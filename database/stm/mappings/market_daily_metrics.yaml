@@ -87,8 +87,18 @@
 # -- 17 of 120 columns are not written ------------------------------------
 # Listed at the end with status `not written`. The DO UPDATE SET covers the
 # 103 written columns and none of these, so any value they hold cannot be
-# cleared - the same freeze hazard as market.yearly_metrics. Census pending:
-# database/stm/census_daily_unwritten.sql.
+# cleared - the same freeze hazard as market.yearly_metrics.
+#
+# THEIR POPULATION IS DELIBERATELY UNMEASURED. A census of this table was
+# attempted on 9 Nov 2026 and OOM-killed PostgreSQL: seventeen
+# count(column) aggregates in one statement against a hypertable of several
+# million rows took 3.5 GB on a 4 GB host. The measurement is a
+# nice-to-have; the outage was not. Recording "unmeasured" is accurate and
+# costs this document nothing.
+#
+# If it is ever wanted, take it on a dump or a replica with
+# backend/scripts/stm/census_unwritten.py, which refuses a table over its
+# size ceiling and counts one column per statement under a timeout.
 
 table: market.daily_metrics
 layer: Gold
@@ -1248,7 +1258,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     high:
       source_column: "n/a"
@@ -1259,7 +1269,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     low:
       source_column: "n/a"
@@ -1270,7 +1280,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     aroon_up:
       source_column: "n/a"
@@ -1281,7 +1291,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     aroon_down:
       source_column: "n/a"
@@ -1292,7 +1302,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     pct_from_atl:
       source_column: "n/a"
@@ -1303,7 +1313,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     volume_avg_52w:
       source_column: "n/a"
@@ -1314,7 +1324,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     return_5d:
       source_column: "n/a"
@@ -1325,7 +1335,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     return_20d:
       source_column: "n/a"
@@ -1336,7 +1346,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     return_60d:
       source_column: "n/a"
@@ -1347,7 +1357,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     sma_5_prev:
       source_column: "n/a"
@@ -1358,7 +1368,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     sma_20_prev:
       source_column: "n/a"
@@ -1369,7 +1379,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     rsi_overbought:
       source_column: "n/a"
@@ -1380,7 +1390,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     rsi_oversold:
       source_column: "n/a"
@@ -1391,7 +1401,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     macd_bullish_cross:
       source_column: "n/a"
@@ -1402,7 +1412,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     macd_bearish_cross:
       source_column: "n/a"
@@ -1413,7 +1423,7 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"
 
     adl:
       source_column: "n/a"
@@ -1424,4 +1434,4 @@ columns:
         everywhere (dead schema) or holds values from a retired code
         path (frozen) has not yet been measured - see
         database/stm/census_daily_unwritten.sql.
-      status: "NOT WRITTEN - census pending"
+      status: "NOT WRITTEN - population deliberately unmeasured"

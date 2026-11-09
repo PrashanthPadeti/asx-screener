@@ -1,0 +1,1427 @@
+# market.daily_metrics  (Gold)
+#
+# Daily technical indicators: one row per (asx_code, trading date), 120
+# columns, the widest per-day table in the warehouse.
+#
+# Authored 9 November 2026 from:
+#   backend/compute/engine/technical_compute.py   (the ONLY writer)
+#   backend/compute/engine/return_windows.py      (window definitions)
+#   backend/compute/engine/split_adjustment.py    (withholding)
+#
+# Source:
+#   market.daily_prices        OHLCV, grouped by the trading day
+#   market.companies_current   domain membership and instrument type
+#   market.splits              corporate actions, for withholding
+#   staging_au.shares_stats    share count, for market_cap
+#
+# Grain: one row per (asx_code, date).
+# Load:  upsert, with the SET clause covering every written column.
+#
+# -- This engine is built differently from its siblings -------------------
+# Three properties the other Gold producers lack:
+#
+# 1. THE COLUMN LIST IS DERIVED, not restated. INSERT_COLS splices in
+#    RETURN_COLS, built from ALL_WINDOWS, so the written columns and the
+#    computed windows cannot disagree. The file records why: three
+#    hand-maintained sequences are how return_2y/4y/6y/8y/9y came to be
+#    served by a producer that no longer existed.
+#
+# 2. IT REFUSES BEFORE IT WRITES. verify_columns checks every column exists
+#    and names the migration file if one is absent, because deploy.sh does
+#    not apply migrations. Without it the first symptom would be an
+#    exception partway through a run, after some companies had committed.
+#
+# 3. IT WRITES ROWS IT CANNOT COMPUTE. At the latest date a company whose
+#    indicators are all NaN still gets a row of NULLs, deliberately: the
+#    universe takes ORDER BY date DESC LIMIT 1 with no recency bound, so a
+#    company skipped today would keep serving whatever was last written.
+#    Four codes were doing exactly that, two last traded three months
+#    earlier. "A row with NULL indicators says this cannot be computed. No
+#    row at all says nothing, and the consumer fills that silence with the
+#    past."
+#
+# -- The producer's domain is its consumer's domain -----------------------
+# SOURCE_DOMAIN_SQL deliberately does NOT filter on companies.status =
+# 'active'. That filter was narrower than the consumer: the universe joins
+# companies_current (SCD2 row currency, NOT listing status) and takes the
+# latest row per code with no age bound, so a delisted company with price
+# history was read by the consumer and never rewritten by the producer, and
+# its stale indicators were indistinguishable from current ones.
+#
+# Membership requires at least 20 distinct trading days. Below that the
+# indicators cannot be formed, so the company is outside the domain rather
+# than missed by it.
+#
+# -- Window semantics, which the column names do not carry ----------------
+# Every return column is a CALENDAR offset with a GRACE in days, not a row
+# count. The anchor is the LAST close at or before (date - offset); taking
+# the last rather than the nearest matters, because the nearest could sit
+# after the target and shorten the window.
+#
+#   return_1w    7 days      grace  4   (4 = Good Friday to Easter Monday)
+#   return_1m    1 month     grace  7
+#   return_3m    3 months    grace 14   PROVISIONAL - distribution unmeasured
+#   return_6m    6 months    grace 14   PROVISIONAL - distribution unmeasured
+#   return_1y    1 year      grace  7   MEASURED: of 1,567 stocks with a
+#                                       close before target, 1,554 anchored
+#                                       within 3 days, and the 8-14 day
+#                                       bucket was EMPTY
+#   return_2y..10y, 15y      grace 14   PROVISIONAL at every horizon
+#
+# The grace is NOT a staleness allowance. At 20% of the window a "1-year
+# return" could legitimately span 14 months, so it is bounded in absolute
+# days and kept small relative to its window.
+#
+# return_1d and return_ytd are NOT windows: the first compares a close with
+# its predecessor, the second runs from the last close of the previous
+# calendar year.
+#
+# -- Withholding, not clamping --------------------------------------------
+# A window spanning a corporate action that cannot be adjusted out is
+# WITHHELD, and the reason is recorded in metric_states on the latest row.
+# This is the only Gold table that explains its own NULLs.
+#
+# A production run withholds on the order of 9.5 million metric values and
+# reports about 107 splits that do not reconcile with the price series.
+#
+# -- 17 of 120 columns are not written ------------------------------------
+# Listed at the end with status `not written`. The DO UPDATE SET covers the
+# 103 written columns and none of these, so any value they hold cannot be
+# cleared - the same freeze hazard as market.yearly_metrics. Census pending:
+# database/stm/census_daily_unwritten.sql.
+
+table: market.daily_metrics
+layer: Gold
+source_layer: Silver
+
+defaults:
+  source_system: internal
+  source_table: market.daily_prices
+  writer_job: compute/engine/technical_compute.py
+  load_strategy: upsert (INSERT ... ON CONFLICT DO UPDATE)
+  grain: asx_code+date
+  tables_involved: >
+    market.daily_prices, market.companies_current, market.splits,
+    staging_au.shares_stats
+  join_condition: >
+    market.daily_prices JOIN market.companies_current ON asx_code, excluding
+    the instrument types the universe removes, HAVING at least 20 distinct
+    trading days
+
+columns:
+
+  market.daily_metrics:
+
+    asx_code:
+      source_column: "asx_code"
+      transformation_rule: "direct copy"
+      unit: "n/a"
+      is_key: "yes"
+      status: "written"
+
+    date:
+      source_column: "time"
+      derivation_formula: "DATE(time AT TIME ZONE 'Australia/Sydney')"
+      transformation_rule: "the trading day, as this producer defines it"
+      business_rule: >
+        A DST-AWARE Sydney conversion, unlike transform_prices which
+        recovers the staging date at a FIXED +10. The two agree for
+        rows stored at 16:00+10, because that lands on the same
+        calendar day under both AEST and AEDT - but they are different
+        rules, and the expected population must derive its dates from
+        THIS one or it would disagree by a day for every evening bar
+        and report a defect that does not exist.
+      unit: "date"
+      is_key: "yes"
+      status: "written"
+
+    close:
+      source_column: "close"
+      transformation_rule: "direct copy"
+      business_rule: >
+        UNADJUSTED close, as market.daily_prices stores it. Every
+        indicator in this table is built on it, so a split inside any
+        lookback mixes bases unless the window was withheld.
+      unit: "AUD"
+      status: "written"
+
+    adj_close:
+      source_column: "adjusted_close"
+      transformation_rule: "direct copy"
+      business_rule: >
+        The provider's adjusted close, carried for reference and NOT
+        used as the basis of the returns below - those run on
+        unadjusted close with corporate-action withholding instead.
+        adjusted_close is known to be a total-return series and stale;
+        see the price-adjustment-basis work.
+      unit: "AUD"
+      status: "written"
+
+    volume:
+      source_column: "volume"
+      transformation_rule: "direct copy, cast to bigint"
+      unit: "shares"
+      status: "written"
+
+    market_cap:
+      source_column: "close, shares_outstanding"
+      derivation_formula: "close * shares_outstanding"
+      transformation_rule: "close times the current share count"
+      business_rule: >
+        A SINGLE CURRENT SHARE COUNT applied to every historical row,
+        so a market cap on an old row is that day's price against
+        today's shares. The same proxy market.yearly_metrics uses,
+        applied here to every trading day rather than every fiscal
+        year.
+      unit: "AUD"
+      status: "written"
+
+    daily_return:
+      source_column: "close"
+      derivation_formula: "close / prior close - 1"
+      transformation_rule: "single-step change from the preceding row"
+      business_rule: >
+        Computed from consecutive ROWS, so a gap in the price series
+        makes this span more than one session without saying so.
+        Unadjusted, so a split registers as a large move.
+      unit: "ratio"
+      status: "written"
+
+    log_return:
+      source_column: "close"
+      derivation_formula: "ln(close / prior close)"
+      transformation_rule: "single-step change from the preceding row"
+      business_rule: >
+        Computed from consecutive ROWS, so a gap in the price series
+        makes this span more than one session without saying so.
+        Unadjusted, so a split registers as a large move.
+      unit: "ratio"
+      status: "written"
+
+    gap_pct:
+      source_column: "close"
+      derivation_formula: "(open - prior close) / prior close, overflow-guarded"
+      transformation_rule: "single-step change from the preceding row"
+      business_rule: >
+        Computed from consecutive ROWS, so a gap in the price series
+        makes this span more than one session without saying so.
+        Unadjusted, so a split registers as a large move.
+      unit: "ratio"
+      status: "written"
+
+    sma_5:
+      source_column: "close"
+      derivation_formula: "rolling mean of close over 5 rows"
+      transformation_rule: "5-period simple moving average"
+      business_rule: >
+        A count of ROWS - 5 trading sessions - not calendar days. NULL
+        until the series has 5 rows.
+      unit: "AUD"
+      status: "written"
+
+    sma_10:
+      source_column: "close"
+      derivation_formula: "rolling mean of close over 10 rows"
+      transformation_rule: "10-period simple moving average"
+      business_rule: >
+        A count of ROWS - 10 trading sessions - not calendar days.
+        NULL until the series has 10 rows.
+      unit: "AUD"
+      status: "written"
+
+    sma_20:
+      source_column: "close"
+      derivation_formula: "rolling mean of close over 20 rows"
+      transformation_rule: "20-period simple moving average"
+      business_rule: >
+        A count of ROWS - 20 trading sessions - not calendar days.
+        NULL until the series has 20 rows.
+      unit: "AUD"
+      status: "written"
+
+    sma_50:
+      source_column: "close"
+      derivation_formula: "rolling mean of close over 50 rows"
+      transformation_rule: "50-period simple moving average"
+      business_rule: >
+        A count of ROWS - 50 trading sessions - not calendar days.
+        NULL until the series has 50 rows.
+      unit: "AUD"
+      status: "written"
+
+    sma_100:
+      source_column: "close"
+      derivation_formula: "rolling mean of close over 100 rows"
+      transformation_rule: "100-period simple moving average"
+      business_rule: >
+        A count of ROWS - 100 trading sessions - not calendar days.
+        NULL until the series has 100 rows.
+      unit: "AUD"
+      status: "written"
+
+    sma_200:
+      source_column: "close"
+      derivation_formula: "rolling mean of close over 200 rows"
+      transformation_rule: "200-period simple moving average"
+      business_rule: >
+        A count of ROWS - 200 trading sessions - not calendar days.
+        NULL until the series has 200 rows.
+      unit: "AUD"
+      status: "written"
+
+    ema_9:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=9, adjust=False).mean()"
+      transformation_rule: "9-period exponential moving average"
+      business_rule: >
+        Recursive, so every value depends on the entire series before
+        it and no single row can be recomputed in isolation.
+      unit: "AUD"
+      status: "written"
+
+    ema_12:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=12, adjust=False).mean()"
+      transformation_rule: "12-period exponential moving average"
+      business_rule: >
+        Recursive, so every value depends on the entire series before
+        it and no single row can be recomputed in isolation.
+      unit: "AUD"
+      status: "written"
+
+    ema_20:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=20, adjust=False).mean()"
+      transformation_rule: "20-period exponential moving average"
+      business_rule: >
+        Recursive, so every value depends on the entire series before
+        it and no single row can be recomputed in isolation.
+      unit: "AUD"
+      status: "written"
+
+    ema_26:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=26, adjust=False).mean()"
+      transformation_rule: "26-period exponential moving average"
+      business_rule: >
+        Recursive, so every value depends on the entire series before
+        it and no single row can be recomputed in isolation.
+      unit: "AUD"
+      status: "written"
+
+    ema_50:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=50, adjust=False).mean()"
+      transformation_rule: "50-period exponential moving average"
+      business_rule: >
+        Recursive, so every value depends on the entire series before
+        it and no single row can be recomputed in isolation.
+      unit: "AUD"
+      status: "written"
+
+    ema_200:
+      source_column: "close"
+      derivation_formula: "close.ewm(span=200, adjust=False).mean()"
+      transformation_rule: "200-period exponential moving average"
+      business_rule: >
+        Recursive, so every value depends on the entire series before
+        it and no single row can be recomputed in isolation.
+      unit: "AUD"
+      status: "written"
+
+    dma20_ratio:
+      source_column: "close"
+      derivation_formula: "close / sma_20, withheld above 9,999,999"
+      transformation_rule: "price relative to its 20-period average"
+      business_rule: >
+        Above 1 means the price sits above the average. NULL where the
+        ratio overflows, so an absent value can mean 'absurd' rather
+        than 'unavailable'.
+      unit: "ratio"
+      status: "written"
+
+    dma50_ratio:
+      source_column: "close"
+      derivation_formula: "close / sma_50, withheld above 9,999,999"
+      transformation_rule: "price relative to its 50-period average"
+      business_rule: >
+        Above 1 means the price sits above the average. NULL where the
+        ratio overflows, so an absent value can mean 'absurd' rather
+        than 'unavailable'.
+      unit: "ratio"
+      status: "written"
+
+    dma200_ratio:
+      source_column: "close"
+      derivation_formula: "close / sma_200, withheld above 9,999,999"
+      transformation_rule: "price relative to its 200-period average"
+      business_rule: >
+        Above 1 means the price sits above the average. NULL where the
+        ratio overflows, so an absent value can mean 'absurd' rather
+        than 'unavailable'.
+      unit: "ratio"
+      status: "written"
+
+    sma_50_prev:
+      source_column: "close"
+      derivation_formula: "sma_50 of the preceding row"
+      transformation_rule: "previous row's 50-period average"
+      business_rule: >
+        Denormalised so golden_cross and death_cross can be evaluated
+        on one row without a self-join.
+      unit: "AUD"
+      status: "written"
+
+    sma_200_prev:
+      source_column: "close"
+      derivation_formula: "sma_200 of the preceding row"
+      transformation_rule: "previous row's 200-period average"
+      business_rule: >
+        Denormalised so golden_cross and death_cross can be evaluated
+        on one row without a self-join.
+      unit: "AUD"
+      status: "written"
+
+    macd_line:
+      source_column: "close"
+      derivation_formula: "ema_12 - ema_26"
+      transformation_rule: "MACD line"
+      unit: "AUD"
+      status: "written"
+
+    macd_signal:
+      source_column: "close"
+      derivation_formula: "9-period EMA of macd_line"
+      transformation_rule: "MACD signal line"
+      unit: "AUD"
+      status: "written"
+
+    macd_hist:
+      source_column: "close"
+      derivation_formula: "macd_line - macd_signal"
+      transformation_rule: "MACD histogram"
+      unit: "AUD"
+      status: "written"
+
+    macd_line_prev:
+      source_column: "close"
+      derivation_formula: "macd_line of the preceding row"
+      transformation_rule: "previous row's value, for cross detection"
+      business_rule: >
+        Denormalised to avoid a self-join - see sma_50_prev.
+      unit: "AUD"
+      status: "written"
+
+    macd_signal_prev:
+      source_column: "close"
+      derivation_formula: "macd_signal of the preceding row"
+      transformation_rule: "previous row's value, for cross detection"
+      business_rule: >
+        Denormalised to avoid a self-join - see sma_50_prev.
+      unit: "AUD"
+      status: "written"
+
+    rsi_7:
+      source_column: "close"
+      derivation_formula: "100 - 100 / (1 + Wilder-smoothed average gain over 7 / average loss over 7)"
+      transformation_rule: "7-period RSI, Wilder smoothing"
+      business_rule: >
+        A stock whose price does not move gives 0/0 and therefore NaN,
+        NOT 50. That is why rsi_14 is the warm-up filter for history
+        rewrites, and why non-trading companies receive a row of NULLs
+        at the latest date rather than no row.
+      unit: "index 0-100"
+      status: "written"
+
+    rsi_14:
+      source_column: "close"
+      derivation_formula: "100 - 100 / (1 + Wilder-smoothed average gain over 14 / average loss over 14)"
+      transformation_rule: "14-period RSI, Wilder smoothing"
+      business_rule: >
+        A stock whose price does not move gives 0/0 and therefore NaN,
+        NOT 50. That is why rsi_14 is the warm-up filter for history
+        rewrites, and why non-trading companies receive a row of NULLs
+        at the latest date rather than no row.
+      unit: "index 0-100"
+      status: "written"
+
+    rsi_21:
+      source_column: "close"
+      derivation_formula: "100 - 100 / (1 + Wilder-smoothed average gain over 21 / average loss over 21)"
+      transformation_rule: "21-period RSI, Wilder smoothing"
+      business_rule: >
+        A stock whose price does not move gives 0/0 and therefore NaN,
+        NOT 50. That is why rsi_14 is the warm-up filter for history
+        rewrites, and why non-trading companies receive a row of NULLs
+        at the latest date rather than no row.
+      unit: "index 0-100"
+      status: "written"
+
+    stoch_k:
+      source_column: "close, high, low"
+      derivation_formula: "100 * (close - low_n) / (high_n - low_n)"
+      transformation_rule: "stochastic %K"
+      unit: "index 0-100"
+      status: "written"
+
+    stoch_d:
+      source_column: "close, high, low"
+      derivation_formula: "moving average of stoch_k"
+      transformation_rule: "stochastic %D"
+      unit: "index 0-100"
+      status: "written"
+
+    bb_upper:
+      source_column: "close"
+      derivation_formula: "bb_mid + 2 standard deviations"
+      transformation_rule: "upper Bollinger band"
+      unit: "AUD"
+      status: "written"
+
+    bb_mid:
+      source_column: "close"
+      derivation_formula: "20-period simple moving average"
+      transformation_rule: "middle Bollinger band"
+      unit: "AUD"
+      status: "written"
+
+    bb_lower:
+      source_column: "close"
+      derivation_formula: "bb_mid - 2 standard deviations"
+      transformation_rule: "lower Bollinger band"
+      unit: "AUD"
+      status: "written"
+
+    bb_pct:
+      source_column: "close"
+      derivation_formula: "(close - bb_lower) / (bb_upper - bb_lower), overflow-guarded"
+      transformation_rule: "position within the bands"
+      business_rule: >
+        0 at the lower band, 1 at the upper, outside that range when
+        price breaks out. The denominator collapses for a flat series,
+        which the overflow guard turns into NULL.
+      unit: "ratio"
+      status: "written"
+
+    bb_width:
+      source_column: "close"
+      derivation_formula: "(bb_upper - bb_lower) / bb_mid, overflow-guarded"
+      transformation_rule: "band width relative to the mean"
+      unit: "ratio"
+      status: "written"
+
+    adx_14:
+      source_column: "close, high, low"
+      derivation_formula: "Wilder-smoothed directional movement over 14 periods"
+      transformation_rule: "14-period Average Directional Index"
+      business_rule: >
+        ADX measures trend STRENGTH without direction; +DI and -DI
+        carry the direction. A high adx_14 alone says nothing about
+        which way the trend runs.
+      unit: "index 0-100"
+      status: "written"
+
+    plus_di:
+      source_column: "close, high, low"
+      derivation_formula: "Wilder-smoothed directional movement over 14 periods"
+      transformation_rule: "14-period +DI"
+      business_rule: >
+        ADX measures trend STRENGTH without direction; +DI and -DI
+        carry the direction. A high adx_14 alone says nothing about
+        which way the trend runs.
+      unit: "index 0-100"
+      status: "written"
+
+    minus_di:
+      source_column: "close, high, low"
+      derivation_formula: "Wilder-smoothed directional movement over 14 periods"
+      transformation_rule: "14-period -DI"
+      business_rule: >
+        ADX measures trend STRENGTH without direction; +DI and -DI
+        carry the direction. A high adx_14 alone says nothing about
+        which way the trend runs.
+      unit: "index 0-100"
+      status: "written"
+
+    cci_20:
+      source_column: "close, high, low"
+      derivation_formula: "(typical price - 20-period SMA) / (0.015 * mean deviation)"
+      transformation_rule: "20-period Commodity Channel Index"
+      unit: "index"
+      status: "written"
+
+    williams_r:
+      source_column: "close, high, low"
+      derivation_formula: "-100 * (high_n - close) / (high_n - low_n)"
+      transformation_rule: "Williams %R"
+      business_rule: >
+        NEGATIVE by construction, ranging -100 to 0.
+      unit: "index -100 to 0"
+      status: "written"
+
+    roc_10:
+      source_column: "close"
+      derivation_formula: "close / close 10 rows earlier - 1, overflow-guarded"
+      transformation_rule: "10-period rate of change"
+      business_rule: >
+        10 ROWS, not 10 calendar days - unlike the return_* columns,
+        which are calendar offsets with a grace. Two different
+        conventions for 'change over a period' in one table.
+      unit: "ratio"
+      status: "written"
+
+    roc_20:
+      source_column: "close"
+      derivation_formula: "close / close 20 rows earlier - 1, overflow-guarded"
+      transformation_rule: "20-period rate of change"
+      business_rule: >
+        20 ROWS, not 20 calendar days - unlike the return_* columns,
+        which are calendar offsets with a grace. Two different
+        conventions for 'change over a period' in one table.
+      unit: "ratio"
+      status: "written"
+
+    atr_14:
+      source_column: "close, high, low"
+      derivation_formula: "Wilder-smoothed true range over 14 periods"
+      transformation_rule: "14-period Average True Range"
+      unit: "AUD"
+      status: "written"
+
+    atr_pct:
+      source_column: "close, high, low"
+      derivation_formula: "atr_14 / close, overflow-guarded"
+      transformation_rule: "ATR relative to price"
+      unit: "ratio"
+      status: "written"
+
+    true_range:
+      source_column: "close, high, low"
+      derivation_formula: "max(high - low, |high - prior close|, |low - prior close|)"
+      transformation_rule: "single-period true range"
+      unit: "AUD"
+      status: "written"
+
+    hv_20d:
+      source_column: "close"
+      derivation_formula: "annualised standard deviation of log returns over 20 rows"
+      transformation_rule: "20-period historical volatility"
+      business_rule: >
+        Built on UNADJUSTED log returns, so a split inside the window
+        inflates volatility unless the window was withheld.
+      unit: "ratio annualised"
+      status: "written"
+
+    hv_60d:
+      source_column: "close"
+      derivation_formula: "annualised standard deviation of log returns over 60 rows"
+      transformation_rule: "60-period historical volatility"
+      business_rule: >
+        Built on UNADJUSTED log returns, so a split inside the window
+        inflates volatility unless the window was withheld.
+      unit: "ratio annualised"
+      status: "written"
+
+    obv:
+      source_column: "close, volume"
+      derivation_formula: "cumulative sum of signed volume"
+      transformation_rule: "On Balance Volume"
+      business_rule: >
+        CUMULATIVE FROM THE START OF THE SERIES, so the absolute level
+        is meaningless across companies and only its direction carries
+        information.
+      unit: "shares"
+      status: "written"
+
+    obv_ema:
+      source_column: "close, volume"
+      derivation_formula: "EMA of obv"
+      transformation_rule: "smoothed On Balance Volume"
+      unit: "shares"
+      status: "written"
+
+    vwap:
+      source_column: "close, volume"
+      derivation_formula: "rolling 20-period sum(close * volume) / sum(volume)"
+      transformation_rule: "rolling volume-weighted average price"
+      business_rule: >
+        A ROLLING 20-period VWAP, not the intraday session VWAP the
+        name usually denotes - this table has no intraday data.
+      unit: "AUD"
+      status: "written"
+
+    above_vwap:
+      source_column: "close, volume"
+      derivation_formula: "1 if close > 20-day rolling VWAP else 0"
+      transformation_rule: "mean-reversion / momentum flag"
+      business_rule: >
+        Stored as SMALLINT 0/1 rather than boolean, unlike the other
+        signal columns in this table which are boolean. A consumer
+        treating it as boolean gets a type error, not a wrong answer.
+      valid_values: "0, 1"
+      unit: "flag"
+      status: "written"
+
+    cmf_20:
+      source_column: "close, high, low, volume"
+      derivation_formula: "20-period sum(money flow volume) / sum(volume), overflow-guarded"
+      transformation_rule: "20-period Chaikin Money Flow"
+      unit: "ratio"
+      status: "written"
+
+    mfi_14:
+      source_column: "close, high, low, volume"
+      derivation_formula: "100 - 100 / (1 + positive money flow / negative money flow) over 14"
+      transformation_rule: "14-period Money Flow Index"
+      unit: "index 0-100"
+      status: "written"
+
+    volume_avg_5d:
+      source_column: "volume"
+      derivation_formula: "rolling mean of volume over 5 rows"
+      transformation_rule: "5-period average volume"
+      business_rule: >
+        Rows, not calendar days: a non-trading day contributes no row
+        rather than a zero, so the denominator is sessions present.
+      unit: "shares"
+      status: "written"
+
+    volume_avg_20d:
+      source_column: "volume"
+      derivation_formula: "rolling mean of volume over 20 rows"
+      transformation_rule: "20-period average volume"
+      business_rule: >
+        Rows, not calendar days: a non-trading day contributes no row
+        rather than a zero, so the denominator is sessions present.
+      unit: "shares"
+      status: "written"
+
+    volume_avg_50d:
+      source_column: "volume"
+      derivation_formula: "rolling mean of volume over 50 rows"
+      transformation_rule: "50-period average volume"
+      business_rule: >
+        Rows, not calendar days: a non-trading day contributes no row
+        rather than a zero, so the denominator is sessions present.
+      unit: "shares"
+      status: "written"
+
+    relative_volume:
+      source_column: "volume"
+      derivation_formula: "volume / volume_avg_20d, overflow-guarded"
+      transformation_rule: "today's volume against its 20-period average"
+      unit: "ratio"
+      status: "written"
+
+    dollar_volume_avg_20d:
+      source_column: "close, volume"
+      derivation_formula: "close * volume_avg_20d / 1,000,000"
+      transformation_rule: "average daily turnover, in AUD millions"
+      business_rule: >
+        IN MILLIONS, per the column comment, and the primary liquidity
+        filter in this schema - the comment names under $0.5M/day as
+        illiquid. Contrast market.mover_snapshots, whose liquidity
+        filter tests screener.universe.market_cap in raw AUD and is
+        inert as a result.
+      unit: "AUD millions"
+      status: "written"
+
+    up_down_vol_ratio_20d:
+      source_column: "close, volume"
+      derivation_formula: "volume on up days / volume on down days over 20 rows"
+      transformation_rule: "accumulation versus distribution over 20 periods"
+      unit: "ratio"
+      status: "written"
+
+    obv_rising:
+      source_column: "close, volume"
+      derivation_formula: "obv greater than its recent average"
+      transformation_rule: "boolean accumulation flag"
+      unit: "boolean"
+      status: "written"
+
+    volume_breakout:
+      source_column: "volume"
+      derivation_formula: "volume materially above its rolling average"
+      transformation_rule: "boolean volume-surge flag"
+      unit: "boolean"
+      status: "written"
+
+    high_52w:
+      source_column: "high"
+      derivation_formula: "rolling maximum over 365 calendar days, grace 14"
+      transformation_rule: "52-week high"
+      business_rule: >
+        CALENDAR days with a MINIMUM-HISTORY grace: a stock publishes
+        no 52-week high until its series spans 365 - 14 = 351 days.
+        The grace does a different job here from the return windows -
+        there it bounds how stale the anchor may be, here it decides
+        how early a newly listed stock gets a value at all. Nothing is
+        read from the boundary, so a wider value cannot misstate a
+        period.
+      unit: "AUD"
+      status: "written"
+
+    low_52w:
+      source_column: "low"
+      derivation_formula: "rolling minimum over 365 calendar days, grace 14"
+      transformation_rule: "52-week low"
+      business_rule: >
+        Same windowing as high_52w.
+      unit: "AUD"
+      status: "written"
+
+    ath_price:
+      source_column: "high"
+      derivation_formula: "running maximum over the whole series"
+      transformation_rule: "all-time high within the stored history"
+      business_rule: >
+        ALL-TIME means all time THIS TABLE HAS - the earliest price
+        market.daily_prices holds for the code, not the stock's
+        listing history. UNADJUSTED, so a pre-split high can stand
+        permanently above every post-split price.
+      unit: "AUD"
+      status: "written"
+
+    atl_price:
+      source_column: "low"
+      derivation_formula: "running minimum over the whole series"
+      transformation_rule: "all-time low within the stored history"
+      business_rule: >
+        Same caveats as ath_price.
+      unit: "AUD"
+      status: "written"
+
+    pct_from_52w_high:
+      source_column: "close"
+      derivation_formula: "(close - high_52w) / high_52w, overflow-guarded"
+      transformation_rule: "distance from high_52w"
+      unit: "ratio"
+      status: "written"
+
+    pct_from_52w_low:
+      source_column: "close"
+      derivation_formula: "(close - low_52w) / low_52w, overflow-guarded"
+      transformation_rule: "distance from low_52w"
+      unit: "ratio"
+      status: "written"
+
+    pct_from_ath:
+      source_column: "close"
+      derivation_formula: "(close - ath_price) / ath_price, overflow-guarded"
+      transformation_rule: "distance from ath_price"
+      unit: "ratio"
+      status: "written"
+
+    above_sma20:
+      source_column: "close"
+      derivation_formula: "close > sma_20"
+      transformation_rule: "boolean, price above its 20-period average"
+      business_rule: >
+        NULL rather than FALSE where sma_20 does not exist yet, so a
+        short series is not reported as a bearish signal.
+      unit: "boolean"
+      status: "written"
+
+    above_sma50:
+      source_column: "close"
+      derivation_formula: "close > sma_50"
+      transformation_rule: "boolean, price above its 50-period average"
+      business_rule: >
+        NULL rather than FALSE where sma_50 does not exist yet, so a
+        short series is not reported as a bearish signal.
+      unit: "boolean"
+      status: "written"
+
+    above_sma100:
+      source_column: "close"
+      derivation_formula: "close > sma_100"
+      transformation_rule: "boolean, price above its 100-period average"
+      business_rule: >
+        NULL rather than FALSE where sma_100 does not exist yet, so a
+        short series is not reported as a bearish signal.
+      unit: "boolean"
+      status: "written"
+
+    above_sma200:
+      source_column: "close"
+      derivation_formula: "close > sma_200"
+      transformation_rule: "boolean, price above its 200-period average"
+      business_rule: >
+        NULL rather than FALSE where sma_200 does not exist yet, so a
+        short series is not reported as a bearish signal.
+      unit: "boolean"
+      status: "written"
+
+    golden_cross:
+      source_column: "close"
+      derivation_formula: "sma_50 > sma_200 AND sma_50_prev <= sma_200_prev"
+      transformation_rule: "boolean, 50 crossing above 200 on this row"
+      business_rule: >
+        An EVENT on one row, not a state. It is true only on the day
+        of the crossing, so a screen looking for 'currently in a
+        golden cross' needs above_sma200 and the two averages, not
+        this flag.
+      unit: "boolean"
+      status: "written"
+
+    death_cross:
+      source_column: "close"
+      derivation_formula: "sma_50 < sma_200 AND sma_50_prev >= sma_200_prev"
+      transformation_rule: "boolean, 50 crossing below 200 on this row"
+      business_rule: >
+        An event on one row - see golden_cross.
+      unit: "boolean"
+      status: "written"
+
+    new_52w_high:
+      source_column: "close, high, low"
+      derivation_formula: "this row sets a new high_52w"
+      transformation_rule: "boolean, high_52w made on this row"
+      business_rule: >
+        An event on one row, not a state - see golden_cross.
+      unit: "boolean"
+      status: "written"
+
+    new_52w_low:
+      source_column: "close, high, low"
+      derivation_formula: "this row sets a new low_52w"
+      transformation_rule: "boolean, low_52w made on this row"
+      business_rule: >
+        An event on one row, not a state - see golden_cross.
+      unit: "boolean"
+      status: "written"
+
+    new_ath:
+      source_column: "close, high, low"
+      derivation_formula: "this row sets a new ath_price"
+      transformation_rule: "boolean, ath_price made on this row"
+      business_rule: >
+        An event on one row, not a state - see golden_cross.
+      unit: "boolean"
+      status: "written"
+
+    return_1d:
+      source_column: "close"
+      derivation_formula: "close / close of the preceding row - 1, overflow-guarded"
+      transformation_rule: "single-row return"
+      business_rule: >
+        NOT a window: it compares a close with its predecessor ROW, so
+        across a trading halt or a data gap it spans more than a day.
+        Named explicitly in RETURN_COLS for that reason.
+      unit: "ratio"
+      status: "written"
+
+    return_ytd:
+      source_column: "close"
+      derivation_formula: "close / last close of the previous calendar year - 1, overflow-guarded"
+      transformation_rule: "year-to-date return"
+      business_rule: >
+        Anchored on the CALENDAR year, not the fiscal year, so for an
+        ASX issuer with a June year end this spans part of two
+        reporting periods.
+      unit: "ratio"
+      status: "written"
+
+    return_1w:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 7 days (grace 4d)"
+      transformation_rule: "calendar 7 days return, grace 4 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 7 days), within
+        4 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace: the
+        exchange calendar - Good Friday to Easter Monday.
+      unit: "ratio"
+      status: "written"
+
+    return_1m:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 1 month (grace 7d)"
+      transformation_rule: "calendar 1 month return, grace 7 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 1 month), within
+        7 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row.
+      unit: "ratio"
+      status: "written"
+
+    return_3m:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 3 months (grace 14d)"
+      transformation_rule: "calendar 3 months return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 3 months),
+        within 14 days. Taking the last rather than the nearest
+        matters: the nearest could sit AFTER the target and shorten
+        the window, and a return that silently measures less than it
+        claims is no better than one that measures more. WITHHELD
+        where the window spans a corporate action that cannot be
+        adjusted out; the reason is in metric_states on the latest
+        row. Grace: PROVISIONAL - the distribution has not been
+        measured.
+      unit: "ratio"
+      status: "written"
+
+    return_6m:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 6 months (grace 14d)"
+      transformation_rule: "calendar 6 months return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 6 months),
+        within 14 days. Taking the last rather than the nearest
+        matters: the nearest could sit AFTER the target and shorten
+        the window, and a return that silently measures less than it
+        claims is no better than one that measures more. WITHHELD
+        where the window spans a corporate action that cannot be
+        adjusted out; the reason is in metric_states on the latest
+        row. Grace: PROVISIONAL - the distribution has not been
+        measured.
+      unit: "ratio"
+      status: "written"
+
+    return_1y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 1 year (grace 7d)"
+      transformation_rule: "calendar 1 year return, grace 7 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 1 year), within
+        7 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace: MEASURED:
+        of 1,567 stocks with any close before their target, 1,554
+        anchored within three days and the 8-14 day bucket was EMPTY,
+        so the 14 originally written here bought nothing.
+      unit: "ratio"
+      status: "written"
+
+    return_2y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 2 years (grace 14d)"
+      transformation_rule: "calendar 2 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 2 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_3y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 3 years (grace 14d)"
+      transformation_rule: "calendar 3 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 3 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_4y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 4 years (grace 14d)"
+      transformation_rule: "calendar 4 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 4 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_5y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 5 years (grace 14d)"
+      transformation_rule: "calendar 5 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 5 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_6y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 6 years (grace 14d)"
+      transformation_rule: "calendar 6 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 6 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_7y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 7 years (grace 14d)"
+      transformation_rule: "calendar 7 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 7 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_8y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 8 years (grace 14d)"
+      transformation_rule: "calendar 8 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 8 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_9y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 9 years (grace 14d)"
+      transformation_rule: "calendar 9 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 9 years), within
+        14 days. Taking the last rather than the nearest matters: the
+        nearest could sit AFTER the target and shorten the window, and
+        a return that silently measures less than it claims is no
+        better than one that measures more. WITHHELD where the window
+        spans a corporate action that cannot be adjusted out; the
+        reason is in metric_states on the latest row. Grace:
+        PROVISIONAL - grace is an estimate at every horizon beyond a
+        year; the further back the target, the thinner the exchange's
+        history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_10y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 10 years (grace 14d)"
+      transformation_rule: "calendar 10 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 10 years),
+        within 14 days. Taking the last rather than the nearest
+        matters: the nearest could sit AFTER the target and shorten
+        the window, and a return that silently measures less than it
+        claims is no better than one that measures more. WITHHELD
+        where the window spans a corporate action that cannot be
+        adjusted out; the reason is in metric_states on the latest
+        row. Grace: PROVISIONAL - grace is an estimate at every
+        horizon beyond a year; the further back the target, the
+        thinner the exchange's history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    return_15y:
+      source_column: "close"
+      derivation_formula: "close / anchor close - 1, where anchor = last close <= date - 15 years (grace 14d)"
+      transformation_rule: "calendar 15 years return, grace 14 days"
+      business_rule: >
+        Anchor is the LAST close at or before (date - 15 years),
+        within 14 days. Taking the last rather than the nearest
+        matters: the nearest could sit AFTER the target and shorten
+        the window, and a return that silently measures less than it
+        claims is no better than one that measures more. WITHHELD
+        where the window spans a corporate action that cannot be
+        adjusted out; the reason is in metric_states on the latest
+        row. Grace: PROVISIONAL - grace is an estimate at every
+        horizon beyond a year; the further back the target, the
+        thinner the exchange's history and the likelier a genuine gap.
+      unit: "ratio"
+      status: "written"
+
+    metric_states:
+      source_column: "n/a"
+      derivation_formula: "jsonb: metric -> {state, cause, reason, observed}"
+      transformation_rule: "per-metric reason sidecar, LATEST ROW ONLY"
+      business_rule: >
+        SPARSE: an entry exists only for a metric whose state is not
+        APPLICABLE, so a populated numeric column must never sit
+        beside an entry, and a NULL numeric column with no entry is a
+        contract violation rather than a default. NULL - not '{}' -
+        means the row was never assessed; '{}' would claim it was
+        examined and found clean. Written only on the row whose date
+        matches the assessment, matched BY DATE rather than by
+        position, because the warm-up filter and --since both reshape
+        the frame and attaching a reason to the wrong day is worse
+        than attaching none. This is the only Gold table that explains
+        its own NULLs.
+      unit: "jsonb"
+      status: "written"
+
+    compute_version:
+      source_column: "COMPUTE_VERSION"
+      transformation_rule: "module constant (\"1.0.0\")"
+      business_rule: >
+        Unchanged while the window semantics were replaced - row
+        counts became day counts in v11.2.62 and calendar offsets
+        later - so it does not separate rows computed under different
+        rules.
+      unit: "n/a"
+      status: "written"
+
+    computed_at:
+      source_column: "datetime.now(timezone.utc)"
+      transformation_rule: "run timestamp, identical across the run"
+      business_rule: >
+        LOAD TIME, distinct from `date` which is the trading day.
+      unit: "timestamptz"
+      status: "written"
+
+    # ======================================================================
+    # NOT WRITTEN BY THE PRODUCER - 17 columns
+    # ======================================================================
+    # Absent from INSERT_COLS, so they appear in neither the INSERT list nor
+    # the ON CONFLICT DO UPDATE SET. No run can set them and no run can
+    # clear them - the same freeze hazard as market.yearly_metrics.
+    #
+    # Three of them are notable because the engine READS the underlying
+    # values and does not store them: open, high and low are fetched by
+    # fetch_ohlcv and feed atr_14, stoch_k, cci_20, williams_r, mfi_14 and
+    # the 52-week extremes, yet the columns themselves are never populated.
+    # gap_pct is computed FROM open and written, while open is not.
+    #
+    # Census pending: database/stm/census_daily_unwritten.sql.
+
+    open:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    high:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    low:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    aroon_up:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    aroon_down:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    pct_from_atl:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    volume_avg_52w:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    return_5d:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    return_20d:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    return_60d:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    sma_5_prev:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    sma_20_prev:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    rsi_overbought:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    rsi_oversold:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    macd_bullish_cross:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    macd_bearish_cross:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"
+
+    adl:
+      source_column: "n/a"
+      derivation_formula: "not written - absent from INSERT_COLS"
+      transformation_rule: "NOT WRITTEN by compute/engine/technical_compute.py"
+      business_rule: >
+        Neither set nor cleared by any run. Whether it is NULL
+        everywhere (dead schema) or holds values from a retired code
+        path (frozen) has not yet been measured - see
+        database/stm/census_daily_unwritten.sql.
+      status: "NOT WRITTEN - census pending"

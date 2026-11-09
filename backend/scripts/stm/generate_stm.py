@@ -459,8 +459,10 @@ def build_layer(layer: str, snap_idx: dict, lineage: dict, mappings: dict,
 def exposed_fields() -> dict:
     """screener.universe column -> the API field name a customer screens on.
 
-    Read from ALLOWED_FIELDS so the mapping document can say which of the 542
-    screener columns a customer can actually reach.
+    Read from ALLOWED_FIELDS so the mapping document can say which of the 376
+    screener columns a customer can actually reach. 300 of them resolve to a
+    field name; the rest are carried for computation or display and cannot be
+    screened on directly.
     """
     import ast
     route = BACKEND / "app/api/v1/routes/screener.py"

@@ -1209,3 +1209,718 @@ columns:
         6,261 rows carrying a stale quick_ratio are stamped with today's
         date.
       unit: timestamptz
+
+    # ══════════════════════════════════════════════════════════════════════
+    # NOT WRITTEN BY THE PRODUCER — 64 columns
+    # ══════════════════════════════════════════════════════════════════════
+    # compute/engine/yearly_compute.py is the ONLY writer of this table and
+    # its INSERT names 124 columns. These 64 appear in neither the INSERT
+    # column list nor the ON CONFLICT DO UPDATE SET clause, so no run can
+    # set them and no run can clear them.
+    #
+    # Census taken 9 November 2026 over 33,864 rows. Two populations:
+    #
+    #   27 columns  NEVER POPULATED  -- dead schema, honest NULLs
+    #   37 columns  FROZEN           -- 969 to 7,656 rows (2.9% - 22.6%)
+    #
+    # The frozen values are NOT merely stale. Three window-length pairs are
+    # inverted:
+    #
+    #     avg_roe_10y    6,429  >  avg_roe_7y    6,424
+    #     avg_roce_10y   6,405  >  avg_roce_7y   6,404
+    #     avg_ebit_10y   6,504  >  avg_ebit_5y   6,502
+    #
+    # Under average_over -- the exactly-n-named-fiscal-years contract the
+    # written avg_* columns use -- a longer window is strictly harder to
+    # satisfy, so a 10-year count can never exceed a 7-year count. This
+    # ordering is only producible by the SUPERSEDED _avg helper, which took
+    # the last n LIST ENTRIES and dropped Nones before averaging. The
+    # docstring of that helper records what it was replaced for:
+    # "avg_roe_3y could be a single year's ROE labelled as three."
+    #
+    # So these columns hold values computed by a method this codebase
+    # documents as defective, on rows whose computed_at asserts they were
+    # produced by today's run.
+    #
+    # See database/stm/OPEN_FINDINGS.md section 6.
+
+    # ── FROZEN: values survive every rewrite, restamped as current ──
+
+    p_fcf_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 7,656 of 33,864 rows (22.6%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    volatility_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,575 of 33,864 rows (19.4%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    equity_multiplier:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,505 of 33,864 rows (19.2%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_ebit_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,504 of 33,864 rows (19.2%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_ebit_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,502 of 33,864 rows (19.2%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_roe_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,429 of 33,864 rows (19.0%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_roe_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,424 of 33,864 rows (19.0%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_roce_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,405 of 33,864 rows (18.9%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_roce_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,404 of 33,864 rows (18.9%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_current_ratio_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,337 of 33,864 rows (18.7%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    cash_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,327 of 33,864 rows (18.7%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    roaa:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,292 of 33,864 rows (18.6%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    roae:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,290 of 33,864 rows (18.6%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    quick_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,261 of 33,864 rows (18.5%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    ebit_growth_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 6,017 of 33,864 rows (17.8%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_operating_margin_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 5,802 of 33,864 rows (17.1%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_net_margin_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 5,766 of 33,864 rows (17.0%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_fcf_margin_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 5,510 of 33,864 rows (16.3%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    avg_fcf_margin_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 5,349 of 33,864 rows (15.8%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    revenue_growth_median_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 5,011 of 33,864 rows (14.8%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    revenue_growth_median_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 4,811 of 33,864 rows (14.2%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    net_debt_to_equity:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 4,580 of 33,864 rows (13.5%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    croic:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 4,384 of 33,864 rows (12.9%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    price_cagr_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 3,992 of 33,864 rows (11.8%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    beneish_m_score:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 3,772 of 33,864 rows (11.1%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    price_cagr_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 3,405 of 33,864 rows (10.1%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    sharpe_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 3,366 of 33,864 rows (9.9%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    inventory_days:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 3,233 of 33,864 rows (9.5%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    price_cagr_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 2,913 of 33,864 rows (8.6%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    inventory_turnover:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 2,718 of 33,864 rows (8.0%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    price_cagr_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 2,494 of 33,864 rows (7.4%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    debt_to_ebitda:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 2,274 of 33,864 rows (6.7%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    price_cagr_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 1,917 of 33,864 rows (5.7%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    ebitda_cagr_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 1,395 of 33,864 rows (4.1%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    net_income_cagr_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 1,211 of 33,864 rows (3.6%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    ebitda_cagr_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 1,122 of 33,864 rows (3.3%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    net_income_cagr_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        FROZEN. No current run produces this value, and the upsert cannot clear it, so it survives untouched while the row's computed_at is restamped to the run date. A reader has no way to date it.
+        Populated on 969 of 33,864 rows (2.9%) by a retired code path.
+      status: NOT WRITTEN - frozen
+
+    # ── DEAD: never populated by anything ───────────────────────────
+
+    alpha_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    alpha_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    avg_eps_growth_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    beta_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    beta_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    beta_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    calmar_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    cash_conversion_cycle:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    dps_grossed_up:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    eps_cagr_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    eps_cagr_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    ev_fcf:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    fcf_per_share:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    max_drawdown_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    ncavps:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    net_debt_per_share:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    ocf_per_share:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    payables_days:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    pcf_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    pe_5y_avg:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    peg_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    pretax_margin:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    revenue_per_employee:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    revenue_per_share:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    sortino_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    tax_rate_effective:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema
+
+    tbvps:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - absent from the INSERT and from ON CONFLICT DO UPDATE"
+      transformation_rule: NOT WRITTEN by compute/engine/yearly_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero of 33,864 rows carry a value. Nothing has ever written it, so a consumer reads NULL on every company and every year. Honest, but the column promises a metric that does not exist.
+      status: NOT WRITTEN - dead schema

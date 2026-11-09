@@ -340,17 +340,57 @@ explains why it writes explicit NULLs for five retired return columns:
 leaving a column unwritten freezes the last value the engine produced. The
 protection was applied to five columns and not to these.
 
-### Census still outstanding
+### Census complete — 9 Nov 2026, 33,864 rows
 
-Population was measured for 7 of the 64. The remaining 57 are unknown and
-must not be assumed either way — a column at zero is 6a, a column with rows
-is 6b, and the mapping document needs the per-column answer rather than a
-blanket statement. `database/stm/census_yearly_unwritten.sql` returns one
-row per column:
+**27 columns never populated** (dead schema): `alpha_1y`, `alpha_3y`,
+`avg_eps_growth_10y`, `beta_1y`, `beta_3y`, `beta_5y`, `calmar_ratio`,
+`cash_conversion_cycle`, `dps_grossed_up`, `eps_cagr_7y`, `eps_cagr_10y`,
+`ev_fcf`, `fcf_per_share`, `max_drawdown_3y`, `ncavps`,
+`net_debt_per_share`, `ocf_per_share`, `payables_days`, `pcf_ratio`,
+`pe_5y_avg`, `peg_ratio`, `pretax_margin`, `revenue_per_employee`,
+`revenue_per_share`, `sortino_1y`, `tax_rate_effective`, `tbvps`.
 
-```bash
-cd /opt/asx-screener && sudo -u postgres psql asx_screener -f /tmp/census.sql
+**37 columns frozen**, 969 to 7,656 rows (2.9% – 22.6%). Largest:
+`p_fcf_ratio` 7,656; `volatility_3y` 6,575; `equity_multiplier` 6,505;
+`avg_ebit_10y` 6,504; `avg_roe_10y` 6,429; `cash_ratio` 6,327; `roaa`
+6,292; `roae` 6,290; `quick_ratio` 6,261; `ebit_growth_1y` 6,017.
+
+### The frozen values were computed by a method this codebase rejected
+
+Three window-length pairs are **inverted**:
+
 ```
+avg_roe_10y    6,429  >  avg_roe_7y    6,424
+avg_roce_10y   6,405  >  avg_roce_7y   6,404
+avg_ebit_10y   6,504  >  avg_ebit_5y   6,502
+```
+
+Under `average_over` — the exactly-*n*-named-fiscal-years contract the
+written `avg_*` columns use — a longer window is strictly harder to
+satisfy, so a 10-year count **can never exceed** a 7-year count. This
+ordering is only producible by the superseded `_avg` helper, which took the
+last *n* list entries and dropped Nones before averaging.
+
+That helper's own docstring records what it was replaced for:
+
+> a company reporting 2016, 2019, 2022 had its "3-year average" computed
+> across seven years … `avg_roe_3y` could be a single year's ROE labelled
+> as three
+
+So these are not merely undated values. They are values produced by a
+method the project identified as defective and replaced — still sitting on
+rows restamped as freshly computed.
+
+### Severity
+
+The two populations need different handling:
+
+- **Dead (27)** — a consumer reads NULL everywhere. No wrong answer is
+  served. Populate or drop; low urgency.
+- **Frozen (37)** — a consumer reads a number computed by rejected logic,
+  on up to 22.6% of rows, with the row's own `computed_at` asserting it is
+  current. This is the one to fix, and the fix is the one the file already
+  applies to five retired return columns: write explicit NULLs.
 
 Fix: write explicit NULLs for every retired column, exactly as the five
 return columns already are — not a schema drop, because dropping loses the
@@ -374,4 +414,5 @@ populated on 18% of rows looks like a metric with coverage gaps.
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |
 | 6a | Dead schema: `peg_ratio`, `beta_1y` never populated | `market.yearly_metrics` | CONFIRMED |
 | 6b | Frozen values restamped today — all 6,261 rows `computed_at` = today | `market.yearly_metrics` | **PROVEN** |
-| 6c | Census of the remaining 57 unwritten columns | `market.yearly_metrics` | OPEN — query ready |
+| 6c | Census complete: 27 dead, 37 frozen | `market.yearly_metrics` | CONFIRMED |
+| 6d | Frozen values produced by the SUPERSEDED `_avg` (window inversions prove it) | `market.yearly_metrics` | **CONFIRMED** |

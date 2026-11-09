@@ -632,3 +632,1262 @@ columns:
         pb_ratio above is absent with it.
       unit: AUD per share
       status: written-conditional
+
+    # ══════════════════════════════════════════════════════════════════════
+    # NOT WRITTEN — 103 columns, ALL DEAD
+    # ══════════════════════════════════════════════════════════════════════
+    # compute/engine/daily_compute.py is the only writer and assigns none of
+    # these keys, so they appear in neither the dynamic INSERT list nor the
+    # DO UPDATE SET.
+    #
+    # Census 9 November 2026: ALL 103 ARE ZERO. Nothing has ever written
+    # them. Unlike market.yearly_metrics -- where 37 of 64 unwritten columns
+    # hold frozen values from a retired code path -- this table carries no
+    # stale numbers. Every one of these reads NULL for every company on
+    # every date.
+    #
+    # That is the honest outcome, but it makes the table two-thirds schema
+    # with no producer: 147 columns, 44 ever written.
+    #
+    # Note for consumers: the covering index idx_cm_screener INCLUDEs
+    # altman_z_score and short_interest_pct, both of which are in this list.
+    # The index carries permanently-NULL columns, and any screen filtering
+    # on them matches nothing.
+    #
+    # See database/stm/OPEN_FINDINGS.md section 7.
+
+    pe_forward:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    pcf_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    pfcf_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ev_sales:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ev_fcf:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    peg_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    earnings_yield:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    graham_number:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ncavps:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    pb_x_pe:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roic:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    croic:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ebit_margin:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    earning_power:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    asset_turnover:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    inventory_turnover:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    receivables_turnover:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    payables_turnover:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    working_capital_turnover:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    debtor_days:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    dpo:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    dio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    cash_conversion_cycle:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    working_capital_days:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    revenue_growth_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    revenue_growth_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    revenue_growth_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    profit_growth_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    profit_growth_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    profit_growth_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_growth_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_growth_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_growth_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_growth_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_growth_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ebitda_growth_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ebitda_growth_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    fcf_growth_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    fcf_growth_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    mcap_growth_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    mcap_growth_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roe_avg_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roe_avg_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roe_avg_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roe_avg_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roce_avg_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roce_avg_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roce_avg_7y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    roce_avg_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    opm_avg_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    opm_avg_10y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    rev_qoq_growth:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    profit_qoq_growth:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    rev_sequential_growth:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    profit_sequential_growth:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    net_debt_to_equity:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    debt_to_assets:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    quick_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    working_capital:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    financial_leverage:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    debt_capacity:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    leverage_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    fcf:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    fcf_per_share:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    capex_to_sales:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ocf_to_debt:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    dividend_avg_5y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    dividend_growth_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    g_factor:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    altman_z_score:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    beneish_m_score:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    beta_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    beta_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    sharpe_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    sortino_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    max_drawdown_1y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    max_drawdown_3y:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    fall_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_last_year:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    eps_preceding_year:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    director_holding_pct:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    institutional_pct:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    retail_pct:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    short_interest_pct:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    short_interest_change_1w:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    short_interest_change_1m:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    aisc_per_oz:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    reserve_life_years:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    nav_per_share:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ffo_per_unit:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    affo_per_unit:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    nta_per_unit:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    price_to_nta:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    gearing_ratio:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    wale_years:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    occupancy_pct:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ffo_yield:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    ev_per_employee:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    mcap_to_sales:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    mcap_to_cashflow:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    mcap_to_quarterly_profit:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    intrinsic_value:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema
+
+    price_to_intrinsic_value:
+      source_system: n/a
+      source_table: n/a
+      source_column: n/a
+      derivation_formula: "not written - the engine never assigns this key"
+      transformation_rule: NOT WRITTEN by compute/engine/daily_compute.py
+      business_rule: >
+        DEAD SCHEMA. Zero rows carry a value, confirmed by census over the
+        whole table. The column promises a metric that has no producer, and
+        a consumer reading it gets NULL for every company and every date.
+      status: NOT WRITTEN - dead schema

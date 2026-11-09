@@ -750,7 +750,7 @@ newly listed stock is being excluded from bullish screens by a measured
 
 **Table:** `screener.universe` (376 columns)
 **Writers:** nine, per the lineage graph — one INSERT, eight UPDATE-in-place
-**Status:** CONFIRMED from code; production NULL counts pending
+**Status:** MEASURED 10 Nov 2026 — nine are empty as stated, and the tenth is WORSE
 **Guard:** `backend/tests/test_universe_column_has_a_writer.py` (9 tests)
 
 ### How the question was asked
@@ -828,21 +828,167 @@ and names the seven modules rather than passing.
 needs its own finding, because adding one is shipping a column the product
 cannot populate.
 
+### Measured, 2,566 rows
+
+```
+rows  short_name listing_date fcps pay_date dps_fy0 dps_fy1
+2566           0            0    0        0       0       0
+
+      analyst_upside shares_float price_to_52w_high  adl
+                   0            0              2290    0
+```
+
+Nine of the ten are empty for every company, as stated.
+
+### `price_to_52w_high` — the claim above was WRONG, and the truth is worse
+
+It is populated on 2,290 of 2,566 rows. No writer was missed: there is none.
+`monthly_compute.py` writes a same-named column on `market.monthly_metrics`,
+which is a different column.
+
+Migration `052_screener_universe_tier3_inline_calcs.sql` adds six columns and
+backfills none of them. The other five — `price_to_52w_low`, `fcf_per_share`,
+`ocf_per_share`, `revenue_per_share`, `working_capital` — are all in the
+builder's INSERT. `price_to_52w_high` is the one that was left out when the
+batch was wired up.
+
+The consequence follows from the builder's own comment:
+
+> The upsert can only add or update — it never removes.
+
+The statement is `INSERT ... ON CONFLICT DO UPDATE`, and this column is in
+neither the insert list nor the SET list. An existing row's value is
+therefore **never touched by any run**. It is frozen at whatever wrote it,
+whenever that was, for as long as the row survives — and the only DELETE in
+the job removes excluded security types, not ordinary companies.
+
+2,290 frozen and 276 NULL is the shape that predicts: a population carried
+from an older build, plus the companies listed since, which take the NULL an
+omitted column gets on first insert.
+
+So this is not a dead column. It is a **stale value served as current**
+through a registered filter, a sort column and a response field — which is
+strictly worse than empty, because empty is visible and stale is not.
+
+A filter over it does return rows. They are ranked and selected on a ratio
+computed against a 52-week high from an unknown earlier date, beside a
+`price` and a `high_52w` in the same row that were refreshed today.
+
+### Why the guard still reported it correctly
+
+`test_universe_column_has_a_writer` asserts that a statement writes each
+column. It does not assert that the column is NULL, and it should not: those
+are different properties and only the first is checkable from the code. The
+measurement is what distinguishes "empty" from "frozen", and the finding was
+written before the measurement came back.
+
+This is the same lesson as the yearly_metrics census — 37 columns there were
+not dead but frozen, restamped `computed_at` by a writer that no longer
+produced them. A column with no writer and a non-zero count is a staleness
+finding, not a coverage one.
+
 ### Pending
 
-Production NULL counts for all ten, which decide whether `price_to_52w_high`
-needs containment now or at the fix:
+How far the frozen ratio has drifted from the row it sits in. `price` and
+`high_52w` are refreshed every run, so recomputing the ratio from the same
+row and differencing it measures the staleness directly:
 
 ```sql
-SELECT count(*) AS rows,
-       count(short_name), count(listing_date),
-       count(franking_credit_per_share), count(pay_date),
-       count(dps_fy0), count(dps_fy1), count(analyst_upside),
-       count(shares_float), count(price_to_52w_high), count(adl)
-  FROM screener.universe;
+SELECT count(*) AS have_stored,
+       count(*) FILTER (
+         WHERE abs(price_to_52w_high - (price / NULLIF(high_52w, 0))) > 0.01
+       ) AS differs_gt_1pct,
+       max(abs(price_to_52w_high - (price / NULLIF(high_52w, 0)))) AS max_diff
+  FROM screener.universe
+ WHERE price_to_52w_high IS NOT NULL
+   AND price IS NOT NULL AND high_52w > 0;
 ```
 
 2,566 rows, ordinary table, one statement: safe.
+
+Containment is not a question of whether to fix it but of which fix. Wiring
+the column into the INSERT and the SET list corrects every row on the next
+run and is four lines. Until then the stored value should not be served:
+a frozen ratio presented beside a current price is a wrong answer, where a
+NULL would have been an honest one.
+
+## 12. Market-cap tier flags report unknown as six measured falses
+
+**Table:** `screener.universe`
+**Writer:** `scripts/eodhd/v2/build_screener_universe.py` (INSERT)
+**Status:** MEASURED 10 Nov 2026 — 641 of 2,566 rows (25.0%)
+
+### The mechanism
+
+The six tier flags and the tier label are computed from the same input and
+disagree about what an absent input means:
+
+```sql
+COALESCE(vs.market_cap >= 50000000000, FALSE)  AS is_mega
+COALESCE(vs.market_cap >= 10000000000
+     AND vs.market_cap <  50000000000, FALSE)  AS is_large
+...
+CASE WHEN vs.market_cap >= 50000000000 THEN 'mega'
+     ...
+     WHEN vs.market_cap > 0            THEN 'nano'
+     ELSE NULL END                             AS market_cap_tier
+```
+
+`market_cap_tier` returns NULL for an unknown cap, which is honest. The six
+flags wrap the comparison in `COALESCE(..., FALSE)`, so a NULL market cap is
+written as a measured `false` on all six.
+
+The schema removes the alternative: all six are `NOT NULL DEFAULT false`, so
+an honest unknown is not storable in them even if the expression wanted to
+write one.
+
+### Measured
+
+```
+rows  cap_null  cap_not_positive  tier_null  no_tier_flag
+2566       639                 2        641           641
+```
+
+641 companies — 25.0% of the universe — carry six falses and a NULL tier.
+The two counts agree exactly, which confirms the flags and the label are
+computed from the same input and differ only in how they report its absence.
+
+### Consequence, and why it is narrower than finding 10
+
+Three consumers read these flags, and all three test `= TRUE`:
+
+- `app/api/v1/routes/market.py:109-118` — cap-tier filter
+- `app/api/v1/routes/market.py:326-331` — the same filter on a second endpoint
+- `app/api/v1/routes/admin.py:1928-1929`
+
+`= TRUE` is the safe direction. No company is reported as belonging to a tier
+it does not belong to. What happens instead is that a quarter of the universe
+is invisible to every tier filter, and there is no "unknown" tier to ask for,
+so the omission is not visible from the API either. Asking for all six tiers
+in turn returns 1,925 of 2,566 companies with nothing stating that 641 were
+not classified rather than not matching.
+
+None of the seven columns is a registered screener field in `ALLOWED_FIELDS`,
+so the customer-facing screener does not expose them directly.
+
+A consumer written as `NOT is_mega` — none exists today — would read all 641
+as positively not-mega, and that is the shape finding 10 describes.
+
+### Why market_cap is absent for 639 rows
+
+Not established. `vs.market_cap` comes from `market.valuation_snapshot`,
+joined on its primary key, so the absence is in the source rather than the
+join. Whether those are suspended securities, recent listings, or companies
+whose shares-outstanding never arrived is a separate question from how the
+absence is reported, and is not answered here.
+
+### Requirement
+
+The same one finding 10 states: unknown must stay distinguishable from a
+measured false. Here the type system is in the way, so the fix is either a
+nullable flag or — more simply — consumers reading `market_cap_tier`, which
+already carries the distinction, and the flags being documented as a
+derived convenience that cannot express it.
 
 ## Tracking
 
@@ -864,4 +1010,5 @@ SELECT count(*) AS rows,
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
 | 9 | Half assigned by row position: 1,827 of 32,263 company-years (5.7%) misassigned, 1,024 companies on `{4}` alone | `market.halfyearly_metrics` | MEASURED — fix before HoH is relied on |
 | 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |
-| 11 | Ten columns no statement writes; `price_to_52w_high` is a live filter, sort and response field | `screener.universe` | **CONFIRMED** from code — NULL counts pending |
+| 11 | Ten columns no statement writes. Nine are empty; `price_to_52w_high` is FROZEN on 2,290 of 2,566 rows and served through a live filter, sort and response field | `screener.universe` | **MEASURED** — stale, not dead |
+| 12 | Unknown market cap written as six measured falses; 641 of 2,566 rows (25%) invisible to every tier filter | `screener.universe` | **MEASURED** — consumers all test `= TRUE`, so omission not misstatement |

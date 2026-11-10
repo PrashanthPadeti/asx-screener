@@ -76,12 +76,18 @@ def insert_columns() -> list[str]:
     return [c.strip() for c in body.split(",") if c.strip()]
 
 
-def conflict_assignments() -> dict[str, str]:
-    """column -> the right-hand side it is assigned on conflict."""
+def conflict_assignment_list() -> list[tuple[str, str]]:
+    """(column, right-hand side) in statement order, duplicates kept.
+
+    A list rather than a dict, because a dict silently keeps the last of a
+    repeated assignment. Postgres rejects a duplicate in SET, so the defect
+    is a statement that fails at run time -- which, for this statement, is
+    the one that publishes the universe.
+    """
     lines = _lines()
     at = next(i for i, ln in enumerate(lines)
               if "ON CONFLICT" in ln and "screener.universe" not in ln)
-    out = {}
+    out = []
     for i in range(at + 1, len(lines)):
         raw = lines[i].strip()
         if raw.startswith('"""') or raw.endswith('"""'):
@@ -89,8 +95,13 @@ def conflict_assignments() -> dict[str, str]:
         m = re.match(r"^\s*([a-z_][a-z0-9_]*)\s*=\s*(.+?),?\s*$",
                      _strip(lines[i]))
         if m:
-            out[m.group(1)] = m.group(2).strip()
+            out.append((m.group(1), m.group(2).strip()))
     return out
+
+
+def conflict_assignments() -> dict[str, str]:
+    """column -> the right-hand side it is assigned on conflict."""
+    return dict(conflict_assignment_list())
 
 
 def select_expressions() -> dict[str, str]:
@@ -132,6 +143,25 @@ def test_the_parsed_populations_are_the_real_ones():
     assert len(sets) == EXPECT_SET_COLUMNS, (
         f"{len(sets)} conflict assignments, expected {EXPECT_SET_COLUMNS}")
     assert len(set(cols)) == len(cols), "a column is inserted twice"
+
+
+def test_no_column_is_assigned_twice_on_conflict():
+    """Postgres rejects a repeated column in SET; this catches it first.
+
+    Found by a mutant that was meant to test something else. The dict-based
+    reading of the SET list silently kept the last of a pair, so a duplicate
+    was invisible to every other check in this file -- and the statement it
+    would break is the one that publishes the universe.
+    """
+    seen, dupes = set(), []
+    for column, _rhs in conflict_assignment_list():
+        if column in seen:
+            dupes.append(column)
+        seen.add(column)
+    assert not dupes, (
+        f"{dupes} appear more than once in ON CONFLICT DO UPDATE SET. "
+        f"Postgres rejects the statement, so the universe build fails at the "
+        f"moment it would publish.")
 
 
 def test_the_select_pairs_one_to_one_with_the_column_list():

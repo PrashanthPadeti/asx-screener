@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:units": "node --experimental-strip-types --no-warnings lib/metric-states.test.mts"
+    "test:units": "node --experimental-strip-types --no-warnings lib/metric-states.test.mts && node --experimental-strip-types --no-warnings lib/screener-operators.test.mts"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.1",

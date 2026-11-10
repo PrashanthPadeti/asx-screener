@@ -615,26 +615,13 @@ const CAP_TIER_RANGES: Record<CapTierKey, { gte?: number; lt?: number }> = {
 
 // ── Filter row types ──────────────────────────────────────────────────────────
 
+import { OPERATORS, operatorFor as resolveOperator } from '@/lib/screener-operators'
+
 interface FilterRow { id: number; field: string; operator: string; value: string }
 
 let nextId = 1
 
 // Operators by field type
-const OPERATORS: Record<string, { value: string; label: string }[]> = {
-  number:  [
-    { value: 'gte', label: '>=' },
-    { value: 'lte', label: '<=' },
-    { value: 'gt',  label: '>'  },
-    { value: 'lt',  label: '<'  },
-    { value: 'eq',  label: '='  },
-    { value: 'neq', label: '≠'  },
-  ],
-  boolean: [{ value: 'eq', label: 'is' }],
-  text:    [
-    { value: 'eq',  label: '=' },
-    { value: 'neq', label: '≠' },
-  ],
-}
 
 // ── Column picker popover ─────────────────────────────────────────────────────
 
@@ -1111,6 +1098,29 @@ export default function ScreenerPage() {
     if (ran) setResultsStale(true)
   }
 
+  // The operator to show and to send for a row, which are the same operator.
+  //
+  // The stored value is never rewritten. The previous version corrected it in
+  // the render body, and that is where the preset bug came from: the
+  // correction ran before the field list had loaded, every field resolved to
+  // 'text', 'gte' is not a text operator, and so each preset's operator was
+  // overwritten with 'eq' and persisted. By the time the field list arrived,
+  // 'eq' was valid for a number and nothing put the original back. Every
+  // preset opened reading "=" and matched nothing: market_cap = 50 wants a
+  // company capitalised at exactly fifty million dollars.
+  //
+  // Normalising for display instead of rewriting state keeps the two failure
+  // modes apart. An unknown field means "not loaded yet", and the answer is
+  // to leave the choice alone; an operator a known type cannot take is a
+  // real mismatch, and the answer is to show the first valid one.
+  //
+  // Used by the operator <select> and by buildApiFilters, so what the screen
+  // shows and what the request carries cannot disagree.
+  const operatorFor = useCallback((row: FilterRow): string =>
+    resolveOperator(row.operator,
+                    allFields.find(x => x.key === row.field)?.type),
+  [allFields])
+
   const applyPresetDirect = (preset: ScreenerPreset) => {
     const rows: FilterRow[] = preset.filters.map(f => ({
       id:       nextId++,
@@ -1299,9 +1309,9 @@ export default function ScreenerPage() {
         let value: string | number | boolean = f.value
         if (meta?.type === 'number') value = parseFloat(f.value)
         if (meta?.type === 'boolean') value = f.value === 'true'
-        return { field: f.field, operator: f.operator, value }
+        return { field: f.field, operator: operatorFor(f), value }
       }),
-  [filters, allFields])
+  [filters, allFields, operatorFor])
 
   // Core fetch function — accepts explicit sort so state-update latency is bypassed
   const fetchResults = useCallback(async (
@@ -2367,11 +2377,26 @@ export default function ScreenerPage() {
 
         {filters.map(f => {
           const meta   = allFields.find(x => x.key === f.field)
-          const ftype  = meta?.type || 'text'
+          // An UNKNOWN field type is not a text field.
+          //
+          // The field list and the preset list load as two independent
+          // promises. When presets won that race, applyPresetDirect set the
+          // filters while allFields was still empty, every field resolved to
+          // 'text' here, and 'gte' is not a valid text operator -- so the
+          // correction below rewrote the preset's operator to 'eq' and
+          // PERSISTED it. By the time the field list arrived, 'eq' was a
+          // valid number operator, so nothing ever put it back.
+          //
+          // That is why every preset opened reading "=" and returned nothing:
+          // market_cap = 50 matches a company capitalised at exactly fifty
+          // million dollars.
+          //
+          // So the fallback is only for a field we have metadata for and do
+          // not recognise. While the metadata is missing we render the
+          // number operators, which every preset filter uses, and correct
+          // nothing.
+          const ftype  = meta?.type ?? (allFields.length ? 'text' : 'number')
           const ops    = OPERATORS[ftype] ?? OPERATORS.text
-          // If the stored operator isn't valid for this field type, auto-correct to first valid op
-          const validOp = ops.find(o => o.value === f.operator) ? f.operator : ops[0].value
-          if (validOp !== f.operator) updateFilter(f.id, 'operator', validOp)
           const isBool = ftype === 'boolean'
           const isText = ftype === 'text'
 
@@ -2392,8 +2417,10 @@ export default function ScreenerPage() {
                 ))}
               </select>
 
-              {/* Operator */}
-              <select value={validOp}
+              {/* Operator — the stored value, not a guess corrected in
+                  render. If it is genuinely invalid for this field's type,
+                  the effect above fixes it once the metadata is loaded. */}
+              <select value={operatorFor(f)}
                 onChange={e => updateFilter(f.id, 'operator', e.target.value)}
                 className="text-sm border border-gray-300 rounded-lg px-2 py-1.5 bg-white
                            focus:outline-none focus:ring-2 focus:ring-blue-500 w-16">

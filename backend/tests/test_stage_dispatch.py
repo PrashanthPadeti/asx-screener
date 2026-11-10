@@ -20,6 +20,7 @@ Run under pytest, or standalone:
 import importlib.util
 import re
 import sys
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -73,7 +74,7 @@ def test_transform_prices_uses_the_nightly_incremental_window():
     atomicity of a path production does not take that night, and says nothing
     about whether the nightly sequence composes.
     """
-    argv = driver.dispatch("transform_prices", 42)
+    argv = driver.dispatch("transform_prices", 42, _FakeConn(date(2026, 11, 6)))
     assert "--from-date" in argv, (
         "transform_prices would run in full-replacement mode, which is not "
         "what the nightly pipeline does")
@@ -81,13 +82,75 @@ def test_transform_prices_uses_the_nightly_incremental_window():
     window = argv[argv.index("--from-date") + 1]
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", window), window
 
-    from datetime import datetime, timedelta, timezone
-    expected = (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
-    assert window == expected, (
-        f"the window is {window}, the nightly pipeline's is {expected}")
-
     for flag in ("--codes", "--allow-shrink"):
         assert flag not in argv, f"{flag} is not part of the nightly shape"
+
+
+class _FakeConn:
+    """Just enough connection to answer the watermark query."""
+
+    def __init__(self, watermark):
+        self._watermark = watermark
+
+    def cursor(self):
+        outer = self
+
+        class _Cur:
+            def execute(self, sql, *a):
+                assert "max(" in sql and "daily_prices" in sql, sql
+
+            def fetchone(self):
+                return (outer._watermark,)
+
+            def close(self):
+                pass
+
+        return _Cur()
+
+
+def test_the_window_comes_from_the_target_not_the_clock():
+    """The November 2026 defect, asserted as a property.
+
+    `today - 1 day` made a missed day permanently unrecoverable: the next
+    successful run asked only for its own yesterday, so 2-4 November were
+    never transformed even though staging held them throughout. The window
+    must be a statement about what the TARGET lacks.
+    """
+    stale_watermark = date(2026, 10, 30)
+    argv = driver.dispatch("transform_prices", 1, _FakeConn(stale_watermark))
+    window = date.fromisoformat(argv[argv.index("--from-date") + 1])
+
+    assert window <= stale_watermark, (
+        f"window {window} starts after the target's newest row "
+        f"{stale_watermark}; everything between them would be skipped")
+
+    today = datetime.now(timezone.utc).date()
+    assert window < today - timedelta(days=2), (
+        "the window tracks the clock, not the watermark: a target five days "
+        "behind would still be asked only for yesterday")
+
+
+def test_the_window_overlaps_the_watermark_so_late_corrections_land():
+    watermark = date(2026, 11, 6)
+    argv = driver.dispatch("transform_prices", 1, _FakeConn(watermark))
+    window = date.fromisoformat(argv[argv.index("--from-date") + 1])
+    assert window == watermark - timedelta(
+        days=driver.INCREMENTAL_OVERLAP_DAYS), window
+
+
+def test_an_unanswerable_window_widens_rather_than_narrows():
+    """Every failure mode must transform MORE, never less.
+
+    The work is an idempotent upsert, so over-repair costs seconds while
+    under-repair leaves a hole nothing goes back for. A fallback of
+    'yesterday' would reinstate the original defect in the one case where
+    the driver knows least.
+    """
+    for conn in (None, _FakeConn(None)):           # no connection; empty table
+        argv = driver.dispatch("transform_prices", 1, conn)
+        window = argv[argv.index("--from-date") + 1]
+        assert window == driver.WIDEST_WINDOW_START, window
+        assert date.fromisoformat(window).year < 2000, window
 
 
 def test_every_producer_is_told_the_run_it_belongs_to():

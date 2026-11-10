@@ -314,41 +314,119 @@ def require_publishable(health: SourceHealth) -> None:
 # atomicity work stands on its own; it is not what this run is testing.
 
 
-def _daily_window() -> str:
-    """The same incremental boundary the nightly pipeline uses."""
-    return (datetime.now(timezone.utc).date() - timedelta(days=1)).isoformat()
+#: Days re-transformed on every run, measured back from the target's newest
+#: row. The transform upserts on (asx_code, time), so overlap costs a little
+#: work and buys two things: a late correction in staging is picked up, and a
+#: run that lands on a Monday still re-checks the Friday before it.
+INCREMENTAL_OVERLAP_DAYS = 3
+
+#: Where the window starts when the target carries no rows, or when no
+#: connection was supplied. Early enough to mean "everything staging has".
+#:
+#: Deliberately NOT a narrow default. Every failure mode of this function
+#: should transform MORE than necessary, never less: the work is an
+#: idempotent upsert, so over-repair costs seconds, while under-repair leaves
+#: a hole that nothing goes back for. The November 2026 outage was exactly
+#: that second kind of mistake.
+WIDEST_WINDOW_START = "1990-01-01"
 
 
-#: stage name -> argv builder. Each takes the run id and returns a full argv.
+def _daily_window(conn) -> str:
+    """The incremental boundary, derived from the TARGET's watermark.
+
+    This used to be `today - 1 day`, taken from the clock. That made the
+    window a statement about when the run happened rather than about what the
+    target was missing, with one consequence: a day the pipeline failed to
+    process was skipped PERMANENTLY, because the next successful run asked
+    only for its own yesterday and nothing ever went back.
+
+    It is not a hypothetical. market.daily_prices held no rows for 2, 3 and 4
+    November 2026 — present in staging the whole time, 6,037 rows, never
+    transformed — because the runs that would have covered those days crashed
+    and the run that finally succeeded on the 7th asked for the 6th. The gap
+    was found by hand, eight days later.
+
+    Reading max() from the target instead makes a missed day self-healing:
+    whatever the target lacks since its newest row is what the next run
+    repairs, however many runs were lost in between.
+
+    There is deliberately NO upper bound on the catch-up. A cap would convert
+    a long outage into a silent partial repair, which is the failure above
+    wearing a different hat. A year behind means a year of upserts — minutes
+    of work, and the only correct amount.
+    """
+    if conn is None:
+        # A caller with no connection cannot ask the target anything. Widen
+        # rather than guess: see WIDEST_WINDOW_START.
+        log.warning("no connection supplied for the incremental window; "
+                    "falling back to %s, which re-transforms everything "
+                    "staging holds", WIDEST_WINDOW_START)
+        return WIDEST_WINDOW_START
+
+    cur = conn.cursor()
+    try:
+        # The same fixed +10 offset transform_prices wrote these rows at, so
+        # the watermark is the staging date it came from. 'Australia/Sydney'
+        # would shift by an hour across a DST boundary and could move the
+        # boundary a day.
+        cur.execute("SELECT max((time AT TIME ZONE INTERVAL '+10:00')::date) "
+                    "FROM market.daily_prices")
+        watermark = cur.fetchone()[0]
+    finally:
+        cur.close()
+
+    if watermark is None:
+        log.warning("market.daily_prices is empty; incremental window starts "
+                    "at %s", WIDEST_WINDOW_START)
+        return WIDEST_WINDOW_START
+
+    start = watermark - timedelta(days=INCREMENTAL_OVERLAP_DAYS)
+    log.info("incremental window: target watermark %s, transforming from %s "
+             "(%d day overlap)", watermark, start, INCREMENTAL_OVERLAP_DAYS)
+    return start.isoformat()
+
+
+#: stage name -> argv builder. Each takes the run id and a live connection,
+#: and returns a full argv.
+#:
+#: The connection is threaded through because an argument may legitimately
+#: depend on the state of the database — transform_prices' incremental window
+#: is derived from the target's watermark, not from the clock. Every builder
+#: takes it so the signature is uniform; most ignore it.
 STAGE_COMMANDS = {
-    "transform_prices": lambda rid: [
+    "transform_prices": lambda rid, conn: [
         PYBIN, "scripts/eodhd/v2/transforms/transform_prices.py",
-        "--from-date", _daily_window(), "--run-id", str(rid)],
-    "yearly_compute": lambda rid: [
+        "--from-date", _daily_window(conn), "--run-id", str(rid)],
+    "yearly_compute": lambda rid, conn: [
         PYBIN, "compute/engine/yearly_compute.py", "--run-id", str(rid)],
-    "daily_compute": lambda rid: [
+    "daily_compute": lambda rid, conn: [
         PYBIN, "compute/engine/daily_compute.py", "--run-id", str(rid)],
-    "technical_compute": lambda rid: [
+    "technical_compute": lambda rid, conn: [
         PYBIN, "compute/engine/technical_compute.py", "--run-id", str(rid)],
-    "halfyearly_compute": lambda rid: [
+    "halfyearly_compute": lambda rid, conn: [
         PYBIN, "compute/engine/halfyearly_compute.py", "--run-id", str(rid)],
-    "period_metrics_compute": lambda rid: [
+    "period_metrics_compute": lambda rid, conn: [
         PYBIN, "compute/engine/period_metrics_compute.py", "--run-id", str(rid)],
-    "universe_build": lambda rid: [
+    "universe_build": lambda rid, conn: [
         PYBIN, "scripts/eodhd/v2/build_screener_universe.py",
         "--run-id", str(rid)],
 }
 
 
-def dispatch(stage: str, run_id: int) -> list[str]:
-    """argv for one known stage. An unknown name is a defect, not a failure."""
+def dispatch(stage: str, run_id: int, conn=None) -> list[str]:
+    """argv for one known stage. An unknown name is a defect, not a failure.
+
+    `conn` is optional so the dispatch shape stays inspectable without a
+    database. A builder that needs it and does not get it must widen its own
+    behaviour rather than narrow it — see _daily_window.
+    """
     if stage not in STAGE_COMMANDS:
         raise PreconditionFailed(
             f"no command is defined for stage '{stage}'. The plan names a "
             f"stage this driver does not know how to run; add it to "
             f"STAGE_COMMANDS deliberately rather than letting the plan supply "
             f"an executable.")
-    return STAGE_COMMANDS[stage](run_id)
+    return STAGE_COMMANDS[stage](run_id, conn)
 
 
 def run_stage(label: str, argv: list[str]) -> None:
@@ -371,7 +449,7 @@ def run_producer(conn, plan, stage: str, run_id: int) -> None:
     Only stages the plan REQUIRES are checked for evidence. A plan may run a
     stage whose success is not a condition of publishing.
     """
-    run_stage(f"{stage} (plan {plan.name})", dispatch(stage, run_id))
+    run_stage(f"{stage} (plan {plan.name})", dispatch(stage, run_id, conn))
     if stage in plan.required:
         require_stage(conn, run_id, stage)
 

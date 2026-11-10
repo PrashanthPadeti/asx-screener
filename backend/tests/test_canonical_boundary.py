@@ -154,7 +154,9 @@ def test_the_parsed_stage_commands_match_the_driver_itself():
 
     parsed = {k: v.relative_to(cb.BACKEND).as_posix()
               for k, v in cb.stage_scripts().items()}
-    real = {stage: builder(1)[1]
+    # Builders take (run_id, conn); None is the no-database shape, which is
+    # all this comparison needs — it reads argv[1], the script path.
+    real = {stage: builder(1, None)[1]
             for stage, builder in module.STAGE_COMMANDS.items()}
     assert parsed == real, f"parsed {parsed}\nreal {real}"
 

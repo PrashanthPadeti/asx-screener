@@ -874,6 +874,42 @@ A filter over it does return rows. They are ranked and selected on a ratio
 computed against a 52-week high from an unknown earlier date, beside a
 `price` and a `high_52w` in the same row that were refreshed today.
 
+### FIXED 10 Nov 2026
+
+Three lines in `build_screener_universe.py`: the column at position 247 of
+the INSERT list, directly after `price_to_52w_low`; the SELECT expression at
+the same position, since the two lists bind by position and nothing else;
+and the conflict assignment.
+
+```sql
+CASE WHEN dp52.high_52w > 0
+     THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END AS price_to_52w_high
+...
+price_to_52w_high       = EXCLUDED.price_to_52w_high,
+```
+
+The `CASE` yields NULL when the high is absent, and the assignment takes
+`EXCLUDED` plainly, so a row whose high disappears has its stale ratio
+REPLACED by NULL rather than keeping it. A `COALESCE` with the stored value
+would have preserved the stale number whenever the new one could not be
+computed — the same defect in a form that looks like care.
+
+The guard is `test_universe_upsert_refreshes_every_column`, and it is
+deliberately not about this column: it asserts over all 342 that every
+inserted column is reassigned on conflict, that the only unlisted
+assignments are the two the builder deliberately revokes, that every
+assignment takes `EXCLUDED` plainly, that no column is assigned twice, and
+that every ratio guards its denominator. Seven mutants, seven killed.
+
+**Not yet proven in production.** A green test shows the statement changed;
+it does not show a value changed. `RELEASE_EVIDENCE_price_to_52w_high.md`
+carries the four acceptance steps, including the one that matters most: the
+builder upserts `companies_current` minus excluded types, so a universe row
+outside that population is touched by no run and keeps its frozen value.
+That count must be zero or explained before this finding closes.
+
+The other nine columns are unchanged and still unwritten.
+
 ### Why the guard still reported it correctly
 
 `test_universe_column_has_a_writer` asserts that a statement writes each
@@ -1010,5 +1046,5 @@ derived convenience that cannot express it.
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
 | 9 | Half assigned by row position: 1,827 of 32,263 company-years (5.7%) misassigned, 1,024 companies on `{4}` alone | `market.halfyearly_metrics` | MEASURED — fix before HoH is relied on |
 | 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |
-| 11 | Ten columns no statement writes. Nine are empty; `price_to_52w_high` is FROZEN on 2,290 of 2,566 rows and served through a live filter, sort and response field | `screener.universe` | **MEASURED** — stale, not dead |
+| 11 | Ten columns no statement writes. Nine remain empty; `price_to_52w_high` was FROZEN on 2,290 of 2,566 rows (91.1% wrong by >0.01, median error 0.10) and is **FIXED** | `screener.universe` | **PARTIALLY CLOSED** — ratio repaired, nine columns still unwritten |
 | 12 | Unknown market cap written as six measured falses; 641 of 2,566 rows (25%) invisible to every tier filter | `screener.universe` | **MEASURED** — consumers all test `= TRUE`, so omission not misstatement |

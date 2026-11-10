@@ -40,6 +40,26 @@ BACKEND = Path(__file__).resolve().parents[1]
 ROOT = BACKEND.parent
 MAPPINGS = ROOT / "database" / "stm" / "mappings"
 EMITTER = BACKEND / "scripts" / "stm" / "universe_sidecars.py"
+EVIDENCE = ROOT / "database" / "stm" / "evidence"
+
+#: The evidence scripts, in dependency order. universe_attrib reads the
+#: pairing and the updaters; universe_sections reads the attribution.
+EVIDENCE_SCRIPTS = (
+    "universe_pairs.py",
+    "universe_updaters.py",
+    "universe_attrib.py",
+    "universe_sections.py",
+    "universe_joins.py",
+)
+
+#: The evidence files those scripts produce.
+EVIDENCE_FILES = (
+    "universe_pairs.json",
+    "universe_updaters.json",
+    "universe_attrib.json",
+    "universe_sections.json",
+    "universe_joins.json",
+)
 
 #: The files the emitter owns. Listed, not globbed: a file that stops being
 #: emitted must fail here rather than quietly drop out of the comparison and
@@ -88,23 +108,52 @@ def _regenerate() -> tuple[Path, str]:
             f"it was deleted -- taking its columns out of the document -- or "
             f"EMITTED is stale.")
         shutil.copy2(src, backup / name)
+    for name in EVIDENCE_FILES:
+        src = EVIDENCE / name
+        assert src.exists(), (
+            f"{name} is missing from {EVIDENCE}. Run the evidence scripts "
+            f"in backend/scripts/stm/ from the repo root.")
+        shutil.copy2(src, backup / name)
 
     env = dict(os.environ, PYTHONIOENCODING="utf-8")
-    result = subprocess.run(
-        [sys.executable, str(EMITTER)], cwd=str(ROOT), env=env,
-        capture_output=True, text=True, encoding="utf-8", errors="replace")
-
     fresh = tmp / "fresh"
     fresh.mkdir()
     try:
+        # The EVIDENCE is regenerated too, and first.
+        #
+        # An earlier version ran only the emitter, which reads the committed
+        # evidence JSONs. When the builder gained a column, the evidence in
+        # the repo stayed at 341, the sidecars regenerated identically from
+        # it, and this test passed over a statement it no longer described.
+        # Checking a chain from its middle proves the middle.
+        out = []
+        for script in EVIDENCE_SCRIPTS:
+            step = subprocess.run(
+                [sys.executable, str(BACKEND / "scripts" / "stm" / script)],
+                cwd=str(ROOT), env=env, capture_output=True, text=True,
+                encoding="utf-8", errors="replace")
+            assert step.returncode == 0, (
+                f"{script} failed, so the evidence cannot be checked:\n"
+                f"{step.stdout}\n{step.stderr}")
+            out.append(step.stdout)
+
+        result = subprocess.run(
+            [sys.executable, str(EMITTER)], cwd=str(ROOT), env=env,
+            capture_output=True, text=True, encoding="utf-8",
+            errors="replace")
         assert result.returncode == 0, (
             f"the emitter failed, so the document cannot be checked at all:\n"
             f"{result.stdout}\n{result.stderr}")
+
         for name in EMITTED:
             shutil.copy2(MAPPINGS / name, fresh / name)
+        for name in EVIDENCE_FILES:
+            shutil.copy2(EVIDENCE / name, fresh / name)
     finally:
         for name in EMITTED:
             shutil.copy2(backup / name, MAPPINGS / name)
+        for name in EVIDENCE_FILES:
+            shutil.copy2(backup / name, EVIDENCE / name)
 
     return fresh, result.stdout
 
@@ -126,6 +175,25 @@ def test_the_emitted_sidecars_are_current():
         f"it into backend/scripts/stm/universe_prose.py -- a generated file "
         f"will destroy it on the next run and it will read as reviewed until "
         f"then.")
+
+
+def test_the_evidence_still_describes_the_statement():
+    """The committed evidence must match what the statement produces now.
+
+    This is the check whose absence let a stale 341-column pairing sit in
+    the repo while every other test passed. The sidecars are derived from
+    this evidence, so evidence that has drifted makes the whole document
+    describe a statement that no longer exists -- accurately, consistently
+    and wrongly.
+    """
+    fresh, _ = _regenerate()
+    stale = [name for name in EVIDENCE_FILES
+             if (EVIDENCE / name).read_text(encoding="utf-8")
+             != (fresh / name).read_text(encoding="utf-8")]
+    assert not stale, (
+        f"{stale} no longer describe the builder's statement. Run the "
+        f"evidence scripts in backend/scripts/stm/ from the repo root, then "
+        f"universe_sidecars.py, and commit both.")
 
 
 def test_every_emitted_file_is_listed():

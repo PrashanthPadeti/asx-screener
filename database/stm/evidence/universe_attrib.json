@@ -2662,11 +2662,13 @@
   {
    "ordinal": 237,
    "column": "price_to_52w_high",
-   "insert_expr": null,
-   "refreshed_on_conflict": false,
+   "insert_expr": "CASE WHEN dp52.high_52w > 0 THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END AS price_to_52w_high",
+   "refreshed_on_conflict": true,
    "governed": false,
-   "writers": [],
-   "unclaimed": true
+   "writers": [
+    "build_screener_universe.py (INSERT)"
+   ],
+   "unclaimed": false
   },
   {
    "ordinal": 238,
@@ -3769,7 +3771,7 @@
    "governed": false,
    "writers": [
     "build_screener_universe.py (INSERT)",
-    "build_screener_universe.py (UPDATE @2135)"
+    "build_screener_universe.py (UPDATE @2157)"
    ],
    "unclaimed": false
   },
@@ -4214,7 +4216,6 @@
   "dps_fy1",
   "analyst_upside",
   "shares_float",
-  "price_to_52w_high",
   "adl"
  ]
 }

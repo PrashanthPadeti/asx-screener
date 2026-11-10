@@ -8,7 +8,6 @@ and in no statement at all.
 Ten columns were in exactly that state. Each had a written sibling beside it,
 which is why none of them looked wrong:
 
-    price_to_52w_high           beside price_to_52w_low
     analyst_upside              beside analyst_upside_pct
     dps_fy0, dps_fy1            beside eps_fy0, eps_fy1
     franking_credit_per_share   beside franking_pct, grossed_up_yield
@@ -17,11 +16,18 @@ which is why none of them looked wrong:
     adl                         beside obv, cmf_20
     short_name                  beside company_name
 
-price_to_52w_high is a registered screener filter (screener.py ALLOWED_FIELDS),
-a sort column (SORT_COLUMNS) and a response field (schemas/screener.py). A
-filter over an all-NULL column returns nothing and reports no error; a sort by
-one orders every row by NULL. Nothing in the suite could see it, because
-nothing in the suite asked the question this file asks.
+A tenth, price_to_52w_high, was the same defect with a worse ending. It
+was a registered screener filter, a sort column and a response field, and
+it was NOT empty: measured at 2,290 of 2,566 rows populated and frozen,
+because it was in neither the INSERT list nor the ON CONFLICT SET list, so
+no run ever touched an existing row's value. Of the 1,837 rows that could
+be recomputed from their own price and high_52w, 1,674 (91.1%) were wrong
+by more than 0.01, median error 0.10 on a ratio whose useful range is 0-1.
+Fixed on 10 Nov 2026 and removed from KNOWN_UNWRITTEN below. Empty is
+visible; stale is not.
+
+Nothing in the suite could see any of this, because nothing in the suite
+asked the question this file asks.
 
 Three writer populations, reconciled
 ------------------------------------
@@ -75,7 +81,6 @@ KNOWN_UNWRITTEN = {
     "franking_credit_per_share",
     "listing_date",
     "pay_date",
-    "price_to_52w_high",
     "shares_float",
     "short_name",
 }
@@ -84,8 +89,8 @@ KNOWN_UNWRITTEN = {
 #: reconciliation checks: if an extraction returns materially less than this,
 #: the extraction broke and its silence is not evidence of coverage.
 EXPECT_TARGET_COLUMNS = 376
-EXPECT_INSERT_COLUMNS = 341
-EXPECT_CONFLICT_SET = 342
+EXPECT_INSERT_COLUMNS = 342
+EXPECT_CONFLICT_SET = 343
 EXPECT_UPDATE_ONLY_MIN = 20
 EXPECT_GOVERNED_MIN = 70
 

@@ -353,14 +353,16 @@ SECTION_PROSE: dict[str, dict] = {
             "AUD per share for the per-share columns; AUD MILLIONS for "
             "working_capital, per its column comment",
         "applicability":
-            "NULL when the share count is absent or not positive. "
-            "price_to_52w_high belongs to this migration batch (052) and is "
-            "FINDING 11: it is in neither the INSERT nor the ON CONFLICT SET "
-            "list, so an existing row's value is never touched by any run. "
-            "Measured 10 Nov 2026: frozen on 2,290 of 2,566 rows and served "
-            "through a registered filter, a sort column and a response "
-            "field. The other five columns of that batch are wired "
-            "correctly.",
+            "NULL when the share count is absent or not positive. All six "
+            "columns of migration 052 are now wired into the statement; "
+            "price_to_52w_high was not until 10 Nov 2026 and was FINDING "
+            "11 -- in neither the INSERT nor the ON CONFLICT SET list, so no "
+            "run ever touched an existing row's value. It was frozen on "
+            "2,290 of 2,566 rows, and of the 1,837 recomputable from their "
+            "own row, 1,674 (91.1%) were wrong by more than 0.01, median "
+            "error 0.10 on a ratio whose range is 0-1. It is now refreshed "
+            "every run, and a row whose 52-week high becomes unavailable has "
+            "its stale ratio REPLACED by NULL rather than keeping it.",
     },
 
     # ── Fundamentals ────────────────────────────────────────────────────────
@@ -929,6 +931,23 @@ COLUMN_PROSE: dict[str, dict] = {
             "column; committed separately it would be a governed mutation "
             "outside the atomic boundary. Companies with a NULL CAGR are "
             "excluded from the median and get NULL, not false.",
+    },
+
+    "price_to_52w_high": {
+        "business_rule":
+            "Price as a fraction of the 52-week high: 1.0 at the high, 0.9 "
+            "ten percent below it. Both inputs are on the same row and are "
+            "refreshed by the same run, so the ratio can always be checked "
+            "against the row that carries it -- which is how its four-month "
+            "staleness was finally measured.",
+        "applicability":
+            "The CASE guards the denominator, so an absent or non-positive "
+            "52-week high yields NULL, and the conflict assignment takes "
+            "EXCLUDED plainly -- meaning NULL REPLACES a previous value "
+            "rather than leaving it in place. That direction is the fix. A "
+            "COALESCE with the stored value here would preserve a stale "
+            "ratio whenever the new one could not be computed, which is the "
+            "same defect in a form that looks like care.",
     },
 
     "dollar_volume_avg_20d": {

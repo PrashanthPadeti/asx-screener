@@ -510,6 +510,9 @@ for _col, _rule, _unit in (
 
 # ── 10 that nothing writes ──────────────────────────────────────────────────
 
+#: price_to_52w_high was the tenth entry here until 10 Nov 2026. It is now
+#: written by the statement, so its prose lives with the section that
+#: contains it. Nine remain.
 _SIBLINGS = {
     "short_name": "company_name, carried from c.company_name",
     "listing_date": "years_listed, computed inline from cp.ipo_date",
@@ -546,43 +549,6 @@ for _col, _sib in _SIBLINGS.items():
         "writer_job": "(none)",
         "join_condition": "(none)",
     }
-
-COLUMN_PROSE_EXTRA["price_to_52w_high"] = {
-    "source_table": "(none -- no statement writes this column)",
-    "source_column": "(none)",
-    "derivation_formula":
-        "(none). Intended: price / high_52w, both present on this row.",
-    "transformation_rule":
-        "There is none. Migration 052 added six columns and backfilled "
-        "none; the other five -- price_to_52w_low, fcf_per_share, "
-        "ocf_per_share, revenue_per_share, working_capital -- were wired "
-        "into the builder's INSERT and this one was not.",
-    "business_rule":
-        "Price as a fraction of the 52-week high: 1.0 at the high, 0.9 ten "
-        "percent below it.",
-    "grain": "one row per asx_code",
-    "unit": "ratio, dimensionless",
-    "applicability":
-        _UNWRITTEN + " It is NOT empty, and that is what makes it the "
-        "serious one. Measured at 2,290 of 2,566 rows populated. Because "
-        "the statement is INSERT ... ON CONFLICT DO UPDATE and this column "
-        "is in NEITHER list, an existing row's value is never touched by "
-        "any run -- the builder's own comment states that the upsert can "
-        "only add or update, never remove, and the job's only DELETE drops "
-        "excluded security types. The value is FROZEN at whatever wrote it, "
-        "sitting beside a price and a high_52w that are refreshed daily. "
-        "2,290 frozen plus 276 NULL is the shape that predicts: an older "
-        "population, plus the companies listed since, which take the NULL "
-        "an omitted column gets on first insert. It is live on three "
-        "surfaces -- a registered filter (screener.py:457), a sort column "
-        "(screener.py:705) and a response field (schemas/screener.py:183) "
-        "-- so a filter over it returns rows selected on a stale ratio and "
-        "reports no error. A stale value served as current is worse than an "
-        "empty column, because empty is visible.",
-    "writer_job": "(none)",
-    "join_condition": "(none)",
-}
-
 
 # ── 25 lifecycle columns ────────────────────────────────────────────────────
 

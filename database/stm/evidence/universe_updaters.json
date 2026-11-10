@@ -246,6 +246,7 @@
   "pretax_margin",
   "price",
   "price_date",
+  "price_to_52w_high",
   "price_to_52w_low",
   "price_to_book",
   "price_to_cash_flow",
@@ -459,7 +460,7 @@
   },
   "backend/scripts/eodhd/v2/build_screener_universe.py": {
    "revenue_above_sector_median": [
-    2135
+    2157
    ]
   }
  },

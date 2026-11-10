@@ -42,15 +42,19 @@ EODHD / ASIC / ASX          the outside world
 
 Two further groups exist and are *not* part of the medallion flow:
 
-- **out-of-scope — 20 tables.** `meta.*`, `users.*`, and other operational
+- **out-of-scope — 21 tables.** `meta.*`, `users.*`, and other operational
   tables. They are written by the same jobs and carry no analytical
   content. `screener.saved_screens` is among them by declaration rather
   than by schema: it holds user-authored screen definitions keyed on
   `user_id`, written by an API route, and is not pipeline output.
-- **UNCLASSIFIED — 2 tables.** `market.ai_summaries` and
-  `market.scheduler_job_runs` are written by code and appear in no layer
-  declaration. They are reported rather than defaulted: a table that falls
-  into a layer by accident is a table nobody placed.
+- **UNCLASSIFIED — 0 tables.** Every write target is now declared.
+  `market.scheduler_job_runs` is per-run telemetry from
+  `app/workers/pipeline_tracker.py` and joins the control tables;
+  `market.ai_summaries` holds generated company summaries written on demand
+  by the companies API route, with no scheduled producer and no run
+  attribution, so it is not a computed measure. Both became visible only
+  when `app/` joined the lineage scan, and both would otherwise have
+  defaulted into a medallion layer on their schema name alone.
 
 ### A note on "intermediate and temp tables"
 

@@ -598,8 +598,30 @@ CANONICAL_LIBRARIES: dict[str, str] = {
 
 #: Directories that are not application code: virtualenvs, caches, the
 #: discovery worktree. Scanning them would report a dependency's own SQL.
+#:
+#: scripts/stm/ is here for a different reason and it is worth stating,
+#: because this file already carries one instance of the same mistake. The
+#: lineage and mapping tools READ the pipeline's SQL and carry it as data --
+#: `INSERT INTO screener.universe (` as a literal to locate, and
+#: `UPDATE\s+screener\.universe\b` as a pattern to match. A writer scan over
+#: them reports the analyser as a writer of the table it analyses.
+#:
+#: That is exactly how incremental_daily.py came to be quarantined as a
+#: latent canonical writer on the strength of a docstring line saying it does
+#: NOT write the table (see QUARANTINED_WRITERS above). An instrument must not
+#: join the system it measures, and being counted as a writer of the thing it
+#: reads is one way to join it.
+#:
+#: The exclusion is safe because of a property that is measured, not assumed:
+#: no file under scripts/stm/ both opens a connection AND contains
+#: write-shaped SQL. The two that connect (snapshot_schema.py,
+#: census_unwritten.py) read the catalogue and count rows and carry no write
+#: text at all; the four carrying write text (extract_lineage.py,
+#: generate_stm.py, universe_pairs.py, universe_updaters.py) never open a
+#: connection. test_the_stm_tooling_cannot_write_what_it_reads asserts it, so
+#: the exclusion stops being safe loudly rather than quietly.
 _NOT_OURS = ("__pycache__", ".git", "node_modules", "site-packages",
-             ".venv", "asx-venv", "tests")
+             ".venv", "asx-venv", "tests", "scripts/stm/")
 
 
 def output_writers() -> dict[str, set[str]]:

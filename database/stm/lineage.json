@@ -2,10 +2,7 @@
   "modules_scanned": 242,
   "modules_touching_tables": 142,
   "tables_written": 85,
-  "layer_conflicts": {
-    "market.ai_summaries": "market.ai_summaries is written by companies.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed.",
-    "market.scheduler_job_runs": "market.scheduler_job_runs is written by pipeline_tracker.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed."
-  },
+  "layer_conflicts": {},
   "by_table": {
     "financials.annual_balance_sheet": {
       "written_by": [
@@ -144,9 +141,9 @@
           ]
         }
       ],
-      "layer": "UNCLASSIFIED",
-      "layer_source": "none",
-      "layer_conflict": "market.ai_summaries is written by companies.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed."
+      "layer": "out-of-scope",
+      "layer_source": "declared",
+      "layer_note": "generated company summaries, written on demand by the companies API route and cached for display; no scheduled producer and no run attribution, so it is not a computed measure"
     },
     "market.analyst_ratings": {
       "written_by": [
@@ -714,9 +711,9 @@
           ]
         }
       ],
-      "layer": "UNCLASSIFIED",
-      "layer_source": "none",
-      "layer_conflict": "market.scheduler_job_runs is written by pipeline_tracker.py but appears in no layer declaration. Add it to TABLE_LAYER, TABLE_LAYER_GOLD or TABLE_LAYER_CONTROL deliberately \u2014 a table that defaults into a layer is a table nobody placed."
+      "layer": "control",
+      "layer_source": "declared",
+      "layer_note": "per-run telemetry written by app/workers/pipeline_tracker.py for the scheduler jobs; carries no business data"
     },
     "market.sector_benchmarks": {
       "written_by": [
@@ -1613,31 +1610,31 @@
           "table": "users.users",
           "alias": "u",
           "on": "u.id = nh.user_id",
-          "line": 1184
+          "line": 1217
         },
         {
           "table": "users.alerts",
           "alias": "a",
           "on": "at.alert_id = a.id",
-          "line": 1214
+          "line": 1247
         },
         {
           "table": "users.users",
           "alias": "u",
           "on": "u.id = a.user_id",
-          "line": 1214
+          "line": 1247
         },
         {
           "table": "screener.universe",
           "alias": "s",
           "on": "s.asx_code = a.asx_code",
-          "line": 1214
+          "line": 1247
         },
         {
           "table": "screener.universe",
           "alias": "s",
           "on": "s.asx_code = aa.asx_code",
-          "line": 1246
+          "line": 1279
         }
       ],
       "dynamic": []
@@ -3828,6 +3825,7 @@
       "writes": {},
       "reads": [
         "information_schema.columns",
+        "market.daily_prices",
         "screener.compute_run_finalizations"
       ],
       "joins": [],

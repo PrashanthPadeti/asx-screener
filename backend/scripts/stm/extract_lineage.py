@@ -160,6 +160,9 @@ TABLE_LAYER_CONTROL = {
                             "pipeline; carries no business data",
     "market.pipeline_step_runs": "per-step telemetry written by the daily "
                                  "pipeline; carries no business data",
+    "market.scheduler_job_runs": "per-run telemetry written by "
+                                 "app/workers/pipeline_tracker.py for the "
+                                 "scheduler jobs; carries no business data",
 }
 
 
@@ -183,12 +186,22 @@ TABLE_LAYER_UNIVERSE = frozenset({
     "screener.compute_run_finalizations",
 })
 
-#: In a pipeline schema and not pipeline output. Declared, not omitted, so
-#: "this is somebody's saved work, not a derived table" is on the record.
-TABLE_LAYER_USER_DATA = {
+#: In a pipeline schema and NOT pipeline output. Declared rather than
+#: omitted, so "this is not a derived table" is on the record instead of
+#: being inferred from a schema name.
+#:
+#: Both entries are written by request handlers under app/, on demand, with
+#: no run attribution and no schedule. They became visible only when app/
+#: joined SOURCE_TREES, and both would otherwise have defaulted into a
+#: medallion layer on their schema alone.
+TABLE_LAYER_NOT_PIPELINE = {
     "screener.saved_screens": "user-authored screen definitions, keyed on "
                               "user_id and written by the saved_screens API "
                               "route; not produced by any pipeline job",
+    "market.ai_summaries": "generated company summaries, written on demand "
+                           "by the companies API route and cached for "
+                           "display; no scheduled producer and no run "
+                           "attribution, so it is not a computed measure",
 }
 
 
@@ -215,9 +228,9 @@ def classify(table: str, modules: list) -> dict:
                 "layer_note": TABLE_LAYER_CONTROL[table]}
     if table in TABLE_LAYER_UNIVERSE:
         return {"layer": "Universe", "layer_source": "declared"}
-    if table in TABLE_LAYER_USER_DATA:
+    if table in TABLE_LAYER_NOT_PIPELINE:
         return {"layer": "out-of-scope", "layer_source": "declared",
-                "layer_note": TABLE_LAYER_USER_DATA[table]}
+                "layer_note": TABLE_LAYER_NOT_PIPELINE[table]}
 
     schema = table.split(".", 1)[0]
     base = LAYER_OF_SCHEMA.get(schema)

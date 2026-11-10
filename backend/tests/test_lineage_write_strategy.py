@@ -218,16 +218,34 @@ def _lineage() -> dict:
     return json.loads(LINEAGE_JSON.read_text(encoding="utf-8"))
 
 
+#: Write targets the lineage scan sees. Moved once, deliberately.
+#:
+#:   66  scripts/ and compute/ only
+#:   85  after app/ joined SOURCE_TREES on 10 Nov 2026
+#:
+#: The 19 added are written by request handlers and scheduled workers under
+#: app/. They were always there; the scan was not looking. That omission
+#: undercut every "nothing writes this column" claim made from the graph,
+#: because an absence proved nothing about a population that excluded a
+#: whole tree -- so the number moving was the point of the change, not a
+#: side effect of it.
+#:
+#: Finding 11 was re-checked against the wider population and still holds:
+#: screener.universe has exactly nine writers and none is under app/.
+EXPECT_TABLES_WRITTEN = 85
+
+
 def test_the_artifact_still_covers_the_same_table_population():
     """Reassembling f-strings must not add or lose write targets.
 
-    66 tables before the change and 66 after. A different number here means
-    the literal stream changed what it sees, and every count in the mapping
-    documents rests on it.
+    The number above is a reconciliation check, not a setting. Update it
+    only together with the reason it moved; a number edited to match
+    whatever the scan happened to produce is not a check of anything.
     """
-    assert _lineage()["tables_written"] == 66, (
-        "the write-target population moved; confirm deliberately rather "
-        "than updating this number to match")
+    assert _lineage()["tables_written"] == EXPECT_TABLES_WRITTEN, (
+        f"the write-target population moved to "
+        f"{_lineage()['tables_written']}; confirm deliberately and record "
+        f"why, rather than updating this number to match")
 
 
 def test_the_artifact_has_no_parse_errors_or_dynamic_targets():

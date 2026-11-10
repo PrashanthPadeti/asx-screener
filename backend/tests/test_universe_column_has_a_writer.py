@@ -309,6 +309,51 @@ def test_every_inserted_column_is_refreshed_on_conflict_except_the_key():
         f"first run they are frozen at their original value")
 
 
+def test_the_stm_tooling_cannot_write_what_it_reads():
+    """No mapping tool both connects to the database and carries write SQL.
+
+    canonical_boundary excludes scripts/stm/ from its tree-wide writer scan,
+    because these tools carry the pipeline's SQL as DATA -- `INSERT INTO
+    screener.universe (` as a literal to find, `UPDATE\\s+screener\\.universe`
+    as a pattern to match. Without the exclusion the analyser is reported as
+    a writer of the table it analyses, and SECOND PUBLICATION AUTHORITY fires
+    on an instrument.
+
+    An exclusion is a hole, so the property that makes it safe is asserted
+    here instead of assumed there. Two files connect and carry no write text;
+    four carry write text and never connect. A file that did both would be
+    excluded from the writer scan while being able to write, which is the one
+    combination the exclusion must not cover.
+
+    A read-only instrument has already OOM-killed this production database
+    once. "It only reads" is a claim that needs a check, not a comment.
+    """
+    stm = BACKEND / "scripts" / "stm"
+    assert stm.is_dir(), f"{stm} is missing"
+
+    connects = re.compile(r"psycopg|connect\(|DATABASE_URL")
+    writes = re.compile(
+        r"\b(INSERT\s+INTO|UPDATE\s+(?:ONLY\s+)?[a-z_]+\.|DELETE\s+FROM"
+        r"|TRUNCATE|CREATE\s+TABLE|MERGE\s+INTO)", re.IGNORECASE)
+
+    both, seen = [], 0
+    for path in sorted(stm.glob("*.py")):
+        seen += 1
+        src = path.read_text(encoding="utf-8")
+        if connects.search(src) and writes.search(src):
+            both.append(path.name)
+
+    assert seen >= 8, (
+        f"only {seen} files found under {stm}; the scan lost its population "
+        f"and an empty scan finds no violation")
+    assert not both, (
+        f"{both} both open a database connection and contain write-shaped "
+        f"SQL. canonical_boundary excludes this directory from its writer "
+        f"scan, so such a file could write a canonical output with no "
+        f"publication authority and nothing would report it. Split the "
+        f"reading from the writing, or remove the exclusion.")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     passed, failed = 0, []

@@ -57,25 +57,41 @@ def _layer_counts() -> Counter:
 
 
 def _assert_states(doc: Path, number: int, context: str, what: str,
-                   actual_label: str):
-    """The document must contain `number`, written with or without commas."""
+                   label: str):
+    """The document must state `number` NEXT TO `label`.
+
+    An earlier version searched the whole document for the number and
+    nothing else. That is a proxy, and it failed exactly as a proxy does:
+    when the Universe table count moved from 5 to 4 and out-of-scope from 19
+    to 20, both checks still passed, because "4" appears in "L4" and "20" in
+    "Gold 20 tables" elsewhere on the page. Two stale figures sat in a
+    published document under a green test.
+
+    The mutation run that was supposed to catch this did not, because the
+    mutants used values (64, 11) that happened to appear nowhere else. A
+    mutant chosen for convenience tests the convenience.
+
+    So the number and its label must appear within the same line, in either
+    order, separated by at most a short span of text.
+    """
     text = _text(doc)
-    plain = str(number)
-    grouped = f"{number:,}"
-    window = re.compile(
-        rf"(?<![\d,.]){re.escape(plain)}(?![\d,.])"
-        rf"|(?<![\d,.]){re.escape(grouped)}(?![\d,.])")
-    assert window.search(text), (
-        f"{doc.name} does not state {what} as {grouped}. "
-        f"{actual_label} is now {grouped}; the document says something else "
-        f"or nothing. Update the sentence about {context}.")
+    lab = re.escape(label)
+    num = (rf"(?<![\d,.])(?:{re.escape(str(number))}"
+           rf"|{re.escape(f'{number:,}')})(?![\d,.])")
+    near = re.compile(rf"(?:{lab}[^\n]{{0,70}}?{num}|{num}[^\n]{{0,70}}?{lab})",
+                      re.IGNORECASE)
+    assert near.search(text), (
+        f"{doc.name} does not state {what} as {number:,} anywhere near the "
+        f"words “{label}”. The artifact now says {number:,}. "
+        f"Update the sentence about {context}, and keep the figure beside "
+        f"its label so this check stays a check.")
 
 
 # ── Deliverable #3 against the run sheet ────────────────────────────────────
 
 def test_doc3_row_count():
     _assert_states(DOC3, len(_rows()), "the CSV companion",
-                   "the run sheet row count", "The run sheet")
+                   "the run sheet row count", "row")
 
 
 def test_doc3_cadence_counts():
@@ -84,7 +100,7 @@ def test_doc3_cadence_counts():
                     "plan:DAILY_CANONICAL",
                     "plan:FULL_FUNDAMENTALS_CANONICAL"):
         _assert_states(DOC3, counts[cadence], f"the {cadence} cadence",
-                       f"the {cadence} row count", f"{cadence}")
+                       f"the {cadence} row count", cadence)
 
 
 def test_doc3_scheduler_resolution_split():
@@ -92,10 +108,9 @@ def test_doc3_scheduler_resolution_split():
     unresolved = [r for r in sched if r["layer"] == "(unresolved)"]
     resolved = len(sched) - len(unresolved)
     _assert_states(DOC3, resolved, "scheduler jobs that resolve",
-                   "the resolved scheduler count", "Resolved scheduler jobs")
+                   "the resolved scheduler count", "resolve")
     _assert_states(DOC3, len(unresolved), "scheduler jobs that do not resolve",
-                   "the unresolved scheduler count",
-                   "Unresolved scheduler jobs")
+                   "the unresolved scheduler count", "do not resolve")
 
 
 def test_doc3_names_every_unresolved_scheduler_job():
@@ -116,14 +131,36 @@ def test_doc2_module_counts():
     lineage = _lineage()
     modules = lineage.get("by_module", {})
     _assert_states(DOC2, len(modules), "the lineage scan",
-                   "the module count", "Modules scanned")
+                   "the module count", "modules scanned")
 
 
 def test_doc2_layer_table_counts():
+    """Layer counts must be stated as "<layer> ... N tables", on one line.
+
+    The looser "number near label" rule was still a proxy here: when Universe
+    went from 5 tables to 4, the check passed on a coincidental `| 4 | ...
+    `universe`` in an unrelated findings table. A count of TABLES has to be
+    stated as a count of tables.
+
+    out-of-scope is included because it was previously not checked at all,
+    and its figure went stale (19 -> 20) with every test green.
+    """
     counts = _layer_counts()
-    for layer in ("Bronze", "Silver", "Gold", "Universe"):
-        _assert_states(DOC2, counts[layer], f"the {layer} layer",
-                       f"the {layer} table count", f"{layer} tables")
+    text = _text(DOC2)
+    wrong = []
+    for layer in ("Bronze", "Silver", "Gold", "Universe", "out-of-scope",
+                  "UNCLASSIFIED"):
+        n = counts[layer]
+        pattern = re.compile(
+            rf"{re.escape(layer)}[^\n]{{0,40}}?(?<![\d,.]){n}(?![\d,.])"
+            rf"\s*tables?\b", re.IGNORECASE)
+        if not pattern.search(text):
+            wrong.append(f"{layer}: artifact says {n}")
+    assert not wrong, (
+        f"{DOC2.name} does not state these layer sizes as "
+        f"“<layer> … N tables” on one line: {wrong}. Write the "
+        f"count as a count of tables beside its layer name, or this check "
+        f"matches any stray digit on the page.")
 
 
 def test_doc2_unclassified_tables_are_named():
@@ -143,9 +180,9 @@ def test_doc2_universe_shape():
     columns = snap["meta"]["counts"]["columns"]
     rows = snap["tables"][0][3]
     _assert_states(DOC2, columns, "screener.universe",
-                   "the universe column count", "screener.universe columns")
+                   "the universe column count", "columns")
     _assert_states(DOC2, rows, "screener.universe",
-                   "the universe row count", "screener.universe rows")
+                   "the universe row count", "rows")
 
 
 def test_doc2_join_cardinality_numbers():
@@ -154,11 +191,11 @@ def test_doc2_join_cardinality_numbers():
     limited = sum(1 for s in laterals if s["limit_1"])
     aggregated = sum(1 for s in laterals if s.get("aggregate_no_group"))
     _assert_states(DOC2, len(sources), "the join cardinality table",
-                   "the source count", "Sources in the statement")
+                   "the source count", "sources")
     _assert_states(DOC2, limited, "the join cardinality table",
-                   "the LIMIT 1 lateral count", "LIMIT 1 laterals")
+                   "the LIMIT 1 lateral count", "LIMIT 1")
     _assert_states(DOC2, aggregated, "the join cardinality table",
-                   "the aggregating lateral count", "Aggregating laterals")
+                   "the aggregating lateral count", "aggregate")
 
 
 # ── Both documents exist and are not stubs ──────────────────────────────────

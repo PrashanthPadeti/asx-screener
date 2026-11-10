@@ -950,7 +950,7 @@
         }
       ],
       "layer": "Universe",
-      "layer_source": "schema"
+      "layer_source": "declared"
     },
     "screener.compute_run_stages": {
       "written_by": [
@@ -968,7 +968,7 @@
         }
       ],
       "layer": "Universe",
-      "layer_source": "schema"
+      "layer_source": "declared"
     },
     "screener.compute_runs": {
       "written_by": [
@@ -993,7 +993,7 @@
         }
       ],
       "layer": "Universe",
-      "layer_source": "schema"
+      "layer_source": "declared"
     },
     "screener.saved_screens": {
       "written_by": [
@@ -1006,8 +1006,9 @@
           ]
         }
       ],
-      "layer": "Universe",
-      "layer_source": "schema"
+      "layer": "out-of-scope",
+      "layer_source": "declared",
+      "layer_note": "user-authored screen definitions, keyed on user_id and written by the saved_screens API route; not produced by any pipeline job"
     },
     "screener.universe": {
       "written_by": [
@@ -1070,7 +1071,7 @@
         }
       ],
       "layer": "Universe",
-      "layer_source": "schema"
+      "layer_source": "declared"
     },
     "staging_au.analyst_ratings": {
       "written_by": [

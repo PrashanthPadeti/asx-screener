@@ -37,13 +37,16 @@ EODHD / ASIC / ASX          the outside world
         │  build_screener_universe.py   one statement, 341 columns
         │  + 8 UPDATE-in-place modules
         ▼
-  screener.*                  UNIVERSE     5 tables
+  screener.*                  UNIVERSE     4 tables
 ```
 
 Two further groups exist and are *not* part of the medallion flow:
 
-- **out-of-scope — 19 tables.** `meta.*`, `users.*`, and other operational
-  tables. They are written by the same jobs and carry no analytical content.
+- **out-of-scope — 20 tables.** `meta.*`, `users.*`, and other operational
+  tables. They are written by the same jobs and carry no analytical
+  content. `screener.saved_screens` is among them by declaration rather
+  than by schema: it holds user-authored screen definitions keyed on
+  `user_id`, written by an API route, and is not pipeline output.
 - **UNCLASSIFIED — 2 tables.** `market.ai_summaries` and
   `market.scheduler_job_runs` are written by code and appear in no layer
   declaration. They are reported rather than defaulted: a table that falls
@@ -184,8 +187,10 @@ screener.universe                     376 columns, 2,566 rows
 screener.compute_runs                 one row per run
 screener.compute_run_stages           append-only stage evidence
 screener.compute_run_finalizations    one row per PUBLISHED run
-screener.saved_screens                user-defined screens
 ```
+
+`screener.saved_screens` sits in the same schema and is NOT in this
+layer. It is user data, declared out-of-scope rather than defaulted in.
 
 ### 5.1 How the row is built
 
@@ -243,7 +248,79 @@ is not.**
 
 ---
 
-## 6. What is NOT established
+## 6. Coverage denominators, reconciled
+
+A coverage figure is only as good as the number it divides by, so the
+denominators are recorded here with their provenance.
+
+### The three layers
+
+| Layer | Target columns | Authored | Coverage |
+|---|---|---|---|
+| Bronze -> Silver | 404 | 404 | 100% |
+| Silver -> Gold | 771 | 771 | 100% |
+| Gold -> Universe | 401 | 401 | 100% |
+| **Total** | **1,576** | **1,576** | **100%** |
+
+`generate_stm.py --fail-on-unmapped` exits 0 against these.
+
+### Gold -> Universe: 401, and where 542 came from
+
+An earlier figure of 542 for this layer was **never a measurement**. It was
+written into the STM generator's own docstring when the generator was
+authored (commit `be72c21`), before any snapshot of `screener.universe`
+existed, and it was corrected to 376 in `20bc4b3`. Nothing ever counted 542
+columns; no migration, snapshot or catalogue query produces that number.
+
+The measured figures reconcile exactly:
+
+```
+542   asserted, never measured
+-166  columns that were never in the table
+ 376  screener.universe, measured
+ +25  compute-run lifecycle columns added to the layer's scope
+ 401  Gold -> Universe target columns
+```
+
+`542 - 401 = 141`, and that difference is **two separate movements** rather
+than one: 166 columns removed because they did not exist, and 25 added
+because the layer covers more than one table.
+
+The 25 are `screener.compute_runs` (8), `screener.compute_run_stages` (11)
+and `screener.compute_run_finalizations` (6). They are in scope because they
+decide whether a universe row may be served at all, and a mapping document
+that described the row but not its publication contract would be describing
+half the surface.
+
+### Why 376 is trustworthy
+
+Four independent confirmations, none of them a restatement of another:
+
+- the production snapshot declares 376 columns and carries 376 rows
+- the ordinals are contiguous 1-376 with no duplicate names
+- the generator emitted exactly 376 rows for the table
+- `universe_writer.verify_storage()` reads `information_schema.columns` at
+  run time and refuses to write when a governed column is absent, so a
+  wrong column set would stop the pipeline rather than produce a document
+
+### A denominator that moved during this work
+
+The Gold -> Universe target set briefly became 1,577. Adding `app/` to the
+lineage scan made `screener.saved_screens` visible, and the `screener`
+schema resolved to "Universe" by a blanket schema rule, so a table of
+user-authored screen definitions joined the layer and the coverage could not
+close.
+
+That is the same defect the `market.*` split was fixed for, in a schema the
+UNCLASSIFIED guard did not cover. The Universe layer is now declared per
+table, `screener.saved_screens` is declared out-of-scope, and an undeclared
+`screener.*` table is UNCLASSIFIED rather than admitted.
+
+The episode is worth recording because the denominator was wrong in the safe
+direction for only one run: a 100% that was measured against a population
+missing a table reads exactly like a 100% that was not.
+
+## 7. What is NOT established
 
 Stated so that absence of a claim is not read as a clean finding:
 

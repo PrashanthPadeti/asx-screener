@@ -91,6 +91,8 @@ LAYER_OF_SCHEMA = {
     "staging_au": "Bronze",
     "financials": "Silver",
     "market":     "Silver/Gold",     # split per-table by TABLE_LAYER below
+    # Declared per table by TABLE_LAYER_UNIVERSE / TABLE_LAYER_USER_DATA, not
+    # by this entry. An undeclared screener.* table is UNCLASSIFIED.
     "screener":   "Universe",
 }
 
@@ -161,11 +163,41 @@ TABLE_LAYER_CONTROL = {
 }
 
 
+#: The Universe layer, declared per table rather than per schema.
+#:
+#: `screener` used to resolve to "Universe" by schema alone, and
+#: screener.saved_screens — user-authored screen definitions, keyed on
+#: user_id and written by an API route — defaulted into the layer on that
+#: rule. It then appeared as a target of the Gold->Universe mapping, where it
+#: had no snapshot and no derivation, and the layer's coverage could not
+#: close.
+#:
+#: That is the same defect the market.* split was fixed for, in a schema the
+#: UNCLASSIFIED guard did not cover. Declaring the four pipeline tables makes
+#: the next screener.* table somebody adds fail loudly instead of joining the
+#: medallion by accident.
+TABLE_LAYER_UNIVERSE = frozenset({
+    "screener.universe",
+    "screener.compute_runs",
+    "screener.compute_run_stages",
+    "screener.compute_run_finalizations",
+})
+
+#: In a pipeline schema and not pipeline output. Declared, not omitted, so
+#: "this is somebody's saved work, not a derived table" is on the record.
+TABLE_LAYER_USER_DATA = {
+    "screener.saved_screens": "user-authored screen definitions, keyed on "
+                              "user_id and written by the saved_screens API "
+                              "route; not produced by any pipeline job",
+}
+
+
 def classify(table: str, modules: list) -> dict:
     """Layer, and how it was decided — never a silent default.
 
-    Every market.* table must appear in exactly one declaration. One that
-    appears in none is UNCLASSIFIED and says so; it is not quietly assigned.
+    Every market.* and screener.* table must appear in exactly one
+    declaration. One that appears in none is UNCLASSIFIED and says so; it is
+    not quietly assigned.
 
     The previous version returned "Gold" for any unnamed market.* table, and
     that default was indistinguishable from a decision. It is how
@@ -181,12 +213,17 @@ def classify(table: str, modules: list) -> dict:
     if table in TABLE_LAYER_CONTROL:
         return {"layer": "control", "layer_source": "declared",
                 "layer_note": TABLE_LAYER_CONTROL[table]}
+    if table in TABLE_LAYER_UNIVERSE:
+        return {"layer": "Universe", "layer_source": "declared"}
+    if table in TABLE_LAYER_USER_DATA:
+        return {"layer": "out-of-scope", "layer_source": "declared",
+                "layer_note": TABLE_LAYER_USER_DATA[table]}
 
     schema = table.split(".", 1)[0]
     base = LAYER_OF_SCHEMA.get(schema)
     if base is None:
         return {"layer": "out-of-scope", "layer_source": "schema"}
-    if base != "Silver/Gold":
+    if base not in ("Silver/Gold", "Universe"):
         return {"layer": base, "layer_source": "schema"}
 
     return {"layer": "UNCLASSIFIED", "layer_source": "none",

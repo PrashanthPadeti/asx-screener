@@ -165,12 +165,12 @@ jobs touch no data" when the truth was that the lineage graph did not scan
 
 ## 6. The scheduler jobs
 
-Twenty jobs on cron triggers, from `app/scheduler_registry.py`. Fourteen now
-resolve to a module and carry real reads and writes; most write only
+Twenty jobs on cron triggers, from `app/scheduler_registry.py`.
+14 resolve to a module and carry real reads and writes; most write only
 `meta.job_heartbeat` because the worker delegates its real work to an engine
 module invoked separately.
 
-Six do not resolve: `fund_prices`, `anomaly_detect`, `capital_raise_scan`,
+6 do not resolve: `fund_prices`, `anomaly_detect`, `capital_raise_scan`,
 `mining_reit_metrics`, `top5_strategy`, `asx_companies`. Their data effects
 are **unknown**, not none. Closing that gap means either importing them in
 the registry the way the other fourteen are, or extending the parse.

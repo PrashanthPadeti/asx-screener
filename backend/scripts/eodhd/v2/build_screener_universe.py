@@ -229,7 +229,7 @@ INSERT INTO screener.universe (
 
     -- ── Per-share & working capital ──────────────────────────────────────────
     ocf_per_share, fcf_per_share, revenue_per_share,
-    working_capital, price_to_52w_low,
+    working_capital, price_to_52w_low, price_to_52w_high,
 
     -- ── Income statement history (annual levels, AUD millions) ───────────────
     gross_profit_fy0, gross_profit_fy1, gross_profit_fy3, gross_profit_fy5, gross_profit_fy7, gross_profit_fy10,
@@ -824,6 +824,27 @@ SELECT
     -- price position vs 52w low (1.0 = sitting at the low)
     CASE WHEN dp52.low_52w > 0
          THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low,
+    -- price position vs 52w high (1.0 = sitting at the high)
+    --
+    -- Migration 052 added six columns and backfilled none. The other five
+    -- were wired into this statement; this one was not, and because it was
+    -- in neither the column list nor the ON CONFLICT SET list below, an
+    -- existing row's value was never touched by any run. It froze at
+    -- whatever wrote it, beside a dp.close and a dp52.high_52w refreshed
+    -- daily, and was served through a registered filter, a sort column and
+    -- a response field.
+    --
+    -- Measured 10 Nov 2026 before this fix: 2,290 of 2,566 rows held a
+    -- value; of the 1,837 that could be recomputed from their own row,
+    -- 1,674 (91.1%) were wrong by more than 0.01, median error 0.10 on a
+    -- ratio whose useful range is 0-1, worst 0.93.
+    --
+    -- The CASE yields NULL when the high is absent or not positive, and the
+    -- SET below assigns EXCLUDED, so a row whose high disappears has its
+    -- stale ratio REPLACED by NULL rather than keeping yesterday's number.
+    -- That direction is the point of the fix, not a side effect of it.
+    CASE WHEN dp52.high_52w > 0
+         THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END AS price_to_52w_high,
 
     -- ── Income statement history (annual levels, AUD millions) ───────────────
     pnl0.gross_profit  AS gross_profit_fy0,
@@ -1890,6 +1911,7 @@ ON CONFLICT (asx_code) DO UPDATE SET
     revenue_per_share       = EXCLUDED.revenue_per_share,
     working_capital         = EXCLUDED.working_capital,
     price_to_52w_low        = EXCLUDED.price_to_52w_low,
+    price_to_52w_high       = EXCLUDED.price_to_52w_high,
     -- Income statement history (annual levels)
     gross_profit_fy0        = EXCLUDED.gross_profit_fy0,
     gross_profit_fy1        = EXCLUDED.gross_profit_fy1,

@@ -1610,31 +1610,31 @@
           "table": "users.users",
           "alias": "u",
           "on": "u.id = nh.user_id",
-          "line": 1217
+          "line": 1222
         },
         {
           "table": "users.alerts",
           "alias": "a",
           "on": "at.alert_id = a.id",
-          "line": 1247
+          "line": 1252
         },
         {
           "table": "users.users",
           "alias": "u",
           "on": "u.id = a.user_id",
-          "line": 1247
+          "line": 1252
         },
         {
           "table": "screener.universe",
           "alias": "s",
           "on": "s.asx_code = a.asx_code",
-          "line": 1247
+          "line": 1252
         },
         {
           "table": "screener.universe",
           "alias": "s",
           "on": "s.asx_code = aa.asx_code",
-          "line": 1279
+          "line": 1284
         }
       ],
       "dynamic": []
@@ -2027,7 +2027,7 @@
           "table": "screener.compute_run_finalizations",
           "alias": "f",
           "on": "f.run_id = r.id",
-          "line": 84
+          "line": 85
         }
       ],
       "dynamic": []

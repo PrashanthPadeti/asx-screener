@@ -140,15 +140,25 @@ def test_every_endpoint_accepts_unknown():
 # ── Nobody filters on a column that cannot say "unknown" ────────────────────
 
 def test_no_consumer_filters_on_the_boolean_tier_flags():
+    """Including a flag name built by interpolation.
+
+    An earlier version of this test matched the six literal names, and a
+    mutant writing `f"u.is_{tier} = TRUE"` survived it: the literal text
+    never contains "is_mega", so the matcher saw nothing. A column name
+    assembled at run time is still a column name, and the check has to look
+    for the shape rather than the spelling.
+    """
+    names = "|".join(FLAG_COLUMNS).replace("is_", "")
+    pattern = re.compile(
+        rf"\bis_(?:{names}|\{{[^}}]*\}})\s*=\s*TRUE", re.IGNORECASE)
     offenders = []
     for path in CONSUMERS:
         for lineno, line in enumerate(
                 path.read_text(encoding="utf-8").splitlines(), start=1):
             if line.lstrip().startswith("#"):
                 continue
-            for flag in FLAG_COLUMNS:
-                if re.search(rf"\b{flag}\b\s*=\s*TRUE", line, re.IGNORECASE):
-                    offenders.append(f"{path.name}:{lineno}")
+            if pattern.search(line):
+                offenders.append(f"{path.name}:{lineno}  {line.strip()[:60]}")
     assert not offenders, (
         f"{offenders} filter on a boolean tier flag. The flags store a "
         f"measured false where the market cap is unknown, so a company with "

@@ -27,7 +27,20 @@ jobs:
         # Rules are declared in backend/ruff.toml, not inherited from whatever
         # the newest ruff defaults to. compute/ is included because the
         # governed-metrics engine lives there and had never been linted at all.
-        run: cd backend && ruff check app/ compute/
+        #
+        # This list is the lint POPULATION, and until 11 Nov 2026 it was two
+        # of the four directories that hold Python here. A NameError shipped
+        # in scripts/ and blocked the universe build in production; F821 was
+        # selected and pinned the whole time and named all three call sites
+        # the moment it was pointed at the file. A verdict scoped to part of
+        # a tree says nothing about the rest, and said nothing about that.
+        #
+        # Everything under backend/ is now covered. Keep it that way:
+        # tests/test_lint_population_covers_the_backend.py fails if a
+        # directory of Python falls out of this command, and suspending a
+        # rule belongs in ruff.toml's per-file-ignores, where it is visible
+        # and counted, rather than here where it looks like a path list.
+        run: cd backend && ruff check app/ compute/ scripts/ tests/ worker.py
       - name: Type check
         run: cd backend && mypy app/ --ignore-missing-imports || true
 

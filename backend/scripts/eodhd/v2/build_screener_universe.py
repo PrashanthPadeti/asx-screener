@@ -2099,7 +2099,8 @@ def main():
     # expected population needs the identical rule, and two lists drift: Cycle
     # A held that producer to covering SUNPG, a capital note this build
     # deletes.
-    from compute.engine.serving_population import population_filter
+    from compute.engine.serving_population import (
+        EXCLUDED_COMPANY_TYPES, population_filter)
     code_filter, params = population_filter(args.codes, alias="c")
 
     from compute.engine.serving_population import current_source_predicate
@@ -2140,10 +2141,11 @@ def main():
             SELECT asx_code FROM market.companies_current
             WHERE COALESCE(company_type, '') IN %s
         )
-    """, (EXCLUDED_TYPES,))
+    """, (EXCLUDED_COMPANY_TYPES,))
     if cur.rowcount:
         log.info(f"Removed {cur.rowcount} non-equity securities "
-                 f"({', '.join(EXCLUDED_TYPES)}) from screener.universe")
+                 f"({', '.join(EXCLUDED_COMPANY_TYPES)}) "
+                 f"from screener.universe")
 
     # Post-processing: revenue_above_sector_median
     # True when a stock's revenue_growth_3y_cagr exceeds its sector's median.
@@ -2182,7 +2184,7 @@ def main():
         "universe_build",
         frozenset(expected_codes), frozenset(written_codes),
         {"scoped_to_codes": bool(args.codes),
-         "excluded_types": list(EXCLUDED_TYPES)})
+         "excluded_types": list(EXCLUDED_COMPANY_TYPES)})
     ok = report_population(cur, args.run_id, result, log)
 
     if not ok:

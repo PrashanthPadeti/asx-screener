@@ -97,5 +97,40 @@ extend-immutable-calls = [
 ]
 
 [lint.per-file-ignores]
-# Tests build deliberately malformed inputs and assert on them.
-"tests/*" = ["B011", "F841"]
+# Tests build deliberately malformed inputs and assert on them. B011/F841
+# predate 11 Nov 2026; the other three are the same pre-existing-finding
+# suspension as scripts/ below, counted the same day (F401 31, B905 9,
+# F541 2). The three B009/E401 findings tests/ also carried were fixed
+# rather than suspended, because ruff's fix for them is safe and changes no
+# behaviour.
+"tests/*" = ["B011", "F841", "F401", "F541", "B905"]
+
+# scripts/ joined the linted population on 11 Nov 2026, after a NameError in
+# scripts/eodhd/v2/build_screener_universe.py blocked the universe build in
+# production. `ruff check --select F821` names all three call sites of the
+# undefined name, at their exact lines, on the deployed file. The rule that
+# would have caught it was already selected and already pinned -- it simply
+# was not pointed at the directory where every pipeline producer lives. The
+# linter's verdict was scoped to app/ and compute/ and said nothing about
+# that scope, which is the whole defect.
+#
+# Entering with 70 pre-existing findings and a red gate would repeat the
+# 1,268-finding failure this file was written to end, so the four rules
+# involved are suspended HERE, with counts measured 11 Nov 2026, rather than
+# by narrowing the directory list. Clearing one means deleting its line.
+#
+#   F401 (34) unused import
+#   F541 (13) f-string with no placeholders
+#   F841  (8) assigned-but-never-used local
+#   B905 (15) zip() without strict=
+#
+# F401/F541/F841 are tidy-up. B905 is NOT: this file argues above that a
+# silently truncating zip() is exactly this project's failure mode, and 15
+# call sites in producers that write governed metrics is a real exposure.
+# Each one needs reading before strict= goes on, because strict=True turns a
+# length mismatch that is currently silent into a crash, and that is a
+# behaviour change in a nightly job -- it belongs in its own change, not in
+# the hotfix that extended this scope.
+#
+# Every rule NOT listed here -- F821 among them -- now applies to scripts/.
+"scripts/*" = ["F401", "F541", "F841", "B905"]

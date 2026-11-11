@@ -722,7 +722,7 @@ async def _output_freshness(db: AsyncSession) -> dict:
     endpoint must not let them read as such.
     """
     from compute.engine.output_freshness import (
-        ANCHORS, DAYS_UNAVAILABLE, classify, existence_sql, latest_sql,
+        ANCHORS, classify, existence_sql, latest_sql,
         observed_days_sql, summarise, unobservable_findings,
     )
 

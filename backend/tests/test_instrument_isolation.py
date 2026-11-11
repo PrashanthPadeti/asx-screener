@@ -114,8 +114,8 @@ def test_importing_the_app_starts_no_scheduler():
             f"a REAL scheduler was created in instrument mode: "
             f"{type(scheduler).__name__}")
         assert scheduler.get_jobs() == []
-        assert getattr(app.state, "schedulers_frozen") is True
-        assert getattr(app.state, "scheduler_jobs") == 0
+        assert app.state.schedulers_frozen is True
+        assert app.state.scheduler_jobs == 0
 
 
 def test_the_null_scheduler_records_what_it_refused():

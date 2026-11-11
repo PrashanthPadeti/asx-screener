@@ -40,7 +40,16 @@ row was examined.
 
 from __future__ import annotations
 
-from typing import Mapping, Optional
+from typing import TYPE_CHECKING, Mapping, Optional
+
+if TYPE_CHECKING:
+    # Only for the annotation on window_assessment below. At runtime the
+    # import happens inside that function, because applicability imports
+    # this module back; under TYPE_CHECKING there is no runtime import and
+    # so no cycle, while the annotation resolves for a reader and a type
+    # checker. Without this the name was undefined at module scope: the
+    # signature said "Assessment" and nothing could tell you what that was.
+    from compute.engine.applicability import Assessment
 
 import pandas as pd
 

@@ -359,7 +359,8 @@ def test_rows_written_is_no_longer_accepted_as_publication():
 # ── The driver's preconditions ───────────────────────────────────────────────
 
 def _driver():
-    import importlib.util, os
+    import importlib.util
+    import os
     from pathlib import Path as _P
     os.environ.setdefault("DATABASE_URL_SYNC", "postgresql://unused/unused")
     path = _P(__file__).resolve().parents[1] / "scripts" / "p0a_canonical_run.py"

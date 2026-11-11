@@ -297,3 +297,80 @@ Still unmet. Three canonical runs have now failed to reach the universe
 upsert, and `price_to_52w_high` has not been recomputed once. The thresholds
 in steps 2 to 4 are unchanged: `differs_gt_1pct` = 0 and
 `still_holding_a_value` = 0, measured in production, against 1,674 and 453.
+
+---
+
+## Acceptance in production (11 Nov 2026, run 49)
+
+v11.2.80 deployed; `daily_pipeline.py` completed in 59.1 min. `universe_build`
+reached the upsert for the first time since the finding was raised, covered
+2,567 of 2,567 expected by `asx_code`, and the canonical commit published
+2,117 rows under run 49 with read-back validation PASS — 80 governed metrics,
+0 attribution errors, 0 state/value contradictions, 0 payload mismatches.
+
+### Step 2 — MET
+
+```
+ have_stored | differs_gt_1pct | max_diff
+        1891 |               0 |   0.0001
+```
+
+Every stored ratio agrees with `price / high_52w` across the whole computable
+population. The residual 0.0001 is the quantisation of `ROUND(…, 4)` in the
+statement itself, not disagreement. **The frozen ratio is repaired in
+production.** Measured on the serving table, not on a branch.
+
+### Step 3 — NOT MET, and it is not this defect
+
+```
+ cannot_compute | still_holding_a_value
+            676 |                   520
+```
+
+453 before the fix, 520 after. The direction is not a regression in the
+repair, and the rows are not rows the build fails to reach — orphans against
+`market.companies_current` are **0**, and every one of the 520 carries
+`compute_run_id = 49` and today's `price_date`. They were written by this run.
+
+The mechanism, confirmed by grouping on the stored state:
+
+```
+ week_52_high state                                            | rows | high_present | ratio_present
+ (none — supplied)                                             | 2047 |         1891 |          1891
+ insufficient_data / insufficient_history                      |  393 |            0 |           393
+   "the series spans 196 days; a 52-week extreme needs 351"
+ … 9 further spans (195, 176, 168, 154, 106, 105, 91 days …)   |   57 |            0 |            57
+```
+
+In every withheld group `high_present` is 0 and `ratio_present` equals the
+row count. Not a correlation — the derivative survives in 100% of the rows
+where its input was withheld.
+
+This is the gap `compute/engine/metric_states.py:383-397` already records in
+writing. `week_52_high` is governed and stores into `high_52w`;
+`price_to_52w_high`, `price_to_52w_low`, `new_52w_high` and `new_52w_low` are
+functions of the extremes and are **not** governed, because assessing a
+derived metric from its input's assessment needs a producer that does not
+exist. So the canonical commit nulls the extreme, the derivative keeps the
+build's number, and the row is published and served.
+
+What the customer sees is worse than a stale value. The screener renders
+**52W High: —** beside **Price / 52W High: 0.9972**, and that 0.9972 was
+computed from a `MAX(high)` over 196 days. It is a six-month ratio labelled as
+a 52-week one, carrying a current run's attribution. The absence was
+established, stated, and destroyed one column over.
+
+Step 3 stays in this document and stays unmet, re-attributed: it is a true
+predicate detecting a real defect, but not the defect this document was
+opened for. Closing it requires the derived-metric producer named above —
+governance work with its own branch, its own gate and `new_52w_high` /
+`new_52w_low` additionally needing `BOOLEAN_METRICS` entries, or
+`storage_value` writes True/False into a numeric column.
+
+### Standing rule this meets again
+
+"Absence must survive to the customer." The previous instance destroyed
+unknown at the producer, the store, the API and the page. This one preserves
+it faithfully in `high_52w` and loses it in the column computed from
+`high_52w` — a governed input and an ungoverned derivative sitting in the same
+row, disagreeing about whether the fact exists.

@@ -2099,19 +2099,8 @@ def main():
     # expected population needs the identical rule, and two lists drift: Cycle
     # A held that producer to covering SUNPG, a capital note this build
     # deletes.
-    from compute.engine.serving_population import EXCLUDED_COMPANY_TYPES
-    EXCLUDED_TYPES = EXCLUDED_COMPANY_TYPES
-    base_filter = ("WHERE COALESCE(c.company_type, '') NOT IN "
-                   f"({', '.join(['%s'] * len(EXCLUDED_TYPES))})")
-    base_params = list(EXCLUDED_TYPES)
-
-    if args.codes:
-        placeholders = ",".join(["%s"] * len(args.codes))
-        code_filter = f"{base_filter} AND c.asx_code IN ({placeholders})"
-        params = base_params + [c.upper() for c in args.codes]
-    else:
-        code_filter = base_filter
-        params = base_params
+    from compute.engine.serving_population import population_filter
+    code_filter, params = population_filter(args.codes, alias="c")
 
     from compute.engine.serving_population import current_source_predicate
     sql = UPSERT_SQL.format(code_filter=code_filter,

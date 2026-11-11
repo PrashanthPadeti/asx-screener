@@ -128,17 +128,30 @@ def _interpolate(text: str) -> None:
     text % (("x",) * placeholders)
 
 
+def _population_filter(codes=None) -> tuple[str, list]:
+    """The builder's OWN filter, called -- not a copy of it.
+
+    An earlier version of this file rebuilt the WHERE clause from the same
+    recipe the builder uses. That made the arity test below pass against its
+    own reconstruction: a mutant that added a placeholder to the real
+    clause survived, because this file never looked at the real clause. A
+    guard written from an explanation tests the explanation.
+    """
+    sys.path.insert(0, str(BACKEND))
+    from compute.engine.serving_population import (     # noqa: E402
+        population_filter)
+    return population_filter(codes, alias="c")
+
+
 def _assemble_upsert() -> str:
     """The statement as main() builds it, from the real shared predicates."""
     sys.path.insert(0, str(BACKEND))
     from compute.engine.serving_population import (     # noqa: E402
-        EXCLUDED_COMPANY_TYPES, current_source_predicate)
+        current_source_predicate)
 
-    constants = _sql_constants(BUILDER)
-    base_filter = ("WHERE COALESCE(c.company_type, '') NOT IN "
-                   f"({', '.join(['%s'] * len(EXCLUDED_COMPANY_TYPES))})")
-    return constants["UPSERT_SQL"].format(
-        code_filter=base_filter,
+    clause, _ = _population_filter()
+    return _sql_constants(BUILDER)["UPSERT_SQL"].format(
+        code_filter=clause,
         current_source=current_source_predicate())
 
 
@@ -202,17 +215,16 @@ def test_the_assembled_upsert_carries_the_expected_parameters():
     statement with two `%s` and one parameter is the IndexError the broken
     run reported. Both are caught here, against the real excluded list.
     """
-    sys.path.insert(0, str(BACKEND))
-    from compute.engine.serving_population import (     # noqa: E402
-        EXCLUDED_COMPANY_TYPES)
-
-    assembled = _assemble_upsert()
-    expected = len(EXCLUDED_COMPANY_TYPES)
-    actual = assembled.count("%s")
-    assert actual == expected, (
-        f"the assembled upsert has {actual} placeholder(s) but main() passes "
-        f"{expected} parameter(s) when --codes is not given. psycopg2 raises "
-        f"IndexError when there are more placeholders than parameters.")
+    for codes in (None, ["BHP"], ["BHP", "CBA", "WES"]):
+        clause, params = _population_filter(codes)
+        assembled = _sql_constants(BUILDER)["UPSERT_SQL"].format(
+            code_filter=clause, current_source="TRUE")
+        actual = assembled.count("%s")
+        assert actual == len(params), (
+            f"with codes={codes} the assembled upsert has {actual} "
+            f"placeholder(s) and main() passes {len(params)} parameter(s). "
+            f"psycopg2 raises IndexError when there are more placeholders "
+            f"than parameters, from inside the driver, naming neither.")
 
 
 if __name__ == "__main__":

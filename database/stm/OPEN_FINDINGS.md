@@ -649,6 +649,40 @@ GROUP BY q.qtrs ORDER BY companies DESC;
 
 Small tables; safe.
 
+### Latest-row exposure — MEASURED 11 Nov 2026
+
+The 5.7% is a rate over company-YEARS of history. What reaches a customer is
+the LATEST half row per company, and that is a different and much smaller
+number:
+
+```
+ latest_matched | misassigned | in_universe | served_misassigned | served_with_a_value
+           1797 |          19 |        1797 |                 19 |                  10
+```
+
+**Ten companies** serve an HoH value drawn from a misassigned company-year.
+Not 5.7% of the customer base: ten rows.
+
+The historical rate did not transfer because the misassigning patterns --
+`{4}`, `{3,4}`, `{1,2}`, `{3}` -- are concentrated in older, sparser years.
+A company reporting all four quarters today lands on `{1,2,3,4}` or `{2,4}`,
+and the positional assignment is correct for those.
+
+**What this measurement does NOT establish.** 1,797 of 2,567 universe rows
+matched a quarter set for their latest half's fiscal year. The other 770
+have no quarterly rows for that year, so their assignment is UNVERIFIED by
+this method, not verified correct. The ten is a floor on exposure, not a
+ceiling.
+
+### Containment
+
+Ten rows is small enough that withholding is cheap and large enough that
+serving a mis-paired interval is not acceptable. The withholding rule must
+be the general one, not a list of ten codes: derive the half from the
+quarter number or the period end date, and withhold HoH wherever the derived
+half disagrees with the stored one. A hardcoded list goes stale on the next
+ingest; the rule does not.
+
 ### Acceptance criterion for any fix, restated
 
 Derive the half from the **quarter number or the period end date**, never
@@ -1018,6 +1052,40 @@ join. Whether those are suspended securities, recent listings, or companies
 whose shares-outstanding never arrived is a separate question from how the
 absence is reported, and is not answered here.
 
+### FIXED 11 Nov 2026, and reconciled
+
+All three consumers now read `market_cap_tier` from one declaration, and
+`unknown` is a selectable tier so those companies are askable-for rather
+than silently absent.
+
+```
+ tier      | count
+ nano      |   993
+ (unknown) |   642
+ micro     |   449
+ small     |   289
+ mid       |   130
+ large     |    48
+ mega      |    16
+                2567   = screener.universe
+```
+
+The seven partition the table exactly. No row is unaccounted for, and the
+unknown group is 25.0% of the universe — the figure that was previously
+reachable through no filter at all.
+
+Found while fixing it, and recorded as its own defect: `asx300` in
+`market.py` was `market_cap >= 300` with a comment reading "≥$300M".
+`screener.universe.market_cap` is RAW AUD, so the predicate meant three
+hundred dollars against a query that already required `market_cap > 0`. It
+admitted essentially the whole universe while presenting as a large-cap
+filter.
+
+The screener route had it right all along: `ALLOWED_FIELDS["market_cap"]`
+carries `"scale": 1_000_000` and `parsed_query` applies it, so its 22
+presets using values of 50 to 500 are correct. Two routes over one column
+disagreed about its unit, and only one of them scaled.
+
 ### Requirement
 
 The same one finding 10 states: unknown must stay distinguishable from a
@@ -1044,7 +1112,7 @@ derived convenience that cannot express it.
 | 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
 | 7b | 103 of 147 columns dead (all zero); covering index includes two | `market.computed_metrics` | CONFIRMED |
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
-| 9 | Half assigned by row position: 1,827 of 32,263 company-years (5.7%) misassigned, 1,024 companies on `{4}` alone | `market.halfyearly_metrics` | MEASURED — fix before HoH is relied on |
+| 9 | Half assigned by row position. 5.7% of company-years, but only **10 companies serve a mis-paired value today**; 770 of 2,567 unverified | `market.halfyearly_metrics` | MEASURED — exposure far smaller than the historical rate |
 | 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |
 | 11 | Ten columns no statement writes. Nine remain empty; `price_to_52w_high` was FROZEN on 2,290 of 2,566 rows (91.1% wrong by >0.01, median error 0.10) and is **FIXED** | `screener.universe` | **PARTIALLY CLOSED** — ratio repaired, nine columns still unwritten |
-| 12 | Unknown market cap written as six measured falses; 641 of 2,566 rows (25%) invisible to every tier filter | `screener.universe` | **MEASURED** — consumers all test `= TRUE`, so omission not misstatement |
+| 12 | Unknown market cap written as six measured falses; 642 of 2,567 rows (25%) were invisible to every tier filter | `screener.universe` | **FIXED** — consumers read the label, `unknown` selectable, seven tiers reconcile to 2,567 |

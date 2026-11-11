@@ -36,6 +36,50 @@ from app.schemas.market import (
 router = APIRouter()
 
 
+#: Cap-tier predicates, declared once because they were declared twice.
+#:
+#: Reads `market_cap_tier`, not the six boolean flags. The flags are
+#: `COALESCE(vs.market_cap >= <band>, FALSE)` written into columns declared
+#: NOT NULL DEFAULT false, so a company whose market cap is unknown is stored
+#: as a measured false on all six. `market_cap_tier` is computed from the
+#: same input by the same statement and returns NULL instead, so it is the
+#: one of the two that can express "we do not know".
+#:
+#: Measured 10 Nov 2026: 641 of 2,566 rows (25.0%) carried six falses and a
+#: NULL tier. Every consumer tested `= TRUE`, so no company was ever reported
+#: in a tier it was not in -- instead a quarter of the universe was invisible
+#: to every tier filter, and nothing in the response said so. `unknown` below
+#: is what makes those companies askable for.
+#:
+#: UNITS. `screener.universe.market_cap` is RAW AUD. The tier bands in
+#: build_screener_universe.py cut it at 50000000000 for mega, so there is no
+#: ambiguity about the scale. The previous `asx300` predicate was
+#: `market_cap >= 300` with a comment reading "≥$300M": three hundred
+#: dollars, against a query that already required `market_cap > 0`. It
+#: admitted essentially the whole universe. This is finding 4c's defect in a
+#: second place -- a threshold written in a unit the column does not use.
+CAP_TIER_SQL: dict[str, str] = {
+    "mega":    "AND market_cap_tier = 'mega'",
+    "large":   "AND market_cap_tier = 'large'",
+    "mid":     "AND market_cap_tier = 'mid'",
+    "small":   "AND market_cap_tier = 'small'",
+    "micro":   "AND market_cap_tier = 'micro'",
+    "nano":    "AND market_cap_tier = 'nano'",
+    # Discoverable rather than silently absent. These companies have no
+    # market cap, which is not the same as having a small one.
+    "unknown": "AND market_cap_tier IS NULL",
+    # 300 million AUD, in the column's own unit.
+    "asx300":  "AND market_cap >= 300000000",
+}
+
+#: The tiers that partition the universe. `asx300` is a threshold across
+#: several of them and is deliberately not a member: counting it would double
+#: count. Used by the reconciliation test, which requires that the seven sum
+#: to the whole table.
+PARTITIONING_TIERS = ("mega", "large", "mid", "small", "micro", "nano",
+                      "unknown")
+
+
 @router.get("/summary", response_model=MarketSummary)
 async def market_summary(db: AsyncSession = Depends(get_db)):
     """
@@ -78,7 +122,7 @@ async def market_summary(db: AsyncSession = Depends(get_db)):
 @router.get("/movers", response_model=MoversResponse)
 async def market_movers(
     period:   str           = Query("1w", pattern="^(1d|1w|1m|3m)$"),
-    cap_tier: str | None    = Query(None, pattern="^(mega|large|mid|small|micro|nano|asx300)$"),
+    cap_tier: str | None    = Query(None, pattern="^(mega|large|mid|small|micro|nano|unknown|asx300)$"),
     limit:    int           = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
@@ -106,18 +150,7 @@ async def market_movers(
                       AND pm.computed_date = {pm_date_subq}"""
     pm_select = f"pm.{ph_col} AS period_high, pm.{pl_col} AS period_low"
 
-    # Cap tier filter — uses pre-computed boolean flags (is_mega, is_large, etc.)
-    # populated by build_screener_universe.py from raw AUD market_cap thresholds.
-    # asx300 = direct market_cap >= 300M filter (all tiers ≥$300M).
-    cap_flag_sql = {
-        "mega":   "AND is_mega  = TRUE",
-        "large":  "AND is_large = TRUE",
-        "mid":    "AND is_mid   = TRUE",
-        "small":  "AND is_small = TRUE",
-        "micro":  "AND is_micro = TRUE",
-        "nano":   "AND is_nano  = TRUE",
-        "asx300": "AND market_cap >= 300",   # ≥$300M — excludes micro/nano noise
-    }
+    cap_flag_sql = CAP_TIER_SQL
 
     gainers_rows: list = []
     losers_rows:  list = []
@@ -312,25 +345,17 @@ def _to_vol_pressure(r) -> VolumePressureStock:
 
 @router.get("/volume-activity", response_model=VolumeActivityResponse)
 async def volume_activity(
-    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano|asx300)$"),
+    cap_tier: str | None = Query(None, pattern="^(mega|large|mid|small|micro|nano|unknown|asx300)$"),
     limit:    int        = Query(10, ge=5, le=25),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Most Active by Volume, Heavy Buying and Heavy Selling panels.
     Without cap_tier: uses pre-computed mover_snapshots (same as dashboard).
-    With cap_tier: queries screener.universe live using boolean flag columns.
-    asx300 = market_cap >= 300 (AUD millions).
+    With cap_tier: queries screener.universe live on market_cap_tier.
+    asx300 = market_cap >= 300000000 (the column is raw AUD).
     """
-    cap_flag_sql = {
-        "mega":   "AND is_mega  = TRUE",
-        "large":  "AND is_large = TRUE",
-        "mid":    "AND is_mid   = TRUE",
-        "small":  "AND is_small = TRUE",
-        "micro":  "AND is_micro = TRUE",
-        "nano":   "AND is_nano  = TRUE",
-        "asx300": "AND market_cap >= 300",
-    }
+    cap_flag_sql = CAP_TIER_SQL
 
     _key = make_key("market", "volume_activity", cap_tier or "all")
     cached = await cache_get(_key)

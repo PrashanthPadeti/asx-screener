@@ -31,6 +31,11 @@ from pydantic import BaseModel
 from app.db.session import get_db
 from app.core.deps import require_admin
 from app.core.config import settings
+# The tier vocabulary is declared once, in market.py, and imported rather
+# than restated. Two copies of it is how this endpoint and the public ones
+# came to disagree about whether `unknown` exists. Membership of this tuple
+# is also what makes the tier name safe to interpolate below.
+from app.api.v1.routes.market import PARTITIONING_TIERS
 
 log = logging.getLogger(__name__)
 
@@ -1956,15 +1961,28 @@ async def admin_movers(
         pm_join   = ""
         pm_select = "NULL::numeric AS period_high, NULL::numeric AS period_low"
 
+    # Reads market_cap_tier, not the six boolean flags.
+    #
+    # The flags are COALESCE(vs.market_cap >= <band>, FALSE) written into
+    # columns declared NOT NULL DEFAULT false, so an unknown market cap is
+    # stored as a measured false on all six. market_cap_tier is computed from
+    # the same input by the same statement and returns NULL instead.
+    #
+    # This endpoint takes a LIST of tiers and ORs them, so the previous
+    # version had a sharper edge than the single-select ones: selecting every
+    # tier returned 1,925 of 2,566 companies, and nothing in the response
+    # said the other 641 were unclassified rather than unmatched. 'unknown'
+    # is accepted here for the same reason.
     cap_filter = ""
-    cap_flag_map = {
-        "mega": "is_mega", "large": "is_large", "mid": "is_mid",
-        "small": "is_small", "micro": "is_micro", "nano": "is_nano",
-    }
-    valid_tiers = [t for t in (cap_tier or []) if t in cap_flag_map]
+    valid_tiers = [t for t in (cap_tier or []) if t in PARTITIONING_TIERS]
     if valid_tiers:
-        conditions = " OR ".join(f"u.{cap_flag_map[t]} = TRUE" for t in valid_tiers)
-        cap_filter = f"AND ({conditions})"
+        parts = []
+        for tier in valid_tiers:
+            if tier == "unknown":
+                parts.append("u.market_cap_tier IS NULL")
+            else:
+                parts.append(f"u.market_cap_tier = '{tier}'")
+        cap_filter = f"AND ({' OR '.join(parts)})"
 
     base_where = f"""
         WHERE u.{ret_col} IS NOT NULL

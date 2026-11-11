@@ -241,10 +241,32 @@ def build_weekly_rows(asx_code: str, daily: pd.DataFrame,
     # ── Signals ───────────────────────────────────────────────────────────────
     sma10_prev   = sma_10.shift(1)
     sma40_prev   = sma_40.shift(1)
-    golden_cross = (sma_10 > sma_40) & (sma10_prev <= sma40_prev)
-    death_cross  = (sma_10 < sma_40) & (sma10_prev >= sma40_prev)
-    above_sma10  = close > sma_10
-    above_sma40  = close > sma_40
+
+    # Unknown must stay distinguishable from a measured false.
+    #
+    # A comparison against NaN is False in pandas, not NaN, so
+    # `sma_10 > sma_40` has ALREADY collapsed the distinction before anything
+    # downstream can see it. Defaulting the lookup to False was not the
+    # defect; it only made the collapse look deliberate. Under 41 weekly bars
+    # there is no 40-week average and no prior one, and the honest answer to
+    # "did a golden cross occur" is that we cannot say.
+    #
+    # market.daily_metrics writes NULL in the identical situation. The two
+    # tables disagreed about what an uncomputable signal means, and all four
+    # of these columns are nullable with no default -- the schema could
+    # always hold the answer.
+    #
+    # A bearish reading for a newly listed company is not a small error. It
+    # is an assertion about a company nobody has measured, and it reaches
+    # pros/cons prose and any screen filtering `golden_cross = false`.
+    cross_known  = (sma_10.notna() & sma_40.notna()
+                    & sma10_prev.notna() & sma40_prev.notna())
+    golden_cross = ((sma_10 > sma_40) & (sma10_prev <= sma40_prev)
+                    ).where(cross_known)
+    death_cross  = ((sma_10 < sma_40) & (sma10_prev >= sma40_prev)
+                    ).where(cross_known)
+    above_sma10  = (close > sma_10).where(close.notna() & sma_10.notna())
+    above_sma40  = (close > sma_40).where(close.notna() & sma_40.notna())
 
     # ── Filter to from_date if incremental run ────────────────────────────────
     if from_date:
@@ -261,6 +283,16 @@ def build_weekly_rows(asx_code: str, daily: pd.DataFrame,
         def g(series, default=None, dt=dt):
             val = series.get(dt, default)
             return _nan_to_none(val)
+
+        def b(series, dt=dt):
+            """A boolean that may be unknown.
+
+            `bool(None)` is False, so routing a withheld signal through
+            bool() would restore the very conflation the masking above
+            removes -- silently, one line later.
+            """
+            val = _nan_to_none(series.get(dt, None))
+            return None if val is None else bool(val)
 
         rows.append((
             asx_code,
@@ -292,10 +324,10 @@ def build_weekly_rows(asx_code: str, daily: pd.DataFrame,
             int(g(vol_avg_4w)) if g(vol_avg_4w) is not None else None,
             g(rel_vol),
             int(g(obv)) if g(obv) is not None else None,
-            bool(g(golden_cross, False)),
-            bool(g(death_cross,  False)),
-            bool(g(above_sma10,  False)),
-            bool(g(above_sma40,  False)),
+            b(golden_cross),
+            b(death_cross),
+            b(above_sma10),
+            b(above_sma40),
             COMPUTE_VERSION,
             now,
         ))

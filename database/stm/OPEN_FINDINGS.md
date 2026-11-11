@@ -772,13 +772,37 @@ NaN to None, so a signal that **cannot be computed** is written `FALSE`:
 deliberately, so that a short series is not reported as a bearish reading.
 The two tables disagree about what an uncomputable signal means.
 
-**Consumer:** `build_screener_universe.py` reads `market.weekly_metrics`
-(line 1343). Which of these four reach `screener.universe`, and whether any
-screen filters on them, still needs confirming — that decides whether a
-newly listed stock is being excluded from bullish screens by a measured
-`false` rather than an honest unknown.
+### FIXED 12 Nov 2026
 
-**Requirement:** unknown must stay distinguishable from a measured false.
+The defect was deeper than the `False` default, and fixing only that would
+have changed nothing. In pandas a comparison against NaN yields **False**,
+not NaN, so `sma_10 > sma_40` had already collapsed unknown into false
+before the default was ever consulted.
+
+Each signal is now masked on its inputs being present, and converted with a
+None-preserving helper rather than `bool()` — because `bool(None)` is False
+and would restore the conflation one line later. All four columns are
+nullable with no default, so the schema could always hold the answer.
+
+Four mutants, four killed: the original `bool(g(..., False))` reinstated,
+the mask removed, `bool()` reintroduced in the helper, and a mask made too
+wide so that computable signals were withheld.
+
+### Consumer question — ANSWERED: none of them reach the customer
+
+`build_screener_universe.py` joins `market.weekly_metrics` as `wm`, and
+**no column in the universe's SELECT reads from it**. The universe's own
+`golden_cross`, `death_cross`, `above_sma50` and `above_sma200` all come
+from `dm` — `market.daily_metrics` — which already writes NULL for an
+uncomputable signal.
+
+So no newly listed company was excluded from a bullish screen by this
+defect. The false readings were real and were stored, but they stopped at
+the Gold layer. That is luck rather than design: the weekly fallback that
+would have carried them was removed for an unrelated reason (a 14-month
+`rsi_14` being served as a 14-day one), and the join was left behind.
+
+**Requirement, met:** unknown stays distinguishable from a measured false.
 
 ## 11. `screener.universe` — ten columns that no statement writes
 
@@ -1094,6 +1118,79 @@ nullable flag or — more simply — consumers reading `market_cap_tier`, which
 already carries the distinction, and the flags being documented as a
 derived convenience that cannot express it.
 
+## 13. A derived metric escapes the governance of its input
+
+**Tables:** `screener.universe`, `market.daily_metrics`
+**Status:** CONFIRMED in production 11 Nov 2026, 520 rows
+**Source:** the acceptance run for finding 11
+
+`week_52_high` is governed. It stores into `high_52w`, and when the series
+is too short the canonical writer withholds it and records a reason:
+
+> the series spans 196 days; a 52-week extreme needs 351
+
+`price_to_52w_high`, `price_to_52w_low`, `new_52w_high` and `new_52w_low`
+are **functions of that extreme and are not governed**, because assessing a
+derived metric from its input's assessment needs a producer that does not
+exist. `compute/engine/metric_states.py:383-397` already records this gap in
+writing.
+
+So the canonical commit nulls the extreme, the derivative keeps the
+builder's number, and the row is published and served:
+
+```
+ week_52_high state                         | rows | high_present | ratio_present
+ (supplied)                                 | 2047 |         1891 |          1891
+ insufficient_data / insufficient_history   |  393 |            0 |           393
+ … 9 further spans (195, 176, 154, 91 days) |   57 |            0 |            57
+```
+
+In every withheld group `high_present` is 0 and `ratio_present` equals the
+row count. The derivative survives in **100%** of the rows where its input
+was withheld. That is not a correlation.
+
+### What the customer sees
+
+The screener renders **52W High: —** beside **Price / 52W High: 0.9972**,
+and that 0.9972 was computed from a `MAX(high)` over 196 days. A six-month
+ratio labelled as a 52-week one, carrying a current run's attribution.
+
+This is worse than the staleness it replaced. A stale value is at least a
+real 52-week ratio from an earlier date; this is a ratio over a window
+nobody named, presented as current and precise.
+
+**The absence was established, stated, and destroyed one column over.**
+
+### Requirement
+
+A metric derived from a governed input inherits its input's state. Closing
+this needs the derived-metric producer named above, and `new_52w_high` /
+`new_52w_low` additionally need `BOOLEAN_METRICS` entries or
+`storage_value` writes True/False into a numeric column.
+
+## 14. A dead join in the statement that publishes the universe
+
+**Table:** `screener.universe`
+**Status:** CONFIRMED from the statement, 12 Nov 2026
+
+`build_screener_universe.py` carries a `LEFT JOIN LATERAL` over
+`market.weekly_metrics` aliased `wm`, with an as-of predicate and an
+`ORDER BY week_date DESC LIMIT 1`. **No column in the SELECT reads from it.**
+
+It is a leftover. The weekly fallback it fed was removed after a 14-month
+`rsi_14` was served as a 14-day one — the comment above the join still
+explains that removal — and the join itself stayed.
+
+Not a correctness defect: it contributes no value, so it corrupts nothing.
+It costs one lateral per company per run, and it misleads a reader into
+believing weekly data reaches the universe, which was exactly the question
+finding 10 could not answer from the code.
+
+Removing it is a one-line change to the publishing statement and should be
+its own commit with its own gate, not a passenger on another fix. The
+cardinality guard's `EXPECT_SOURCES`, `EXPECT_LATERALS` and
+`EXPECT_LIMIT_1` move with it.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -1113,6 +1210,8 @@ derived convenience that cannot express it.
 | 7b | 103 of 147 columns dead (all zero); covering index includes two | `market.computed_metrics` | CONFIRMED |
 | 8 | INCIDENT: census query OOM-killed PostgreSQL; .sql files removed, guarded script added | inventory tooling | CLOSED |
 | 9 | Half assigned by row position. 5.7% of company-years, but only **10 companies serve a mis-paired value today**; 770 of 2,567 unverified | `market.halfyearly_metrics` | MEASURED — exposure far smaller than the historical rate |
-| 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | OPEN — 4 signals listed |
+| 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | **FIXED** — masked at source; none of the four reached the customer |
 | 11 | Ten columns no statement writes. Nine remain empty; `price_to_52w_high` was FROZEN on 2,290 of 2,566 rows (91.1% wrong by >0.01, median error 0.10) and is **FIXED** | `screener.universe` | **PARTIALLY CLOSED** — ratio repaired, nine columns still unwritten |
 | 12 | Unknown market cap written as six measured falses; 642 of 2,567 rows (25%) were invisible to every tier filter | `screener.universe` | **FIXED** — consumers read the label, `unknown` selectable, seven tiers reconcile to 2,567 |
+| 13 | A derived metric escapes its input's governance: 520 rows show a 52-week ratio computed over 196 days beside a withheld 52-week high | `screener.universe` | **CONFIRMED** — needs a derived-metric producer |
+| 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |

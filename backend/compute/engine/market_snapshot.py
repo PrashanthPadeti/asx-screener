@@ -63,7 +63,7 @@ EXDIV_DAYS = 14
 # third-party, so its properties can be asserted on any machine rather
 # than only where SQLAlchemy is installed.
 from compute.engine.snapshot_stages import (  # noqa: E402
-    REQUIRED_STAGES, RETURN_PERIODS, SnapshotIncomplete, incomplete_stages,
+    RETURN_PERIODS, SnapshotIncomplete, incomplete_stages,
 )
 
 

@@ -386,7 +386,12 @@ async def all_transactions(
     """))).mappings().all()
     who = {r["stripe_customer_id"]: (r["email"], r["name"]) for r in rows}
 
-    out, gross, refunded = [], 0, 0
+    # Gross only. This endpoint reports what each invoice was PAID, which is
+    # what `page_total_minor` says; refunds are attached to charges, not
+    # invoices, and the endpoint below reads them properly into
+    # net_paid_minor. A third `refunded = 0` here was never incremented, so
+    # it could only ever have reported every refund as zero.
+    out, gross = [], 0
     for inv in page["data"]:
         cid = inv.get("customer")
         email, name = who.get(cid, (None, None))

@@ -208,3 +208,92 @@ of their call sites — and all ten were killed.
 
 The acceptance thresholds in steps 2 to 4 are unchanged and still unmet. They
 remain the only evidence that a user's number moved.
+
+---
+
+## Second production run: a name the repair itself deleted (11 Nov 2026)
+
+v11.2.79 deployed. The run got one stage further — `technical_compute`,
+`halfyearly_compute` and `period_metrics_compute` all proved their
+populations, sets equal — and then died in the same place:
+
+    NameError: name 'EXCLUDED_TYPES' is not defined
+      build_screener_universe.py:2143, in main
+
+Mine, and from the same edit. Replacing twelve lines of inline filter
+construction with a call to the shared `population_filter()` removed the
+local `EXCLUDED_TYPES` that those lines defined. Three statements further
+down `main()` still read it: the `DELETE` that removes non-equity securities
+left over from a previous build, its log line, and the stage evidence's
+`excluded_types` field. All three are now the shared
+`EXCLUDED_COMPANY_TYPES`, which is where the filter's own copy comes from.
+
+### Why nothing caught it
+
+`ruff check --select F821` names all three call sites, at their exact lines,
+on the deployed file. Verified against the deployed blob rather than claimed:
+
+    $ git show HEAD:backend/scripts/eodhd/v2/build_screener_universe.py > /tmp/f
+    $ ruff check --select F821 /tmp/f
+    F821 Undefined name `EXCLUDED_TYPES`  2143:11
+    F821 Undefined name `EXCLUDED_TYPES`  2146:32
+    F821 Undefined name `EXCLUDED_TYPES`  2185:33
+    Found 3 errors.
+
+The rule was selected. The linter was pinned. `ruff.toml` carries a written
+argument for every rule in it, and names the F family first because it found
+a real customer-facing bug. None of it mattered: CI ran
+
+    ruff check app/ compute/
+
+and every pipeline producer lives in `scripts/`. Four directories under
+`backend/` hold Python; two were linted. "All checks passed" was true of
+what was measured and silent about what was not — the scoped-verdict failure
+again, this time in the gate rather than in a query.
+
+Two further consequences were found while measuring it:
+
+* The lint job had **four findings in its own scope** and therefore was red,
+  and `backend-test` is `needs: backend-lint`, so the test job had not been
+  running. Three were redundant imports or a vestigial local; one was an
+  `F821` of its own — `window_states.window_assessment` annotated
+  `-> "Assessment"` with the name imported only inside the function body, so
+  the signature named a type no reader could resolve. All four are fixed.
+* `admin_billing`'s invoice endpoint initialised `refunded = 0` and never
+  incremented it. It is not returned, so nothing was reported wrongly; had
+  it been wired up as it stood, every refund would have read as zero.
+
+### The repair
+
+The lint population is now every directory of Python under `backend/`, plus
+`worker.py` at the root, which is in no directory and would be linted by
+nothing. `scripts/` and `tests/` enter carrying 70 and 42 pre-existing
+findings; turning the gate red on those would repeat the 1,268-finding
+failure `ruff.toml` exists to end, so the four rules involved are suspended
+in `per-file-ignores`, by name, with counts and the date measured. A
+suspension there is visible and countable; a shortened path list is neither.
+
+`F821` is not among them, anywhere.
+
+`tests/test_lint_population_covers_the_backend.py` asserts the population
+rather than the rules: every Python-bearing directory and every loose root
+module is in the CI command, the linter is pinned, `F821` is selected, and
+`F821` is suspended for no path. Six mutants, all killed — including the one
+that matters most, adding `scripts/` to the path list and then suspending
+`F821` inside it, which leaves every other assertion in the file passing and
+the system exactly as able to ship the next `NameError`.
+
+Three directories' worth of `zip()` without `strict=` (15 in `scripts/`, 9
+in `tests/`) are suspended rather than fixed. `ruff.toml` argues that a
+silently truncating `zip()` is this project's characteristic failure mode, so
+these are real exposure in producers that write governed metrics, not
+tidy-up. `strict=True` converts a currently-silent length mismatch into a
+crash, which is a behaviour change in a nightly job: each site needs reading,
+and that is its own change, not a line in this one.
+
+### Status of the finding this document is about
+
+Still unmet. Three canonical runs have now failed to reach the universe
+upsert, and `price_to_52w_high` has not been recomputed once. The thresholds
+in steps 2 to 4 are unchanged: `differs_gt_1pct` = 0 and
+`still_holding_a_value` = 0, measured in production, against 1,674 and 453.

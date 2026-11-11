@@ -1297,15 +1297,26 @@ def get_field_reference(allowed_fields: dict) -> list[dict]:
         if key in allowed_fields:
             reverse.setdefault(key, []).append(alias)
 
+    # Withdrawn fields are reported, not hidden.
+    #
+    # Dropping them would make a saved screen that names one look like it
+    # references a field that never existed. Reporting them with the reason
+    # lets a client grey the field out and say why, and keeps the catalogue
+    # a complete description of what the registry will resolve.
+    from app.core.screener_fields import WITHDRAWN_FIELDS
+
     result = []
     for key, info in allowed_fields.items():
+        withdrawn = WITHDRAWN_FIELDS.get(key)
         result.append({
-            "key":      key,
-            "label":    info["label"],
-            "unit":     info["unit"],
-            "category": info["cat"],
-            "type":     info["type"],
-            "aliases":  sorted(reverse.get(key, [])),
+            "key":        key,
+            "label":      info["label"],
+            "unit":       info["unit"],
+            "category":   info["cat"],
+            "type":       info["type"],
+            "aliases":    sorted(reverse.get(key, [])),
+            "available":  withdrawn is None,
+            "unavailable_reason": withdrawn,
         })
 
     return result

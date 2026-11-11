@@ -34,6 +34,22 @@ from compute.engine.metric_registry import normalise
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 
 
+class WithdrawnField(Exception):
+    """A real field, withdrawn from screening because it holds nothing.
+
+    Separate from UnknownField so the caller can say which happened. They
+    are different failures with different remedies: an unknown field is the
+    request's problem and the customer should correct it, a withdrawn field
+    is ours and the customer can do nothing about it.
+    """
+
+    def __init__(self, field: str, reason: str):
+        self.field = field
+        self.reason = reason
+        super().__init__(f"{field!r} is not available for screening: "
+                         f"{reason}")
+
+
 class UnknownField(Exception):
     """A field name no request may use.
 
@@ -61,11 +77,38 @@ class FieldDef:
     #: key: the key is an API name and may be a storage spelling.
     canonical: Optional[str] = None
     governed: bool = False
+    #: Set when the field exists, is documented, and is NOT offered for
+    #: screening because the column holds nothing. The string is the reason,
+    #: shown to the customer. A withdrawn field stays in the registry
+    #: deliberately: a saved screen naming it must be recognised and
+    #: explained, not refused as though the name were invented.
+    withdrawn: Optional[str] = None
 
     @property
     def bare_column(self) -> str:
         """The column without its table alias, for ORDER BY over a subquery."""
         return self.column.split(".")[-1]
+
+
+#: Fields registered, documented, and NOT offered for screening, with the
+#: reason each one is withdrawn.
+#:
+#: A field here is still resolvable, so a saved screen naming it gets an
+#: explanation rather than "unknown field". It is not filterable and not
+#: sortable, so no new screen can be built on it.
+#:
+#: Removing an entry is how a field comes back, and it should come back only
+#: with a measurement showing the column is populated.
+WITHDRAWN_FIELDS: dict[str, str] = {
+    "beta_1y": (
+        "beta is not computed for any company. market.yearly_metrics.beta_1y "
+        "is populated on 0 of 33,864 rows, and its writer carries a TODO "
+        "rather than an implementation, so the column has never held a "
+        "value. The filter was offered anyway and matched nothing, with no "
+        "error and nothing saying the metric was unavailable rather than "
+        "the screen strict. Withdrawn 11 Nov 2026 until a producer exists."
+    ),
+}
 
 
 def build_registry(allowed_fields: Mapping[str, Mapping],
@@ -90,6 +133,7 @@ def build_registry(allowed_fields: Mapping[str, Mapping],
             sortable=key in sortable_cols,
             canonical=canonical if canonical in governed else None,
             governed=canonical in governed,
+            withdrawn=WITHDRAWN_FIELDS.get(key),
         )
 
     # Sortable-only fields — asx_code and company_name are orderable identity
@@ -117,6 +161,12 @@ def resolve(registry: Mapping[str, FieldDef], name: str,
     field = registry.get((name or "").strip().lower())
     if field is None:
         raise UnknownField(f"unknown field: {name!r}")
+
+    # Checked before the capability flags: a withdrawn field is not
+    # sortable and not filterable either, and reporting the capability would
+    # bury the reason.
+    if field.withdrawn:
+        raise WithdrawnField(field.key, field.withdrawn)
 
     if for_sort and not field.sortable:
         raise UnknownField(

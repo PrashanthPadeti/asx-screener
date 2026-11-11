@@ -41,7 +41,8 @@ from app.core.parsed_query import (
 )
 from app.core.screen_diagnosis import diagnose_empty_screen
 from app.core.row_projection import expected_outputs, governed_columns, project_row
-from app.core.screener_fields import UnknownField, build_registry
+from app.core.screener_fields import (UnknownField, WithdrawnField,
+                                       build_registry)
 from compute.engine.metric_states import GOVERNED_METRICS, LATEST_MODEL_VERSION
 # The writer and the reader must agree on what "published" means, so the
 # required stage set is imported rather than restated here.
@@ -1038,6 +1039,13 @@ def _plan_for(req, scope):
     parsed = _typed_from_filters(req)
     try:
         parsed = canonicalise(parsed, FIELD_REGISTRY)
+    except WithdrawnField as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": "filter_unavailable",
+            "field": exc.field,
+            "message": str(exc),
+            "reason": exc.reason,
+        })
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     try:
@@ -1358,6 +1366,13 @@ async def run_screener(
     # snapshot and decoded values from another.
     try:
         parsed = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
+    except WithdrawnField as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": "filter_unavailable",
+            "field": exc.field,
+            "message": str(exc),
+            "reason": exc.reason,
+        })
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -1688,6 +1703,13 @@ async def export_screener(
     try:
         try:
             parsed = canonicalise(_typed_from_filters(req), FIELD_REGISTRY)
+        except WithdrawnField as exc:
+            raise HTTPException(status_code=422, detail={
+                "error": "filter_unavailable",
+                "field": exc.field,
+                "message": str(exc),
+                "reason": exc.reason,
+            })
         except UnknownField as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         snapshot = await resolve_snapshot(db)
@@ -2313,15 +2335,31 @@ async def get_screener_presets():
                 ],
                 "sort_by": "altman_z_score", "sort_dir": "desc",
             },
+            # Was "Low Beta Income Shield", filtering beta_1y <= 0.8.
+            #
+            # beta is not computed for any company -- yearly_metrics.beta_1y
+            # is populated on 0 of 33,864 rows -- so this premium screen
+            # returned nothing, and a customer could not tell a strict screen
+            # from an unavailable metric. The field is now withdrawn, which
+            # would make the preset answer 422.
+            #
+            # Renamed rather than kept, because the beta criterion was its
+            # defining claim: without it, "low market correlation" is a
+            # promise nothing in the query tests. Volatility was NOT
+            # substituted -- dispersion is not correlation to the market, and
+            # swapping one for the other keeps the name honest-looking while
+            # the screen measures something else.
+            #
+            # Restore the criterion and the name together when a beta
+            # producer exists.
             {
-                "id":          "low_beta_income_shield",
-                "name":        "Low Beta Income Shield",
-                "description": "Defensive income fortress — low market correlation with franked dividends for capital preservation",
+                "id":          "franked_income_shield",
+                "name":        "Franked Income Shield",
+                "description": "Defensive income fortress — heavily franked dividends from profitable, financially sound companies",
                 "icon":        "dollar-sign",
                 "premium":     True,
                 "min_plan":    "premium",
                 "filters": [
-                    {"field": "beta_1y",        "operator": "lte", "value": 0.8},
                     {"field": "dividend_yield", "operator": "gte", "value": 3},
                     {"field": "franking_pct",   "operator": "gte", "value": 50},
                     {"field": "net_margin",     "operator": "gt",  "value": 0},
@@ -2421,6 +2459,13 @@ async def query_screener(
                          else Direction.ASC),
                 parsed.raw)
             parsed = canonicalise(parsed, FIELD_REGISTRY)
+    except WithdrawnField as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": "filter_unavailable",
+            "field": exc.field,
+            "message": str(exc),
+            "reason": exc.reason,
+        })
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -2592,6 +2637,13 @@ async def export_query_screener(
                                  else Direction.ASC),
                         parsed.raw),
             FIELD_REGISTRY)
+    except WithdrawnField as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": "filter_unavailable",
+            "field": exc.field,
+            "message": str(exc),
+            "reason": exc.reason,
+        })
     except UnknownField as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

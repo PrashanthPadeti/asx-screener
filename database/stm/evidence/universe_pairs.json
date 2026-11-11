@@ -1,8 +1,8 @@
 {
  "insert_line": 82,
  "select_line": 287,
- "from_line": 1126,
- "conflict_line": 1631,
+ "from_line": 1135,
+ "conflict_line": 1640,
  "alias_tables": {
   "c": "market.companies_current",
   "vs": "market.valuation_snapshot",

@@ -153,3 +153,58 @@ two that look like care — a `COALESCE` preserving the old value, and a ratio
 with its `CASE` guard removed.
 
 None of that shows a single number changed in production. Steps 2 to 4 do.
+
+---
+
+## First production run: the statement could not execute (10 Nov 2026)
+
+The deploy shipped the code. The first canonical run after it died before
+writing a row:
+
+    IndexError: list index out of range
+      build_screener_universe.py:2118, in cur.execute(sql, params)
+
+Not a data problem. psycopg2 interpolates a query client-side with Python's
+`%` operator and sends one finished string, so the statement is a FORMAT
+STRING — and a `--` comment is invisible to Postgres but fully visible to
+`%`. The comment added above the repair contained
+
+    -- 1,674 (91.1%) were wrong by more than 0.01
+
+with the percent undoubled. Every other percent in that 2,000-line statement
+is correctly `%%`. The comment documenting the repair is what prevented the
+repair from ever running.
+
+The pipeline then failed a second time, in the handler reporting the first:
+
+    TypeError: finish_step() got an unexpected keyword argument 'error'
+
+The parameter is `error_msg`. Four older call sites pass it correctly; the
+two added when the canonical driver was wrapped pass `error`, and both are
+reached only after something has already failed — so neither had ever
+executed. The step was never marked failed, and the operator's log shows a
+keyword-argument traceback instead of the database error that mattered.
+
+### What this says about the evidence above
+
+Every claim in the preceding sections was true and none of it was sufficient.
+The statement was parsed, its column list counted, its `ON CONFLICT` set
+checked column by column, and seven mutants killed — by tests that read the
+SQL as text and never asked the driver to accept it. Structural evidence
+establishes machinery; only execution establishes that the machinery runs.
+
+That gap is now closed at the gate rather than in production:
+
+* `tests/test_sql_constants_are_executable.py` interpolates every SQL
+  constant and every inline statement the way psycopg2 does, plus the upsert
+  assembled exactly as `main()` assembles it, and checks placeholder arity
+  against the parameters `main()` passes, for several `--codes` lists.
+* `tests/test_pipeline_calls_bind_to_their_signatures.py` binds every call
+  site in the pipeline to the signature it names, and refuses two spellings
+  of one argument.
+
+Ten mutants were run against the pair — including both real defects, at both
+of their call sites — and all ten were killed.
+
+The acceptance thresholds in steps 2 to 4 are unchanged and still unmet. They
+remain the only evidence that a user's number moved.

@@ -102,6 +102,41 @@ def current_source_predicate(alias: str = "") -> str:
 EXCLUDED_COMPANY_TYPES = ("notes", "preferred_stock")
 
 
+def population_filter(codes=None, alias: str = "") -> tuple[str, list]:
+    """The WHERE clause selecting the serving population, and its parameters.
+
+    Returned as a pair because they are one thing. psycopg2 interpolates a
+    statement client-side, so a clause carrying more `%s` than the list has
+    items raises `IndexError: list index out of range` -- from inside the
+    driver, naming neither the clause nor the list. Built a few lines apart,
+    as they were in build_screener_universe until 11 Nov 2026, the two can
+    disagree while nothing local looks wrong.
+
+    Lives here, beside EXCLUDED_COMPANY_TYPES, for the reason that constant
+    does: the universe build and technical_compute must agree on who is in
+    the population, and two copies drift.
+
+    It is also a function so that the agreement is checkable.
+    tests/test_sql_constants_are_executable.py counts the placeholders this
+    returns against the parameters it returns, for several code lists. A
+    test that rebuilt the clause from the same recipe would confirm only its
+    own copy -- which is exactly what the first version of that test did,
+    and a mutant that added a placeholder to the real clause survived it.
+    """
+    prefix = f"{alias}." if alias else ""
+    placeholders = ", ".join(["%s"] * len(EXCLUDED_COMPANY_TYPES))
+    clause = (f"WHERE COALESCE({prefix}company_type, '') "
+              f"NOT IN ({placeholders})")
+    params = list(EXCLUDED_COMPANY_TYPES)
+
+    if codes:
+        clause += (f" AND {prefix}asx_code IN "
+                   f"({','.join(['%s'] * len(codes))})")
+        params += [c.upper() for c in codes]
+
+    return clause, params
+
+
 def excluded_types_predicate(alias: str = "") -> str:
     """`COALESCE(company_type,'') NOT IN (...)`, qualified by `alias`.
 

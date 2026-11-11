@@ -431,8 +431,8 @@ def canonical_execution(tracker):
                               "this cycle; see its log for which boundary it "
                               "stopped at", result.returncode)
                     tracker.finish_step(5, success=False,
-                                        error=f"canonical driver exit "
-                                              f"{result.returncode}")
+                                        error_msg=f"canonical driver exit "
+                                                  f"{result.returncode}")
                 yield published
             finally:
                 os.environ.pop(LEASE_HELD_ENV, None)
@@ -440,7 +440,7 @@ def canonical_execution(tracker):
         # Another canonical execution is in flight. The previously finalised
         # output keeps serving; this cycle simply does not publish.
         log.error("%s", exc)
-        tracker.finish_step(5, success=False, error=str(exc)[:400])
+        tracker.finish_step(5, success=False, error_msg=str(exc)[:400])
         yield False
     finally:
         conn.close()

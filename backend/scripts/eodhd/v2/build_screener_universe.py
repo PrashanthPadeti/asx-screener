@@ -836,8 +836,17 @@ SELECT
     --
     -- Measured 10 Nov 2026 before this fix: 2,290 of 2,566 rows held a
     -- value; of the 1,837 that could be recomputed from their own row,
-    -- 1,674 (91.1%) were wrong by more than 0.01, median error 0.10 on a
+    -- 1,674 (91.1%%) were wrong by more than 0.01, median error 0.10 on a
     -- ratio whose useful range is 0-1, worst 0.93.
+    --
+    -- The percent sign above is DOUBLED, and so is every other one in this
+    -- string. psycopg2 interpolates the whole query text client-side before
+    -- it is sent, so a SQL comment is not inert: it is part of a Python
+    -- format string. An undoubled one written here on 10 Nov 2026 made this
+    -- statement unexecutable, and the first canonical run after the fix
+    -- shipped died on it -- the comment describing the repair prevented the
+    -- repair. tests/test_sql_constants_are_executable.py now interpolates
+    -- this statement the way the driver does.
     --
     -- The CASE yields NULL when the high is absent or not positive, and the
     -- SET below assigns EXCLUDED, so a row whose high disappears has its
@@ -2090,19 +2099,8 @@ def main():
     # expected population needs the identical rule, and two lists drift: Cycle
     # A held that producer to covering SUNPG, a capital note this build
     # deletes.
-    from compute.engine.serving_population import EXCLUDED_COMPANY_TYPES
-    EXCLUDED_TYPES = EXCLUDED_COMPANY_TYPES
-    base_filter = ("WHERE COALESCE(c.company_type, '') NOT IN "
-                   f"({', '.join(['%s'] * len(EXCLUDED_TYPES))})")
-    base_params = list(EXCLUDED_TYPES)
-
-    if args.codes:
-        placeholders = ",".join(["%s"] * len(args.codes))
-        code_filter = f"{base_filter} AND c.asx_code IN ({placeholders})"
-        params = base_params + [c.upper() for c in args.codes]
-    else:
-        code_filter = base_filter
-        params = base_params
+    from compute.engine.serving_population import population_filter
+    code_filter, params = population_filter(args.codes, alias="c")
 
     from compute.engine.serving_population import current_source_predicate
     sql = UPSERT_SQL.format(code_filter=code_filter,

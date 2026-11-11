@@ -216,6 +216,12 @@ tail -1 "$WORK/load.out"
 #: suite ran and found a defect". Classified INCONCLUSIVE, never pre-existing.
 ENV_MARKERS='could not connect|OperationalError|UndefinedTable|ConnectionRefused|Connection refused|Temporary failure in name resolution|nodename nor servname|ModuleNotFoundError|ImportError|getaddrinfo|Network is unreachable|psycopg|asyncpg\.exceptions'
 
+#: Evidence that a suite RAN to the end of its runner, whatever its verdict.
+#: Both shapes are honest conventions in this tree:
+#:   "N/M passed"             a __main__ runner enumerating its tests
+#:   "ALL ... CHECKS PASSED"  a script-style suite asserting at module level
+RAN_MARKER='^[0-9]+/[0-9]+ passed|ALL [A-Z ]*CHECKS PASSED'
+
 # ── Run every suite at one commit ───────────────────────────────────────────
 run_at() {
     # Declared separately, not `local a=$1 b=$a`: bash expands every word of
@@ -287,7 +293,7 @@ run_at() {
             #
             # Both prove the file RAN to its end. A file that defines
             # functions and never calls them prints neither.
-            if ! grep -qE '^[0-9]+/[0-9]+ passed|ALL [A-Z ]*CHECKS PASSED' "$out"; then
+            if ! grep -qE "$RAN_MARKER" "$out"; then
                 incon=$((incon + 1))
                 echo "$name" >> "$WORK/$label.inconclusive"
                 printf '  INCONCL %-50s %s\n' "$name" \
@@ -312,7 +318,31 @@ run_at() {
             continue
         fi
 
-        if grep -qE "$ENV_MARKERS" "$out"; then
+        # An environment fault means the suite COULD NOT RUN. It does not
+        # mean the suite ran, failed, and happened to say "psycopg" while
+        # doing so.
+        #
+        # That distinction was missing, and it cost a release. On 10 Nov 2026
+        # test_sql_percent_literals.py -- a guard written in v11.2.65 for
+        # exactly this defect -- correctly failed on an undoubled percent
+        # sign in UPSERT_SQL, naming the file, the line and the constant. Its
+        # message explains that "psycopg2 will consume a bind parameter at
+        # each one". ENV_MARKERS contains `psycopg`. The gate reclassified a
+        # precise, correct, blocking finding as INCONCLUSIVE, which blocks
+        # nothing, and v11.2.78 shipped a statement that could not be
+        # executed. The first canonical run after it died before writing a
+        # row.
+        #
+        # The suite's own completion marker already distinguishes the two
+        # cases: a file that printed "N/M passed" reached the end of its
+        # runner, so it RAN, so its failures are findings. Only a suite with
+        # no evidence of having run can be an environment fault.
+        #
+        # A suite that ran and had SOME tests fail on a missing import is now
+        # reported per test rather than discarded whole. That is strictly
+        # better: those tests fail at both commits and attribution files them
+        # PRE-EXISTING, while a test that newly fails still blocks.
+        if grep -qE "$ENV_MARKERS" "$out" && ! grep -qE "$RAN_MARKER" "$out"; then
             incon=$((incon + 1))
             echo "$name" >> "$WORK/$label.inconclusive"
             printf '  INCONCL %-50s %s\n' "$name" \

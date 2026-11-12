@@ -1449,11 +1449,40 @@ Which leaves no residue at all: **wherever a daily row existed and the
 input was absent, the flag was FALSE.** 547 of 547, 38 of 38, 72 of 72.
 The conflation was total, with no exceptions anywhere in the population.
 
-**547 of 2,569 rows — 21.3% of the served universe — carried three
-confident negatives each.** Put against the positives: `golden_cross` is
-TRUE on 6 rows in the entire universe, so 547 unmeasured falses sit beside
-6 real signals. Of the 2,356 rows claiming "no golden cross", 23% were
-claiming it about an average that did not exist.
+#### CORRECTION: an inference was published as a measurement
+
+An earlier version of this section said "**547 of 2,569 rows carried three
+confident negatives each**". That was read off three flags sharing the
+count 547, and **equal counts do not establish identical rows**: three
+flags at 547 is equally consistent with 547 overlapping instruments and
+with 1,641 distinct ones.
+
+The conclusion does follow from these numbers, and the derivation is worth
+writing down because it is not obvious:
+
+- `absent(above_sma200)` is `sma_200 IS NULL`; `absent(golden_cross)` is
+  `sma_50 IS NULL OR sma_200 IS NULL`. The first is a **subset** of the
+  second, and both measured 754 — a subset of equal size is the same set.
+- Inside that 754, TRUE was 0 and FALSE was 547, so NULL-inside-absent is
+  207 — which equals the **whole-table** NULL count, so every NULL lies
+  inside `absent`.
+- The FALSE set is therefore `absent` minus those 207: the same 547 rows
+  for all three flags.
+
+Sound, and still an inference drawn from a subset relation read out of SQL
+by hand rather than from the database. The overlap is now measured per
+instrument by the same diagnostic, and this claim stays **derived, not
+measured** until that run returns.
+
+What the counts establish without any derivation: `above_sma200`,
+`golden_cross` and `death_cross` each affected 547 rows; `above_sma50` 38;
+`volume_breakout` 72. 1,751 flag-rows in total — **flag-rows, not
+instruments.**
+
+Against the positives, which needs no overlap argument: `golden_cross` is
+TRUE on **6 rows in the entire universe**, and 547 rows claimed FALSE
+about an average that did not exist. Of the 2,356 rows asserting "no
+golden cross", 23% were asserting it from nothing.
 
 `confident POS = 0` everywhere. No flag was ever fabricated upward, which
 is the one thing that could have been worse and is worth stating because
@@ -1513,10 +1542,47 @@ one layer down.
 Technicals. A filter over an all-NULL column returns zero rows and reports
 no error.
 
-One detail that makes this more than a missing writer: the label promises
-**≥70**, while `pros_cons.py:93` uses **75** for the same name. Adding a
-writer requires deciding which threshold is the product's, so this is not
-a drive-by fix — it is a product decision with two existing answers.
+### The census: four working definitions, none of them the column
+
+The exact metric, formula and consumers, before choosing a threshold.
+**The metric is `rsi_14`** — a 14-period Wilder RSI on the split-adjusted
+close, written by `technical_compute` into `market.daily_metrics.rsi_14`
+and carried into `screener.universe`. "Overbought" is not a stored
+quantity anywhere; it is a predicate over that one.
+
+| consumer | expression | overbought | oversold | works? |
+|---|---|---|---|---|
+| preset "RSI Overbought (> 70)" `screener.py:2082` | `rsi_14 >= 70` | **70** | — | yes |
+| preset "RSI Oversold (< 30)" `screener.py:2068` | `rsi_14 <= 30` | — | **30** | yes |
+| `pros_cons.py:92-93` | `rsi >= T[...]` | **75** | **35** | yes |
+| `anomaly_detect.py:94,108` | `rsi_14 > 75` / `< 30` | **75** | **30** | yes |
+| filter field `rsi_overbought` | `u.rsi_overbought` (boolean) | 70 claimed | 30 claimed | **no — all NULL** |
+| `ScreenerRow` comment `schemas/screener.py:244` | "RSI14 >= 70" | 70 claimed | 30 claimed | **no** |
+
+Every consumer that works reads `rsi_14` and applies its own predicate.
+Three different overbought cutoffs are live in shipped code — 70, 75, 75 —
+and two oversold — 30, 35.
+
+### Recommendation: withdraw the columns, do not write them
+
+Adding a writer would create a **fifth** definition and make the drift
+permanent in storage, where it is harder to see than in four readable
+predicates. It would also be finding 13's defect performed deliberately: a
+second producer for a quantity the system already derives, stored beside
+the number it is derived from.
+
+The right fix is the `beta_1y` mechanism from v11.2.81 — mark
+`rsi_overbought` and `rsi_oversold` **withdrawn** with a reason a customer
+can read, so a saved screen naming one gets "this filter is unavailable
+because the metric was never populated; filter on RSI (14) directly"
+rather than zero silent results. The presets already do exactly that and
+are unaffected.
+
+The separate, larger question is whether three overbought cutoffs in four
+features is intended. It may be: a pros/cons narrative can reasonably be
+more conservative than a screen. But it is currently **incidental rather
+than declared**, and nothing would catch a fifth appearing. That is a
+product decision and is recorded here rather than taken.
 
 ## Tracking
 
@@ -1542,5 +1608,5 @@ a drive-by fix — it is a product decision with two existing answers.
 | 12 | Unknown market cap written as six measured falses; 642 of 2,567 rows (25%) were invisible to every tier filter | `screener.universe` | **FIXED** — consumers read the label, `unknown` selectable, seven tiers reconcile to 2,567 |
 | 13 | Not a governance gap but a **second producer**: a `dp52` lateral recomputed the 52-week extremes from raw, unadjusted `daily_prices` with no coverage rule, and four published columns derived from it while the extreme beside them came from the governed producer. The split basis made a stock at its 52-week high publish at a fraction of it | `screener.universe` | **FIXED** — lateral deleted, all four read `dm`; governance backstop deferred, awaiting the model-version decision |
 | 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |
-| 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. **Measured: 547 of 2,569 served rows (21.3%) carried three confident negatives each**, and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, with no exceptions. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked on their inputs; 6 mutants killed; after-run pending |
-| 16 | `rsi_overbought`, `rsi_oversold`, `macd_bullish_cross`, `macd_bearish_cross` have no writer — NULL on every row, and `rsi_overbought` is a registered screener filter. The label says ≥70, `pros_cons` uses 75 | `market.daily_metrics` | CONFIRMED — needs a threshold decision, not just a writer |
+| 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. Measured: **1,751 flag-rows** across five flags (547 each for `above_sma200`/`golden_cross`/`death_cross`), and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, no exceptions. Instrument-level overlap is derived, not yet measured. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked; 6 mutants killed; production verification pending |
+| 16 | `rsi_overbought`, `rsi_oversold`, `macd_bullish_cross`, `macd_bearish_cross` have no writer — NULL on every row, and two are registered screener filters. Census: **four working consumers all derive from `rsi_14` directly**, with three different overbought cutoffs (70, 75, 75). The presets named after these columns do not use them | `market.daily_metrics` | CONFIRMED — recommend **withdrawing** the columns, not writing them; a writer would be a fifth definition |

@@ -104,6 +104,55 @@ SELECT count(*)                                            AS rows_total,
 """
 
 
+#: How many of the five flags a single instrument carries as a confident
+#: negative, and how many instruments sit at each count.
+#:
+#: WHY THIS EXISTS. The first run reported 38, 547, 547, 547 and 72, and the
+#: write-up concluded "547 rows carried three confident negatives each".
+#: That was published from equal COUNTS, which do not establish identical
+#: ROWS: three flags at 547 is equally consistent with 547 overlapping rows
+#: and with 1,641 distinct ones.
+#:
+#: The conclusion does follow from the numbers, and the derivation is worth
+#: writing down because it is not obvious:
+#:
+#:   absent(above_sma200) is `sma_200 IS NULL`
+#:   absent(golden_cross) is `sma_50 IS NULL OR sma_200 IS NULL`
+#:   so the first is a SUBSET of the second, and both measured 754 --
+#:   a subset of equal size is the same set.
+#:
+#:   Inside that 754: TRUE was 0 and FALSE was 547, so NULL inside absent
+#:   is 207 -- which equals the whole-table NULL count, so every NULL lies
+#:   inside absent. The FALSE set is therefore absent minus those 207: the
+#:   same 547 rows for all three flags.
+#:
+#: Sound, and still an inference drawn from a subset relation read out of
+#: SQL by hand. This measures it per instrument instead, so the claim rests
+#: on the database rather than on my reading of the predicate.
+#:
+#: Built from PAIRS rather than written out, so a flag added above cannot
+#: silently drop out of the overlap.
+OVERLAP = """
+SELECT flags_affected, count(*) AS instruments
+  FROM (
+    SELECT u.asx_code,
+           {terms} AS flags_affected
+      FROM screener.universe u
+  ) t
+ GROUP BY 1
+ ORDER BY 1
+"""
+
+
+def _overlap_sql() -> str:
+    terms = "\n         + ".join(
+        "(CASE WHEN u.{flag} IS FALSE AND ({absent}) THEN 1 ELSE 0 END)".format(
+            flag=flag,
+            absent=" OR ".join(f"u.{i} IS NULL" for i in inputs))
+        for flag, inputs in PAIRS.items())
+    return OVERLAP.format(terms=terms)
+
+
 def _dsn(env_file: str | None) -> str:
     if env_file:
         path = Path(env_file)
@@ -167,9 +216,27 @@ def main() -> int:
 
             print()
             served = sum(n for _f, n, _p, _a in worst)
-            print(f"  confident negatives across the five flags: {served}")
-            print(f"  (rows, not companies: one company contributes to "
-                  f"several)")
+            print(f"  confident negatives across the five flags: {served} "
+                  f"FLAG-ROWS, not instruments")
+            print()
+
+            print("── how many flags a single instrument carries "
+                  "──────────────────")
+            cur.execute(_overlap_sql())
+            rows = cur.fetchall()
+            print("  {:>14}  {:>11}".format("flags affected", "instruments"))
+            print("  " + "-" * 29)
+            affected = 0
+            for count, instruments in rows:
+                print("  {:>14}  {:>11}".format(count, instruments))
+                if count:
+                    affected += instruments
+            print(f"\n  instruments carrying at least one: {affected}")
+            print("  This is the number to quote. Equal per-flag counts do "
+                  "NOT establish")
+            print("  identical rows, and the earlier write-up published "
+                  "that inference")
+            print("  before measuring it.")
             print()
             print("  A 'confident negative' is FALSE where the input the "
                   "comparison needed is NULL.")

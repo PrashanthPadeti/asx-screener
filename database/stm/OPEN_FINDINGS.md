@@ -1394,18 +1394,129 @@ most extreme cases and not the ones that matter: a stock with 100 bars has
 an RSI and no `sma_200`, so its `above_sma200` and both crosses are
 confident negatives drawn from nothing.
 
-### Requirement
+### FIXED 13 Nov 2026
 
-The same shape as finding 10's fix: mask each signal on its inputs being
-present, convert with a None-preserving helper rather than `bool()`, and a
-test that runs the real computation over a short series rather than
-asserting on the source. The columns must be nullable — that needs
-checking per column, since `weekly_metrics` already was and `daily_metrics`
-may not be.
+All 15 boolean columns are nullable with no default, checked against the
+schema snapshot rather than assumed — so the schema could always hold the
+third answer.
 
-Population and exposure are unmeasured. A count of rows per column where
-the flag is FALSE and its input is NULL is the measurement, and it belongs
-in the same guarded diagnostic as finding 13's.
+Twelve signals now mask on their inputs being present: the four
+`above_smaN`, both crosses, the three new-extreme flags, `obv_rising`,
+`volume_breakout` and `above_vwap`. The mask is applied **after** the
+comparison, which is the only order that works: changing a default would
+have changed nothing, because the collapse happens inside the comparison
+before any default is consulted. That is the subtlety that made finding 10
+more than a one-word fix, and it is the same here.
+
+`above_vwap` loses its `.astype(int)`. The column is `smallint` and an int
+cast cannot represent the third state.
+
+The previous bar is treated as an input like any other, so "did it make a
+new high today" is unanswerable on the first row rather than no.
+
+`test_daily_signals_withhold_unknown.py` runs the real `compute_indicators`
+over real short series and reads what it produces, **including through
+`_v()`** — the mask is worth nothing if the conversion that follows turns
+NaN back into False. Six mutants, six killed, among them a mask applied to
+too few inputs, which looks guarded and is not.
+
+**Nothing downstream coerces.** The response schema already declares these
+`Optional[bool] = None`, no API SELECT wraps them in `COALESCE`, and the
+universe reads them plainly. Checked rather than assumed, because v11.2.32
+fixed `is_reit` in the data and the API destroyed the distinction on the
+way out — the same fix undone one layer later.
+
+### MEASURED 13 Nov 2026, before the fix
+
+```
+ flag              TRUE   FALSE   NULL   input absent   conf. NEG   conf. POS
+ above_sma50        869    1493    207            245          38           0
+ above_sma200       496    1866    207            754         547           0
+ golden_cross         6    2356    207            754         547           0
+ death_cross          4    2358    207            754         547           0
+ volume_breakout     11    2351    207            279          72           0
+```
+
+2,569 served rows. Read the third and fourth numeric columns together:
+
+**`input absent` − `confident NEG` = 207 on every single row of this
+table.** 245−38, 754−547, 279−72 — all exactly 207, and 207 is also the
+`NULL` count for every flag. Those 207 are the rows where the `dm` as-of
+join matched nothing, so every `dm` column is NULL and the flag honestly
+has no value.
+
+Which leaves no residue at all: **wherever a daily row existed and the
+input was absent, the flag was FALSE.** 547 of 547, 38 of 38, 72 of 72.
+The conflation was total, with no exceptions anywhere in the population.
+
+**547 of 2,569 rows — 21.3% of the served universe — carried three
+confident negatives each.** Put against the positives: `golden_cross` is
+TRUE on 6 rows in the entire universe, so 547 unmeasured falses sit beside
+6 real signals. Of the 2,356 rows claiming "no golden cross", 23% were
+claiming it about an average that did not exist.
+
+`confident POS = 0` everywhere. No flag was ever fabricated upward, which
+is the one thing that could have been worse and is worth stating because
+the measurement looked for it rather than assuming it.
+
+### Expected after the fix
+
+Recorded before the run so it can be wrong. `TRUE` counts should not move
+at all — `confident POS = 0` means no TRUE depended on an absent input.
+
+| flag | FALSE | → | NULL | → |
+|---|---|---|---|---|
+| `above_sma50` | 1,493 | 1,455 | 207 | 245 |
+| `above_sma200` | 1,866 | 1,319 | 207 | 754 |
+| `golden_cross` | 2,356 | 1,809 | 207 | 754 |
+| `death_cross` | 2,358 | 1,811 | 207 | 754 |
+| `volume_breakout` | 2,351 | 2,279 | 207 | 279 |
+
+`confident NEG` must be **0** on every row. Anything else means the mask
+missed a path.
+
+### Why the measurement came from the universe
+
+`measure_confident_negatives.py` reads
+`screener.universe` and not `market.daily_metrics`. The hypertable
+holds every trading day for every company, counting a predicate across it
+is the shape that OOM-killed production on 28 Oct, and a false on a row
+from 2023 is served to nobody. The universe holds the latest row per
+company and carries both the flags and their inputs, so 2,569 ordinary
+rows answer the question that matters.
+
+`above_sma200 = false` beside `sma_200 IS NULL` cannot be anything but a
+comparison against a value that was not there.
+
+The counts for `golden_cross` and `death_cross` are a **lower bound**: they
+also need the previous averages, which the universe does not carry.
+
+## 16. Four boolean columns of `market.daily_metrics` have no writer
+
+**Table:** `market.daily_metrics` → `screener.universe`
+**Status:** CONFIRMED from the producer, 13 Nov 2026
+**Source:** found while fixing finding 15
+
+`technical_compute` is the **only** writer of `market.daily_metrics`, and
+its `INSERT_COLS` does not contain:
+
+```
+rsi_overbought   rsi_oversold   macd_bullish_cross   macd_bearish_cross
+```
+
+All four exist in the table, all four are selected by the universe's `dm`
+lateral, and all four are therefore NULL on every row. Finding 11's shape,
+one layer down.
+
+`rsi_overbought` is a **registered screener filter** — `screener.py:452`,
+`"col": "u.rsi_overbought"`, label "RSI Overbought (≥70)", category
+Technicals. A filter over an all-NULL column returns zero rows and reports
+no error.
+
+One detail that makes this more than a missing writer: the label promises
+**≥70**, while `pros_cons.py:93` uses **75** for the same name. Adding a
+writer requires deciding which threshold is the product's, so this is not
+a drive-by fix — it is a product decision with two existing answers.
 
 ## Tracking
 
@@ -1431,4 +1542,5 @@ in the same guarded diagnostic as finding 13's.
 | 12 | Unknown market cap written as six measured falses; 642 of 2,567 rows (25%) were invisible to every tier filter | `screener.universe` | **FIXED** — consumers read the label, `unknown` selectable, seven tiers reconcile to 2,567 |
 | 13 | Not a governance gap but a **second producer**: a `dp52` lateral recomputed the 52-week extremes from raw, unadjusted `daily_prices` with no coverage rule, and four published columns derived from it while the extreme beside them came from the governed producer. The split basis made a stock at its 52-week high publish at a fraction of it | `screener.universe` | **FIXED** — lateral deleted, all four read `dm`; governance backstop deferred, awaiting the model-version decision |
 | 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |
-| 15 | Nine boolean columns written as pandas comparisons against NaN, so unknown is stored as a measured FALSE. **Four are served** — the universe reads `above_sma50`, `above_sma200`, `golden_cross`, `death_cross` straight from `dm`. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **CONFIRMED** — population unmeasured |
+| 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. **Measured: 547 of 2,569 served rows (21.3%) carried three confident negatives each**, and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, with no exceptions. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked on their inputs; 6 mutants killed; after-run pending |
+| 16 | `rsi_overbought`, `rsi_oversold`, `macd_bullish_cross`, `macd_bearish_cross` have no writer — NULL on every row, and `rsi_overbought` is a registered screener filter. The label says ≥70, `pros_cons` uses 75 | `market.daily_metrics` | CONFIRMED — needs a threshold decision, not just a writer |

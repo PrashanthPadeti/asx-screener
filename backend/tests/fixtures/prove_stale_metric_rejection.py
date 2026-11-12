@@ -75,6 +75,17 @@ def _target_database(url: str) -> str:
     return urlsplit(url).path.lstrip("/").split("?")[0]
 
 
+def _may_mutate(database: str) -> bool:
+    """May this fixture destroy the named database?
+
+    Exposed as a predicate over a NAME so the shared guard can test it
+    across every mutating fixture without opening a connection. Each
+    fixture answers for itself; the guard asserts the one property they
+    must all have, which is that production is refused.
+    """
+    return database in APPROVED_TARGETS
+
+
 def _connect():
     """Scratch only. A fixture that mutates production is not a fixture.
 
@@ -98,7 +109,7 @@ def _connect():
     """
     url = get_database_url_sync()
     target = _target_database(url)
-    if target not in APPROVED_TARGETS:
+    if not _may_mutate(target):
         raise SystemExit(
             f"REFUSING: this fixture mutates data and {target!r} is not an "
             f"approved scratch database.\n"

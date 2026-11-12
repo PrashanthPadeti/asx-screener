@@ -95,9 +95,21 @@ def _groups() -> dict:
 
 
 def _comparable_pairs() -> list:
+    """Every ungoverned, available pair in the registry.
+
+    Withdrawn fields are excluded because they are not compilable BY
+    DESIGN: resolve() refuses them with a reason, which is the whole point
+    of withdrawing one. Including them would make this property fail for a
+    field doing exactly what it is supposed to.
+
+    Excluded here rather than caught in the loop below, so the pair count
+    stays honest -- a withdrawn field is not a pair that failed, it is a
+    pair that does not exist.
+    """
     pairs = []
     for members in _groups().values():
-        free = [k for k in members if not REGISTRY[k].governed]
+        free = [k for k in members
+                if not REGISTRY[k].governed and not REGISTRY[k].withdrawn]
         pairs.extend((a, b) for a in free for b in free if a != b)
     return pairs
 

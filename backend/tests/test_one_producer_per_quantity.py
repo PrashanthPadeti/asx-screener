@@ -17,13 +17,38 @@ an absent one:
                      window returns the maximum of whatever is there, so a
                      stock with 196 days of history got a "52-week high"
                      drawn from six months.
-  raw, not adjusted  technical_compute reads high_adj where it exists,
-                     deliberately -- raw prices put the exchange's worst
-                     performers at the top of "best 1-year return" after
-                     their consolidations. dp52 read raw `high`. A 1-for-10
-                     leaves the raw high ten times the adjusted one, so a
-                     stock AT its 52-week high published at 10% of it.
+  raw, not adjusted  technical_compute's indicators are fed by the *_adj
+                     columns; dp52 read raw `high`. A real basis
+                     difference that, measured, produced no numerical
+                     disagreement where both values existed -- see below.
   nothing recorded   no state, no reason, no attribution.
+
+MEASURED 13 Nov 2026, BEFORE the fix. The numbers matter because one of
+them refuted a claim this file originally asserted:
+
+    governed extreme PRESENT   1,895 rows, ratio present on all 1,895
+    governed extreme WITHHELD    674 rows, ratio present on 519,
+                                 new_52w_high FALSE on 659, TRUE on 15,
+                                 NULL on 0
+    the two producers, where both values exist
+                                 0 rows differing by more than 1%,
+                                 max difference 0.0001 -- rounding
+
+So the coverage defect is real and sizeable: 519 ratios and 674 flags
+published from a window that did not span 52 weeks, including 15 rows
+claiming a NEW 52-week high computed against a six-month maximum.
+
+The price-basis defect is NOT demonstrated. This file originally stated it
+as established fact -- "a stock AT its 52-week high published at 10% of
+it" -- and the measurement does not support it. 112 companies split inside
+the window and all 112 publish a ratio, but Q3 can only see rows whose
+governed extreme is present, so its silence may simply mean the cohort
+sits in the withheld group. Q6 of the diagnostic settles it. Until then
+the basis difference is recorded as a difference, not as an error.
+
+None of this changes what the tests below assert. Two producers for one
+quantity is a defect because the row contradicts itself, not because the
+numbers happened to diverge.
 
 The canonical commit overwrites `screener.universe.high_52w` with the
 governed assessment, so the extreme and the ratios published beside it came

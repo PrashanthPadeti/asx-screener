@@ -1227,7 +1227,7 @@ definitions of one quantity, disagreeing three ways:
 | | governed producer | `dp52` |
 |---|---|---|
 | coverage | blank until the series spans 365 days, reason recorded | `MAX` over whatever rows exist |
-| price basis | split-**adjusted** (`high_adj`) | **raw** `high` |
+| price basis | split-**adjusted** (`*_adj` feed the indicators) | **raw** `high` — a real difference, measured to produce none |
 | state | `window_states` entry | nothing |
 
 So `high_present = 0` beside `ratio_present` = every row was never a
@@ -1235,17 +1235,50 @@ correlation to explain: **the two columns never came from the same
 computation.** The canonical commit withheld one and had no opinion about
 the other.
 
-The split basis is the worse half and the finding never saw it.
-`technical_compute` reads adjusted highs deliberately — raw prices once put
-the exchange's worst performers at the top of "best 1-year return" after
-their consolidations. A 1-for-10 leaves the raw high ten times the adjusted
-one, so `price_to_52w_high` from `dp52` came out **ten times too small**: a
-stock sitting at its 52-week high published at 10% of it. Not a
-short-history edge case — precisely the stocks the split-adjustment work
-exists for.
-
 And the two flags were a hand-written `ELSE FALSE`, publishing "this stock
 did not make a new 52-week high" wherever the high was unknown.
+
+### MEASURED 13 Nov 2026, before the fix
+
+```
+ governed extreme PRESENT    1,895 rows   ratio present on 1,895
+ governed extreme WITHHELD     674 rows   ratio present on 519
+                                          new_52w_high FALSE on 659
+                                          new_52w_high TRUE  on  15
+                                          new_52w_high NULL  on   0
+ the two producers, where both values exist
+                                          0 rows differing by >1%
+                                          max difference 0.0001
+```
+
+The coverage defect is real and sizeable. **519 ratios and 674 flags were
+published from a window that did not span 52 weeks**, and 15 of those rows
+claim a **new** 52-week high measured against a six-month maximum. `NULL`
+appears zero times in 2,569 rows, which is the whole point: the column
+could never say "we do not know".
+
+#### The price-basis claim is WITHDRAWN
+
+An earlier version of this finding stated that the raw-vs-adjusted
+difference was "the worse half", that `dp52` came out "ten times too
+small", and that a stock at its 52-week high published at 10% of it. **The
+measurement does not support that, and it was written before measuring.**
+
+The mechanism is real — `technical_compute`'s indicators are fed by the
+`*_adj` columns and `dp52` read raw `high` — but where both values exist
+the two agree to rounding. A split restates the dates *before* it, so raw
+and adjusted agree on every date after the most recent split.
+
+112 companies split inside the window and all 112 publish a ratio, so the
+cohort is not empty. What is not established is where those 112 sit: Q3
+can only see rows whose governed extreme is present, so its silence may
+mean the cohort is concentrated in the withheld group rather than that the
+basis never mattered. Q6 of `measure_shadow_52w_extreme.py` settles it and
+has not yet been run.
+
+Recorded as a basis difference, not as a demonstrated error. It does not
+change the fix: two producers for one quantity is a defect because the row
+contradicts itself, not because the numbers happened to diverge.
 
 ### FIXED 13 Nov 2026
 
@@ -1286,10 +1319,24 @@ lateral shadows a producer. It now records outputs.
 ### Not yet proven in production
 
 A green test shows the statement changed. `measure_shadow_52w_extreme.py`
-carries the before-measurement; the same script re-run after a canonical
-run is the after. The number that matters is how far the published ratio
-moves for the split cohort, because that is the population the finding
-never counted.
+carries the before-measurement above; the same script re-run after a
+canonical run is the after.
+
+The expected effect, stated before the run so it can be wrong:
+
+| | before | after |
+|---|---|---|
+| `price_to_52w_high` present | 2,414 | **1,895** |
+| `new_52w_high` NULL | 0 | **674** |
+| `new_52w_high` TRUE | 83 | **68** |
+
+Coverage falls by 519 ratios, and that is the fix working rather than a
+regression: those 519 rows were answering a question nobody could answer.
+The 15 lost TRUEs are the rows claiming a new 52-week high against a
+six-month maximum.
+
+If the after-run does not show roughly these numbers, the fix did
+something other than what is claimed here.
 
 ## 14. A dead join in the statement that publishes the universe
 

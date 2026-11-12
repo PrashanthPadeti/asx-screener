@@ -243,7 +243,7 @@ for the annual ones, `UNIQUE (asx_code)` for the three Bronze tables.
 |---|---|---|
 | 11 | Ten columns no statement writes. Nine are NULL on every row. `price_to_52w_high` is FROZEN on 2,290 of 2,566 rows — it is in neither the insert list nor the `DO UPDATE SET` list, so an existing row's value is never touched by any run — and it is served through a registered filter, a sort column and a response field | MEASURED |
 | 12 | The six market-cap tier flags are `COALESCE(..., FALSE)` on `NOT NULL DEFAULT false` columns, while `market_cap_tier` beside them returns NULL. 641 of 2,566 rows (25.0%) carry six falses and a NULL tier | MEASURED |
-| 13 | A `dp52` lateral computed the 52-week extremes a **second** time — `MAX(high)`/`MIN(low)` over 365 days of raw `market.daily_prices` — with no coverage rule and no split adjustment, and four published columns were derived from it while the extreme beside them came from the governed producer | **FIXED** — the lateral is removed; the extremes and everything derived from them read `dm` |
+| 13 | A `dp52` lateral computed the 52-week extremes a **second** time — `MAX(high)`/`MIN(low)` over 365 days of `market.daily_prices` with no coverage rule — and four published columns were derived from it while the extreme beside them came from the governed producer. Measured 13 Nov 2026: **519 ratios and 674 flags published from a window that did not span 52 weeks**, 15 of them claiming a *new* 52-week high against a six-month maximum | **FIXED** — the lateral is removed; the extremes and everything derived from them read `dm` |
 
 Finding 11 is the sharper one, and not for the reason it first appeared.
 Nine empty columns are a schema promise nobody kept — visible, inert, easy to
@@ -255,9 +255,12 @@ Finding 13 is the same lesson one level up. Two producers for one quantity
 is not redundancy; it is a contradiction the row publishes without saying
 so. The governed extreme and the ratio taken of it sat in adjacent columns
 and came from different computations — one that required 365 days of
-coverage and split-adjusted prices, one that required nothing and used raw
-ones. **A ratio must come from the same producer as the quantity it is a
-ratio of.**
+coverage, one that required nothing. **A ratio must come from the same
+producer as the quantity it is a ratio of.**
+
+That it is a defect does not depend on the two numbers diverging. Measured,
+they agreed to rounding wherever both existed; the damage was done where
+one of them did not exist, and the row published the other anyway.
 
 ---
 

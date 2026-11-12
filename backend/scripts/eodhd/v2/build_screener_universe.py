@@ -1446,14 +1446,16 @@ LEFT JOIN LATERAL (
            --                      maximum of 196 days, labelled 52-week.
            --                      rolling_extreme() blanks that row and
            --                      records why in window_states.
-           --   raw, not adjusted  technical_compute reads high_adj where it
-           --                      exists. dp52 read raw `high`, so the two
-           --                      differed by the split factor for any
-           --                      stock that split inside the window -- and
-           --                      in the direction that makes a stock AT
-           --                      its 52-week high publish as a fraction of
-           --                      it, since a consolidation leaves the raw
-           --                      high a multiple of the adjusted one.
+           --   raw, not adjusted  technical_compute's indicators are fed by
+           --                      the *_adj columns; dp52 read raw `high`.
+           --                      A real difference in basis, but measured
+           --                      13 Nov 2026 it produced NO numerical
+           --                      disagreement where both values existed:
+           --                      0 rows differing by >1%%, max 0.0001 over
+           --                      1,895 rows. A split restates the dates
+           --                      BEFORE it, so the two agree after the
+           --                      most recent one. Recorded as a basis
+           --                      difference, NOT as a demonstrated error.
            --   nothing recorded   no state, no reason, no attribution.
            --
            -- The canonical commit overwrites screener.universe.high_52w

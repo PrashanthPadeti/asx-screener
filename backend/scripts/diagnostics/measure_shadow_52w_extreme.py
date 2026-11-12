@@ -135,20 +135,24 @@ SELECT count(*) AS both_present,
    AND u.price IS NOT NULL
 """
 
-#: The second layer, and the one the finding never saw.
+#: The price-basis question. STATED AS A HYPOTHESIS, and the 13 Nov run did
+#: not support it.
 #:
 #: technical_compute reads SPLIT-ADJUSTED highs -- `_series("high")` returns
-#: high_adj where the column exists -- because computing indicators from raw
-#: prices put the exchange's worst performers at the top of "best 1-year
-#: return" after their consolidations. dp52 reads RAW `high` from
-#: market.daily_prices.
+#: high_adj, and the *_adj columns are the ones that feed the indicators --
+#: while dp52 read RAW `high`. The mechanism is real, and the expectation
+#: was that the two would differ by the split factor for any stock that
+#: split inside the window.
 #:
-#: So the two producers disagree for every stock that split inside the
-#: window, by the split factor. A 1-for-10 consolidation leaves the raw high
-#: ten times the adjusted one, so price_to_52w_high computed from dp52 is
-#: ten times too SMALL: a stock sitting at its 52-week high is published at
-#: 10% of it. That is not a short-history edge case -- it is the stocks the
-#: split-adjustment work exists for.
+#: MEASURED 13 Nov 2026: they did NOT. Q3 returned differs_gt_1pct = 0 and
+#: max_diff = 0.0001 over 1,895 rows, which is rounding. 112 companies had
+#: split inside the window and all 112 published a ratio.
+#:
+#: The two are reconcilable: a split restates the prices BEFORE it, so raw
+#: and adjusted agree on every date after the most recent split, and the
+#: split cohort may sit largely in the WITHHELD group that Q3 cannot see --
+#: Q3 requires the governed extreme to be present. Q6 settles that, and
+#: until it is run the price-basis layer is NOT demonstrated.
 #:
 #: Counted from market.splits, which is small and not a hypertable.
 Q4 = """
@@ -169,6 +173,25 @@ SELECT count(DISTINCT u.asx_code) AS exposed_companies
   JOIN market.splits s ON s.asx_code = u.asx_code
  WHERE s.split_date >= CURRENT_DATE - 365
    AND (u.price_to_52w_high IS NOT NULL OR u.price_to_52w_low IS NOT NULL)
+"""
+
+#: Where the split cohort actually sits.
+#:
+#: Q3 found no disagreement between the two producers, but Q3 can only see
+#: rows whose governed extreme is PRESENT. If the 112 split companies are
+#: concentrated in the withheld group, Q3's silence says nothing about the
+#: price basis. This splits the cohort the way Q2 splits the universe, so
+#: the two are read against each other instead of one being assumed.
+Q6 = """
+SELECT (u.high_52w IS NULL) AS extreme_withheld,
+       count(DISTINCT u.asx_code) AS split_companies,
+       count(DISTINCT u.asx_code) FILTER (
+         WHERE u.price_to_52w_high IS NOT NULL) AS publishing_a_ratio
+  FROM screener.universe u
+  JOIN market.splits s ON s.asx_code = u.asx_code
+ WHERE s.split_date >= CURRENT_DATE - 365
+ GROUP BY 1
+ ORDER BY 1
 """
 
 #: extreme column, derived ratio, derived boolean. Listed rather than
@@ -293,6 +316,16 @@ def main() -> int:
                   "─────────────────")
             header, rows = _rows(cur, Q5)
             _table(header, rows)
+
+            print()
+            print("── Q6  where the split cohort sits relative to Q3's view "
+                  "──────────")
+            header, rows = _rows(cur, Q6)
+            _table(header, rows)
+            print()
+            print("  Q3 only sees extreme_withheld = False. A cohort "
+                  "concentrated in the True row means Q3's silence says "
+                  "nothing about the price basis.")
 
         conn.rollback()
     finally:

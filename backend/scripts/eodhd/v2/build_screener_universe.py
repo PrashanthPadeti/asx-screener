@@ -331,8 +331,8 @@ SELECT
     dp.volume         AS volume,
     dp20.avg_volume_20d,
     vs.market_cap,
-    dp52.high_52w,
-    dp52.low_52w,
+    dm.high_52w,
+    dm.low_52w,
 
     -- ── Valuation ratios ─────────────────────────────────────────────────────
     -- P/E: prefer valuation_snapshot; fall back to price / derived EPS (eps_fy0)
@@ -796,10 +796,20 @@ SELECT
     dm.above_sma200,
     dm.golden_cross,
     dm.death_cross,
-    CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL
-         AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high,
-    CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL
-         AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low,
+    -- A new 52-week high is only knowable when BOTH the close and the
+    -- 52-week high are. These carried `ELSE FALSE`, which published "this
+    -- stock did not make a new 52-week high" for every stock whose high was
+    -- unknown -- a confident negative drawn from nothing, and the same
+    -- defect as finding 10 in its most explicit form.
+    --
+    -- Returning the comparison from the CASE rather than TRUE/FALSE
+    -- branches keeps the three outcomes distinct: TRUE, FALSE, and NULL for
+    -- "we do not know". The columns are nullable with no default, so the
+    -- schema could always hold the third one.
+    CASE WHEN dp.close IS NOT NULL AND dm.high_52w IS NOT NULL
+         THEN dp.close >= dm.high_52w END AS new_52w_high,
+    CASE WHEN dp.close IS NOT NULL AND dm.low_52w IS NOT NULL
+         THEN dp.close <= dm.low_52w END  AS new_52w_low,
     dm.relative_volume,
     dm.bb_pct,
     dm.rsi_21,
@@ -822,15 +832,15 @@ SELECT
     -- working capital: current assets − current liabilities (already AUD millions)
     (bs0.total_current_assets - bs0.total_current_liab) AS working_capital,
     -- price position vs 52w low (1.0 = sitting at the low)
-    CASE WHEN dp52.low_52w > 0
-         THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low,
+    CASE WHEN dm.low_52w > 0
+         THEN ROUND((dp.close / dm.low_52w)::numeric, 4) END AS price_to_52w_low,
     -- price position vs 52w high (1.0 = sitting at the high)
     --
     -- Migration 052 added six columns and backfilled none. The other five
     -- were wired into this statement; this one was not, and because it was
     -- in neither the column list nor the ON CONFLICT SET list below, an
     -- existing row's value was never touched by any run. It froze at
-    -- whatever wrote it, beside a dp.close and a dp52.high_52w refreshed
+    -- whatever wrote it, beside a dp.close and a 52-week high refreshed
     -- daily, and was served through a registered filter, a sort column and
     -- a response field.
     --
@@ -852,8 +862,12 @@ SELECT
     -- SET below assigns EXCLUDED, so a row whose high disappears has its
     -- stale ratio REPLACED by NULL rather than keeping yesterday's number.
     -- That direction is the point of the fix, not a side effect of it.
-    CASE WHEN dp52.high_52w > 0
-         THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END AS price_to_52w_high,
+    --
+    -- The high is dm's, not a second computation of it. See the dm lateral
+    -- for why that matters; in short, the ratio and the high it is a ratio
+    -- OF must come from the same producer or the row contradicts itself.
+    CASE WHEN dm.high_52w > 0
+         THEN ROUND((dp.close / dm.high_52w)::numeric, 4) END AS price_to_52w_high,
 
     -- ── Income statement history (annual levels, AUD millions) ───────────────
     pnl0.gross_profit  AS gross_profit_fy0,
@@ -1146,14 +1160,17 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) dp ON TRUE
 
--- ── 52-week high/low (simple MAX/MIN aggregate — much faster than window fn) ─
-LEFT JOIN LATERAL (
-    SELECT MAX(high) AS high_52w, MIN(low) AS low_52w
-    FROM market.daily_prices
-    WHERE asx_code = c.asx_code
-      AND time >= NOW() - INTERVAL '365 days'
-      AND {current_source}
-) dp52 ON TRUE
+-- The 52-week high/low lateral that stood here is REMOVED, not replaced.
+-- It was `MAX(high), MIN(low)` over 365 days of market.daily_prices, and it
+-- was a second definition of a quantity the system already has a governed
+-- producer for. The extremes and everything derived from them now come from
+-- dm; see its SELECT list for the three ways the two disagreed.
+--
+-- Deleting it rather than leaving it unused is deliberate. A lateral that
+-- computes a plausible number nobody reads is how the next column acquires
+-- an ungoverned source: it is already in scope, it already looks right, and
+-- nothing in the statement says it must not be used. The same shape as the
+-- dead weekly_metrics join recorded as finding 14.
 
 -- ── 20-day avg volume (LIMIT 20 aggregate — scans only 20 rows per stock) ────
 LEFT JOIN LATERAL (
@@ -1419,6 +1436,33 @@ LEFT JOIN LATERAL (
            return_7y, return_8y, return_9y, return_10y, return_15y,
            metric_states,
            above_vwap, dollar_volume_avg_20d,
+           -- The 52-week extremes, and the single source for everything
+           -- derived from them. This statement used to compute them a
+           -- second time -- MAX(high)/MIN(low) over 365 days of
+           -- market.daily_prices, in a lateral called dp52 -- which
+           -- disagreed with the governed producer in three ways:
+           --
+           --   no coverage rule   a stock with 196 days of history got the
+           --                      maximum of 196 days, labelled 52-week.
+           --                      rolling_extreme() blanks that row and
+           --                      records why in window_states.
+           --   raw, not adjusted  technical_compute's indicators are fed by
+           --                      the *_adj columns; dp52 read raw `high`.
+           --                      A real difference in basis, but measured
+           --                      13 Nov 2026 it produced NO numerical
+           --                      disagreement where both values existed:
+           --                      0 rows differing by >1%%, max 0.0001 over
+           --                      1,895 rows. A split restates the dates
+           --                      BEFORE it, so the two agree after the
+           --                      most recent one. Recorded as a basis
+           --                      difference, NOT as a demonstrated error.
+           --   nothing recorded   no state, no reason, no attribution.
+           --
+           -- The canonical commit overwrites screener.universe.high_52w
+           -- with the governed assessment, so the published extreme and the
+           -- ratios published beside it came from different computations.
+           -- Reading dm here is what makes them one.
+           high_52w, low_52w,
            -- Tier 2 signals
            dma50_ratio, dma200_ratio,
            above_sma50, above_sma200,

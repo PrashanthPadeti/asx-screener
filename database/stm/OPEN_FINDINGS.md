@@ -793,16 +793,42 @@ wide so that computable signals were withheld.
 `build_screener_universe.py` joins `market.weekly_metrics` as `wm`, and
 **no column in the universe's SELECT reads from it**. The universe's own
 `golden_cross`, `death_cross`, `above_sma50` and `above_sma200` all come
-from `dm` — `market.daily_metrics` — which already writes NULL for an
-uncomputable signal.
+from `dm` — `market.daily_metrics`.
 
-So no newly listed company was excluded from a bullish screen by this
-defect. The false readings were real and were stored, but they stopped at
+So no newly listed company was excluded from a bullish screen *by this
+defect*. The false readings were real and were stored, but they stopped at
 the Gold layer. That is luck rather than design: the weekly fallback that
 would have carried them was removed for an unrelated reason (a 14-month
 `rsi_14` being served as a 14-day one), and the join was left behind.
 
-**Requirement, met:** unknown stays distinguishable from a measured false.
+**Requirement, met:** unknown stays distinguishable from a measured false —
+in `market.weekly_metrics`.
+
+> #### CORRECTION, 13 Nov 2026
+>
+> The sentence above originally continued "…come from `dm` —
+> `market.daily_metrics` — **which already writes NULL for an uncomputable
+> signal**." That is **false**, and it was asserted without being checked.
+>
+> `technical_compute.py:570-578` writes the daily signals as plain pandas
+> comparisons:
+>
+> ```python
+> df["above_sma200"] = c > df["sma_200"]
+> df["golden_cross"] = (df["sma_50"] > df["sma_200"]) & (...)
+> df["new_52w_high"] = (h >= df["high_52w"]) & (h > h.shift(1))
+> ```
+>
+> A comparison against NaN yields **False**, not NaN — the same trap this
+> finding is about — and `_v()` converts `np.bool_(False)` to `False`
+> rather than to None. So `market.daily_metrics` carries measured falses in
+> exactly the situation `market.weekly_metrics` did, and unlike the weekly
+> ones **these reach the customer**, because the universe reads four of
+> them straight from `dm`.
+>
+> Recorded as finding 15. The claim was comforting, load-bearing, and
+> wrong: it is what let this finding close as "none of them reach the
+> customer" when a larger instance of the same defect sat one table over.
 
 ### The fix is forward-only, and that is acceptable here
 
@@ -1179,12 +1205,138 @@ nobody named, presented as current and precise.
 
 **The absence was established, stated, and destroyed one column over.**
 
-### Requirement
+### The mechanism was not what this finding said it was
 
-A metric derived from a governed input inherits its input's state. Closing
-this needs the derived-metric producer named above, and `new_52w_high` /
-`new_52w_low` additionally need `BOOLEAN_METRICS` entries or
-`storage_value` writes True/False into a numeric column.
+Written as "a derived metric escapes the governance of its input", which
+implied the fix was a derived-metric producer. Reading the statement on
+13 Nov 2026 found something narrower and more fixable.
+
+The builder computed the extreme a **second time**:
+
+```sql
+-- build_screener_universe.py, the dp52 lateral
+SELECT MAX(high) AS high_52w, MIN(low) AS low_52w
+  FROM market.daily_prices
+ WHERE asx_code = c.asx_code
+   AND time >= NOW() - INTERVAL '365 days'
+```
+
+`market.daily_metrics.high_52w` already existed and was governed. Two
+definitions of one quantity, disagreeing three ways:
+
+| | governed producer | `dp52` |
+|---|---|---|
+| coverage | blank until the series spans 365 days, reason recorded | `MAX` over whatever rows exist |
+| price basis | split-**adjusted** (`*_adj` feed the indicators) | **raw** `high` — a real difference, measured to produce none |
+| state | `window_states` entry | nothing |
+
+So `high_present = 0` beside `ratio_present` = every row was never a
+correlation to explain: **the two columns never came from the same
+computation.** The canonical commit withheld one and had no opinion about
+the other.
+
+And the two flags were a hand-written `ELSE FALSE`, publishing "this stock
+did not make a new 52-week high" wherever the high was unknown.
+
+### MEASURED 13 Nov 2026, before the fix
+
+```
+ governed extreme PRESENT    1,895 rows   ratio present on 1,895
+ governed extreme WITHHELD     674 rows   ratio present on 519
+                                          new_52w_high FALSE on 659
+                                          new_52w_high TRUE  on  15
+                                          new_52w_high NULL  on   0
+ the two producers, where both values exist
+                                          0 rows differing by >1%
+                                          max difference 0.0001
+```
+
+The coverage defect is real and sizeable. **519 ratios and 674 flags were
+published from a window that did not span 52 weeks**, and 15 of those rows
+claim a **new** 52-week high measured against a six-month maximum. `NULL`
+appears zero times in 2,569 rows, which is the whole point: the column
+could never say "we do not know".
+
+#### The price-basis claim is WITHDRAWN
+
+An earlier version of this finding stated that the raw-vs-adjusted
+difference was "the worse half", that `dp52` came out "ten times too
+small", and that a stock at its 52-week high published at 10% of it. **The
+measurement does not support that, and it was written before measuring.**
+
+The mechanism is real — `technical_compute`'s indicators are fed by the
+`*_adj` columns and `dp52` read raw `high` — but where both values exist
+the two agree to rounding. A split restates the dates *before* it, so raw
+and adjusted agree on every date after the most recent split.
+
+112 companies split inside the window and all 112 publish a ratio, so the
+cohort is not empty. What is not established is where those 112 sit: Q3
+can only see rows whose governed extreme is present, so its silence may
+mean the cohort is concentrated in the withheld group rather than that the
+basis never mattered. Q6 of `measure_shadow_52w_extreme.py` settles it and
+has not yet been run.
+
+Recorded as a basis difference, not as a demonstrated error. It does not
+change the fix: two producers for one quantity is a defect because the row
+contradicts itself, not because the numbers happened to diverge.
+
+### FIXED 13 Nov 2026
+
+The lateral is **deleted**, not left unused. The extremes and all four
+derived columns read `dm`, whose as-of predicate is already correct and
+already fails closed. The flags return the comparison from the `CASE`, so
+TRUE, FALSE and NULL stay three answers.
+
+Deleting rather than orphaning is the point: a lateral computing a
+plausible number nobody reads is how the next column acquires an ungoverned
+source. It is already in scope and already looks right.
+
+`test_one_producer_per_quantity.py` asserts the **class**, not these four
+columns: no lateral may produce a quantity a joined producer already
+publishes; a ratio must read its denominator from the alias that publishes
+it; no boolean may fall back to a literal after guarding its input for
+NULL. Five mutants, five killed.
+
+Governing the four as a backstop is still worth doing and is **not** done
+here — it needs a model-version decision (V3 is frozen the moment a
+production run finalises under it) and the booleans need `BOOLEAN_METRICS`
+entries. The source fix does not depend on it, and makes the governed and
+published values agree by construction rather than by enforcement.
+
+### Two defects found while fixing this one
+
+`universe_joins.py` read line numbers from another generator's **cached**
+output and never checked them. A stale `universe_pairs.json` pointed it at
+a window ending three laterals early: 30 sources instead of 32, one
+invented with alias `None` from the truncated tail — and
+`test_universe_join_cardinality` passed all seven assertions on it. The
+anchors are now verified against the file.
+
+The join evidence recorded what every lateral **reads** and nothing about
+what it **produces**, which is exactly why no guard could ask whether a
+lateral shadows a producer. It now records outputs.
+
+### Not yet proven in production
+
+A green test shows the statement changed. `measure_shadow_52w_extreme.py`
+carries the before-measurement above; the same script re-run after a
+canonical run is the after.
+
+The expected effect, stated before the run so it can be wrong:
+
+| | before | after |
+|---|---|---|
+| `price_to_52w_high` present | 2,414 | **1,895** |
+| `new_52w_high` NULL | 0 | **674** |
+| `new_52w_high` TRUE | 83 | **68** |
+
+Coverage falls by 519 ratios, and that is the fix working rather than a
+regression: those 519 rows were answering a question nobody could answer.
+The 15 lost TRUEs are the rows claiming a new 52-week high against a
+six-month maximum.
+
+If the after-run does not show roughly these numbers, the fix did
+something other than what is claimed here.
 
 ## 14. A dead join in the statement that publishes the universe
 
@@ -1209,6 +1361,52 @@ its own commit with its own gate, not a passenger on another fix. The
 cardinality guard's `EXPECT_SOURCES`, `EXPECT_LATERALS` and
 `EXPECT_LIMIT_1` move with it.
 
+## 15. `market.daily_metrics` conflates unknown with false, and it is served
+
+**Table:** `market.daily_metrics` → `screener.universe`
+**Status:** CONFIRMED from the producer, 13 Nov 2026
+**Source:** found while fixing finding 13; **corrects finding 10**
+
+Finding 10 closed partly on the claim that `market.daily_metrics` "already
+writes NULL for an uncomputable signal". It does not.
+
+```python
+# technical_compute.py:570-578
+df["above_sma20"]   = c > df["sma_20"]
+df["above_sma200"]  = c > df["sma_200"]
+df["golden_cross"]  = (df["sma_50"] > df["sma_200"]) & (df["sma_50_prev"] <= df["sma_200_prev"])
+df["new_52w_high"]  = (h >= df["high_52w"]) & (h > h.shift(1))
+```
+
+A pandas comparison against NaN yields **False**, and `_v()` converts
+`np.bool_(False)` to `False` rather than None. Nine boolean columns —
+`above_sma20/50/100/200`, `golden_cross`, `death_cross`, `new_52w_high`,
+`new_52w_low`, `volume_breakout`, plus `obv_rising` — are written as
+measured falses wherever their inputs do not exist.
+
+**This one reaches the customer.** Finding 10's falses stopped at the Gold
+layer because nothing read `weekly_metrics`. These do not: the universe
+reads `above_sma50`, `above_sma200`, `golden_cross` and `death_cross`
+straight from `dm`.
+
+The warm-up filter (`df = df[df["rsi_14"].notna()]`, ~15 bars) removes the
+most extreme cases and not the ones that matter: a stock with 100 bars has
+an RSI and no `sma_200`, so its `above_sma200` and both crosses are
+confident negatives drawn from nothing.
+
+### Requirement
+
+The same shape as finding 10's fix: mask each signal on its inputs being
+present, convert with a None-preserving helper rather than `bool()`, and a
+test that runs the real computation over a short series rather than
+asserting on the source. The columns must be nullable — that needs
+checking per column, since `weekly_metrics` already was and `daily_metrics`
+may not be.
+
+Population and exposure are unmeasured. A count of rows per column where
+the flag is FALSE and its input is NULL is the measurement, and it belongs
+in the same guarded diagnostic as finding 13's.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -1231,5 +1429,6 @@ cardinality guard's `EXPECT_SOURCES`, `EXPECT_LATERALS` and
 | 10 | Insufficient history written as FALSE, not NULL | `market.weekly_metrics` | **FIXED** — masked at source; none of the four reached the customer |
 | 11 | Ten columns no statement writes. Nine remain empty; `price_to_52w_high` was FROZEN on 2,290 of 2,566 rows (91.1% wrong by >0.01, median error 0.10) and is **FIXED** | `screener.universe` | **PARTIALLY CLOSED** — ratio repaired, nine columns still unwritten |
 | 12 | Unknown market cap written as six measured falses; 642 of 2,567 rows (25%) were invisible to every tier filter | `screener.universe` | **FIXED** — consumers read the label, `unknown` selectable, seven tiers reconcile to 2,567 |
-| 13 | A derived metric escapes its input's governance: 520 rows show a 52-week ratio computed over 196 days beside a withheld 52-week high | `screener.universe` | **CONFIRMED** — needs a derived-metric producer |
+| 13 | Not a governance gap but a **second producer**: a `dp52` lateral recomputed the 52-week extremes from raw, unadjusted `daily_prices` with no coverage rule, and four published columns derived from it while the extreme beside them came from the governed producer. The split basis made a stock at its 52-week high publish at a fraction of it | `screener.universe` | **FIXED** — lateral deleted, all four read `dm`; governance backstop deferred, awaiting the model-version decision |
 | 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |
+| 15 | Nine boolean columns written as pandas comparisons against NaN, so unknown is stored as a measured FALSE. **Four are served** — the universe reads `above_sma50`, `above_sma200`, `golden_cross`, `death_cross` straight from `dm`. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **CONFIRMED** — population unmeasured |

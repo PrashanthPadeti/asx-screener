@@ -1,14 +1,14 @@
 {
  "insert_line": 82,
  "select_line": 287,
- "from_line": 1135,
- "conflict_line": 1640,
+ "from_line": 1149,
+ "conflict_line": 1684,
  "alias_tables": {
   "c": "market.companies_current",
   "vs": "market.valuation_snapshot",
   "ar": "market.analyst_ratings"
  },
- "lateral_count": 30,
+ "lateral_count": 29,
  "do_update_set": [
   "company_name",
   "sector",
@@ -528,12 +528,12 @@
   {
    "ordinal": 35,
    "column": "high_52w",
-   "expr": "dp52.high_52w"
+   "expr": "dm.high_52w"
   },
   {
    "ordinal": 36,
    "column": "low_52w",
-   "expr": "dp52.low_52w"
+   "expr": "dm.low_52w"
   },
   {
    "ordinal": 37,
@@ -1508,12 +1508,12 @@
   {
    "ordinal": 231,
    "column": "new_52w_high",
-   "expr": "CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high"
+   "expr": "CASE WHEN dp.close IS NOT NULL AND dm.high_52w IS NOT NULL THEN dp.close >= dm.high_52w END AS new_52w_high"
   },
   {
    "ordinal": 232,
    "column": "new_52w_low",
-   "expr": "CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low"
+   "expr": "CASE WHEN dp.close IS NOT NULL AND dm.low_52w IS NOT NULL THEN dp.close <= dm.low_52w END  AS new_52w_low"
   },
   {
    "ordinal": 233,
@@ -1583,12 +1583,12 @@
   {
    "ordinal": 246,
    "column": "price_to_52w_low",
-   "expr": "CASE WHEN dp52.low_52w > 0 THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low"
+   "expr": "CASE WHEN dm.low_52w > 0 THEN ROUND((dp.close / dm.low_52w)::numeric, 4) END AS price_to_52w_low"
   },
   {
    "ordinal": 247,
    "column": "price_to_52w_high",
-   "expr": "CASE WHEN dp52.high_52w > 0 THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END AS price_to_52w_high"
+   "expr": "CASE WHEN dm.high_52w > 0 THEN ROUND((dp.close / dm.high_52w)::numeric, 4) END AS price_to_52w_high"
   },
   {
    "ordinal": 248,

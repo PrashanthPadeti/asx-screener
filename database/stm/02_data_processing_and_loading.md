@@ -229,9 +229,9 @@ Proven structurally, not assumed — `backend/tests/test_universe_join_cardinali
 | driving relation | 1 | `market.companies_current`, UNIQUE PARTIAL index | one |
 | plain `LEFT JOIN` | 2 | `ON asx_code`, the other side's PRIMARY KEY | at most one |
 | lateral, `LIMIT 1` | 25 | ordered, or an equality on a unique key | at most one |
-| lateral, aggregate | 5 | no `GROUP BY` | exactly one |
+| lateral, aggregate | 4 | no `GROUP BY` | exactly one |
 
-Zero of the 33 sources can fan the driving row out. Cardinality and
+Zero of the 32 sources can fan the driving row out. Cardinality and
 determinism are checked separately, because `LIMIT 1` settles only the first:
 twelve laterals take `LIMIT 1` with no `ORDER BY` and are deterministic
 because their WHERE clause pins a unique key — `fiscal_year = pnl0.fiscal_year - 1`
@@ -243,12 +243,24 @@ for the annual ones, `UNIQUE (asx_code)` for the three Bronze tables.
 |---|---|---|
 | 11 | Ten columns no statement writes. Nine are NULL on every row. `price_to_52w_high` is FROZEN on 2,290 of 2,566 rows — it is in neither the insert list nor the `DO UPDATE SET` list, so an existing row's value is never touched by any run — and it is served through a registered filter, a sort column and a response field | MEASURED |
 | 12 | The six market-cap tier flags are `COALESCE(..., FALSE)` on `NOT NULL DEFAULT false` columns, while `market_cap_tier` beside them returns NULL. 641 of 2,566 rows (25.0%) carry six falses and a NULL tier | MEASURED |
+| 13 | A `dp52` lateral computed the 52-week extremes a **second** time — `MAX(high)`/`MIN(low)` over 365 days of `market.daily_prices` with no coverage rule — and four published columns were derived from it while the extreme beside them came from the governed producer. Measured 13 Nov 2026: **519 ratios and 674 flags published from a window that did not span 52 weeks**, 15 of them claiming a *new* 52-week high against a six-month maximum | **FIXED** — the lateral is removed; the extremes and everything derived from them read `dm` |
 
 Finding 11 is the sharper one, and not for the reason it first appeared.
 Nine empty columns are a schema promise nobody kept — visible, inert, easy to
 fix. The tenth is a value frozen at an unknown past date sitting beside a
 `price` and a `high_52w` that are refreshed daily. **Empty is visible; stale
 is not.**
+
+Finding 13 is the same lesson one level up. Two producers for one quantity
+is not redundancy; it is a contradiction the row publishes without saying
+so. The governed extreme and the ratio taken of it sat in adjacent columns
+and came from different computations — one that required 365 days of
+coverage, one that required nothing. **A ratio must come from the same
+producer as the quantity it is a ratio of.**
+
+That it is a defect does not depend on the two numbers diverging. Measured,
+they agreed to rounding wherever both existed; the damage was done where
+one of them did not exist, and the row published the other anyway.
 
 ---
 

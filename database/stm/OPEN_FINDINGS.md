@@ -804,6 +804,24 @@ would have carried them was removed for an unrelated reason (a 14-month
 
 **Requirement, met:** unknown stays distinguishable from a measured false.
 
+### The fix is forward-only, and that is acceptable here
+
+`weekly_pipeline.py` step 6 computes weekly metrics **incrementally, last
+week** (`0 21 * * 0`, Sunday 21:00 UTC). The conflict path does reassign all
+four signals from `EXCLUDED`, so a recomputed week replaces a stored `false`
+with `NULL` — but only the weeks a run recomputes.
+
+Every company's early history therefore keeps its stored falses: roughly the
+first 40 weekly rows per company for `golden_cross`, `death_cross` and
+`above_sma40w`, the first 10 for `above_sma10w`. Deployed 12 Nov 2026; the
+first corrected week is the run of Sunday 15 Nov 2026.
+
+This is left as data hygiene rather than a repair because the exposure
+answer above holds for the historical rows too: nothing under `app/`
+references `weekly_metrics` at all, and the one statement that joins it
+reads no column from it (finding 14). If any reader is ever wired to this
+table, the backfill becomes a precondition, not an option.
+
 ## 11. `screener.universe` — ten columns that no statement writes
 
 **Table:** `screener.universe` (376 columns)

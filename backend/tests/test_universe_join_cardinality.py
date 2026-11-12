@@ -33,10 +33,17 @@ EVIDENCE = ROOT / "database" / "stm" / "evidence" / "universe_joins.json"
 SNAP_DIR = ROOT / "database" / "stm"
 
 #: Populations at the time of writing. Reconciliation, not configuration.
-EXPECT_SOURCES = 33
-EXPECT_LATERALS = 30
+#:
+#: 33/30/25/5/3 until the dp52 lateral was removed. It computed the 52-week
+#: extremes a second time -- MAX(high)/MIN(low) over 365 days of raw
+#: market.daily_prices, with no coverage rule -- and four published columns
+#: were derived from it while the extreme beside them came from the governed
+#: producer. One source, one lateral and one aggregate-without-GROUP-BY
+#: leave with it; LIMIT 1 is unchanged because it never had one.
+EXPECT_SOURCES = 32
+EXPECT_LATERALS = 29
 EXPECT_LIMIT_1 = 25
-EXPECT_AGG_NO_GROUP = 5
+EXPECT_AGG_NO_GROUP = 4
 EXPECT_PLAIN = 3
 
 #: The driving relation. One row per asx_code comes from a UNIQUE PARTIAL

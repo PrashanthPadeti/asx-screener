@@ -28,6 +28,32 @@ pairs = json.loads((SP / "universe_pairs.json").read_text(encoding="utf-8"))
 lines = BUILDER.read_text(encoding="utf-8").splitlines()
 start, end = pairs["from_line"] - 1, pairs["conflict_line"] - 1
 
+# The line numbers come from another generator's CACHED output, and the file
+# they index has been edited since that output was written every time this
+# matters. On 13 Nov 2026 a stale universe_pairs.json pointed this parser at
+# a window that ended three laterals early: it reported 30 sources instead of
+# 32, invented one with alias None out of the truncated tail, and the
+# cardinality guard that consumes this file passed on all seven assertions.
+# A wrong answer, silently, from an input that looked fine.
+#
+# So the anchors are CHECKED against the file rather than trusted. This is
+# not a style preference: a derived artifact that indexes another artifact by
+# position must verify the position still means what it meant, or it reports
+# on a file that no longer exists.
+_from_anchor = lines[start].strip() if 0 <= start < len(lines) else ""
+_conflict_anchor = lines[end].strip() if 0 <= end < len(lines) else ""
+if not re.match(r"^FROM\s", _from_anchor, re.I) or \
+        not re.search(r"ON\s+CONFLICT", _conflict_anchor, re.I):
+    raise SystemExit(
+        f"universe_pairs.json is stale: it says the FROM block runs from "
+        f"line {pairs['from_line']} to {pairs['conflict_line']}, but those "
+        f"lines now read\n"
+        f"  {pairs['from_line']}: {_from_anchor!r}\n"
+        f"  {pairs['conflict_line']}: {_conflict_anchor!r}\n"
+        f"Run `python backend/scripts/stm/universe_pairs.py` first. "
+        f"Parsing from here would describe a statement that is not the one "
+        f"in the file.")
+
 
 def strip(s):
     return re.sub(r"--.*$", "", s)
@@ -88,10 +114,27 @@ while i < len(block):
             m.group(1).lower() for m in
             re.finditer(r"(?:^|\bAND\b)\s*([a-z_][a-z0-9_]*)\s*=",
                         wtext, re.I)})
+        # What the lateral PRODUCES, not only what it reads.
+        #
+        # The evidence recorded base tables, ordering, cardinality and the
+        # WHERE -- everything about how a lateral selects its row, and
+        # nothing about what it hands back. That blind spot is why no guard
+        # could ask the question finding 13 turned on: does this lateral
+        # compute a quantity a joined producer already publishes?
+        #
+        # dp52 produced `high_52w` and `low_52w`, names that
+        # market.daily_metrics already carries, from a raw price table with
+        # no coverage rule. The evidence said it read market.daily_prices
+        # and returned at most one row, both true, and had no way to say it
+        # was a second definition of something the statement already had.
+        outputs = sorted({
+            m.group(1).lower() for m in
+            re.finditer(r"\bAS\s+([a-z_][a-z0-9_]*)", text, re.I)})
         sources.append({
             "kind": "lateral",
             "alias": alias,
             "base_tables": base,
+            "outputs": outputs,
             "limit_1": has_limit,
             "group_by": has_group,
             "aggregate_no_group": aggregate and not has_group,

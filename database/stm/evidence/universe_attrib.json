@@ -279,7 +279,7 @@
   {
    "ordinal": 26,
    "column": "high_52w",
-   "insert_expr": "dp52.high_52w",
+   "insert_expr": "dm.high_52w",
    "refreshed_on_conflict": true,
    "governed": true,
    "writers": [
@@ -291,7 +291,7 @@
   {
    "ordinal": 27,
    "column": "low_52w",
-   "insert_expr": "dp52.low_52w",
+   "insert_expr": "dm.low_52w",
    "refreshed_on_conflict": true,
    "governed": true,
    "writers": [
@@ -2541,7 +2541,7 @@
   {
    "ordinal": 226,
    "column": "new_52w_high",
-   "insert_expr": "CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL AND dp.close >= dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high",
+   "insert_expr": "CASE WHEN dp.close IS NOT NULL AND dm.high_52w IS NOT NULL THEN dp.close >= dm.high_52w END AS new_52w_high",
    "refreshed_on_conflict": true,
    "governed": false,
    "writers": [
@@ -2552,7 +2552,7 @@
   {
    "ordinal": 227,
    "column": "new_52w_low",
-   "insert_expr": "CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL AND dp.close <= dp52.low_52w THEN TRUE ELSE FALSE END  AS new_52w_low",
+   "insert_expr": "CASE WHEN dp.close IS NOT NULL AND dm.low_52w IS NOT NULL THEN dp.close <= dm.low_52w END  AS new_52w_low",
    "refreshed_on_conflict": true,
    "governed": false,
    "writers": [
@@ -2662,7 +2662,7 @@
   {
    "ordinal": 237,
    "column": "price_to_52w_high",
-   "insert_expr": "CASE WHEN dp52.high_52w > 0 THEN ROUND((dp.close / dp52.high_52w)::numeric, 4) END AS price_to_52w_high",
+   "insert_expr": "CASE WHEN dm.high_52w > 0 THEN ROUND((dp.close / dm.high_52w)::numeric, 4) END AS price_to_52w_high",
    "refreshed_on_conflict": true,
    "governed": false,
    "writers": [
@@ -2673,7 +2673,7 @@
   {
    "ordinal": 238,
    "column": "price_to_52w_low",
-   "insert_expr": "CASE WHEN dp52.low_52w > 0 THEN ROUND((dp.close / dp52.low_52w)::numeric, 4) END AS price_to_52w_low",
+   "insert_expr": "CASE WHEN dm.low_52w > 0 THEN ROUND((dp.close / dm.low_52w)::numeric, 4) END AS price_to_52w_low",
    "refreshed_on_conflict": true,
    "governed": false,
    "writers": [
@@ -3771,7 +3771,7 @@
    "governed": false,
    "writers": [
     "build_screener_universe.py (INSERT)",
-    "build_screener_universe.py (UPDATE @2157)"
+    "build_screener_universe.py (UPDATE @2199)"
    ],
    "unclaimed": false
   },

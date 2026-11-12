@@ -460,7 +460,7 @@
   },
   "backend/scripts/eodhd/v2/build_screener_universe.py": {
    "revenue_above_sector_median": [
-    2157
+    2199
    ]
   }
  },

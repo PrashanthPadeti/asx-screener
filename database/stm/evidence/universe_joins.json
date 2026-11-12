@@ -16,6 +16,9 @@
    "base_tables": [
     "market.daily_prices"
    ],
+   "outputs": [
+    "price_date"
+   ],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -32,27 +35,12 @@
   },
   {
    "kind": "lateral",
-   "alias": "dp52",
-   "base_tables": [
-    "market.daily_prices"
-   ],
-   "limit_1": false,
-   "group_by": false,
-   "aggregate_no_group": true,
-   "order_by": [],
-   "where": [
-    "asx_code = c.asx_code AND time >= NOW() - INTERVAL '365 days' AND {current_source}"
-   ],
-   "eq_columns": [
-    "asx_code"
-   ],
-   "at_most_one_row": true
-  },
-  {
-   "kind": "lateral",
    "alias": "dp20",
    "base_tables": [
     "market.daily_prices"
+   ],
+   "outputs": [
+    "avg_volume_20d"
    ],
    "limit_1": false,
    "group_by": false,
@@ -86,6 +74,7 @@
    "base_tables": [
     "market.dividends"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -106,6 +95,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -126,6 +116,10 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [
+    "annual_periods",
+    "run_key"
+   ],
    "limit_1": false,
    "group_by": false,
    "aggregate_no_group": true,
@@ -144,6 +138,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -163,6 +158,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -182,6 +178,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -201,6 +198,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -220,6 +218,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -239,6 +238,7 @@
    "base_tables": [
     "financials.annual_pnl"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -258,6 +258,7 @@
    "base_tables": [
     "financials.annual_balance_sheet"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -278,6 +279,7 @@
    "base_tables": [
     "financials.annual_balance_sheet"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -297,6 +299,7 @@
    "base_tables": [
     "financials.annual_cashflow"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -317,6 +320,7 @@
    "base_tables": [
     "financials.annual_cashflow"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -336,6 +340,7 @@
    "base_tables": [
     "market.computed_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -356,6 +361,7 @@
    "base_tables": [
     "market.weekly_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -376,6 +382,7 @@
    "base_tables": [
     "market.monthly_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -396,6 +403,7 @@
    "base_tables": [
     "market.daily_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -417,6 +425,7 @@
    "base_tables": [
     "market.yearly_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -437,6 +446,7 @@
    "base_tables": [
     "market.quarterly_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -457,6 +467,7 @@
    "base_tables": [
     "market.halfyearly_metrics"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -489,6 +500,7 @@
    "base_tables": [
     "staging_au.shares_stats"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -507,6 +519,7 @@
    "base_tables": [
     "staging_au.company_profile"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -525,6 +538,7 @@
    "base_tables": [
     "staging_au.fundamentals"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -542,6 +556,13 @@
    "alias": "eq",
    "base_tables": [
     "financials.earnings_quarterly"
+   ],
+   "outputs": [
+    "consecutive_eps_beats",
+    "eps_beat_rate_4q",
+    "eps_beat_rate_8q",
+    "miss_before",
+    "rn"
    ],
    "limit_1": false,
    "group_by": false,
@@ -561,6 +582,14 @@
    "base_tables": [
     "market.asx_announcements"
    ],
+   "outputs": [
+    "announcement_count_1y",
+    "capital_raise_count_1y",
+    "days_since_last_announcement",
+    "director_change_count_1y",
+    "recent_capital_raise",
+    "trading_halt_count_1y"
+   ],
    "limit_1": false,
    "group_by": false,
    "aggregate_no_group": true,
@@ -577,6 +606,7 @@
    "base_tables": [
     "market.companies"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,
@@ -596,6 +626,7 @@
    "base_tables": [
     "market.short_positions"
    ],
+   "outputs": [],
    "limit_1": true,
    "group_by": false,
    "aggregate_no_group": false,

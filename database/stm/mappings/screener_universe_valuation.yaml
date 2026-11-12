@@ -559,15 +559,15 @@ columns:
         rather than leaving it in place. That direction is the fix. A COALESCE with the stored value here
         would preserve a stale ratio whenever the new one could not be computed, which is the same defect
         in a form that looks like care.
-      derivation_formula: CASE WHEN dp52.high_52w > 0 THEN ROUND((dp.close / dp52.high_52w)::numeric,
-        4) END AS price_to_52w_high
-      source_table: market.daily_prices
-      source_column: market.daily_prices.high_52w; market.daily_prices.close
-      tables_involved: market.daily_prices
-      join_condition: 'LEFT JOIN LATERAL (market.daily_prices) AS dp52: aggregate, no GROUP BY -> exactly
-        one row; WHERE asx_code = c.asx_code AND time >= NOW() - INTERVAL ''365 days'' AND {current_source}
-        | LEFT JOIN LATERAL (market.daily_prices) AS dp: ORDER BY time DESC LIMIT 1 -> the named row;
-        WHERE asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1'
+      derivation_formula: CASE WHEN dm.high_52w > 0 THEN ROUND((dp.close / dm.high_52w)::numeric, 4) END
+        AS price_to_52w_high
+      source_table: market.daily_metrics; market.daily_prices
+      source_column: market.daily_metrics.high_52w; market.daily_prices.close
+      tables_involved: market.daily_metrics; market.daily_prices
+      join_condition: 'LEFT JOIN LATERAL (market.daily_metrics) AS dm: ORDER BY date DESC LIMIT 1 -> the
+        named row; WHERE asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date
+        DESC LIMIT 1 | LEFT JOIN LATERAL (market.daily_prices) AS dp: ORDER BY time DESC LIMIT 1 -> the
+        named row; WHERE asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT)
     price_to_52w_low:
       transformation_rule: 'Computed inline, each guarded by a CASE on its denominator. The per-share
@@ -588,15 +588,15 @@ columns:
         1,674 (91.1%) were wrong by more than 0.01, median error 0.10 on a ratio whose range is 0-1. It
         is now refreshed every run, and a row whose 52-week high becomes unavailable has its stale ratio
         REPLACED by NULL rather than keeping it.
-      derivation_formula: CASE WHEN dp52.low_52w > 0 THEN ROUND((dp.close / dp52.low_52w)::numeric, 4)
-        END AS price_to_52w_low
-      source_table: market.daily_prices
-      source_column: market.daily_prices.low_52w; market.daily_prices.close
-      tables_involved: market.daily_prices
-      join_condition: 'LEFT JOIN LATERAL (market.daily_prices) AS dp52: aggregate, no GROUP BY -> exactly
-        one row; WHERE asx_code = c.asx_code AND time >= NOW() - INTERVAL ''365 days'' AND {current_source}
-        | LEFT JOIN LATERAL (market.daily_prices) AS dp: ORDER BY time DESC LIMIT 1 -> the named row;
-        WHERE asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1'
+      derivation_formula: CASE WHEN dm.low_52w > 0 THEN ROUND((dp.close / dm.low_52w)::numeric, 4) END
+        AS price_to_52w_low
+      source_table: market.daily_metrics; market.daily_prices
+      source_column: market.daily_metrics.low_52w; market.daily_prices.close
+      tables_involved: market.daily_metrics; market.daily_prices
+      join_condition: 'LEFT JOIN LATERAL (market.daily_metrics) AS dm: ORDER BY date DESC LIMIT 1 -> the
+        named row; WHERE asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date
+        DESC LIMIT 1 | LEFT JOIN LATERAL (market.daily_prices) AS dp: ORDER BY time DESC LIMIT 1 -> the
+        named row; WHERE asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT)
     fcf_per_share:
       transformation_rule: 'Computed inline, each guarded by a CASE on its denominator. The per-share

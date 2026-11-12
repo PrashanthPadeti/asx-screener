@@ -110,12 +110,13 @@ columns:
         it in place. Precedence is therefore: builder INSERT, then engine updaters, then the canonical
         writer. Until the canonical writer commits, `metric_states` and `compute_run_id` are NULL and
         `app/core/row_projection.py` fails the row closed as OUTSIDE_SNAPSHOT rather than serving it.'
-      derivation_formula: dp52.high_52w
-      source_table: market.daily_prices
-      source_column: market.daily_prices.high_52w
-      tables_involved: market.daily_prices
-      join_condition: 'LEFT JOIN LATERAL (market.daily_prices) AS dp52: aggregate, no GROUP BY -> exactly
-        one row; WHERE asx_code = c.asx_code AND time >= NOW() - INTERVAL ''365 days'' AND {current_source}'
+      derivation_formula: dm.high_52w
+      source_table: market.daily_metrics
+      source_column: market.daily_metrics.high_52w
+      tables_involved: market.daily_metrics
+      join_condition: 'LEFT JOIN LATERAL (market.daily_metrics) AS dm: ORDER BY date DESC LIMIT 1 -> the
+        named row; WHERE asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date
+        DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT); universe_writer.py (canonical UPDATE, governed)
     low_52w:
       transformation_rule: Latest daily bar carried through unchanged; avg_volume_20d and the 52-week
@@ -139,12 +140,13 @@ columns:
         it in place. Precedence is therefore: builder INSERT, then engine updaters, then the canonical
         writer. Until the canonical writer commits, `metric_states` and `compute_run_id` are NULL and
         `app/core/row_projection.py` fails the row closed as OUTSIDE_SNAPSHOT rather than serving it.'
-      derivation_formula: dp52.low_52w
-      source_table: market.daily_prices
-      source_column: market.daily_prices.low_52w
-      tables_involved: market.daily_prices
-      join_condition: 'LEFT JOIN LATERAL (market.daily_prices) AS dp52: aggregate, no GROUP BY -> exactly
-        one row; WHERE asx_code = c.asx_code AND time >= NOW() - INTERVAL ''365 days'' AND {current_source}'
+      derivation_formula: dm.low_52w
+      source_table: market.daily_metrics
+      source_column: market.daily_metrics.low_52w
+      tables_involved: market.daily_metrics
+      join_condition: 'LEFT JOIN LATERAL (market.daily_metrics) AS dm: ORDER BY date DESC LIMIT 1 -> the
+        named row; WHERE asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date
+        DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT); universe_writer.py (canonical UPDATE, governed)
     volume:
       transformation_rule: Latest daily bar carried through unchanged; avg_volume_20d and the 52-week
@@ -789,15 +791,15 @@ columns:
       applicability: A boolean here is NULL when it could not be computed, which is the behaviour market.weekly_metrics
         does not share -- finding 10. Do not compare a daily signal's false against a weekly signal's
         false and treat them as the same claim.
-      derivation_formula: CASE WHEN dp.close IS NOT NULL AND dp52.high_52w IS NOT NULL AND dp.close >=
-        dp52.high_52w THEN TRUE ELSE FALSE END AS new_52w_high
-      source_table: market.daily_prices
-      source_column: market.daily_prices.close; market.daily_prices.high_52w
-      tables_involved: market.daily_prices
+      derivation_formula: CASE WHEN dp.close IS NOT NULL AND dm.high_52w IS NOT NULL THEN dp.close >=
+        dm.high_52w END AS new_52w_high
+      source_table: market.daily_prices; market.daily_metrics
+      source_column: market.daily_prices.close; market.daily_metrics.high_52w
+      tables_involved: market.daily_prices; market.daily_metrics
       join_condition: 'LEFT JOIN LATERAL (market.daily_prices) AS dp: ORDER BY time DESC LIMIT 1 -> the
         named row; WHERE asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1 | LEFT
-        JOIN LATERAL (market.daily_prices) AS dp52: aggregate, no GROUP BY -> exactly one row; WHERE asx_code
-        = c.asx_code AND time >= NOW() - INTERVAL ''365 days'' AND {current_source}'
+        JOIN LATERAL (market.daily_metrics) AS dm: ORDER BY date DESC LIMIT 1 -> the named row; WHERE
+        asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT)
     new_52w_low:
       transformation_rule: Boolean crossings and ratios carried from the daily engine, with two computed
@@ -813,15 +815,15 @@ columns:
       applicability: A boolean here is NULL when it could not be computed, which is the behaviour market.weekly_metrics
         does not share -- finding 10. Do not compare a daily signal's false against a weekly signal's
         false and treat them as the same claim.
-      derivation_formula: CASE WHEN dp.close IS NOT NULL AND dp52.low_52w IS NOT NULL AND dp.close <=
-        dp52.low_52w THEN TRUE ELSE FALSE END AS new_52w_low
-      source_table: market.daily_prices
-      source_column: market.daily_prices.close; market.daily_prices.low_52w
-      tables_involved: market.daily_prices
+      derivation_formula: CASE WHEN dp.close IS NOT NULL AND dm.low_52w IS NOT NULL THEN dp.close <= dm.low_52w
+        END AS new_52w_low
+      source_table: market.daily_prices; market.daily_metrics
+      source_column: market.daily_prices.close; market.daily_metrics.low_52w
+      tables_involved: market.daily_prices; market.daily_metrics
       join_condition: 'LEFT JOIN LATERAL (market.daily_prices) AS dp: ORDER BY time DESC LIMIT 1 -> the
         named row; WHERE asx_code = c.asx_code AND {current_source} ORDER BY time DESC LIMIT 1 | LEFT
-        JOIN LATERAL (market.daily_prices) AS dp52: aggregate, no GROUP BY -> exactly one row; WHERE asx_code
-        = c.asx_code AND time >= NOW() - INTERVAL ''365 days'' AND {current_source}'
+        JOIN LATERAL (market.daily_metrics) AS dm: ORDER BY date DESC LIMIT 1 -> the named row; WHERE
+        asx_code = c.asx_code                  AND date = dp.price_date ORDER BY date DESC LIMIT 1'
       writer_job: build_screener_universe.py (INSERT)
     relative_volume:
       transformation_rule: Boolean crossings and ratios carried from the daily engine, with two computed

@@ -161,6 +161,35 @@ def _s(series: pd.Series, idx: int):
         return None
 
 
+def _signal(expr: pd.Series, *inputs: pd.Series) -> pd.Series:
+    """A comparison is a signal only where every input it compares exists.
+
+    In pandas a comparison against NaN yields **False**, not NaN. Every
+    boolean column in this module was written as a bare comparison, so a
+    stock with 100 bars -- enough for an RSI, not enough for a 200-day
+    average -- was published with `above_sma200 = false`, `golden_cross =
+    false` and `death_cross = false`. Not "unknown": false. A measured
+    claim that the stock is below an average that does not exist.
+
+    `_v()` then converts `np.bool_(False)` to `False`, so nothing
+    downstream could recover the distinction either.
+
+    The columns are nullable with no default, so the schema could always
+    hold the third answer. This supplies it: the comparison where the
+    inputs are present, NULL where they are not.
+
+    Note that masking AFTER the comparison is the only order that works.
+    Changing a default from False to None would have changed nothing,
+    because the collapse happens inside the comparison, before any default
+    is consulted -- the same subtlety that made finding 10 more than a
+    one-word fix in weekly_compute.
+    """
+    known = inputs[0].notna()
+    for series in inputs[1:]:
+        known = known & series.notna()
+    return expr.where(known)
+
+
 # ── Data Fetchers ─────────────────────────────────────────────────────────────
 
 def fetch_source_domain(cur) -> dict:
@@ -514,7 +543,13 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
 
     # ── Rolling VWAP (20d) ────────────────────────────────────────────────────
     df["vwap"]       = compute_vwap_rolling(c, v, 20)
-    df["above_vwap"] = (c > df["vwap"]).astype(int)   # 1 if close > 20d VWAP
+    # 1 if close > 20d VWAP, NULL before the 20-day window exists.
+    #
+    # `.astype(int)` is gone deliberately: it cannot represent the third
+    # state, and on a masked series it would raise rather than mislead.
+    # The column is smallint, and _v() passes a float through to a value
+    # PostgreSQL assigns to smallint; a NaN becomes None.
+    df["above_vwap"] = _signal((c > df["vwap"]).astype(float), c, df["vwap"])
 
     # ── Volume Averages ───────────────────────────────────────────────────────
     df["volume_avg_5d"]  = v.rolling(5).mean().round(0).astype("Int64")
@@ -554,28 +589,55 @@ def compute_indicators(df: pd.DataFrame, shares: Optional[float]) -> pd.DataFram
     ).clip(upper=99.99).round(4)
 
     # OBV Rising: OBV above its 20-day EMA signals sustained accumulation
-    df["obv_rising"] = df["obv"].astype(float) > df["obv_ema"].astype(float)
+    _obv = df["obv"].astype(float)
+    _obv_ema = df["obv_ema"].astype(float)
+    df["obv_rising"] = _signal(_obv > _obv_ema, _obv, _obv_ema)
 
-    # Volume Breakout: elevated volume + stock within 3% of 52-week high
-    df["volume_breakout"] = (
-        (df["relative_volume"] >= 1.5) &
-        (df["pct_from_52w_high"] >= -0.03)
-    )
+    # Volume Breakout: elevated volume + stock within 3% of 52-week high.
+    #
+    # Both inputs are required. pct_from_52w_high is itself absent until the
+    # series spans 52 weeks, so without the mask every stock too young to
+    # have a 52-week high was published as "not breaking out" -- which is
+    # the one thing nobody could know about it.
+    df["volume_breakout"] = _signal(
+        (df["relative_volume"] >= 1.5) & (df["pct_from_52w_high"] >= -0.03),
+        df["relative_volume"], df["pct_from_52w_high"])
 
     # ── Market Cap (AUD millions) ─────────────────────────────────────────────
     if shares and shares > 0:
         df["market_cap"] = (c * shares / 1_000_000).round(2)
 
     # ── Price Signals ─────────────────────────────────────────────────────────
-    df["above_sma20"]   = c > df["sma_20"]
-    df["above_sma50"]   = c > df["sma_50"]
-    df["above_sma100"]  = c > df["sma_100"]
-    df["above_sma200"]  = c > df["sma_200"]
-    df["golden_cross"]  = (df["sma_50"] > df["sma_200"]) & (df["sma_50_prev"] <= df["sma_200_prev"])
-    df["death_cross"]   = (df["sma_50"] < df["sma_200"]) & (df["sma_50_prev"] >= df["sma_200_prev"])
-    df["new_52w_high"]  = (h >= df["high_52w"]) & (h > h.shift(1))
-    df["new_52w_low"]   = (l <= df["low_52w"])  & (l < l.shift(1))
-    df["new_ath"]       = (h >= df["ath_price"]) & (h > h.shift(1))
+    #
+    # Every one of these is withheld until the average or extreme it compares
+    # against exists. A stock listed four months ago has no 200-day average,
+    # so "is the price above it" has no answer -- and `false` is not that
+    # answer, it is a different claim that happens to be cheap to compute.
+    #
+    # above_sma50/200, golden_cross and death_cross are the four the universe
+    # reads straight from this table, which is why these reach a customer
+    # where finding 10's weekly equivalents did not.
+    for window in (20, 50, 100, 200):
+        sma = df[f"sma_{window}"]
+        df[f"above_sma{window}"] = _signal(c > sma, c, sma)
+
+    _s50, _s200 = df["sma_50"], df["sma_200"]
+    _s50p, _s200p = df["sma_50_prev"], df["sma_200_prev"]
+    df["golden_cross"] = _signal((_s50 > _s200) & (_s50p <= _s200p),
+                                 _s50, _s200, _s50p, _s200p)
+    df["death_cross"] = _signal((_s50 < _s200) & (_s50p >= _s200p),
+                                _s50, _s200, _s50p, _s200p)
+
+    # The previous bar is an input like any other: on the first row of a
+    # series there is none, and "did it make a new high today" is then
+    # unanswerable rather than no.
+    _hp, _lp = h.shift(1), l.shift(1)
+    df["new_52w_high"] = _signal((h >= df["high_52w"]) & (h > _hp),
+                                 h, df["high_52w"], _hp)
+    df["new_52w_low"] = _signal((l <= df["low_52w"]) & (l < _lp),
+                                l, df["low_52w"], _lp)
+    df["new_ath"] = _signal((h >= df["ath_price"]) & (h > _hp),
+                            h, df["ath_price"], _hp)
 
     # ── Returns ───────────────────────────────────────────────────────────────
     # The previous close is the previous close, whenever it was: no window.

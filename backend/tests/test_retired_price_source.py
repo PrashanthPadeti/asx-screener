@@ -77,23 +77,31 @@ def test_a_null_data_source_is_treated_as_retired_safe():
 
 
 def test_every_price_lateral_is_gated():
-    """Three laterals read market.daily_prices: the latest price, the 52-week
-    range and the 20-day average volume.
+    """Two laterals read market.daily_prices: the latest price and the
+    20-day average volume.
 
-    Gating only the first would exclude an instrument from serving while its
-    52-week range still carried retired data -- the same defect one level
-    down, and harder to see.
+    Gating only the first would exclude an instrument from serving while
+    another price-derived column still carried retired data -- the same
+    defect one level down, and harder to see.
+
+    It was THREE until 13 Nov 2026. The third was `dp52`, which recomputed
+    the 52-week extremes from raw prices with no coverage rule while
+    market.daily_metrics already published governed ones; finding 13
+    removed it and the extremes now come from `dm`. The count drops because
+    a reader of this table left, not because a gate did -- both survivors
+    are still gated, and `dm` is gated by its own as-of predicate against
+    `dp.price_date`, which is itself drawn from a gated lateral.
     """
     sql = _universe_sql()
-    assert sql.count("FROM market.daily_prices") == 3, (
+    assert sql.count("FROM market.daily_prices") == 2, (
         "a lateral was added or removed; check it is gated too")
-    assert sql.count("{current_source}") == 3
+    assert sql.count("{current_source}") == 2
 
 
 def test_the_sql_renders_with_the_shared_predicate():
     rendered = _universe_sql().format(code_filter="",
                                       current_source=current_source_predicate())
-    assert rendered.count("NOT IN ('yahoo')") == 3
+    assert rendered.count("NOT IN ('yahoo')") == 2
 
 
 def test_the_builder_uses_the_shared_definition_not_a_literal():

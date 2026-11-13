@@ -88,6 +88,71 @@ SELECT count(*)                  AS companies,
   FROM latest
 """
 
+#: Row-by-row reconciliation, in BOTH directions.
+#:
+#: Two counts agreeing at 580 establishes cardinality, not identity. It is
+#: consistent with the lateral taking a different fiscal year for some
+#: companies and the miscounts cancelling. The only way to know is to join
+#: the two sides on the instrument and compare the period and the value.
+#:
+#: FULL OUTER JOIN, so a row present on one side and absent on the other is
+#: reported rather than dropped -- an INNER JOIN would show zero mismatches
+#: precisely when the two populations diverge most.
+#:
+#: The value comparison uses IS DISTINCT FROM so that NULL = NULL counts as
+#: agreement and NULL vs a number counts as a mismatch; `=` would return
+#: NULL for both and silently drop the row from the count.
+ROW_BY_ROW = """
+WITH latest AS (
+    SELECT DISTINCT ON (asx_code)
+           asx_code, fiscal_year, p_fcf_ratio
+      FROM market.yearly_metrics
+     ORDER BY asx_code, fiscal_year DESC
+),
+served AS (
+    SELECT asx_code, price_to_fcf
+      FROM screener.universe
+)
+SELECT count(*)                                              AS compared,
+       count(*) FILTER (WHERE l.asx_code IS NULL)            AS universe_only,
+       count(*) FILTER (WHERE s.asx_code IS NULL)            AS yearly_only,
+       count(*) FILTER (
+         WHERE l.asx_code IS NOT NULL AND s.asx_code IS NOT NULL
+           AND s.price_to_fcf IS DISTINCT FROM l.p_fcf_ratio
+       )                                                     AS value_mismatch,
+       count(*) FILTER (
+         WHERE s.price_to_fcf IS NOT NULL AND l.p_fcf_ratio IS NULL
+       )                                                     AS served_not_in_latest,
+       count(*) FILTER (
+         WHERE l.p_fcf_ratio IS NOT NULL AND s.price_to_fcf IS NULL
+       )                                                     AS latest_not_served
+  FROM served s
+  FULL OUTER JOIN latest l ON l.asx_code = s.asx_code
+"""
+
+#: The fiscal period the served value came from. If the lateral is taking
+#: the latest year, every served row's period is that company's max.
+PERIOD_CHECK = """
+WITH latest AS (
+    SELECT asx_code, max(fiscal_year) AS max_fy
+      FROM market.yearly_metrics
+     GROUP BY asx_code
+),
+carrying AS (
+    SELECT asx_code, max(fiscal_year) AS fy_with_value
+      FROM market.yearly_metrics
+     WHERE p_fcf_ratio IS NOT NULL
+     GROUP BY asx_code
+)
+SELECT count(*)                                        AS companies_carrying,
+       count(*) FILTER (WHERE c.fy_with_value = l.max_fy)
+                                                       AS value_on_latest_year,
+       count(*) FILTER (WHERE c.fy_with_value < l.max_fy)
+                                                       AS value_only_on_older
+  FROM carrying c
+  JOIN latest l ON l.asx_code = c.asx_code
+"""
+
 ALL_YEARS = """
 SELECT count(*)            AS rows_total,
        count(p_fcf_ratio)  AS p_fcf_ratio_present,
@@ -172,8 +237,53 @@ def main() -> int:
                 print(f"     taking the row this measurement assumes; "
                       f"investigate before trusting either.")
             else:
-                print("  agrees with the universe count, so the lateral "
-                      "takes the latest year.")
+                print(f"  cardinality agrees with the universe count "
+                      f"({served}).")
+                print("  Cardinality is NOT identity -- see the row-by-row "
+                      "check below.")
+
+            print()
+            print("── row by row, both directions "
+                  "──────────────────────────────────")
+            cur.execute(ROW_BY_ROW)
+            (compared, uni_only, yr_only, mismatch,
+             served_absent, latest_unserved) = cur.fetchone()
+            print(f"  instruments compared                 {compared}")
+            print(f"  in universe, no yearly row           {uni_only}")
+            print(f"  in yearly, not in universe           {yr_only}")
+            print(f"  value differs                        {mismatch}")
+            print(f"    of which served but latest is NULL {served_absent}")
+            print(f"    of which latest has one, not served{latest_unserved}")
+            if mismatch == 0 and uni_only == 0 and yr_only == 0:
+                print()
+                print("  ZERO mismatches in both directions. The served "
+                      "value IS the latest")
+                print("  fiscal year's p_fcf_ratio, instrument by "
+                      "instrument -- not merely the")
+                print("  same number of them.")
+            else:
+                print()
+                print("  ** NON-ZERO. Two counts agreeing at the same total "
+                      "is consistent with")
+                print("     the lateral taking a different year for some "
+                      "companies and the")
+                print("     errors cancelling. Resolve before relying on "
+                      "either figure.")
+
+            print()
+            print("── which fiscal period the value sits on "
+                  "───────────────────────────")
+            cur.execute(PERIOD_CHECK)
+            carrying_n, on_latest, on_older = cur.fetchone()
+            print(f"  companies carrying a value anywhere  {carrying_n}")
+            print(f"  value on their LATEST fiscal year    {on_latest}")
+            print(f"  value only on an older year          {on_older}")
+            print()
+            print("  The second number is the served population. The third "
+                  "is carried in the")
+            print("  table and reaches nobody, which is why rows-with-a-"
+                  "value is the wrong")
+            print("  denominator for exposure.")
 
             print()
             print("── all years, and whether the carriers are restamped "

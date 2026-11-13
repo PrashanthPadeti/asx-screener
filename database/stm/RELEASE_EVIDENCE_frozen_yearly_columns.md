@@ -3,8 +3,9 @@
 ## What changes for a customer
 
 **`price_to_fcf` (Price / FCF) stops being served.** Measured 13 Nov 2026:
-**580 of 2,569 universe rows (22.6%)** currently carry a value. After the
-next yearly recompute and universe refresh, that becomes **0**.
+**580 of 2,569 universe rows (22.6%)** carried a value before the repair.
+After the recompute it is **0 of 2,570** — confirmed in production the
+same day.
 
 This is a deliberate loss, not a regression. Every one of those 580 values
 was produced by a code path that no longer exists, and sits beside a
@@ -113,18 +114,58 @@ deployment, in this order.
    one.** Those 325 reach nobody, which is why 7,656 rows-with-a-value was
    never the right denominator for exposure.
 
-2. **Yearly recompute**, which rewrites `market.yearly_metrics`.
+2. **The canonical driver**, which runs the whole plan under one lease and
+   ends in a publication:
+   ```
+   cd /opt/asx-screener/backend && ../asx-venv/bin/python \
+     scripts/p0a_canonical_run.py --execute --allow-production
+   ```
+   `FULL_FUNDAMENTALS_CANONICAL` is the default plan and already contains
+   `yearly_compute`, `universe_build` and `composite_score` in order.
 
-3. **Universe refresh**, which rebuilds `screener.universe` from it. The
-   order matters: a universe built before the recompute carries the
-   frozen values forward one more day.
+   **Do NOT run `yearly_compute.py` and `build_screener_universe.py`
+   directly.** The first version of this handoff did, and it was wrong.
+   `build_screener_universe` invalidates the canonical contract atomically:
+   it clears `metric_states` and `compute_run_id` and leaves every row
+   PROVISIONAL. Nothing re-attributes them without a `composite_score` run
+   carrying a `--run-id` from an open lifecycle, and only the driver can
+   open one. Between the bare rebuild and the next canonical publication,
+   `row_projection` reads every governed metric as *outside the snapshot*
+   and serves `null` with a state — correct behaviour, dark surface. The
+   comment at `weekly_pipeline.py:339` documents this exact failure; the
+   handoff reproduced it anyway.
 
-4. **After.** Same script.
+3. **After.** Same script as step 1.
    Expect: **served 0, carriers 0**, and the inversion rows reading 0/0.
 
 The inversions going to 0/0 rather than staying inverted is itself the
 proof that these columns were not being rewritten by any current code: if
 something still wrote them, the counts would persist.
+
+**RUN 13 Nov 2026, 04:3x UTC — every expectation met.**
+
+```
+universe rows                     2,570
+serving a frozen ratio                0  (0.0%)
+latest fiscal year has a value        0
+companies carrying a value anywhere   0
+rows 33,864   p_fcf_ratio present     0
+avg_roe_7y  0   avg_roe_10y  0
+avg_roce_7y 0   avg_roce_10y 0
+avg_ebit_5y 0   avg_ebit_10y 0
+```
+
+The yearly run reported `0 skipped | 0 errors | 33,864 rows upserted`,
+`Prune: no orphaned yearly_metrics rows`, and `Coverage: every sourced
+yearly_metrics row was rewritten by this run` — so the 0s are the result
+of rewriting the whole population, not of skipping it. All three
+inversions collapsed, which is the provenance proof: no current code
+writes those columns.
+
+The `** NON-ZERO` line in that output is the stale verdict from
+`origin/main`, which does not yet carry the fix described in step 1.
+`value differs` was 0 in both directions again; 721 and 30 are the two
+population figures.
 
 ## Not closed by this release
 

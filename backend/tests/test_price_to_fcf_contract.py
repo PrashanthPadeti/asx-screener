@@ -225,6 +225,94 @@ def test_missing_shares_withholds_via_market_cap(col_index):
                   idx=col_index) is None
 
 
+@pytest.mark.parametrize("shares", [0.0, -100_000_000.0])
+def test_non_positive_market_cap_withholds(col_index, shares):
+    """The numerator must be POSITIVE, not merely present.
+
+    `mc = px * shares / 1e6 if (px and shares) else None` already drops a zero
+    price and a zero share count through truthiness, so for shares == 0 this
+    test and the `mc > 0` guard agree by two routes. A NEGATIVE share count
+    reaches the guard and nothing else: it produces a negative market
+    capitalisation, a negative ratio, and a company at the top of a "cheapest
+    first" sort -- the same customer-visible failure as negative FCF, arriving
+    from the numerator instead.
+
+    Both parameters are impossible as facts and representable in the source,
+    which is the only reason the guard is explicit. A condition that holds
+    only through two other expressions' internals is not the policy being
+    enforced, it is the policy being coincided with.
+    """
+    assert _ratio(40.0, currency=BASE_CURRENCY, shares=shares,
+                  idx=col_index) is None, (
+        f"shares={shares} produced a ratio from a non-positive market "
+        f"capitalisation.")
+
+
+def test_a_market_cap_that_rounds_to_zero_withholds(col_index):
+    """The one input that distinguishes `mc > 0` from `mc >= 0`.
+
+    mc is rounded to 2dp, so a tiny-but-positive market capitalisation becomes
+    exactly 0.0 -- here one share at $4.00 gives round(4e-6, 2) == 0.0. The
+    truthiness test that builds mc cannot catch this: both px and shares are
+    truthy, and the zero appears in the rounding.
+
+    Under `mc >= 0` the producer would divide 0.0 by the cash flow and publish
+    a Price/FCF of 0.0, which is the CHEAPEST value the column can hold and
+    sorts above every real company on an ascending screen. That is why the
+    comparison is strict, and this is the row that proves it.
+    """
+    assert _ratio(40.0, currency=BASE_CURRENCY, shares=1.0,
+                  idx=col_index) is None, (
+        "a market capitalisation that rounded to 0.0 published a ratio of "
+        "0.00, which sorts first on 'cheapest'.")
+
+
+def test_the_clamp_suppresses_rather_than_substituting(col_index):
+    """A ratio over 9,999 is withheld, NOT stored as 9,999.
+
+    `_clamp` reads like it bounds a value and it does not -- it returns None
+    above the threshold. That distinction is the whole customer-facing
+    question: a substituted boundary value would put a fabricated 9,999.00
+    into a sort column, indistinguishable from a company whose ratio really is
+    9,999.
+
+    The threshold is NOT an overflow guard on this column. p_fcf_ratio is
+    NUMERIC(10,2) and holds 99,999,999.99; 9,999 is the editorial threshold
+    every NUMERIC(10,2) valuation ratio in this producer already uses, and
+    p_fcf matches them deliberately. Asserted here so that changing the
+    threshold for this column alone has to be a decision, not an edit.
+    """
+    from compute.engine.yearly_compute import _clamp
+    assert _clamp(9_999.0) == 9_999.0
+    assert _clamp(10_000.0) is None, (
+        "_clamp substituted a boundary value instead of withholding")
+
+    # price 4.00 x 100m shares / 1e6 = 400.0 against fcf 0.02 -> 20,000
+    assert _ratio(0.02, currency=BASE_CURRENCY, idx=col_index) is None, (
+        "a ratio of 20,000 published; the threshold the sibling ratios use "
+        "is not being applied to this one")
+
+
+def test_the_pair_disagrees_at_the_extreme_and_that_is_recorded():
+    """The _clamp threshold is not symmetric across the two presentations.
+
+    A ratio above 9,999 is a yield below 0.0001, which rounds to 0.0000 in
+    NUMERIC(8,4) and publishes. So the reciprocal pair disagrees at the
+    extreme: no ratio, a near-zero yield. This is a consequence of two column
+    types, not of a policy, and it is pinned here so it is a known property
+    rather than a surprise found in production.
+    """
+    cols = _insert_columns()
+    rows = build_yearly_rows("TST", _financials(0.02), _prices(),
+                             current_shares=100_000_000.0,
+                             reporting_currency=BASE_CURRENCY)
+    row = rows[0]
+    assert row[cols.index("p_fcf_ratio")] is None
+    assert row[cols.index("fcf_yield")] is not None, (
+        "fcf_yield was also withheld, so the asymmetry this test records no "
+        "longer exists -- delete the test and the comment that explains it")
+
+
 @pytest.mark.parametrize("currency", ["USD", "NZD", "usd", " usd "])
 def test_foreign_reporting_currency_withholds(col_index, currency):
     """An AUD market cap over a foreign cash flow has no unit.
@@ -244,16 +332,31 @@ def test_aud_publishes(col_index):
 
 
 def test_unknown_currency_publishes(col_index):
-    """Silence is not evidence of a mismatch.
+    """PINS AN OPEN DECISION. It does not justify one.
 
-    1,016 of 2,019 ASX codes state no reporting currency, because they have
-    no financial statements at all. Reading None as "not AUD" would suppress
-    half the exchange to fix roughly 160 companies, and this is the same
-    rule applicability.unit_gate follows for the eight ratios it covers.
+    This test records what the producer does today -- an unstated currency
+    publishes -- and the earlier version of this docstring argued that was
+    correct. It is not established. The source contract is explicit that
+    silence is NOT AUD (backend/migrations/add_reporting_currency.sql), so
+    publishing here rests on "an unknown currency is not evidence of a
+    mismatch" rather than on any evidence of coherence, and roughly 8% of ASX
+    reporters state a foreign currency.
+
+    What keeps it permissive for now is consistency, not proof:
+    applicability.unit_gate makes the identical choice for all eight ratios it
+    covers, so a strict rule here alone withholds Price/FCF on rows where P/E
+    publishes for the same reason, and unit_gate cannot change while
+    FACTOR_MODEL_V3 is frozen.
+
+    Both options leave an inconsistency, so the decision needs the cost.
+    scripts/diagnostics/measure_p_fcf_populations.py reports P7: the rows that
+    publish ONLY because the currency is unstated. If this test's expectation
+    flips, that measurement is why.
     """
     assert _ratio(40.0, currency=None, idx=col_index) is not None, (
-        "an unstated reporting currency withheld the ratio. None means the "
-        "source said nothing, which is not the same as saying USD.")
+        "an unstated reporting currency withheld the ratio. If that is now "
+        "deliberate, this test is the record of the old rule -- replace it "
+        "with the strict one and cite the P7 measurement that decided it.")
 
 
 # ── The guard is enforced here BECAUSE it cannot be enforced there ───────

@@ -338,16 +338,26 @@ def fetch_reporting_currency(cur, asx_code: str) -> Optional[str]:
     whose financials are in USD. This is the same column and the same source
     the universe build reads for applicability gate 1b.
 
-    ``None`` means the source stated nothing, which is NOT read as AUD.
-    1,016 of 2,019 ASX codes state no currency because they have no financial
-    statements at all, and treating silence as a mismatch would suppress half
-    the exchange to fix roughly 160 companies. Silence and a stated foreign
-    currency have opposite consequences, so they stay distinguishable here.
+    ``None`` means the source stated nothing, which is NOT read as AUD here.
+    Silence and a stated foreign currency have opposite consequences, so they
+    stay distinguishable at this boundary; what the CALLER does with silence is
+    the caller's rule, not this function's.
+
+    ONE ROW PER COMPANY, AND ONE CURRENCY FOR ALL OF ITS HISTORY.
+    ``staging_au.fundamentals`` is ``UNIQUE (asx_code)``, so this returns the
+    only row there is -- but the value describes the LATEST snapshot's
+    statements, and the caller applies it to every fiscal year that company
+    has. The source carries no per-period currency, so there is nothing better
+    to read; the limitation is real and is recorded as a finding rather than
+    disguised. ``ORDER BY asx_code`` makes the single-row assumption explicit
+    instead of resting on a bare ``LIMIT 1``, which reads as "any row will do"
+    and would quietly pick one at random if that uniqueness ever lapsed.
     """
     cur.execute("""
         SELECT reporting_currency
         FROM staging_au.fundamentals
         WHERE asx_code = %s
+        ORDER BY asx_code
         LIMIT 1
     """, [asx_code])
     row = cur.fetchone()
@@ -809,9 +819,24 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # price_at(prices, ped) and fcf is the annual cash-flow figure for the
         # same period. There is no period mismatch to disclose.
         #
-        # THREE WAYS TO DECLINE, and they are different facts:
+        # FIVE WAYS TO DECLINE, and they are different facts:
         #
         #   fcf is None / mc is None   an input is missing. Nothing to divide.
+        #
+        #   mc <= 0                    a PRESENT input that cannot be a
+        #                              numerator. mc is px * shares, and the
+        #                              truthiness test that builds it already
+        #                              drops px == 0 and shares == 0, so this
+        #                              can only fire on a negative price or a
+        #                              negative share count -- both impossible
+        #                              as facts and both representable in the
+        #                              source. The guard is explicit because
+        #                              `mc is not None` was NOT the stated
+        #                              policy: the policy is a positive market
+        #                              capitalisation, and a condition that
+        #                              happens to coincide with the policy
+        #                              through two other expressions' internals
+        #                              is not the policy being enforced.
         #
         #   fcf <= 0                   NOT a missing input -- a reported one
         #                              that makes the ratio meaningless. A
@@ -855,18 +880,73 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         #                              computed rather than computed and
         #                              masked downstream.
         #
-        #                              None means the source stated nothing,
-        #                              which is not evidence of a mismatch and
-        #                              must not suppress.
+        #                              None means the source stated nothing.
+        #                              UNDER REVIEW, and the open question of
+        #                              this release -- see THE SILENCE RULE
+        #                              below.
         #
-        # All three produce NULL. The reason is not machine-readable, because
-        # an ungoverned column has no sidecar to carry a cause -- that is a
-        # real limit of restoring this without a model version, and it is
+        #   |mc / fcf| > 9,999         _clamp declines it. Not an overflow
+        #                              guard on THIS column: p_fcf_ratio is
+        #                              NUMERIC(10,2) and holds up to
+        #                              99,999,999.99. 9,999 is the editorial
+        #                              threshold every NUMERIC(10,2) valuation
+        #                              ratio in this function already uses
+        #                              (pe, pb, ps, ev_ebitda, ev_ebit,
+        #                              ev_revenue), and p_fcf uses it to match
+        #                              them rather than to protect the column.
+        #                              _clamp SUPPRESSES -- it returns None, it
+        #                              does not substitute a boundary value, so
+        #                              no customer ever sees 9,999.00 standing
+        #                              in for something larger. The name is
+        #                              misleading and the behaviour is the one
+        #                              documented here.
+        #
+        #                              It bites asymmetrically against
+        #                              fcf_yield, which is NUMERIC(8,4): a
+        #                              company whose ratio exceeds 9,999 has a
+        #                              yield under 0.0001, which rounds to
+        #                              0.0000 and publishes. So at the extreme
+        #                              the pair disagrees -- a near-zero yield
+        #                              shown, no ratio. Recorded, measured, and
+        #                              not silently reconciled.
+        #
+        # THE SILENCE RULE (open). Publishing on `reporting_currency is None`
+        # asserts nothing about the currency; it declines to suppress. The
+        # source contract is explicit that silence is NOT AUD
+        # (backend/migrations/add_reporting_currency.sql), and roughly 8% of
+        # ASX reporters state a foreign currency, so a published ratio on a
+        # silent row carries about that chance of being wrong by an exchange
+        # rate. Against that: unit_gate makes the SAME permissive choice today
+        # for the eight governed ratios, so going strict here alone withholds
+        # Price/FCF on rows where P/E publishes for the identical reason, and
+        # unit_gate cannot change under a frozen V3.
+        #
+        # Both choices leave an inconsistency. The cost of the strict one is a
+        # measurable row count and is being measured before the rule is fixed
+        # -- scripts/diagnostics/measure_p_fcf_populations.py reports the
+        # delta. Permissive is what ships only if that measurement says the
+        # population is empty.
+        #
+        # SCOPE OF THE CURRENCY FACT. The source states one currency per
+        # COMPANY, read from whichever of Income_Statement / Balance_Sheet /
+        # Cash_Flow first carries a currency_symbol, in the latest snapshot.
+        # There is no per-fiscal-year currency anywhere in the source, so this
+        # one value is applied to every historical year of that company. A
+        # company that changed presentation currency has its earlier years
+        # judged by its current one. That is a limit of the source, it is the
+        # same limit gate 1b has for all eight ratios it covers, and it is
+        # recorded as a finding rather than hidden behind a per-row lookup that
+        # would only look per-row.
+        #
+        # Every route produces NULL. The reason is not machine-readable,
+        # because an ungoverned column has no sidecar to carry a cause -- that
+        # is a real limit of restoring this without a model version, and it is
         # recorded as such rather than papered over.
         currency_coherent = (reporting_currency is None
                              or reporting_currency == BASE_CURRENCY)
         p_fcf = (_clamp(_div(mc, fcf))
-                 if (mc is not None and fcf is not None and fcf > 0
+                 if (mc is not None and mc > 0
+                     and fcf is not None and fcf > 0
                      and currency_coherent)
                  else None)
         earn_yld  = _clamp(_div(eps, px))

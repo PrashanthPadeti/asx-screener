@@ -1246,7 +1246,109 @@ INSERT_SQL = """
         gross_margin_stability  = EXCLUDED.gross_margin_stability,
         revenue_predictability  = EXCLUDED.revenue_predictability,
         compute_version         = EXCLUDED.compute_version,
-        computed_at             = EXCLUDED.computed_at
+        computed_at             = EXCLUDED.computed_at,
+
+        -- ── Retired columns: emptied, not left alone ──────────────────────
+        --
+        -- These 64 columns exist in market.yearly_metrics and are absent
+        -- from the INSERT above, so until now the conflict path never
+        -- touched them. An existing row kept whatever the last code path to
+        -- produce them wrote, while `computed_at` on the SAME ROW was
+        -- restamped to today. A reader had no way to date the values: the
+        -- row's own timestamp asserted they were current.
+        --
+        -- Measured 9 Nov 2026 over 33,864 rows: 27 of the 64 were never
+        -- populated at all, and 37 held values on 2.9%% to 22.6%% of rows.
+        -- Of the 6,261 rows carrying a quick_ratio, min(computed_at) =
+        -- max(computed_at) = that day's run. There was no population of
+        -- untouched old rows to explain them.
+        --
+        -- The frozen values were produced by a method this codebase
+        -- REJECTED. Three window pairs are inverted -- avg_roe_10y (6,429)
+        -- exceeds avg_roe_7y (6,424), and two more like it -- which
+        -- average_over cannot produce, because a longer window is strictly
+        -- harder to satisfy. Only the superseded `_avg` helper, which took
+        -- the last n list entries and dropped Nones, orders them that way.
+        -- Its own docstring records that it could label a single year's ROE
+        -- as a three-year average.
+        --
+        -- This file already names the hazard and already applies the fix to
+        -- five retired return columns: "leaving them unwritten would freeze
+        -- the last values this engine produced". The protection was written
+        -- for five columns and these 64 did not get it.
+        --
+        -- `= NULL` and not `= EXCLUDED.x`, because they are not in the
+        -- INSERT; and emptying rather than dropping the columns, because a
+        -- DROP loses the record that the column was once produced and does
+        -- nothing for the rows already written.
+        --
+        -- The INSERT path needs no change: all 64 are nullable with no
+        -- default, verified against the schema snapshot, so a new row
+        -- already arrives NULL. Only the conflict path was preserving them.
+        pcf_ratio                 = NULL,
+        p_fcf_ratio               = NULL,
+        ev_fcf                    = NULL,
+        peg_ratio                 = NULL,
+        ncavps                    = NULL,
+        pe_5y_avg                 = NULL,
+        tbvps                     = NULL,
+        dps_grossed_up            = NULL,
+        fcf_per_share             = NULL,
+        ocf_per_share             = NULL,
+        revenue_per_share         = NULL,
+        net_debt_per_share        = NULL,
+        roae                      = NULL,
+        roaa                      = NULL,
+        croic                     = NULL,
+        pretax_margin             = NULL,
+        tax_rate_effective        = NULL,
+        inventory_turnover        = NULL,
+        inventory_days            = NULL,
+        payables_days             = NULL,
+        cash_conversion_cycle     = NULL,
+        revenue_per_employee      = NULL,
+        quick_ratio               = NULL,
+        cash_ratio                = NULL,
+        debt_to_ebitda            = NULL,
+        net_debt_to_equity        = NULL,
+        equity_multiplier         = NULL,
+        beneish_m_score           = NULL,
+        ebit_growth_1y            = NULL,
+        revenue_growth_median_5y  = NULL,
+        revenue_growth_median_10y = NULL,
+        net_income_cagr_7y        = NULL,
+        net_income_cagr_10y       = NULL,
+        eps_cagr_7y               = NULL,
+        eps_cagr_10y              = NULL,
+        ebitda_cagr_7y            = NULL,
+        ebitda_cagr_10y           = NULL,
+        price_cagr_1y             = NULL,
+        price_cagr_3y             = NULL,
+        price_cagr_5y             = NULL,
+        price_cagr_7y             = NULL,
+        price_cagr_10y            = NULL,
+        avg_roe_7y                = NULL,
+        avg_roe_10y               = NULL,
+        avg_roce_7y               = NULL,
+        avg_roce_10y              = NULL,
+        avg_operating_margin_10y  = NULL,
+        avg_net_margin_10y        = NULL,
+        avg_fcf_margin_3y         = NULL,
+        avg_fcf_margin_5y         = NULL,
+        avg_eps_growth_10y        = NULL,
+        avg_ebit_5y               = NULL,
+        avg_ebit_10y              = NULL,
+        beta_1y                   = NULL,
+        beta_3y                   = NULL,
+        beta_5y                   = NULL,
+        volatility_3y             = NULL,
+        sharpe_3y                 = NULL,
+        sortino_1y                = NULL,
+        max_drawdown_3y           = NULL,
+        calmar_ratio              = NULL,
+        alpha_1y                  = NULL,
+        alpha_3y                  = NULL,
+        avg_current_ratio_3y      = NULL
 """
 
 

@@ -1302,7 +1302,7 @@ claim a **new** 52-week high measured against a six-month maximum. `NULL`
 appears zero times in 2,569 rows, which is the whole point: the column
 could never say "we do not know".
 
-#### The price-basis claim is REFUTED, not merely unsupported
+#### The price-basis EXPLANATIONS are withdrawn; the basis is UNVERIFIED
 
 An earlier version of this finding stated that the raw-vs-adjusted
 difference was "the worse half", that `dp52` came out "ten times too
@@ -1329,16 +1329,32 @@ the measurement; the measurement looked straight at it and found the two
 producers agreeing to rounding. The second explanation is refuted along
 with the first.
 
-Why they agree is not established here, and the honest answer is that the
-repair does not depend on it — the likeliest reading is that
-`market.daily_prices` is already restated in post-split terms, so raw and
-adjusted highs coincide over the window.
+#### What is withdrawn, and what remains open
 
-Two predictions, both wrong, both corrected by measurement. What survives
-is the coverage defect, which is what the numbers actually showed all
-along: **two producers for one quantity is a defect because the row
-contradicts itself, not because the numbers diverge.** The damage was done
-where one of the two did not exist and the row published the other anyway.
+Both explanations are **withdrawn**: that the basis difference produced a
+large error, and that the cohort was hidden from the measurement. Each was
+contradicted by a measurement taken to test it.
+
+What is **not** established is that the price basis is correct.
+
+Producer agreement is not basis verification. Q3 compares `dp52` against
+`market.daily_metrics`, and two producers reading the same underlying
+series will agree whether or not that series is the right one. If
+`market.daily_prices` were restated in post-split terms in place, both
+would read restated prices and agree — and both would also agree if the
+restatement were wrong, or absent, or applied twice.
+
+So the status is **price basis UNVERIFIED**, and it stays there until
+ingestion or corporate-action evidence settles it: what
+`market.daily_prices.high` actually holds for a date before a split, and
+whether `high_adj` differs from it. That is a question about the ingestion
+path, not about either consumer, and neither Q3 nor Q6 can reach it.
+
+It does not block the repair. **Two producers for one quantity is a defect
+because the row contradicts itself, not because the numbers diverge** —
+the damage was done where one of the two did not exist and the row
+published the other anyway. But it must not be recorded as "the basis was
+fine", because nothing measured that.
 
 ### FIXED 13 Nov 2026
 
@@ -1529,7 +1545,11 @@ writing down because it is not obvious:
 - The FALSE set is therefore `absent` minus those 207: the same 547 rows
   for all three flags.
 
-#### MEASURED 13 Nov 2026 — the derivation held, the sentence did not
+#### MEASURED 13 Nov 2026 — the BEFORE-state; the derivation held,
+#### the sentence did not
+
+> Taken before any canonical run under v11.2.84, so these are the
+> values the defect produced. They are not verification of the fix.
 
 ```
  flags affected   instruments

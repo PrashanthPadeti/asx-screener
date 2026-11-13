@@ -81,9 +81,37 @@ deployment, in this order.
      /tmp/asxdiag/frozen.py --env-file /opt/asx-screener/backend/.env
    ```
    Expect: 580 served, 7,656 carriers, three inversions, and **zero
-   mismatches in the row-by-row reconciliation**. That last one is the
-   precondition: if it is non-zero, the 580 is cardinality agreement
+   value mismatches in the row-by-row reconciliation**. That last one is
+   the precondition: if it is non-zero, the 580 is cardinality agreement
    rather than row identity and the exposure claim does not hold.
+
+   **RUN 13 Nov 2026, 03:0x UTC — precondition MET.**
+
+   ```
+   instruments compared                 2,599
+   in universe, no yearly row             720
+   in yearly, not in universe              30
+   value differs                            0
+     served but latest is NULL              0
+     latest has one, not served             0
+   instruments present on both sides     1,849
+   ```
+
+   Zero value mismatches across all 1,849 matched instruments, in both
+   directions. The served value IS the latest fiscal year's
+   `p_fcf_ratio`, instrument by instrument.
+
+   The two population figures are not mismatches and the first version of
+   this check wrongly treated them as such. 720 universe rows carry no
+   fundamentals at all — ETFs, funds, notes — and 30 companies with
+   fundamentals sit outside the serving population. The join decomposes
+   exactly: `2,599 = 2,569 universe + 30 yearly-only`, and
+   `1,879 yearly companies = 1,849 matched + 30`.
+
+   A second fact fell out of it: **905 companies carry a `p_fcf_ratio`
+   somewhere, 580 on their latest fiscal year and 325 only on an older
+   one.** Those 325 reach nobody, which is why 7,656 rows-with-a-value was
+   never the right denominator for exposure.
 
 2. **Yearly recompute**, which rewrites `market.yearly_metrics`.
 

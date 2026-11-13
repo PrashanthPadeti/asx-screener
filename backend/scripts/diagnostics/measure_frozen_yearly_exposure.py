@@ -254,21 +254,54 @@ def main() -> int:
             print(f"  value differs                        {mismatch}")
             print(f"    of which served but latest is NULL {served_absent}")
             print(f"    of which latest has one, not served{latest_unserved}")
-            if mismatch == 0 and uni_only == 0 and yr_only == 0:
-                print()
-                print("  ZERO mismatches in both directions. The served "
-                      "value IS the latest")
-                print("  fiscal year's p_fcf_ratio, instrument by "
-                      "instrument -- not merely the")
-                print("  same number of them.")
+            # The verdict tests IDENTITY, not population equality.
+            #
+            # The first version required universe_only and yearly_only to be
+            # zero as well, and reported NON-ZERO on a run whose value
+            # mismatches were all zero. Those two count instruments that
+            # exist on one side and not the other -- ETFs, funds and notes
+            # carry no fundamentals, and some companies with fundamentals
+            # are outside the serving population -- which is a fact about
+            # the two populations, not a disagreement about a value.
+            #
+            # Requiring them to be zero made the check fail on correct data,
+            # which is the same defect this project keeps finding elsewhere:
+            # a verdict testing a proxy instead of the property. The
+            # property is "where both sides exist, do they agree".
+            matched = compared - uni_only - yr_only
+            identical = (mismatch == 0 and served_absent == 0
+                         and latest_unserved == 0)
+            print()
+            print(f"  instruments present on BOTH sides    {matched}")
+            if identical:
+                print(f"  ZERO value mismatches across all {matched}, in "
+                      f"both directions.")
+                print("  The served value IS the latest fiscal year's "
+                      "p_fcf_ratio, instrument")
+                print("  by instrument -- not merely the same number of "
+                      "them.")
             else:
-                print()
-                print("  ** NON-ZERO. Two counts agreeing at the same total "
-                      "is consistent with")
-                print("     the lateral taking a different year for some "
-                      "companies and the")
-                print("     errors cancelling. Resolve before relying on "
-                      "either figure.")
+                print("  ** VALUES DISAGREE. Two counts agreeing at the "
+                      "same total is")
+                print("     consistent with the lateral taking a different "
+                      "year for some")
+                print("     companies and the errors cancelling. Resolve "
+                      "before relying on")
+                print("     either figure.")
+
+            # Population differences are context, and they must still
+            # reconcile. A FULL OUTER JOIN returns one row per instrument on
+            # either side, so the total has exactly one decomposition; if it
+            # does not hold, one of the two sides is not what it claims.
+            print()
+            print(f"  population difference: {uni_only} universe rows with "
+                  f"no yearly row")
+            print(f"  (instruments carrying no fundamentals), {yr_only} "
+                  f"yearly rows outside")
+            print("  the serving population. Expected, and not a mismatch.")
+            if compared != uni_only + yr_only + matched:
+                print("  ** the join total does not decompose; one side is "
+                      "not what it claims")
 
             print()
             print("── which fiscal period the value sits on "

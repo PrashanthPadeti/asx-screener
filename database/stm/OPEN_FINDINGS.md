@@ -313,6 +313,51 @@ Fix: populate or drop. Low urgency, no wrong answers served.
 
 #### 6b. Frozen values under a fresh timestamp — the real defect
 
+##### MEASURED 13 Nov 2026 — served exposure, and the inversion re-checked
+
+```
+ screener.universe rows                     2,569
+ serving a frozen price_to_fcf                580   (22.6%)
+
+ market.yearly_metrics companies            1,879
+ whose LATEST fiscal year carries a value     580   -- agrees
+
+ rows 33,864   p_fcf_ratio present 7,656
+ computed_at over the carriers    2026-11-08 .. 2026-11-08
+```
+
+**580 served rows, 22.6% of the universe**, each carrying a Price/FCF
+produced by a code path that no longer exists.
+
+The two independent counts agree exactly, which is what makes the chain
+sound rather than assumed: 580 universe rows serve it, and 580 companies
+have it on the latest fiscal year — the row the lateral takes. Had they
+disagreed, the lateral would not be taking the row this analysis assumes
+and neither number would mean anything.
+
+`min(computed_at) = max(computed_at) = 2026-11-08` over the 7,656 carriers.
+There is no population of untouched old rows to explain the values: every
+one was rewritten by that run while the column it carries was not.
+
+The inversion re-measured, rather than quoted from the 9 Nov census:
+
+```
+ avg_roe_7y    6,424  <  avg_roe_10y    6,429   INVERTED
+ avg_roce_7y   6,404  <  avg_roce_10y   6,405   INVERTED
+ avg_ebit_5y   6,502  <  avg_ebit_10y   6,504   INVERTED
+```
+
+All three still hold. A longer window is strictly harder to satisfy, so
+`average_over` cannot produce this ordering; only the superseded `_avg`
+helper can.
+
+**The cost of the repair, stated plainly:** `price_to_fcf` coverage goes
+from 580 rows to 0 until something computes it properly. That is the same
+trade as finding 13's 519 ratios — an undatable number beside a current
+timestamp is worse than an absent one — but it is a visible loss and
+should be a decision, not a side effect.
+
+
 `quick_ratio`, `croic`, `avg_roe_7y`, `beneish_m_score`, `price_cagr_3y`
 and others hold values on 10-19% of rows, written by a code path that no
 longer runs.
@@ -1257,28 +1302,43 @@ claim a **new** 52-week high measured against a six-month maximum. `NULL`
 appears zero times in 2,569 rows, which is the whole point: the column
 could never say "we do not know".
 
-#### The price-basis claim is WITHDRAWN
+#### The price-basis claim is REFUTED, not merely unsupported
 
 An earlier version of this finding stated that the raw-vs-adjusted
 difference was "the worse half", that `dp52` came out "ten times too
-small", and that a stock at its 52-week high published at 10% of it. **The
-measurement does not support that, and it was written before measuring.**
+small", and that a stock at its 52-week high published at 10% of it. That
+was written before measuring, and it is wrong.
 
 The mechanism is real — `technical_compute`'s indicators are fed by the
-`*_adj` columns and `dp52` read raw `high` — but where both values exist
-the two agree to rounding. A split restates the dates *before* it, so raw
-and adjusted agree on every date after the most recent split.
+`*_adj` columns and `dp52` read raw `high`. It produced no error.
 
-112 companies split inside the window and all 112 publish a ratio, so the
-cohort is not empty. What is not established is where those 112 sit: Q3
-can only see rows whose governed extreme is present, so its silence may
-mean the cohort is concentrated in the withheld group rather than that the
-basis never mattered. Q6 of `measure_shadow_52w_extreme.py` settles it and
-has not yet been run.
+When Q3 came back with 0 rows differing by more than 1% and a maximum
+difference of 0.0001, I offered a second explanation: that the 112 split
+companies might sit in the **withheld** group, which Q3 cannot see, so its
+silence would say nothing. Q6 was added to test that rather than let it
+stand.
 
-Recorded as a basis difference, not as a demonstrated error. It does not
-change the fix: two producers for one quantity is a defect because the row
-contradicts itself, not because the numbers happened to diverge.
+```
+ Q6   extreme_withheld   split_companies   publishing_a_ratio
+      False                          106                  106
+      True                             6                    6
+```
+
+**106 of the 112 are inside Q3's view.** The cohort was never hidden from
+the measurement; the measurement looked straight at it and found the two
+producers agreeing to rounding. The second explanation is refuted along
+with the first.
+
+Why they agree is not established here, and the honest answer is that the
+repair does not depend on it — the likeliest reading is that
+`market.daily_prices` is already restated in post-split terms, so raw and
+adjusted highs coincide over the window.
+
+Two predictions, both wrong, both corrected by measurement. What survives
+is the coverage defect, which is what the numbers actually showed all
+along: **two producers for one quantity is a defect because the row
+contradicts itself, not because the numbers diverge.** The damage was done
+where one of the two did not exist and the row published the other anyway.
 
 ### FIXED 13 Nov 2026
 
@@ -1469,15 +1529,39 @@ writing down because it is not obvious:
 - The FALSE set is therefore `absent` minus those 207: the same 547 rows
   for all three flags.
 
-Sound, and still an inference drawn from a subset relation read out of SQL
-by hand rather than from the database. The overlap is now measured per
-instrument by the same diagnostic, and this claim stays **derived, not
-measured** until that run returns.
+#### MEASURED 13 Nov 2026 — the derivation held, the sentence did not
 
-What the counts establish without any derivation: `above_sma200`,
-`golden_cross` and `death_cross` each affected 547 rows; `above_sma50` 38;
-`volume_breakout` 72. 1,751 flag-rows in total — **flag-rows, not
-instruments.**
+```
+ flags affected   instruments
+ --------------   -----------
+              0         1,958
+              1            64
+              3           507
+              4            34
+              5             6
+
+ instruments carrying at least one:  611
+```
+
+**611 instruments — 23.8% of 2,569 — carry at least one confident
+negative**, and that is the number to quote.
+
+The derivation was right about the 547: `507 + 34 + 6 = 547` instruments
+carry **three or more**, exactly as the subset argument predicted. The
+sentence was still wrong in two ways. Only **507** carry exactly three;
+40 carry more. And 64 more instruments carry exactly one, so the affected
+population is 611, not 547 — those 64 never appeared in the inference
+because `volume_breakout` depends on `relative_volume` rather than on an
+average, and nothing in three equal counts pointed at them.
+
+Note the empty row: **no instrument carries exactly two.** That is the
+subset relation showing up in the data — `above_sma200`, `golden_cross`
+and `death_cross` all depend on `sma_200`, so they appear and disappear
+together.
+
+The lesson is not that the derivation was unsound. It is that a derivation
+answers only the question it was built for: it reconciled the three equal
+counts and was silent about a population it had no reason to consider.
 
 Against the positives, which needs no overlap argument: `golden_cross` is
 TRUE on **6 rows in the entire universe**, and 547 rows claimed FALSE
@@ -1596,7 +1680,7 @@ product decision and is recorded here rather than taken.
 | 4c | Liquidity filter is twenty DOLLARS — smallest panel constituent A$2.7M | `market.mover_snapshots` | **CONFIRMED by effect** |
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |
 | 6a | Dead schema: `peg_ratio`, `beta_1y` never populated | `market.yearly_metrics` | CONFIRMED |
-| 6b | Frozen values restamped today — all 6,261 rows `computed_at` = today | `market.yearly_metrics` | **PROVEN** |
+| 6b | Frozen values restamped today. **Measured 13 Nov: 580 universe rows (22.6%) serve a frozen `price_to_fcf`**, confirmed from both sides; all 7,656 carriers stamped on one date | `market.yearly_metrics` | **FIXED on branch** — 64 columns emptied on conflict; costs 580 rows of `price_to_fcf` coverage |
 | 6c | Census complete: 27 dead, 37 frozen | `market.yearly_metrics` | CONFIRMED |
 | 6d | Frozen values produced by the SUPERSEDED `_avg` (window inversions prove it) | `market.yearly_metrics` | **CONFIRMED** |
 | 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
@@ -1608,5 +1692,5 @@ product decision and is recorded here rather than taken.
 | 12 | Unknown market cap written as six measured falses; 642 of 2,567 rows (25%) were invisible to every tier filter | `screener.universe` | **FIXED** — consumers read the label, `unknown` selectable, seven tiers reconcile to 2,567 |
 | 13 | Not a governance gap but a **second producer**: a `dp52` lateral recomputed the 52-week extremes from raw, unadjusted `daily_prices` with no coverage rule, and four published columns derived from it while the extreme beside them came from the governed producer. The split basis made a stock at its 52-week high publish at a fraction of it | `screener.universe` | **FIXED** — lateral deleted, all four read `dm`; governance backstop deferred, awaiting the model-version decision |
 | 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |
-| 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. Measured: **1,751 flag-rows** across five flags (547 each for `above_sma200`/`golden_cross`/`death_cross`), and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, no exceptions. Instrument-level overlap is derived, not yet measured. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked; 6 mutants killed; production verification pending |
+| 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. Measured: **1,751 flag-rows** across five flags (547 each for `above_sma200`/`golden_cross`/`death_cross`), and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, no exceptions. **Measured: 611 instruments (23.8%) carry at least one**; 547 carry three or more, 507 exactly three. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked; 6 mutants killed; production verification pending |
 | 16 | `rsi_overbought`, `rsi_oversold`, `macd_bullish_cross`, `macd_bearish_cross` have no writer — NULL on every row, and two are registered screener filters. Census: **four working consumers all derive from `rsi_14` directly**, with three different overbought cutoffs (70, 75, 75). The presets named after these columns do not use them | `market.daily_metrics` | CONFIRMED — recommend **withdrawing** the columns, not writing them; a writer would be a fifth definition |

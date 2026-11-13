@@ -120,8 +120,13 @@ def main() -> int:
 
             produced = yc.build_yearly_rows(code, fin, prices, current_shares,
                                             currency)
+            # Mirrors the producer exactly: it does `fin.reset_index(drop=True)`
+            # then `to_dict("records")`, so the fcf this reads is the object
+            # the producer's `_f(row.get("fcf"))` reads. Iterating the frame
+            # instead would hand back Series objects -- a different type, with
+            # different truthiness, which is how this instrument first failed.
             by_year = {int(r["fiscal_year"]): r
-                       for _, r in fin.iterrows()
+                       for r in fin.reset_index(drop=True).to_dict("records")
                        if r.get("fiscal_year") is not None}
 
             for row in produced:
@@ -129,7 +134,12 @@ def main() -> int:
                 fy = int(row[I_FY])
                 mc = row[I_MC]
                 actual = row[I_PFCF]
-                src = by_year.get(fy) or {}
+                src = by_year.get(fy)
+                if src is None:
+                    r1_failures.append((code, fy, "no source row for the "
+                                        "fiscal year the producer emitted",
+                                        None, actual))
+                    continue
                 fcf = yc._f(src.get("fcf"))
 
                 coherent = (currency is None or currency == BASE_CURRENCY)

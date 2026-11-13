@@ -53,6 +53,9 @@ from app.core.db import get_database_url_sync  # noqa: E402
 # Pure period arithmetic, kept out of this module so it can be
 # exercised without a database credential.
 from compute.engine.periods import average_over  # noqa: E402
+# The one definition of the base currency. Imported rather than restated so a
+# Price/FCF guard here cannot drift from applicability gate 1b's "AUD".
+from compute.engine.applicability import BASE_CURRENCY  # noqa: E402
 
 
 # Cast PostgreSQL NUMERIC → Python float automatically
@@ -328,6 +331,32 @@ def fetch_current_shares(cur, asx_code: str) -> Optional[float]:
     return float(row[0]) if row and row[0] is not None else None
 
 
+def fetch_reporting_currency(cur, asx_code: str) -> Optional[str]:
+    """The currency the STATEMENTS are stated in, upper-cased, or None.
+
+    Not the listing currency: ``General.CurrencyCode`` reads AUD for BHP,
+    whose financials are in USD. This is the same column and the same source
+    the universe build reads for applicability gate 1b.
+
+    ``None`` means the source stated nothing, which is NOT read as AUD.
+    1,016 of 2,019 ASX codes state no currency because they have no financial
+    statements at all, and treating silence as a mismatch would suppress half
+    the exchange to fix roughly 160 companies. Silence and a stated foreign
+    currency have opposite consequences, so they stay distinguishable here.
+    """
+    cur.execute("""
+        SELECT reporting_currency
+        FROM staging_au.fundamentals
+        WHERE asx_code = %s
+        LIMIT 1
+    """, [asx_code])
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    text = str(row[0]).strip().upper()
+    return text or None
+
+
 def fetch_all_prices(cur, asx_code: str) -> pd.Series:
     """
     Fetch ALL daily closing prices for a stock in a SINGLE query.
@@ -570,7 +599,8 @@ def consecutive_div_years(df: pd.DataFrame) -> int:
 
 def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
                       prices: pd.Series,
-                      current_shares: Optional[float] = None) -> list[tuple]:
+                      current_shares: Optional[float] = None,
+                      reporting_currency: Optional[str] = None) -> list[tuple]:
     """
     For each fiscal_year row, compute all metrics.
     prices:         full daily close history fetched once by caller.
@@ -578,6 +608,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
                     when annual_balance_sheet.shares_outstanding is NULL —
                     EODHD does not provide per-share data for ASX income
                     statements, so we approximate EPS from net_profit / shares.
+    reporting_currency: the unit the statements are stated in, or None when
+                    the source stated nothing. Read by p_fcf_ratio only; see
+                    the Price/FCF block for why that metric needs it and the
+                    other ratios here do not.
     """
     if fin.empty:
         return []
@@ -756,6 +790,70 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         ev_ebit   = _clamp(_div(ev,  ebit))
         ev_rev    = _clamp(_div(ev,  rev))
         fcf_yield = _clamp(_div(_div(fcf, shares / 1e6 if shares else None), px))
+
+        # ── Price / FCF ───────────────────────────────────────────────────
+        #
+        # Restored in v11.2.86. Every value this column held before was
+        # written by a code path that no longer exists, so the repair emptied
+        # it and this is what fills it again.
+        #
+        # ONE PAIR, NOT ONE DERIVED FROM THE OTHER. p_fcf is the reciprocal
+        # of fcf_yield above -- both are fcf against mc -- so it is computed
+        # from the same mc and fcf rather than as 1/fcf_yield. _div rounds to
+        # 4dp, so a yield of 0.00003 stores as 0.0000, and a reciprocal taken
+        # from the stored value would divide by zero on exactly the companies
+        # whose ratio is largest. Reading a rounded output as an input is how
+        # a presentation becomes a second producer.
+        #
+        # They are both anchored to the fiscal year end, not to today: px is
+        # price_at(prices, ped) and fcf is the annual cash-flow figure for the
+        # same period. There is no period mismatch to disclose.
+        #
+        # THREE WAYS TO DECLINE, and they are different facts:
+        #
+        #   fcf is None / mc is None   an input is missing. Nothing to divide.
+        #
+        #   fcf <= 0                   NOT a missing input -- a reported one
+        #                              that makes the ratio meaningless. A
+        #                              company burning cash gets a NEGATIVE
+        #                              Price/FCF, which sorts FIRST on a
+        #                              "cheapest" ascending screen while
+        #                              describing a company with no free cash
+        #                              flow at all. fcf_yield publishes the
+        #                              same fact safely because -4% reads as
+        #                              bad; -4x reads as cheap. Zero divides
+        #                              to infinity and is excluded by the same
+        #                              test rather than a separate one.
+        #
+        #   non-AUD reporting currency an AUD market capitalisation over a
+        #                              foreign-currency cash flow has no unit.
+        #                              Gate 1b suppresses exactly this for
+        #                              eight other ratios, but it only runs on
+        #                              governed metrics and model
+        #                              constituents; p_fcf_ratio is neither,
+        #                              and FACTOR_MODEL_V3 is frozen by 13
+        #                              finalised runs, so it cannot become one
+        #                              without a V4. Declaring it in
+        #                              CROSS_CURRENCY would have been inert.
+        #                              The guard therefore lives HERE, where
+        #                              it is reached, and the value is never
+        #                              computed rather than computed and
+        #                              masked downstream.
+        #
+        #                              None means the source stated nothing,
+        #                              which is not evidence of a mismatch and
+        #                              must not suppress.
+        #
+        # All three produce NULL. The reason is not machine-readable, because
+        # an ungoverned column has no sidecar to carry a cause -- that is a
+        # real limit of restoring this without a model version, and it is
+        # recorded as such rather than papered over.
+        currency_coherent = (reporting_currency is None
+                             or reporting_currency == BASE_CURRENCY)
+        p_fcf = (_clamp(_div(mc, fcf))
+                 if (mc is not None and fcf is not None and fcf > 0
+                     and currency_coherent)
+                 else None)
         earn_yld  = _clamp(_div(eps, px))
         div_yld   = _clamp(_div(dps, px))
         payout    = _clamp(_div(dps, eps) if (eps and eps > 0) else None)
@@ -1010,7 +1108,8 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             px, mc,
             int(shares) if shares and np.isfinite(shares) else None,
             # Valuation
-            pe, pb, ps, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield, graham,
+            pe, pb, ps, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield,
+            p_fcf, graham,
             # Per share
             eps, _f(row.get("eps_diluted")), bvps, dps, fpc,
             # Dividend
@@ -1083,7 +1182,7 @@ INSERT_SQL = """
         market_cap, shares_outstanding,
         pe_ratio, pb_ratio, ps_ratio,
         enterprise_value, ev_ebitda, ev_ebit, ev_revenue,
-        earnings_yield, fcf_yield, graham_number,
+        earnings_yield, fcf_yield, p_fcf_ratio, graham_number,
         eps, eps_diluted, bvps, dps, franking_pct,
         dividend_yield, franked_yield, payout_ratio,
         dividend_cagr_3y, dividend_cagr_5y, dividend_consecutive_yrs,
@@ -1138,6 +1237,7 @@ INSERT_SQL = """
         ev_revenue              = EXCLUDED.ev_revenue,
         earnings_yield          = EXCLUDED.earnings_yield,
         fcf_yield               = EXCLUDED.fcf_yield,
+        p_fcf_ratio             = EXCLUDED.p_fcf_ratio,
         graham_number           = EXCLUDED.graham_number,
         eps                     = EXCLUDED.eps,
         eps_diluted             = EXCLUDED.eps_diluted,
@@ -1286,7 +1386,10 @@ INSERT_SQL = """
         -- default, verified against the schema snapshot, so a new row
         -- already arrives NULL. Only the conflict path was preserving them.
         pcf_ratio                 = NULL,
-        p_fcf_ratio               = NULL,
+        -- p_fcf_ratio left this list in v11.2.86. It is written again, from
+        -- the Price/FCF block in build_yearly_rows, and so appears in the
+        -- EXCLUDED assignments above instead. The partition test is what
+        -- keeps the two lists from both claiming it.
         ev_fcf                    = NULL,
         peg_ratio                 = NULL,
         ncavps                    = NULL,
@@ -1556,7 +1659,11 @@ def main():
             # ── Current shares (proxy for historical EPS derivation) ───────
             current_shares = fetch_current_shares(cur, asx_code)
 
-            rows = build_yearly_rows(asx_code, fin, prices, current_shares)
+            # ── Reporting currency (the Price/FCF unit guard) ──────────────
+            reporting_currency = fetch_reporting_currency(cur, asx_code)
+
+            rows = build_yearly_rows(asx_code, fin, prices, current_shares,
+                                     reporting_currency)
             if not rows:
                 skipped += 1
                 continue

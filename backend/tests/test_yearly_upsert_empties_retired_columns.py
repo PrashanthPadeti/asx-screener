@@ -67,14 +67,21 @@ TABLE = "market.yearly_metrics"
 #: The upsert key. Not assigned on conflict, by definition.
 KEY = ("asx_code", "fiscal_year")
 
-#: Measured 9 Nov 2026. Reconciliation, not configuration.
+#: Measured 9 Nov 2026, revised 13 Nov when p_fcf_ratio was restored.
+#: Reconciliation, not configuration.
 EXPECT_TABLE_COLUMNS = 188
-EXPECT_INSERT_COLUMNS = 124
-EXPECT_RETIRED = 64
+EXPECT_INSERT_COLUMNS = 125
+EXPECT_RETIRED = 63
 
-#: The one retired column that reaches a customer, named so that removing
-#: its exposure is a deliberate act rather than a side effect.
-SERVED_RETIRED = "p_fcf_ratio"
+#: The column that WAS the one retired column reaching a customer. v11.2.86
+#: restored it: build_yearly_rows computes it again, under an explicit
+#: contract, so it is written rather than emptied.
+#:
+#: Kept as a named constant rather than deleted. The assertion below flipped
+#: from "must be emptied" to "must be written", and a future reader needs to
+#: see that the move was deliberate -- a silent disappearance from this file
+#: would look like the column had simply stopped being watched.
+RESTORED_FORMERLY_RETIRED = "p_fcf_ratio"
 
 #: ── 6a: DEAD. Never populated by anything, on any row. ──────────────────
 #:
@@ -105,7 +112,7 @@ FROZEN_6B = (
     "debt_to_ebitda", "ebit_growth_1y", "ebitda_cagr_10y",
     "ebitda_cagr_7y", "equity_multiplier", "inventory_days",
     "inventory_turnover", "net_debt_to_equity", "net_income_cagr_10y",
-    "net_income_cagr_7y", "p_fcf_ratio", "price_cagr_10y", "price_cagr_1y",
+    "net_income_cagr_7y", "price_cagr_10y", "price_cagr_1y",
     "price_cagr_3y", "price_cagr_5y", "price_cagr_7y", "quick_ratio",
     "revenue_growth_median_10y", "revenue_growth_median_5y", "roaa",
     "roae", "sharpe_3y", "volatility_3y",
@@ -291,9 +298,15 @@ def test_the_6a_and_6b_lists_partition_the_retired_set():
         f"{phantom} are classified as retired but the INSERT writes them. "
         f"Either the write was restored, or the list is stale.")
 
-    assert len(dead) == 27 and len(frozen) == 37, (
-        f"the census measured 27 dead and 37 frozen; these lists hold "
-        f"{len(dead)} and {len(frozen)}")
+    # The 9 Nov census measured 27 dead and 37 frozen. 6b is 36 from
+    # v11.2.86: p_fcf_ratio left it by being RESTORED, not by being
+    # reclassified. "Restored" is the only legitimate way out of either list,
+    # and `phantom` above is what proves it -- a name that leaves a list
+    # without the INSERT gaining it fails there first.
+    assert len(dead) == 27 and len(frozen) == 36, (
+        f"the census measured 27 dead and 37 frozen, less p_fcf_ratio "
+        f"restored in v11.2.86; these lists hold {len(dead)} and "
+        f"{len(frozen)}")
 
 
 def test_every_6d_column_is_emptied():
@@ -326,20 +339,29 @@ def test_the_inverted_pairs_are_all_frozen_columns():
         f"provenance argument does not rest on them.")
 
 
-def test_the_served_retired_column_is_emptied():
-    """Named explicitly because emptying it removes data a customer sees.
+def test_the_restored_column_is_written_and_not_emptied():
+    """The inverse of what this test asserted in v11.2.85, deliberately.
 
     p_fcf_ratio reaches screener.universe.price_to_fcf -- a registered
-    filter, a sort column, a CSV column and a company-detail field. Its
-    coverage falls to zero when this runs, and that is the intent: the
-    values were produced by a code path that no longer exists and cannot be
-    dated. Serving an undatable number beside a current timestamp is worse
-    than serving none.
+    filter, a sort column, a CSV column and a company-detail field. v11.2.85
+    emptied it because every value it held came from a code path that no
+    longer existed and could not be dated. v11.2.86 gives it a producer
+    again, so the correct assertion is now that it is WRITTEN.
+
+    Both halves are asserted. A column that appeared in neither list would
+    silently keep whatever a prior run left in it, which is the exact defect
+    finding 6b was -- and emptying and writing are the only two outcomes
+    this statement may produce for it.
     """
-    assert SERVED_RETIRED in emptied(), (
-        f"{SERVED_RETIRED} is not emptied. It is the one retired column "
-        f"with customer exposure, so leaving it would keep the defect "
-        f"exactly where it is visible.")
+    assert RESTORED_FORMERLY_RETIRED in refreshed(), (
+        f"{RESTORED_FORMERLY_RETIRED} is not written on conflict. It was "
+        f"restored in v11.2.86 and a row that keeps its prior value is the "
+        f"frozen-column defect returning to the one column where a customer "
+        f"can see it.")
+    assert RESTORED_FORMERLY_RETIRED not in emptied(), (
+        f"{RESTORED_FORMERLY_RETIRED} is still in the NULL list as well as "
+        f"the written one. Whichever assignment PostgreSQL applied, one of "
+        f"the two intents is not happening.")
 
 
 def test_computed_at_is_still_refreshed():

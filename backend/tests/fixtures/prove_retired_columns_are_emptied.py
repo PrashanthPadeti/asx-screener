@@ -17,23 +17,35 @@ database does with an EXISTING row.
 
 THE TRANSITION ON TRIAL
 
-    before   p_fcf_ratio = 12.34      computed_at = an old date
+    before   quick_ratio = 56.78      computed_at = an old date
     upsert   the real INSERT_SQL, same (asx_code, fiscal_year)
-    after    p_fcf_ratio IS NULL      computed_at = the new date
+    after    quick_ratio IS NULL      computed_at = the new date
 
-A `COALESCE(yearly_metrics.p_fcf_ratio, EXCLUDED.p_fcf_ratio)` would pass
+A `COALESCE(yearly_metrics.quick_ratio, EXCLUDED.quick_ratio)` would pass
 every source assertion and fail here, which is why this exists.
 
-Three columns are watched together, because they fail differently:
+Four columns are watched together, because they fail differently:
 
-    p_fcf_ratio    RETIRED and SERVED -- reaches screener.universe as
-                   price_to_fcf. Must go to NULL.
     quick_ratio    RETIRED, not served. The largest frozen population
-                   after p_fcf_ratio. Must go to NULL.
-    pe_ratio       WRITTEN. Must take the new value, proving the statement
-                   still refreshes what it is supposed to refresh. A
-                   repair that emptied everything would pass a
-                   NULL-only check.
+                   after the restored one. Must go to NULL.
+    avg_roe_10y    RETIRED, and one of the three 6d inversions -- the
+                   evidence that the frozen values came from the
+                   superseded `_avg` helper. Must go to NULL.
+    p_fcf_ratio    RESTORED in v11.2.86, and SERVED -- it reaches
+                   screener.universe as price_to_fcf. Must take the
+                   INCOMING value, which is seeded different from both
+                   the prior value and NULL so that "preserved",
+                   "emptied" and "written" are three distinguishable
+                   outcomes rather than two.
+    pe_ratio       WRITTEN throughout. Must take the new value, proving
+                   the statement still refreshes what it always
+                   refreshed. A repair that emptied everything would
+                   pass a NULL-only check.
+
+p_fcf_ratio is the reason the fourth column matters. It moved from the
+emptied list to the written one, and a fixture that only asserted "not
+NULL" for it would accept a value preserved from a run five months ago --
+which is the exact defect finding 6b was.
 
 Usage (from a worktree, against scratch or a gate database):
     python tests/fixtures/prove_retired_columns_are_emptied.py
@@ -65,8 +77,9 @@ from app.core.db import get_database_url_sync                      # noqa: E402
 # A fixture whose production check cannot be inspected without loading the
 # world is a fixture whose production check will eventually go unchecked.
 
-RETIRED_SERVED = "p_fcf_ratio"
+RESTORED = "p_fcf_ratio"       # 6b until v11.2.86; written again since
 RETIRED_UNSERVED = "quick_ratio"
+RETIRED_6D = "avg_roe_10y"
 WRITTEN = "pe_ratio"
 
 #: Databases this fixture may mutate.
@@ -153,24 +166,26 @@ def main() -> int:
     # ── Arrange: a valid value in each retired column, and an old stamp ──
     cur.execute(f"""
         UPDATE market.yearly_metrics
-           SET {RETIRED_SERVED} = 12.34,
+           SET {RESTORED} = 12.34,
                {RETIRED_UNSERVED} = 56.78,
+               {RETIRED_6D} = 0.91,
                {WRITTEN} = 1.0,
                computed_at = %s
          WHERE asx_code = %s AND fiscal_year = %s
     """, (old_stamp, code, fy))
 
     cur.execute(f"""
-        SELECT {RETIRED_SERVED}, {RETIRED_UNSERVED}, {WRITTEN}, computed_at
+        SELECT {RESTORED}, {RETIRED_UNSERVED}, {RETIRED_6D}, {WRITTEN},
+               computed_at
           FROM market.yearly_metrics
          WHERE asx_code = %s AND fiscal_year = %s
     """, (code, fy))
     before = cur.fetchone()
-    if before[0] is None or before[1] is None:
-        raise SystemExit("2  could not seed the retired columns; aborting")
-    print(f"before   {code} FY{fy}: {RETIRED_SERVED}={before[0]} "
-          f"{RETIRED_UNSERVED}={before[1]} {WRITTEN}={before[2]} "
-          f"computed_at={before[3]}")
+    if any(before[i] is None for i in (0, 1, 2)):
+        raise SystemExit("2  could not seed the watched columns; aborting")
+    print(f"before   {code} FY{fy}: {RESTORED}={before[0]} "
+          f"{RETIRED_UNSERVED}={before[1]} {RETIRED_6D}={before[2]} "
+          f"{WRITTEN}={before[3]} computed_at={before[4]}")
 
     # ── Act: the REAL statement, through the REAL executor ──────────────
     #
@@ -183,36 +198,50 @@ def main() -> int:
     values = list(cur.fetchone())
     new_stamp = datetime.now(timezone.utc)
     values[columns.index(WRITTEN)] = 2.0
+    # The restored column gets an incoming value DIFFERENT from both the
+    # seeded one and NULL, which is what makes its three outcomes
+    # distinguishable: 12.34 means preserved, NULL means still in the retired
+    # list, 7.5 means written from EXCLUDED. A control that could only be
+    # "set or not set" cannot tell the first two apart.
+    values[columns.index(RESTORED)] = 7.5
     values[columns.index("computed_at")] = new_stamp
 
     execute_values(cur, INSERT_SQL, [tuple(values)], page_size=1)
 
     cur.execute(f"""
-        SELECT {RETIRED_SERVED}, {RETIRED_UNSERVED}, {WRITTEN}, computed_at
+        SELECT {RESTORED}, {RETIRED_UNSERVED}, {RETIRED_6D}, {WRITTEN},
+               computed_at
           FROM market.yearly_metrics
          WHERE asx_code = %s AND fiscal_year = %s
     """, (code, fy))
     after = cur.fetchone()
-    print(f"after    {code} FY{fy}: {RETIRED_SERVED}={after[0]} "
-          f"{RETIRED_UNSERVED}={after[1]} {WRITTEN}={after[2]} "
-          f"computed_at={after[3]}")
+    print(f"after    {code} FY{fy}: {RESTORED}={after[0]} "
+          f"{RETIRED_UNSERVED}={after[1]} {RETIRED_6D}={after[2]} "
+          f"{WRITTEN}={after[3]} computed_at={after[4]}")
 
     # ── Assert ──────────────────────────────────────────────────────────
     failures = []
-    if after[0] is not None:
+    if after[0] != 7.5:
+        was = ("preserved from before the upsert" if after[0] == 12.34
+               else "emptied, so it is still in the retired list"
+               if after[0] is None else "neither the old nor the new value")
         failures.append(
-            f"{RETIRED_SERVED} is {after[0]!r}, not NULL. A valid value "
-            f"survived a run that restamped the row -- the defect is "
-            f"intact, and this column reaches customers as price_to_fcf.")
+            f"{RESTORED} is {after[0]!r}, expected 7.5 -- {was}. This column "
+            f"reaches customers as price_to_fcf, and v11.2.86 restored it: "
+            f"it must take the incoming value like any written column.")
     if after[1] is not None:
         failures.append(
             f"{RETIRED_UNSERVED} is {after[1]!r}, not NULL.")
-    if after[2] != 2.0:
+    if after[2] is not None:
         failures.append(
-            f"{WRITTEN} is {after[2]!r}, expected 2.0. The statement no "
+            f"{RETIRED_6D} is {after[2]!r}, not NULL. A 6d column keeping a "
+            f"value is the inversion evidence returning.")
+    if after[3] != 2.0:
+        failures.append(
+            f"{WRITTEN} is {after[3]!r}, expected 2.0. The statement no "
             f"longer refreshes a written column, so the repair emptied "
             f"more than it should have.")
-    if after[3] == before[3]:
+    if after[4] == before[4]:
         failures.append(
             "computed_at did not move. The repair must empty the values, "
             "not stop the clock.")

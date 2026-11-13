@@ -1763,6 +1763,88 @@ more conservative than a screen. But it is currently **incidental rather
 than declared**, and nothing would catch a fifth appearing. That is a
 product decision and is recorded here rather than taken.
 
+## 17. `fcf_yield` mixes AUD with the reporting currency, unguarded
+
+Found while restoring Price/FCF in v11.2.86, by asking whether the
+restored column could join applicability gate 1b. It could not — and the
+same question revealed that its reciprocal, which **is** reachable by the
+gate, was never added to it.
+
+### The shape
+
+`CROSS_CURRENCY` suppresses eight ratios when `reporting_currency` is
+positively known to differ from AUD, on one stated principle: *an AUD
+market capitalisation over a figure stated in another currency has no
+unit until one side is converted*. `ev_ebitda` is in that list for
+exactly this reason.
+
+```
+fcf_yield = free cash flow (reporting currency) / market cap (AUD)
+```
+
+Identical shape. Not in the list.
+
+This is not a ratio of two statement figures — those are deliberately
+absent from `CROSS_CURRENCY`, because `roe` and `gross_margin` are
+currency-invariant and suppressing them would delete correct numbers. One
+side of `fcf_yield` is a market price.
+
+### Why it matters more than a display defect
+
+`fcf_yield` is a declared constituent of the factor model's Value signal
+(`factor_model.py:260`). A number with incoherent units does not merely
+appear on a page; it contributes a z-score to a ranking that orders the
+whole exchange.
+
+It is also a registered screener filter, a sort column, a CSV column
+labelled "FCF Yield %", a company-detail field, and the sort key of a
+shipped example screen.
+
+### Why it is reachable, and `price_to_fcf` is not
+
+```
+  fcf_yield      assessable=True   governed=False
+  price_to_fcf   assessable=False  governed=False
+```
+
+`factor_applicability` assesses `governed | model_constituents`, so being
+a model constituent is enough — gate 1b **would** fire on `fcf_yield` the
+moment the entry exists. That is what makes this a one-line fix and also
+what makes it not one.
+
+### The fix needs a model version, which is the whole decision
+
+Suppressing a constituent changes the Value signal, which changes
+composite scores, under a version name that **13 finalised production
+runs already reference**. The freeze rule exists for exactly that: two
+runs labelled `FACTOR_MODEL_V3` that mean different things is the state
+versioning prevents.
+
+So the honest fix is `FACTOR_MODEL_V4`, carrying both this entry and
+`price_to_fcf` into `GOVERNED_METRICS` so the producer-side guard added
+in v11.2.86 can be deleted rather than lived with. That is a larger piece
+of work than a register line, and it was explicitly deferred rather than
+taken.
+
+### Measure before deciding
+
+`scripts/diagnostics/measure_fcf_cross_currency.py` answers how many rows
+this is, how many are inside the scored population, **and** runs the eight
+already-guarded ratios as a control on the same rows. The control is the
+part that matters: a count of an unguarded metric means nothing without
+evidence that the gate works where it is applied. If any of the eight
+publishes on a foreign reporter, this finding is wrong before it starts.
+
+### Not to be confused with the v11.2.86 guard
+
+`price_to_fcf` **is** guarded, from the producer, because gate 1b cannot
+reach it. `test_price_to_fcf_contract.py` fails the moment that column
+becomes assessable, so the rule moves into `CROSS_CURRENCY` rather than
+existing in two places. Until then the site declines Price/FCF for
+foreign reporters while publishing its reciprocal for the same companies
+— a real inconsistency, recorded here rather than hidden by withdrawing
+the safer of the two.
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -1789,3 +1871,4 @@ product decision and is recorded here rather than taken.
 | 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |
 | 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. Measured: **1,751 flag-rows** across five flags (547 each for `above_sma200`/`golden_cross`/`death_cross`), and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, no exceptions. **Measured: 611 instruments (23.8%) carry at least one**; 547 carry three or more, 507 exactly three. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked; 6 mutants killed; production verification pending |
 | 16 | `rsi_overbought`, `rsi_oversold`, `macd_bullish_cross`, `macd_bearish_cross` have no writer — NULL on every row, and two are registered screener filters. Census: **four working consumers all derive from `rsi_14` directly**, with three different overbought cutoffs (70, 75, 75). The presets named after these columns do not use them | `market.daily_metrics` | CONFIRMED — recommend **withdrawing** the columns, not writing them; a writer would be a fifth definition |
+| 17 | `fcf_yield` is a free cash flow over an AUD market capitalisation, the same shape as the eight ratios applicability gate 1b suppresses for foreign reporters — and it is **not in `CROSS_CURRENCY`**. It is served today: a registered filter, a sort column, a CSV column, a company-detail field and a constituent of the factor model's Value signal, so the mismatch does not merely display, it moves a ranking | `screener.universe`, `market.yearly_metrics` | **OPEN — exposure not yet measured**; the fix needs FACTOR_MODEL_V4 (see below) |

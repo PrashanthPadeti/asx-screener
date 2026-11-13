@@ -821,9 +821,24 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         #                              describing a company with no free cash
         #                              flow at all. fcf_yield publishes the
         #                              same fact safely because -4% reads as
-        #                              bad; -4x reads as cheap. Zero divides
-        #                              to infinity and is excluded by the same
-        #                              test rather than a separate one.
+        #                              bad; -4x reads as cheap.
+        #
+        #                              Zero is excluded TWICE and the
+        #                              duplication is deliberate. `_div`
+        #                              returns None on a zero denominator, so
+        #                              `fcf > 0` is redundant for exactly
+        #                              fcf == 0 -- mutating it to `>= 0`
+        #                              changes no output, and the mutation run
+        #                              records that survivor as equivalent
+        #                              rather than as a gap. The explicit test
+        #                              stays because it carries the INTENT:
+        #                              zero free cash flow is declined for the
+        #                              same reason negative is, and a reader
+        #                              should not have to know _div's internals
+        #                              to see that. test_div_returns_none_on_
+        #                              zero_denominator pins the second
+        #                              guarantee so it cannot quietly become
+        #                              the only one.
         #
         #   non-AUD reporting currency an AUD market capitalisation over a
         #                              foreign-currency cash flow has no unit.

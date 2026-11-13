@@ -165,12 +165,30 @@ def test_the_ratio_is_the_reciprocal_of_the_yield(col_index):
 
 # ── The three declining cases ────────────────────────────────────────────
 
+def test_div_returns_none_on_zero_denominator():
+    """The second of the two guarantees that exclude fcf == 0.
+
+    `fcf > 0` in the producer and `_div`'s zero-denominator rule both
+    decline a zero free cash flow, so mutating `> 0` to `>= 0` changes no
+    output -- an equivalent mutant, recorded as such in the mutation run
+    rather than chased.
+
+    Equivalent only while BOTH hold. This pins the half that lives
+    somewhere else, so a change to _div cannot silently make the producer's
+    test the only thing standing between a zero denominator and a division.
+    """
+    from compute.engine.yearly_compute import _div
+    assert _div(400.0, 0.0) is None
+    assert _div(400.0, 0) is None
+    assert _div(400.0, None) is None
+
+
 @pytest.mark.parametrize("fcf", [-40.0, -0.01, 0.0])
 def test_non_positive_fcf_withholds(col_index, fcf):
     """Zero and negative both decline, and for the same stated reason.
 
-    Zero would divide to infinity. Negative would publish a number that
-    sorts as cheap while meaning the opposite.
+    Negative would publish a number that sorts as cheap while meaning the
+    opposite. Zero has no finite ratio at all.
     """
     assert _ratio(fcf, currency=BASE_CURRENCY, idx=col_index) is None, (
         f"fcf={fcf} produced a ratio. On an ascending 'cheapest first' "

@@ -1414,6 +1414,43 @@ six-month maximum.
 If the after-run does not show roughly these numbers, the fix did
 something other than what is claimed here.
 
+### CLOSED 13 Nov 2026 — measured after canonical run 52
+
+The acceptance criterion held exactly. On all **757** rows where the
+governed extreme is withheld: `price_to_52w_high` present on **0**,
+`new_52w_high` FALSE on **0**, NULL on **757**. The same for the low.
+The second producer is gone; nothing derives a published answer from an
+extreme the governed producer refused to publish.
+
+The magnitudes missed. Predicted against measured:
+
+| | predicted | measured |
+|---|---|---|
+| rows with the extreme withheld | 674 | **757** |
+| `price_to_52w_high` present | 1,895 | **1,813** |
+| `new_52w_high` TRUE | 68 | **45** |
+
+Withholding is 83 rows wider and TRUE is 23 lower than predicted. The
+prediction assumed the only change was removing the `dp52` fallback, with
+the governed withholding population held constant. It did not stay
+constant: the same canonical run recomputed `market.daily_metrics`, and
+`technical_compute` withheld 9,506,805 values for unadjustable corporate
+actions across 108 unreconciled splits. A wider withholding population
+upstream is sufficient to explain all three numbers, and the direction of
+every one of them is consistent with it.
+
+**Sufficient is not established.** Attributing the 83 needs one query
+comparing the withheld set before and after by instrument. Until that
+runs, the closure rests on the acceptance criterion — which is a property
+over the withheld rows and holds whatever their number — and not on the
+magnitudes.
+
+Q3 still reports `differs_gt_1pct = 0, max_diff = 0.0001` over the 1,813
+rows where both existed, and Q6 still shows 17 of the 112 split companies
+sitting in the withheld group where Q3 cannot see them. **The price basis
+remains UNVERIFIED**; agreement between two consumers of one series is
+not evidence about the series.
+
 ## 14. A dead join in the statement that publishes the universe
 
 **Table:** `screener.universe`
@@ -1607,6 +1644,44 @@ at all — `confident POS = 0` means no TRUE depended on an absent input.
 
 `confident NEG` must be **0** on every row. Anything else means the mask
 missed a path.
+
+### CLOSED 13 Nov 2026 — measured after canonical run 52
+
+```
+  flag                  TRUE   FALSE    NULL  input absent  confident NEG
+  above_sma50            869    1455     246           246              0
+  above_sma200           496    1319     755           755              0
+  golden_cross             6    1808     756           755              0
+  death_cross              4    1810     756           755              0
+  volume_breakout         11    1738     821           280              0
+
+  instruments carrying at least one confident negative: 0  (was 611)
+```
+
+**`confident NEG` is 0 on every flag, and 0 instruments carry one** —
+down from 611. The five TRUE counts are 869, 496, 6, 4, 11, identical to
+the before-state, which is what `confident POS = 0` predicted: no TRUE
+ever depended on an absent input, so none could be lost.
+
+For `above_sma50` and `above_sma200` the predicted FALSE counts (1,455
+and 1,319) are exact, and NULL is one above prediction because the
+universe grew 2,569 → 2,570.
+
+**`volume_breakout` missed badly: NULL 821 against 279 predicted, FALSE
+1,738 against 2,279.** 542 more rows withheld than forecast. The
+prediction was built from `input absent` as the universe measures it, and
+the universe measures only the inputs it stores. `volume_breakout`
+compares against an average volume computed inside the engine and never
+written to a column, so a row can be unknown for a reason the universe
+cannot see. The lower-bound caveat was written for `golden_cross` and
+`death_cross` and should have been written for this flag too — the
+property it describes is a property of the measurement, not of those two
+columns.
+
+Over-withholding is the safe direction and `confident NEG = 0` says the
+mask is not withholding rows whose inputs were present. But the size of
+the gap is unexplained from the universe alone, and confirming it means
+reading the engine's own input series rather than the stored columns.
 
 ### Why the measurement came from the universe
 

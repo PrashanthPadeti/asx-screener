@@ -28,7 +28,10 @@ WHAT IT REPORTS
   P2  an input missing (mc or fcf is None)
   P3  non-positive market capitalisation
   P4  non-positive free cash flow
-  P5  a known currency mismatch
+  P5a a stated foreign currency -- the units do not cancel
+  P5b no currency stated at all. Publishing here would assert a unit the
+      source never stated; the strict rule (14 Nov 2026) withholds, and
+      this count is the coverage it costs
   P6  declined by _clamp at |ratio| > 9,999
   P10 declined because the ratio rounded to 0.00 -- the underflow end of
       the same problem, found by reading P1's distribution rather than its
@@ -159,7 +162,14 @@ def main() -> int:
                     reason = "P4 free cash flow <= 0"
                     predicted = None
                 elif not coherent:
-                    reason = "P5 currency mismatch"
+                    # Split, because the two halves are different facts and
+                    # the strict silence rule (14 Nov 2026) was decided on
+                    # the size of the second one. Collapsing them into one
+                    # "currency" bucket would hide the only number that
+                    # decision rests on.
+                    reason = ("P5b currency not stated at all"
+                              if currency is None
+                              else "P5a currency stated and foreign")
                     predicted = None
                 else:
                     predicted = yc._clamp(yc._div(mc, fcf))

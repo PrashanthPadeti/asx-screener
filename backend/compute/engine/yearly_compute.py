@@ -880,10 +880,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         #                              computed rather than computed and
         #                              masked downstream.
         #
-        #                              None means the source stated nothing.
-        #                              UNDER REVIEW, and the open question of
-        #                              this release -- see THE SILENCE RULE
-        #                              below.
+        #   no currency stated         DECLINED TOO -- see THE SILENCE RULE
+        #                              below. This is the one guard that is a
+        #                              policy choice rather than arithmetic,
+        #                              and it was decided on a measurement.
         #
         #   |mc / fcf| > 9,999         _clamp declines it. Not an overflow
         #                              guard on THIS column: p_fcf_ratio is
@@ -910,22 +910,33 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         #                              shown, no ratio. Recorded, measured, and
         #                              not silently reconciled.
         #
-        # THE SILENCE RULE (open). Publishing on `reporting_currency is None`
-        # asserts nothing about the currency; it declines to suppress. The
-        # source contract is explicit that silence is NOT AUD
-        # (backend/migrations/add_reporting_currency.sql), and roughly 8% of
-        # ASX reporters state a foreign currency, so a published ratio on a
-        # silent row carries about that chance of being wrong by an exchange
-        # rate. Against that: unit_gate makes the SAME permissive choice today
-        # for the eight governed ratios, so going strict here alone withholds
-        # Price/FCF on rows where P/E publishes for the identical reason, and
-        # unit_gate cannot change under a frozen V3.
+        # THE SILENCE RULE (decided 14 Nov 2026, on the measurement).
         #
-        # Both choices leave an inconsistency. The cost of the strict one is a
-        # measurable row count and is being measured before the rule is fixed
-        # -- scripts/diagnostics/measure_p_fcf_populations.py reports the
-        # delta. Permissive is what ships only if that measurement says the
-        # population is empty.
+        # Publishing requires a STATED AUD. An unstated currency withholds.
+        #
+        # The first candidate published on silence, arguing that an unknown
+        # currency is not evidence of a mismatch. True, and beside the point:
+        # publishing a ratio asserts its unit, and silence establishes no
+        # unit. The source contract says so in writing --
+        # backend/migrations/add_reporting_currency.sql: "NULL is meaningful
+        # and is NOT a default of 'AUD'". The producer was reading it as one.
+        #
+        # Measured over 33,864 rows before the rule was chosen: 1,261 of the
+        # 6,938 publishable rows (18%) published ONLY because the currency was
+        # unstated, and roughly 13% of statement-bearing ASX companies report
+        # in a foreign currency -- so about 160 of those 1,261 were wrong by
+        # an exchange rate, with nothing in the row to say so. Withholding
+        # 1,261 rows of coverage is recoverable; 160 wrong ratios are wrong.
+        #
+        # THE COST IS AN INCONSISTENCY, AND IT IS DELIBERATE. unit_gate makes
+        # the permissive choice for the eight ratios it covers, so Price/FCF
+        # is now withheld on rows where P/E publishes for the identical
+        # reason. Those eight are governed model constituents: changing them
+        # moves composite scores under a version name 13 finalised runs
+        # reference, which needs FACTOR_MODEL_V4 and is a separate release.
+        # The inconsistency is in the conservative direction, it is recorded
+        # as a finding rather than resolved by relaxing the safer side, and
+        # new code does not join a known defect to look tidy.
         #
         # SCOPE OF THE CURRENCY FACT. The source states one currency per
         # COMPANY, read from whichever of Income_Statement / Balance_Sheet /
@@ -942,8 +953,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # because an ungoverned column has no sidecar to carry a cause -- that
         # is a real limit of restoring this without a model version, and it is
         # recorded as such rather than papered over.
-        currency_coherent = (reporting_currency is None
-                             or reporting_currency == BASE_CURRENCY)
+        currency_coherent = (reporting_currency == BASE_CURRENCY)
         p_fcf = (_clamp(_div(mc, fcf))
                  if (mc is not None and mc > 0
                      and fcf is not None and fcf > 0

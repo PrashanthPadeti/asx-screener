@@ -148,7 +148,11 @@ def _ratio(fcf, currency=None, shares=100_000_000.0, idx=None):
 def test_positive_fcf_publishes_the_ratio(col_index):
     """mc / fcf, from the same pair fcf_yield uses."""
     # price 4.00 x 100m shares / 1e6 = 400.0 (AUD millions); fcf 40.0
-    value = _ratio(40.0, idx=col_index)
+    # The currency must be passed explicitly: `_ratio`'s default is None, and
+    # None withholds. Leaving it defaulted is what this test did before the
+    # silence rule was decided, and it failed the moment the rule changed --
+    # which is the behaviour wanted from a default that asserts nothing.
+    value = _ratio(40.0, currency=BASE_CURRENCY, idx=col_index)
     assert value == pytest.approx(10.0), (
         f"expected mc/fcf = 400/40 = 10.0, got {value!r}")
 
@@ -370,32 +374,50 @@ def test_aud_publishes(col_index):
     assert _ratio(40.0, currency=BASE_CURRENCY, idx=col_index) is not None
 
 
-def test_unknown_currency_publishes(col_index):
-    """PINS AN OPEN DECISION. It does not justify one.
+def test_unstated_currency_withholds(col_index):
+    """Publishing requires a STATED AUD. Silence is not a unit.
 
-    This test records what the producer does today -- an unstated currency
-    publishes -- and the earlier version of this docstring argued that was
-    correct. It is not established. The source contract is explicit that
-    silence is NOT AUD (backend/migrations/add_reporting_currency.sql), so
-    publishing here rests on "an unknown currency is not evidence of a
-    mismatch" rather than on any evidence of coherence, and roughly 8% of ASX
-    reporters state a foreign currency.
+    The first candidate published here, arguing that an unknown currency is
+    not evidence of a mismatch. True, and beside the point: publishing a ratio
+    asserts its unit, and silence establishes none. The source contract says
+    so in writing -- backend/migrations/add_reporting_currency.sql: "NULL is
+    meaningful and is NOT a default of 'AUD'" -- and the producer was reading
+    it as one.
 
-    What keeps it permissive for now is consistency, not proof:
-    applicability.unit_gate makes the identical choice for all eight ratios it
-    covers, so a strict rule here alone withholds Price/FCF on rows where P/E
-    publishes for the same reason, and unit_gate cannot change while
-    FACTOR_MODEL_V3 is frozen.
+    Decided 14 Nov 2026 on a measurement, not an argument. Over 33,864 rows,
+    1,261 of the 6,938 publishable rows published only because the currency
+    was unstated, and about 13% of statement-bearing ASX companies report in a
+    foreign currency: roughly 160 of those were wrong by an exchange rate.
+    1,261 rows of coverage is recoverable; 160 wrong ratios are wrong.
 
-    Both options leave an inconsistency, so the decision needs the cost.
-    scripts/diagnostics/measure_p_fcf_populations.py reports P7: the rows that
-    publish ONLY because the currency is unstated. If this test's expectation
-    flips, that measurement is why.
+    This leaves Price/FCF stricter than its own peers. applicability.unit_gate
+    publishes on silence for the eight ratios it covers, so the same row can
+    show a P/E and no Price/FCF. Those eight are governed model constituents
+    and cannot change under a frozen FACTOR_MODEL_V3. The inconsistency is in
+    the conservative direction and is recorded as a finding -- it is not a
+    reason to relax the safer side.
     """
-    assert _ratio(40.0, currency=None, idx=col_index) is not None, (
-        "an unstated reporting currency withheld the ratio. If that is now "
-        "deliberate, this test is the record of the old rule -- replace it "
-        "with the strict one and cite the P7 measurement that decided it.")
+    assert _ratio(40.0, currency=None, idx=col_index) is None, (
+        "an unstated reporting currency published a ratio. Silence is not "
+        "AUD; the source contract says so explicitly, and this is the guard "
+        "that reads it correctly.")
+
+
+def test_only_a_stated_aud_publishes(col_index):
+    """The whole currency rule in one assertion, stated positively.
+
+    Written as an allow-list rather than as three separate denials, because
+    the denials can all pass while a fourth input nobody enumerated publishes.
+    The property is "AUD and nothing else", and that is what this asserts.
+    """
+    assert _ratio(40.0, currency="AUD", idx=col_index) is not None
+    for other in (None, "", "USD", "NZD", "CAD", "GBP", "EUR", "SGD", "PGK",
+                  "IDR", "HKD", "MYR", "aud ", "AU", "A$"):
+        assert _ratio(40.0, currency=other, idx=col_index) is None, (
+            f"reporting_currency={other!r} published a ratio. Only an exact, "
+            f"normalised 'AUD' establishes the unit -- note that 'aud ' is "
+            f"included because normalisation happens at the FETCH, so a "
+            f"caller passing raw text must not get a free pass here.")
 
 
 # ── The guard is enforced here BECAUSE it cannot be enforced there ───────

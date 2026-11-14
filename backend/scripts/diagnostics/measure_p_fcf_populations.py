@@ -102,6 +102,16 @@ def main() -> int:
         cur = conn.cursor()
         codes = yc.fetch_codes(cur, None, args.limit)
 
+        # What the CUSTOMER will see is not the yearly-row count. The universe
+        # build takes ONE row per company -- `ORDER BY fiscal_year DESC LIMIT
+        # 1` -- so the served figure is the number of companies whose LATEST
+        # fiscal year publishes, intersected with the universe's own company
+        # membership. Both halves are read here rather than assumed: the last
+        # release predicted a served count from the wrong population and
+        # missed by 542 rows.
+        cur.execute("SELECT asx_code FROM screener.universe")
+        in_universe = {r[0] for r in cur.fetchall()}
+
         reasons: Counter[str] = Counter()
         currencies: Counter[str] = Counter()
         values: list[float] = []
@@ -112,6 +122,7 @@ def main() -> int:
         staleness: list[int] = []                # P8
         stale_worst: list[tuple] = []
         multi_reason = 0
+        latest: dict[str, tuple[int, str]] = {}   # code -> (fy, reason)
         r1_failures: list[tuple] = []
         r2_failures: list[tuple] = []
         rows_total = 0
@@ -193,6 +204,8 @@ def main() -> int:
                             silence_published.append((code, fy, predicted))
 
                 reasons[reason] += 1
+                if code not in latest or fy > latest[code][0]:
+                    latest[code] = (fy, reason)
 
                 # How many predicates does this row satisfy at once?
                 hits = sum([

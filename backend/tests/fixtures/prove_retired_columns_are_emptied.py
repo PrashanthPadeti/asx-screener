@@ -246,6 +246,48 @@ def main() -> int:
             "computed_at did not move. The repair must empty the values, "
             "not stop the clock.")
 
+    # ── Act 2: the inputs become ineligible ─────────────────────────────
+    #
+    # A restored column has a second obligation the first act cannot show.
+    # Writing the incoming value proves the statement refreshes it. It does
+    # NOT prove the statement can take it AWAY: a company that reported
+    # positive free cash flow last year and negative this year, or that
+    # restated into a foreign currency, produces an incoming NULL -- and the
+    # row already holds a number.
+    #
+    # If `DO UPDATE SET p_fcf_ratio = EXCLUDED.p_fcf_ratio` were ever
+    # softened to a COALESCE, or the column dropped out of the SET list, the
+    # first act would still pass while the stored 7.5 survived forever. The
+    # customer would then see a Price/FCF for a cash-burning company,
+    # computed when it was profitable, with nothing in the row to say so.
+    # That is finding 6b -- the defect this release exists to repair --
+    # reappearing through the column it repaired.
+    values[columns.index(RESTORED)] = None
+    values[columns.index(WRITTEN)] = 3.0
+    values[columns.index("computed_at")] = datetime.now(timezone.utc)
+    execute_values(cur, INSERT_SQL, [tuple(values)], page_size=1)
+
+    cur.execute(f"""
+        SELECT {RESTORED}, {WRITTEN}
+          FROM market.yearly_metrics
+         WHERE asx_code = %s AND fiscal_year = %s
+    """, (code, fy))
+    cleared = cur.fetchone()
+    print(f"cleared  {code} FY{fy}: {RESTORED}={cleared[0]} "
+          f"{WRITTEN}={cleared[1]}  (incoming {RESTORED} was NULL)")
+
+    if cleared[0] is not None:
+        failures.append(
+            f"{RESTORED} is {cleared[0]!r} after an incoming NULL, expected "
+            f"None. The statement cannot withdraw a value it previously "
+            f"published, so a ratio computed from inputs that are no longer "
+            f"eligible -- negative free cash flow, a restated currency -- "
+            f"stays on the customer's screen as a live number.")
+    if cleared[1] != 3.0:
+        failures.append(
+            f"{WRITTEN} is {cleared[1]!r}, expected 3.0. The second upsert "
+            f"did not take effect at all, so the NULL above proves nothing.")
+
     # Never commit. The proof is in what the statement DID, and leaving it
     # behind would corrupt a shared scratch database for the next reader.
     conn.rollback()
@@ -257,7 +299,9 @@ def main() -> int:
         print(f"\n{len(failures)} assertion(s) failed; rolled back")
         return 1
     print("\nPROVEN: a valid value became unavailable, a written column was "
-          "refreshed, and the timestamp moved. Rolled back.")
+          "refreshed, the restored column took an incoming value AND gave it "
+          "back up when the next incoming value was NULL, and the timestamp "
+          "moved. Rolled back.")
     return 0
 
 

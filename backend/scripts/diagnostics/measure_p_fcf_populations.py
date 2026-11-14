@@ -30,6 +30,9 @@ WHAT IT REPORTS
   P4  non-positive free cash flow
   P5  a known currency mismatch
   P6  declined by _clamp at |ratio| > 9,999
+  P10 declined because the ratio rounded to 0.00 -- the underflow end of
+      the same problem, found by reading P1's distribution rather than its
+      count, and guarded from the same release
   P7  THE OPEN QUESTION: rows that publish ONLY because the reporting
       currency is unstated. This is the population the strict silence rule
       would additionally withhold, and the number the release decision needs.
@@ -101,6 +104,7 @@ def main() -> int:
         values: list[float] = []
         silence_published: list[tuple] = []      # P7
         clamped: list[tuple] = []                # P6
+        underflow: list[tuple] = []              # P10
         asymmetric: list[tuple] = []             # P9
         staleness: list[int] = []                # P8
         stale_worst: list[tuple] = []
@@ -159,7 +163,13 @@ def main() -> int:
                     predicted = None
                 else:
                     predicted = yc._clamp(yc._div(mc, fcf))
-                    if predicted is None:
+                    if predicted == 0:
+                        # The underflow guard: both inputs positive, the ratio
+                        # below the column's 4dp precision. Mirrors _clamp.
+                        predicted = None
+                        reason = "P10 ratio rounds to 0.00 (underflow)"
+                        underflow.append((code, fy, mc, fcf, row[I_YLD]))
+                    elif predicted is None:
                         reason = "P6 declined by _clamp (> 9,999)"
                         clamped.append((code, fy, yc._div(mc, fcf),
                                         row[I_YLD]))

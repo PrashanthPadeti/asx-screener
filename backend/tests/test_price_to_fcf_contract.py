@@ -279,6 +279,33 @@ def test_a_market_cap_that_rounds_to_zero_withholds(col_index):
         "0.00, which sorts first on 'cheapest'.")
 
 
+def test_a_ratio_that_rounds_to_zero_withholds(col_index):
+    """The underflow end, and the one the count would never have shown.
+
+    _div rounds to 4dp. A market capitalisation of 0.01 against a cash flow of
+    1,000 gives 0.00001, which rounds to 0.0 and stores as 0.00 -- from two
+    positive inputs, with no arithmetic failure anywhere. The ratio is real
+    and the representation lost it.
+
+    A published 0.00 sorts ahead of every company on an ascending "cheapest
+    first" screen, including ahead of the negatives that the fcf <= 0 guard
+    exists to exclude. It is the same customer-visible failure arriving from
+    precision instead of from sign.
+
+    Found by reading the published DISTRIBUTION (min 0.00 across 6,938 rows),
+    not by counting the buckets -- a count of publishable rows says nothing
+    about whether the values in it are usable.
+    """
+    # price 4.00 x 1,000 shares / 1e6 = 0.004 -> mc rounds to 0.0... so use
+    # shares that leave mc positive but tiny against a large cash flow.
+    value = _ratio(1_000.0, currency=BASE_CURRENCY, shares=2_500.0,
+                   idx=col_index)
+    assert value is None, (
+        f"a ratio of {value!r} published. 0.00 sorts first on 'cheapest', "
+        f"ahead of every real company and ahead of the negatives this "
+        f"contract already excludes.")
+
+
 def test_the_clamp_suppresses_rather_than_substituting(col_index):
     """A ratio over 9,999 is withheld, NOT stored as 9,999.
 

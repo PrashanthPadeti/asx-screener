@@ -949,6 +949,26 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
                      and fcf is not None and fcf > 0
                      and currency_coherent)
                  else None)
+        # UNDERFLOW, the mirror of _clamp's overflow. Found by measuring the
+        # published DISTRIBUTION rather than the count: the minimum published
+        # ratio was 0.00. _div rounds to 4dp, so a market capitalisation of
+        # 0.01 against a cash flow of 1,000 gives 0.00001 -> 0.0, and the
+        # column stores 0.00.
+        #
+        # Every guard above exists because a misleading value sorts ahead of a
+        # true one on an ascending "cheapest first" screen. A zero sorts ahead
+        # of EVERYTHING -- further forward than the negatives the fcf <= 0
+        # guard was written to keep out -- and it is not even a measurement:
+        # it is a real ratio that fell below the column's precision. Both
+        # inputs were positive, so the arithmetic did not fail; the
+        # representation did.
+        #
+        # Declined for the same reason _clamp declines the other end, and
+        # withheld rather than stored as 0.00 for the same reason _clamp
+        # substitutes nothing: a fabricated boundary value is
+        # indistinguishable from a measured one.
+        if p_fcf == 0:
+            p_fcf = None
         earn_yld  = _clamp(_div(eps, px))
         div_yld   = _clamp(_div(dps, px))
         payout    = _clamp(_div(dps, eps) if (eps and eps > 0) else None)

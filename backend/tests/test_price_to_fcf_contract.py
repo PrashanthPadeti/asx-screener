@@ -78,13 +78,25 @@ def _insert_columns() -> list[str]:
     return [c.strip() for c in inner.replace("\n", " ").split(",") if c.strip()]
 
 
-@pytest.fixture(scope="module")
-def col_index() -> int:
+def _col_index() -> int:
     cols = _insert_columns()
     assert COLUMN in cols, (
         f"{COLUMN} is not in the INSERT column list. The producer writes a "
         f"value the statement never carries, so nothing below can be true.")
     return cols.index(COLUMN)
+
+
+@pytest.fixture(scope="module")
+def col_index() -> int:
+    """A thin fixture over a plain function.
+
+    The body lives in `_col_index` so the __main__ runner at the bottom can
+    call it. A pytest fixture cannot be invoked directly, and this suite has
+    to run both under pytest AND as a standalone script, because the release
+    gate executes `python tests/<file>.py` -- see that block for what happened
+    when this file could not.
+    """
+    return _col_index()
 
 
 # ── A minimal company that CAN produce a ratio ───────────────────────────
@@ -385,3 +397,88 @@ def test_the_declaration_route_is_still_closed():
             f"{name} is declared in CROSS_CURRENCY but is not assessable, "
             f"so nothing reads that entry. It is a declaration without "
             f"enforcement, which reads as a guard and is not one.")
+
+
+if __name__ == "__main__":
+    # THE RELEASE GATE RUNS THIS FILE AS A SCRIPT, NOT UNDER PYTEST.
+    #
+    # `gate_full_suite.sh` executes `python tests/<file>.py` and requires the
+    # "N/M passed" line below as positive evidence of execution. Without this
+    # block the file defines its functions, runs nothing, and exits 0 -- which
+    # the gate reports as INCONCLUSIVE, and which an earlier gate would have
+    # counted as a pass.
+    #
+    # That is exactly what happened to the FIRST candidate of this release.
+    # All 21 tests passed locally under pytest and NONE of them ran in the
+    # gate: the suite written to certify the restoration could not certify
+    # anything, and the gate said so. The contract is only a contract where
+    # it executes.
+    #
+    # This runner expands @pytest.mark.parametrize itself and injects the
+    # col_index fixture by name, then CHECKS ITS OWN COVERAGE: the number of
+    # invocations must equal the number the marks imply, and a test whose
+    # signature asks for something this runner cannot supply is an ERROR, not
+    # a skip. A runner that silently skipped such a test would reproduce the
+    # defect one level up -- a count that looks complete while a case never
+    # ran.
+    import inspect
+    import sys as _sys
+
+    def _cases(fn):
+        """(kwargs, label) per invocation, from the function's own marks."""
+        marks = [m for m in getattr(fn, "pytestmark", [])
+                 if m.name == "parametrize"]
+        cases = [({}, "")]
+        for m in marks:
+            names = [n.strip() for n in m.args[0].split(",")]
+            expanded = []
+            for base, label in cases:
+                for value in m.args[1]:
+                    values = value if len(names) > 1 else (value,)
+                    kw = dict(base, **dict(zip(names, values)))
+                    expanded.append((kw, f"{label}[{value!r}]"))
+            cases = expanded
+        return cases
+
+    FIXTURES = {"col_index": _col_index()}
+
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    expected = sum(len(_cases(f)) for _, f in tests)
+    ran = 0
+    failures: list[str] = []
+
+    for name, fn in tests:
+        wanted = set(inspect.signature(fn).parameters)
+        for kwargs, label in _cases(fn):
+            missing = wanted - set(kwargs) - set(FIXTURES)
+            if missing:
+                failures.append(name)
+                ran += 1
+                print(f"  ERROR {name}{label}  - this runner cannot supply "
+                      f"{sorted(missing)}; add it to FIXTURES rather than "
+                      f"letting the case go unrun")
+                continue
+            call = dict(kwargs)
+            for f_name in wanted & set(FIXTURES):
+                call[f_name] = FIXTURES[f_name]
+            try:
+                fn(**call)
+                ran += 1
+                print(f"  PASS  {name}{label}")
+            except AssertionError as e:
+                ran += 1
+                failures.append(name)
+                print(f"  FAIL  {name}{label}  - {e}")
+            except Exception as e:                            # noqa: BLE001
+                ran += 1
+                failures.append(name)
+                print(f"  ERROR {name}{label}  - {type(e).__name__}: {e}")
+
+    if ran != expected:
+        print(f"\n  ** COVERAGE: ran {ran} of {expected} expected cases. The "
+              f"count below is not a verdict on this contract.")
+        failures.append("runner-coverage")
+
+    print(f"\n{ran - len(failures)}/{expected} passed")
+    _sys.exit(1 if failures else 0)

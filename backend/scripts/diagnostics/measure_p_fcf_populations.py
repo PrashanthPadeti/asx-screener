@@ -187,11 +187,15 @@ def main() -> int:
                     predicted = None
                 else:
                     predicted = yc._clamp(yc._div(mc, fcf))
-                    if predicted == 0:
-                        # The underflow guard: both inputs positive, the ratio
-                        # below the column's 4dp precision. Mirrors _clamp.
+                    if (predicted is not None
+                            and predicted < yc.P_FCF_MIN_REPRESENTABLE):
+                        # The underflow guard, at the COLUMN's scale. An
+                        # earlier version tested `predicted == 0` -- _div's
+                        # scale -- and caught nothing over 33,864 rows while
+                        # the published minimum sat below 0.005 and stored as
+                        # 0.00. The threshold belongs to the column.
                         predicted = None
-                        reason = "P10 ratio rounds to 0.00 (underflow)"
+                        reason = "P10 rounds to 0.00 at the stored scale"
                         underflow.append((code, fy, mc, fcf, row[I_YLD]))
                     elif predicted is None:
                         reason = "P6 declined by _clamp (> 9,999)"
@@ -287,20 +291,42 @@ def main() -> int:
         if values:
             s = pd.Series(values)
             print("\n── P1 the published distribution " + "─" * 36)
-            print(f"  n {len(s)}   min {s.min():.2f}   p25 {s.quantile(.25):.2f}"
+            # FULL PRECISION on the minimum, deliberately. Printed as {:.2f}
+            # it read "0.00" -- which is how a ratio that rounds away at the
+            # column's own scale hid inside the published set, and the guard
+            # written from that display tested the wrong mechanism.
+            print(f"  min, full precision: {s.min()!r}")
+            print(f"  n {len(s)}   min {s.min():.4f}   p25 {s.quantile(.25):.2f}"
                   f"   median {s.median():.2f}   p75 {s.quantile(.75):.2f}"
                   f"   max {s.max():.2f}")
 
-        print("\n── P7 THE OPEN QUESTION " + "─" * 45)
-        print(f"  rows publishing ONLY because the currency is unstated: "
+        print("\n── P7 the silence rule, enforced " + "─" * 36)
+        print(f"  rows publishing on an UNSTATED currency: "
               f"{len(silence_published)}")
-        print("  These are what the strict silence rule would additionally")
-        print("  withhold. Roughly 8% of ASX reporters state a foreign")
-        print("  currency, so that share of these is wrong by an exchange")
-        print("  rate -- and the identical rows publish a P/E today, because")
-        print("  unit_gate makes the same permissive choice under a frozen V3.")
+        print("  MUST BE 0 from v11.2.86. It was 1,261 of 6,938 publishable")
+        print("  rows before the rule went strict, about 160 of them wrong by")
+        print("  an exchange rate. A non-zero here means the guard is not")
+        print("  reached on the path this instrument runs.")
         for r in silence_published[:10]:
             print(f"       {r}")
+
+        print("\n── what the customer will see " + "─" * 39)
+        served = Counter()
+        for code, (fy, reason) in latest.items():
+            if code in in_universe:
+                served[reason] += 1
+        print(f"  companies in screener.universe whose latest fiscal year")
+        print(f"  reaches this producer: {sum(served.values())} "
+              f"(universe holds {len(in_universe)})")
+        for reason in sorted(served):
+            print(f"    {reason:<40} {served[reason]:>6}")
+        print()
+        print(f"  PREDICTED SERVED price_to_fcf: "
+              f"{served.get('P1 publishable', 0)} universe rows")
+        print("  The universe takes ONE row per company -- ORDER BY")
+        print("  fiscal_year DESC LIMIT 1 -- so the yearly-row count above is")
+        print("  not what a customer sees. Companies with no yearly row at")
+        print("  all keep NULL and are not counted here.")
 
         print("\n── P6/P9 the extreme end " + "─" * 44)
         print(f"  declined by _clamp: {len(clamped)}")

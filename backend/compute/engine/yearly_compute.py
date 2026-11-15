@@ -331,6 +331,19 @@ def fetch_current_shares(cur, asx_code: str) -> Optional[float]:
     return float(row[0]) if row and row[0] is not None else None
 
 
+#: Decimal places `market.yearly_metrics.p_fcf_ratio` stores.
+#: NUMERIC(10,2) — database/migrations/008_compute_metrics_tables.sql.
+#: Asserted against that DDL by the Price/FCF contract, so the constant
+#: cannot drift from the column it describes.
+P_FCF_STORED_SCALE = 2
+
+#: The smallest Price/FCF the column can hold without rounding to zero.
+#: A positive ratio below this is withheld, never stored as 0.00: a
+#: fabricated zero sorts first on "cheapest" and is indistinguishable from
+#: a measured one.
+P_FCF_MIN_REPRESENTABLE = 0.5 * 10 ** -P_FCF_STORED_SCALE   # 0.005
+
+
 def currency_is_coherent(reporting_currency: Optional[str]) -> bool:
     """Can an AUD market quantity be divided by this company's statements?
 
@@ -978,25 +991,29 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
                      and fcf is not None and fcf > 0
                      and currency_coherent)
                  else None)
-        # UNDERFLOW, the mirror of _clamp's overflow. Found by measuring the
-        # published DISTRIBUTION rather than the count: the minimum published
-        # ratio was 0.00. _div rounds to 4dp, so a market capitalisation of
-        # 0.01 against a cash flow of 1,000 gives 0.00001 -> 0.0, and the
-        # column stores 0.00.
+        # UNDERFLOW, the mirror of _clamp's overflow, AND A CORRECTED
+        # DIAGNOSIS.
         #
-        # Every guard above exists because a misleading value sorts ahead of a
-        # true one on an ascending "cheapest first" screen. A zero sorts ahead
-        # of EVERYTHING -- further forward than the negatives the fcf <= 0
-        # guard was written to keep out -- and it is not even a measurement:
-        # it is a real ratio that fell below the column's precision. Both
-        # inputs were positive, so the arithmetic did not fail; the
-        # representation did.
+        # Found by measuring the published distribution rather than the count:
+        # the minimum published ratio printed as 0.00. A zero sorts ahead of
+        # EVERYTHING on an ascending "cheapest first" screen -- further
+        # forward than the negatives the fcf <= 0 guard exists to keep out --
+        # and it is not a measurement, it is a real ratio that fell below the
+        # stored precision.
         #
-        # Declined for the same reason _clamp declines the other end, and
-        # withheld rather than stored as 0.00 for the same reason _clamp
-        # substitutes nothing: a fabricated boundary value is
-        # indistinguishable from a measured one.
-        if p_fcf == 0:
+        # The first guard here tested `p_fcf == 0`, on the theory that _div's
+        # 4dp rounding produced the zero. IT DID NOT, and the guard caught
+        # nothing: over 33,864 rows, zero rows had _div return 0.0, while the
+        # published minimum was still under 0.005. The rounding that destroys
+        # the value happens at the COLUMN -- p_fcf_ratio is NUMERIC(10,2), so
+        # _div's 0.0001 is stored as 0.00. The guard was built on an
+        # explanation of the mechanism, the explanation was wrong, and a
+        # guard built on a wrong explanation passes while the defect ships.
+        #
+        # So the threshold is the column's, not _div's: anything that would
+        # round to zero at 2dp is withheld rather than stored as a fabricated
+        # 0.00, for the same reason _clamp substitutes nothing at the top end.
+        if p_fcf is not None and p_fcf < P_FCF_MIN_REPRESENTABLE:
             p_fcf = None
         earn_yld  = _clamp(_div(eps, px))
         div_yld   = _clamp(_div(dps, px))

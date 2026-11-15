@@ -283,31 +283,91 @@ def test_a_market_cap_that_rounds_to_zero_withholds(col_index):
         "0.00, which sorts first on 'cheapest'.")
 
 
-def test_a_ratio_that_rounds_to_zero_withholds(col_index):
-    """The underflow end, and the one the count would never have shown.
+def test_the_stored_scale_matches_the_column_it_describes():
+    """The threshold is the COLUMN's precision, so read the column.
 
-    _div rounds to 4dp. A market capitalisation of 0.01 against a cash flow of
-    1,000 gives 0.00001, which rounds to 0.0 and stores as 0.00 -- from two
-    positive inputs, with no arithmetic failure anywhere. The ratio is real
-    and the representation lost it.
-
-    A published 0.00 sorts ahead of every company on an ascending "cheapest
-    first" screen, including ahead of the negatives that the fcf <= 0 guard
-    exists to exclude. It is the same customer-visible failure arriving from
-    precision instead of from sign.
-
-    Found by reading the published DISTRIBUTION (min 0.00 across 6,938 rows),
-    not by counting the buckets -- a count of publishable rows says nothing
-    about whether the values in it are usable.
+    P_FCF_MIN_REPRESENTABLE is derived from P_FCF_STORED_SCALE, and a constant
+    that describes a schema is a constant that can drift from it. This reads
+    the declared scale out of the migration that creates the column, so
+    changing NUMERIC(10,2) without changing the constant fails here instead of
+    silently moving the threshold the producer applies.
     """
-    # price 4.00 x 1,000 shares / 1e6 = 0.004 -> mc rounds to 0.0... so use
-    # shares that leave mc positive but tiny against a large cash flow.
-    value = _ratio(1_000.0, currency=BASE_CURRENCY, shares=2_500.0,
+    import re
+    from compute.engine.yearly_compute import (
+        P_FCF_MIN_REPRESENTABLE, P_FCF_STORED_SCALE,
+    )
+    ddl = (BACKEND.parent / "database" / "migrations"
+           / "008_compute_metrics_tables.sql").read_text(encoding="utf-8")
+    m = re.search(r"\bp_fcf_ratio\s+NUMERIC\(\s*\d+\s*,\s*(\d+)\s*\)",
+                  ddl, re.IGNORECASE)
+    assert m, ("p_fcf_ratio's NUMERIC declaration was not found in "
+               "008_compute_metrics_tables.sql; the constant below is "
+               "describing a column this test can no longer see.")
+    assert int(m.group(1)) == P_FCF_STORED_SCALE, (
+        f"the column stores {m.group(1)} decimal places and "
+        f"P_FCF_STORED_SCALE says {P_FCF_STORED_SCALE}")
+    assert P_FCF_MIN_REPRESENTABLE == 0.005
+
+
+def test_a_ratio_below_the_stored_precision_withholds(col_index):
+    """The underflow end, with the diagnosis corrected.
+
+    The first version of this test asserted that _div's 4dp rounding produced
+    the zero, and the guard it pinned tested `p_fcf == 0`. Both were wrong.
+    Over 33,864 production rows, NO row had _div return 0.0 -- and the
+    published minimum was still below 0.005. The rounding that destroys the
+    value happens at the COLUMN: p_fcf_ratio is NUMERIC(10,2), so _div's
+    0.0001 is stored as 0.00.
+
+    The guard had been built on an explanation of the mechanism, the
+    explanation was wrong, and it passed while the defect shipped. This test
+    now asserts against the stored scale instead.
+
+    A stored 0.00 sorts ahead of every company on an ascending "cheapest
+    first" screen -- further forward than the negatives the fcf <= 0 guard
+    exists to exclude -- from two positive inputs and no arithmetic failure.
+    """
+    from compute.engine.yearly_compute import _div
+
+    # mc = 4.00 x 25,000 / 1e6 = 0.1 (AUD millions) against fcf 1,000.
+    raw = _div(0.1, 1_000.0)
+    assert raw == 0.0001 and raw != 0, (
+        f"_div returned {raw!r}; the premise of this test is that the ratio "
+        f"survives _div and dies at the column, so check that first.")
+    assert round(raw, 2) == 0, "the premise is wrong: this does not store as 0"
+
+    value = _ratio(1_000.0, currency=BASE_CURRENCY, shares=25_000.0,
                    idx=col_index)
     assert value is None, (
-        f"a ratio of {value!r} published. 0.00 sorts first on 'cheapest', "
-        f"ahead of every real company and ahead of the negatives this "
-        f"contract already excludes.")
+        f"a ratio of {value!r} published. It stores as 0.00, which sorts "
+        f"first on 'cheapest', ahead of every real company and ahead of the "
+        f"negatives this contract already excludes.")
+
+
+def test_the_underflow_boundary_is_inclusive_of_what_postgres_keeps(col_index):
+    """Exactly 0.005 PUBLISHES, because PostgreSQL rounds half away from zero.
+
+    Verified against the server, not assumed:
+
+        SELECT 0.005::numeric(10,2)   ->  0.01
+        SELECT 0.0049::numeric(10,2)  ->  0.00
+
+    So 0.005 is representable and must not be withheld. Python disagrees --
+    round(0.005, 2) is 0.0 under banker's rounding on a binary float -- which
+    is exactly why the threshold was checked against the database rather than
+    against the language the producer is written in.
+
+    Mutating `<` to `<=` survived the contract until this test existed: it
+    withholds a value the column can hold, which is a coverage loss with no
+    reason behind it.
+    """
+    # mc = 4.00 x 125,000 / 1e6 = 0.5 against fcf 100 -> exactly 0.005
+    value = _ratio(100.0, currency=BASE_CURRENCY, shares=125_000.0,
+                   idx=col_index)
+    assert value == pytest.approx(0.005), (
+        f"expected the boundary value 0.005 to publish, got {value!r}. "
+        f"PostgreSQL stores it as 0.01, so withholding it loses a row the "
+        f"column can represent.")
 
 
 def test_the_clamp_suppresses_rather_than_substituting(col_index):

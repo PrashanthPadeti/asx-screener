@@ -331,6 +331,25 @@ def fetch_current_shares(cur, asx_code: str) -> Optional[float]:
     return float(row[0]) if row and row[0] is not None else None
 
 
+def currency_is_coherent(reporting_currency: Optional[str]) -> bool:
+    """Can an AUD market quantity be divided by this company's statements?
+
+    Only a stated AUD. A foreign currency has no common unit with an AUD
+    market capitalisation, and an unstated one establishes no unit at all --
+    see THE SILENCE RULE in build_yearly_rows for the measurement that decided
+    the second half.
+
+    IT IS A FUNCTION BECAUSE IT HAD BEEN RESTATED. The predicate lived inline
+    in build_yearly_rows and a copy of it lived in
+    measure_p_fcf_populations.py. When the rule changed, the producer went
+    strict and the instrument stayed permissive; the instrument's own
+    reconciliation caught it and voided its report, which is the good outcome
+    of a bad arrangement. A predicate with two implementations has two
+    answers. There is now one, and everything that needs it calls this.
+    """
+    return reporting_currency == BASE_CURRENCY
+
+
 def fetch_reporting_currency(cur, asx_code: str) -> Optional[str]:
     """The currency the STATEMENTS are stated in, upper-cased, or None.
 
@@ -953,7 +972,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # because an ungoverned column has no sidecar to carry a cause -- that
         # is a real limit of restoring this without a model version, and it is
         # recorded as such rather than papered over.
-        currency_coherent = (reporting_currency == BASE_CURRENCY)
+        currency_coherent = currency_is_coherent(reporting_currency)
         p_fcf = (_clamp(_div(mc, fcf))
                  if (mc is not None and mc > 0
                      and fcf is not None and fcf > 0

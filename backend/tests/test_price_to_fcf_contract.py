@@ -403,6 +403,26 @@ def test_unstated_currency_withholds(col_index):
         "that reads it correctly.")
 
 
+def test_the_currency_predicate_has_exactly_one_implementation():
+    """A predicate with two implementations has two answers.
+
+    The rule lived inline in build_yearly_rows and was RESTATED in
+    scripts/diagnostics/measure_p_fcf_populations.py. When it went strict the
+    producer changed and the instrument did not, so the instrument classified
+    1,261 rows as publishable that the producer withheld. Its own
+    reconciliation caught the disagreement and voided its report -- the good
+    outcome of a bad arrangement, and only because that reconciliation exists.
+
+    This asserts the exported predicate directly, so the instrument and the
+    producer are tested against the same object they both call.
+    """
+    from compute.engine.yearly_compute import currency_is_coherent
+    assert currency_is_coherent("AUD") is True
+    assert currency_is_coherent(None) is False
+    assert currency_is_coherent("USD") is False
+    assert currency_is_coherent("") is False
+
+
 def test_only_a_stated_aud_publishes(col_index):
     """The whole currency rule in one assertion, stated positively.
 

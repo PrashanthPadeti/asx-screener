@@ -86,7 +86,6 @@ def main() -> int:
     import pandas as pd
     import psycopg2
     from app.core.db import get_database_url_sync
-    from compute.engine.applicability import BASE_CURRENCY
     from compute.engine import yearly_compute as yc
 
     cols = yc._insert_columns()
@@ -160,7 +159,11 @@ def main() -> int:
                     continue
                 fcf = yc._f(src.get("fcf"))
 
-                coherent = (currency is None or currency == BASE_CURRENCY)
+                # THE PRODUCER'S OWN PREDICATE, not a copy of it. An
+                # earlier version of this line restated the rule, the rule
+                # changed under it, and R1 voided the whole report -- which is
+                # why the predicate is a function in the producer now.
+                coherent = yc.currency_is_coherent(currency)
 
                 # ── The producer's own order, so each row lands in one bucket
                 if mc is None or fcf is None:

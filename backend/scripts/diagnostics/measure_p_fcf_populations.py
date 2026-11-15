@@ -122,6 +122,16 @@ def main() -> int:
         stale_worst: list[tuple] = []
         multi_reason = 0
         latest: dict[str, tuple[int, str]] = {}   # code -> (fy, reason)
+        # Keyed price age, so the SERVED rows can be reported rather than the
+        # whole table. The review's point: Price/FCF is mc / fcf, mc is
+        # px * shares, and px is price_at() -- so there is NO predicate
+        # anywhere in this producer that stops a stale price reaching the
+        # restored ratio. Claiming finding 18 does not reach Price/FCF was
+        # wrong. This measures how far it reaches, on the rows a customer
+        # actually sees.
+        age_by: dict[tuple[str, int], int] = {}
+        date_by: dict[tuple[str, int], tuple[str, str]] = {}
+        ratio_by: dict[tuple[str, int], float] = {}
         r1_failures: list[tuple] = []
         r2_failures: list[tuple] = []
         rows_total = 0
@@ -245,6 +255,11 @@ def main() -> int:
                                                 stored_px))
                         age = int((tgt - picked_on).days)
                         staleness.append(age)
+                        age_by[(code, fy)] = age
+                        date_by[(code, fy)] = (str(tgt.date()),
+                                               str(picked_on.date()))
+                        if actual is not None:
+                            ratio_by[(code, fy)] = float(actual)
                         if age > 7:
                             stale_worst.append((code, fy, age,
                                                 str(picked_on.date())))
@@ -327,6 +342,67 @@ def main() -> int:
         print("  fiscal_year DESC LIMIT 1 -- so the yearly-row count above is")
         print("  not what a customer sees. Companies with no yearly row at")
         print("  all keep NULL and are not counted here.")
+
+        # ── P11  FINDING 18 ON THE SERVED ROWS ───────────────────────────
+        #
+        # THERE IS NO FRESHNESS PREDICATE. Not in the Price/FCF guards, not
+        # in mc, not in price_at. The claim that finding 18 does not reach
+        # this column was wrong: mc = px * shares and px = price_at(prices,
+        # period_end), so every served ratio carries whatever age its price
+        # has. This reports that age on exactly the rows a customer sees.
+        served_keys = [(code, fy) for code, (fy, reason) in latest.items()
+                       if code in in_universe and reason == "P1 publishable"]
+        ages = [(age_by[k], k) for k in served_keys if k in age_by]
+        print("\n── P11 price age ON THE SERVED ROWS (finding 18) " + "─" * 20)
+        print(f"  served rows: {len(served_keys)};  with a measurable price "
+              f"age: {len(ages)}")
+        print("  DOCUMENTED FRESHNESS LIMIT: none. There is no predicate in")
+        print("  the producer that withholds on price age -- not in the six")
+        print("  Price/FCF guards, not in mc, not in price_at. So the count")
+        print("  'exceeding the limit' is reported against candidate")
+        print("  thresholds, because no limit exists to exceed.")
+        if ages:
+            s = pd.Series([a for a, _ in ages])
+            print(f"\n  median {s.median():.0f}d   p75 {s.quantile(.75):.0f}d"
+                  f"   p95 {s.quantile(.95):.0f}d   p99 "
+                  f"{s.quantile(.99):.0f}d   max {s.max():.0f}d")
+            print("\n  coverage impact of a scoped withholding rule:")
+            print(f"    {'threshold':>12}  {'withheld':>8}  {'remaining':>9}"
+                  f"  {'% lost':>7}")
+            for t in (7, 14, 30, 60, 90, 180, 365, 730):
+                lost = sum(1 for a, _ in ages if a > t)
+                print(f"    {str(t) + 'd':>12}  {lost:>8}  "
+                      f"{len(served_keys) - lost:>9}  "
+                      f"{100.0 * lost / len(served_keys):>6.1f}%")
+            print("\n  the oldest served prices, with the ratio each produced:")
+            print(f"    {'code':<6} {'FY':<6} {'period end':<12} "
+                  f"{'price date':<12} {'age':>6}  ratio")
+            for age, k in sorted(ages, key=lambda r: -r[0])[:15]:
+                pe, pd_ = date_by.get(k, ("?", "?"))
+                print(f"    {k[0]:<6} {k[1]:<6} {pe:<12} {pd_:<12} "
+                      f"{age:>5}d  {ratio_by.get(k)}")
+
+        # Currency provenance for the served rows: ESTABLISHED or INFERRED.
+        print("\n── P12 currency provenance of the served rows " + "─" * 23)
+        print("  INFERRED, not established, for every one of them.")
+        print("  staging_au.fundamentals is UNIQUE (asx_code): one row, one")
+        print("  reporting_currency, read by the loader from whichever of")
+        print("  Income_Statement / Balance_Sheet / Cash_Flow first carries a")
+        print("  currency_symbol IN THE LATEST SNAPSHOT. There is no")
+        print("  per-period currency in the source, so the guard applies")
+        print("  today's stated currency to every fiscal year of that")
+        print("  company -- including the served row when it is not the")
+        print("  latest. That is finding 19, and it is a property of the")
+        print("  source, not of this release.")
+        served_fy_not_latest = sum(
+            1 for code, fy in served_keys
+            if fy != max(f for (c, f) in age_by if c == code) if True)
+        print(f"\n  served rows whose fiscal year is NOT the company's most")
+        print(f"  recent reported year: {served_fy_not_latest}")
+        print("  (the universe takes max(fiscal_year) from what this producer")
+        print("   EMITTED, so this should be 0; a non-zero means the served")
+        print("   row is older than the company's own latest statements and")
+        print("   the currency inference spans a longer gap)")
 
         print("\n── P6/P9 the extreme end " + "─" * 44)
         print(f"  declined by _clamp: {len(clamped)}")

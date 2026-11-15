@@ -1,123 +1,272 @@
 # v11.2.86 — Price / FCF restored
 
+Candidate `3ab4bcb` · baseline `a2d11a2` (main) · branch
+`fix/price-to-fcf-restoration` · **not deployed**
+
 ## What changes for a customer
 
 **`price_to_fcf` (Price / FCF) is served again**, after v11.2.85 emptied
 it. The filter, the sort column, the CSV column "P/FCF" and the
 company-detail field all return values once a yearly run has executed.
 
-Coverage will **not** return to the 580 rows it held before. Three
-populations are declined on purpose:
+**Predicted served count: 438 universe rows**, down from the 580 the
+frozen column held before. That number is not a forecast from the inputs
+that happen to be stored — it is the producer's own output over the
+universe's own selection rule, measured before this was written. The
+v11.2.84 forecast missed by 542 rows by doing the opposite.
 
-| declined | why |
+## The populations, measured over all 33,864 yearly rows
+
+| | rows | |
+|---|---|---|
+| **publishable** | **5,670** | 16.7% |
+| an input missing | 7,797 | 23.0% |
+| market capitalisation ≤ 0 | 623 | 1.8% |
+| free cash flow ≤ 0 | 17,550 | 51.8% |
+| a stated foreign currency | 949 | 2.8% |
+| no currency stated at all | 1,261 | 3.7% |
+| declined by `_clamp` (> 9,999) | 7 | 0.0% |
+| rounds to 0.00 at the stored scale | 7 | 0.0% |
+| | 33,864 | |
+
+13,499 rows satisfy more than one decline predicate. Each is counted
+once, under the producer's own short-circuit order, so the column sums to
+the row total exactly.
+
+The 5,670 publishable yearly rows become **438 served rows** because the
+universe takes one row per company — `ORDER BY fiscal_year DESC LIMIT 1`
+— and 1,849 of the universe's 2,570 companies reach this producer at all.
+Of those 1,849, the latest fiscal year is publishable for 438, declines
+on free cash flow for 1,124, on a missing input for 90, and on a
+non-positive market capitalisation for 3.
+
+### Both reconciliations held, over every row
+
+The counts above mean nothing without these, so the instrument prints
+them first and exits 1 if either fails:
+
+| | |
 |---|---|
-| free cash flow ≤ 0 | a negative Price/FCF sorts FIRST on an ascending "cheapest" screen while describing a company with no free cash flow; zero has no finite ratio |
-| an input missing | no market capitalisation or no cash flow, nothing to divide |
-| foreign reporting currency | an AUD market capitalisation over a cash flow stated in another currency has no unit |
+| **R1** the attributed reason predicts each row's exact stored ratio | 0 failures of 33,864 |
+| **R2** the price read for the staleness measurement equals the stored `price_at_compute` | 0 failures |
 
-The expected after-count is therefore **lower than 580 and not yet
-predicted**, because the three populations have not been measured. That
-measurement is step 1 of the handoff, and predicting before measuring is
-how the last two releases produced magnitudes that missed.
+**R1 earned its place.** The first after-measurement reported **1,261
+failures** and refused to print a single population count. The instrument
+had restated the currency predicate as `currency is None or currency ==
+BASE_CURRENCY`; the producer went strict and the copy did not. That is
+now one function, `yearly_compute.currency_is_coherent`, called by both.
+A predicate with two implementations has two answers.
 
-## The three things confirmed before any code was written
-
-**1. Period — no mismatch, and the earlier note was wrong.**
+## The six guards
 
 ```python
-px  = price_at(prices, ped)      # close at/before the row's period end
-fcf = _f(row.get("fcf"))         # annual cash flow for that same period
-mc  = round(px * shares / 1e6, 2)
+currency_coherent = currency_is_coherent(reporting_currency)
+p_fcf = (_clamp(_div(mc, fcf))
+         if (mc is not None and mc > 0
+             and fcf is not None and fcf > 0
+             and currency_coherent)
+         else None)
+if p_fcf is not None and p_fcf < P_FCF_MIN_REPRESENTABLE:
+    p_fcf = None
 ```
 
-The v11.2.85 note said this would mix "a current price with a
-fiscal-year cash flow" and that the mix must be stated. It does not mix.
-`price_at` anchors on the row's own `period_end_date`, so both sides are
-as of the fiscal year end. **That disclosure is withdrawn** — there is
-nothing to disclose.
+**`mc > 0`, not `mc is not None`.** The earlier condition coincided with
+the policy through two other expressions' truthiness and was not the
+policy. `mc` is rounded to 2dp, so one share at $4.00 gives exactly
+`0.0` — which `mc >= 0` would divide into a published Price/FCF of 0.00,
+the cheapest value the column holds and the top of an ascending screen.
+**623 rows** decline here; the guard is not theoretical.
 
-**2. The ratio is the reciprocal of a metric already served.**
+**`fcf > 0`.** A company burning cash gets a negative ratio, which sorts
+FIRST on "cheapest" while describing a company with no free cash flow.
+`fcf_yield` publishes the same fact safely, because −4% reads as bad and
+−4× reads as cheap. The two reciprocals deliberately do **not** share a
+guard, and a test pins the asymmetry.
 
-`fcf_yield` is live and is `fcf / mc`; `p_fcf` is `mc / fcf`. One pair,
-two presentations.
+**A stated AUD, and nothing else** — see below.
 
-It is computed from the same `mc` and `fcf` rather than as
-`1 / fcf_yield`. `_div` rounds to 4dp, so a yield of `0.00003` stores as
-`0.0000`, and a reciprocal taken from the stored value would divide by
-zero on exactly the companies whose ratio is largest. **Reading a rounded
-output as an input is how a presentation becomes a second producer** —
-the defect finding 13 was.
+**`_clamp` at 9,999.** It **suppresses**: returns None, never substitutes
+a boundary value, so no customer sees a fabricated 9,999.00 in a sort
+column. It is **not an overflow guard here** — `p_fcf_ratio` is
+NUMERIC(10,2) and holds 99,999,999.99. 9,999 is the threshold every
+NUMERIC(10,2) valuation ratio in this producer already uses (pe, pb, ps,
+ev_ebitda, ev_ebit, ev_revenue), and Price/FCF matches them deliberately
+rather than protecting its column. **7 rows.**
 
-They deliberately do **not** share a guard. A negative FCF *yield* is a
-reportable fact that reads as bad. A negative Price/FCF reads as cheap.
-`test_negative_fcf_still_publishes_the_yield` pins the asymmetry so a
-later consistency refactor cannot align them.
+**Below 0.005.** See the corrected diagnosis below. **7 rows.**
 
-**3. The currency guard could not go where the note proposed.**
+## The silence rule
+
+**Publishing requires a stated AUD. An unstated currency withholds.**
+
+The first candidate published on silence, arguing that an unknown
+currency is not evidence of a mismatch. True, and beside the point:
+publishing a ratio asserts its unit, and silence establishes none. The
+source contract says so in writing — `add_reporting_currency.sql`: *"NULL
+is meaningful and is NOT a default of 'AUD'"* — and the producer was
+reading it as one.
+
+Decided on the measurement, not the argument. Under the permissive rule
+**1,261 of 6,938 publishable rows (18%)** published only because the
+currency was unstated. About 13% of statement-bearing ASX companies
+report in a foreign currency, so roughly **160** of those were wrong by
+an exchange rate with nothing in the row to say so. 1,261 rows of
+coverage is recoverable; 160 wrong ratios are wrong.
+
+**The cost is an inconsistency and it is deliberate.** `unit_gate`
+publishes on silence for the eight ratios it covers, so one company-year
+can now show a P/E and no Price/FCF for the identical reason. Those eight
+are governed model constituents; changing them moves composite scores
+under a version name 13 finalised runs reference, which needs
+FACTOR_MODEL_V4. The inconsistency runs in the conservative direction and
+is recorded as **finding 20** rather than resolved by relaxing the safer
+side.
+
+## What the gate found, that nothing local could
+
+Running the gate against main blocked the first candidate on two
+findings. Both were invisible to a green local suite and to the mutation
+run.
+
+**1. The contract never ran.** `gate_full_suite.sh` executes each suite
+as `python tests/<file>.py`, and `test_price_to_fcf_contract.py` was
+pytest-only — fixtures, parametrize, no `__main__` block. Run as a script
+it defined 21 functions, called none, and exited 0. The gate reported it
+INCONCLUSIVE, which is the correct verdict and a damning one: **the file
+written to certify this restoration certified nothing**, while passing
+21/21 locally.
+
+It now has a runner that expands parametrize, injects the fixture by
+name, and **checks its own coverage** — invocations must equal the number
+the marks imply, and a case whose signature it cannot satisfy is an
+ERROR, never a skip. Both modes report 26, and agreeing on the number is
+the check.
+
+**2. The currency was an unfingerprinted input.** Reading
+`staging_au.fundamentals` made `yearly_compute` consume a table
+`source_fingerprint` does not project, and
+`test_every_table_yearly_compute_reads_is_fingerprinted` said so.
+
+Not cosmetic. `DAILY_CANONICAL` reuses `market.yearly_metrics` when the
+fingerprint matches, so a company restating from USD to AUD would change
+the correct value of every `p_fcf_ratio` row it has while the fingerprint
+stayed put, reuse was granted, and the stored ratios kept a currency the
+source no longer states. **Silent staleness, introduced by the feature
+that made the currency matter.**
+
+Projected as `(asx_code, reporting_currency)` and nothing else. The table
+also holds `raw_json`, `snapshot_date`, `loaded_at` and `checksum`, each
+of which moves on every fundamentals reload — projecting those would make
+`DAILY_CANONICAL` promote itself to the full plan after every load, which
+is the failure the two scoped tables are shaped to avoid.
+
+`FINGERPRINT_SCHEMA_VERSION` 1 → 2. **Operational consequence: the first
+canonical run after this deploys reports "not comparable", refuses to
+reuse `market.yearly_metrics`, and recomputes.** That refusal is designed
+behaviour, not a fault.
+
+## The corrected diagnosis
+
+The published distribution's minimum printed as `0.00`, so a guard went
+in testing `p_fcf == 0` on the theory that `_div`'s 4dp rounding produced
+it.
+
+**The measurement refuted the theory.** Over 33,864 rows, zero rows had
+`_div` return 0.0, the bucket was empty, and the published minimum was
+still under 0.005. The rounding that destroys the value happens at the
+**column**: `p_fcf_ratio` is NUMERIC(10,2), so `_div`'s 0.0001 is stored
+as 0.00. A guard built on an explanation tests the explanation, and that
+one passed while the defect shipped.
+
+The threshold is now the column's — `P_FCF_STORED_SCALE = 2`,
+`P_FCF_MIN_REPRESENTABLE = 0.005` — asserted against the NUMERIC
+declaration in `008_compute_metrics_tables.sql` so the constant cannot
+drift from the column it describes. The published minimum is now
+**0.0065**.
+
+The boundary is `<`, not `<=`, checked against the server rather than
+against Python:
 
 ```
-  fcf_yield      assessable=True   governed=False
-  price_to_fcf   assessable=False  governed=False
+SELECT 0.005::numeric(10,2)   ->  0.01
+SELECT 0.0049::numeric(10,2)  ->  0.00
 ```
 
-Gate 1b runs on `governed | model_constituents`. `price_to_fcf` is in
-neither, so an entry in `CROSS_CURRENCY` would have been **declared and
-never read**. Making it assessable means `GOVERNED_METRICS`, and
-FACTOR_MODEL_V3 is frozen by 13 finalised runs, so that means V4.
+PostgreSQL rounds half away from zero, so 0.005 is representable and must
+publish. `round(0.005, 2)` in Python is 0.0. The `<=` mutant survived the
+contract until a test asserted the boundary value publishes.
 
-The guard therefore lives in the producer, where it is reached, and
+The instrument now prints the minimum at full precision first — `{:.2f}`
+is how a sub-0.005 value hid inside the published set looking like a
+stored zero.
+
+## The three questions answered before any code was written
+
+**1. Period — no mismatch, and the earlier note was wrong.** `px =
+price_at(prices, ped)` anchors on the row's own `period_end_date` and
+`fcf` is that same period's annual figure. The v11.2.85 note said this
+would mix "a current price with a fiscal-year cash flow" and that the mix
+must be stated. **That disclosure is withdrawn** — but see finding 18,
+which is a different and larger problem with the same `px`.
+
+**2. The ratio is the reciprocal of a metric already served.** `fcf_yield`
+is live and is `fcf / mc`; `p_fcf` is `mc / fcf`. It is computed from the
+same `mc` and `fcf` rather than as `1 / fcf_yield`: `_div` rounds to 4dp,
+so a yield of 0.00003 stores as 0.0000 and a reciprocal taken from the
+stored value would divide by zero on exactly the companies whose ratio is
+largest. **Reading a rounded output as an input is how a presentation
+becomes a second producer** — the defect finding 13 was.
+
+**3. The currency guard could not go where the note proposed.** Gate 1b
+runs on `governed | model_constituents`; `price_to_fcf` is in neither, so
+a `CROSS_CURRENCY` entry would have been **declared and never read**. The
+guard lives in the producer, where it is reached, and
 `test_the_declaration_route_is_still_closed` fails the moment the column
-becomes assessable — so the rule gets **moved** into `CROSS_CURRENCY`
-rather than existing in two places.
+becomes assessable — so the rule gets **moved** rather than duplicated.
 
 ## Evidence
 
-**Contract** — `tests/test_price_to_fcf_contract.py`, 16/16. The
-publishing case by value (`400/40 = 10.0`), the reciprocal identity
-against `fcf_yield`, all three declining cases, case and whitespace on
-the currency, and unstated currency publishing (silence is not evidence
-of a mismatch).
+| | |
+|---|---|
+| **Gate** | candidate 147 files — 145 passed, 2 failed, **0 inconclusive**; baseline 146 files — 144 passed, 2 failed. **INTRODUCED: none.** Both failures pre-existing at the baseline. P0 primary-feature contracts hold. `EXIT=0` |
+| **Contract** | `test_price_to_fcf_contract.py` 26/26 under pytest **and** 26/26 as a standalone script |
+| **Statement** | `test_yearly_upsert_empties_retired_columns.py` 12/12. `p_fcf_ratio` in the written list and **not** in the NULL list; both halves asserted |
+| **Behaviour** | the fixture distinguishes **four** outcomes now: 12.34 preserved, NULL still retired, 7.5 written — and a second act proves an incoming NULL **clears** a stored 7.5 |
+| **Mutation** | 13 mutants on the guards: 12 killed, 1 the known equivalent (`fcf > 0` → `>= 0`, which `_div` already decides) |
+| **Control** | all eight gate-1b ratios are **0** on the 164 attributed foreign-reporter rows, so the gate does enforce where it is applied and finding 17's comparison is valid |
 
-**Statement** — `test_yearly_upsert_empties_retired_columns.py`, 12/12.
-`p_fcf_ratio` is now in the written list and **not** in the NULL list;
-both halves asserted, because a column in neither keeps whatever a prior
-run left in it. The partition test caught the stale 6b count on the first
-run, which is what it is for: 6b is 36, not 37, and it lost the name by
-**restoration**, not reclassification.
-
-**Behaviour** — `tests/fixtures/prove_retired_columns_are_emptied.py`
-now distinguishes **three** outcomes for this column rather than two. The
-incoming value differs from both the seeded one and NULL, so `12.34`
-means preserved, `NULL` means still retired, and `7.5` means written. A
-"not NULL" assertion would have accepted a value frozen since June.
-
-**Mutation** — 8 mutants, **7 killed, 1 equivalent**. The survivor is
-`fcf > 0` → `fcf >= 0`, which changes no output because `_div` already
-declines a zero denominator. The comment claiming the `> 0` test excluded
-zero was corrected, and `test_div_returns_none_on_zero_denominator` pins
-the half that lives elsewhere so the equivalence cannot quietly stop
-holding.
+**The clearing proof matters as much as the writing proof.** A restored
+column must be able to take a value *away*: a company that reported
+positive free cash flow last year and negative this year now produces an
+incoming NULL over a row that already holds a number. Softening `DO
+UPDATE SET p_fcf_ratio = EXCLUDED.p_fcf_ratio` to a COALESCE would leave
+the writing proof passing while a ratio computed when the company was
+profitable stayed on screen forever — finding 6b returning through the
+column that repaired it.
 
 ## Deployment handoff
 
 Nothing changes until a yearly run rewrites the rows, and then the
 universe must be rebuilt **through the canonical driver**.
 
-1. **Before.** Size the three declining populations, so the after-count
-   is a prediction rather than a rationalisation.
+1. **Before.** Re-run the population measurement and the finding-17
+   control, so the after-state has a same-day baseline.
    ```
-   PYTHONPATH=/opt/asx-screener/backend asx-venv/bin/python \
-     /tmp/asxdiag/fcfcur.py --env-file /opt/asx-screener/backend/.env
+   cd /tmp/pfcf/src/backend && PYTHONPATH=/tmp/pfcf/src/backend \
+     /opt/asx-screener/asx-venv/bin/python \
+     scripts/diagnostics/measure_p_fcf_populations.py \
+     --env-file /opt/asx-screener/backend/.env
    ```
-   The control is the part to read first: if any of the eight
-   gate-1b-guarded ratios publishes on a foreign reporter, the gate is
-   not doing what finding 17 assumes and that finding is void.
+   Read the reconciliation block first. If R1 or R2 fails, the script
+   exits 1 and prints no counts — that is the instrument refusing to
+   report numbers about code that behaves differently from its model.
 
-2. **The canonical driver**, which runs yearly, universe build and the
-   publication under one lease:
+2. **The canonical driver**, which runs yearly, the universe build and
+   the publication under one lease:
    ```
-   cd /opt/asx-screener/backend && ../asx-venv/bin/python \
-     scripts/p0a_canonical_run.py --execute --allow-production
+   cd /opt/asx-screener/backend && set -a && . ./.env && set +a \
+     && ../asx-venv/bin/python scripts/p0a_canonical_run.py \
+        --execute --allow-production
    ```
    **Not the two scripts separately.** `build_screener_universe`
    invalidates the canonical contract atomically and leaves every row
@@ -125,24 +274,41 @@ universe must be rebuilt **through the canonical driver**.
    `row_projection` serves every governed metric as null. The v11.2.85
    handoff made that mistake and took the surface dark.
 
-   Note: the driver has **no `load_dotenv` of its own** and inherits the
-   credential from `PipelineTracker.connect()` inside the pipelines. Run
-   as a script it needs the environment sourced first:
-   ```
-   cd /opt/asx-screener/backend && set -a && . ./.env && set +a && ...
-   ```
-   That is a defect in its own right and is not fixed here.
+   **Expect the fingerprint to refuse reuse on this first run** and the
+   full plan to execute — `FINGERPRINT_SCHEMA_VERSION` moved 1 → 2. That
+   is the designed consequence of adding a projection, not a fault.
 
-3. **After.** Same script as step 1. `price_to_fcf` on foreign reporters
-   must be **0** while `fcf_yield` on the same rows is **unchanged** —
-   that difference is finding 17, made visible.
+   The driver has **no `load_dotenv` of its own** and inherits the
+   credential from `PipelineTracker.connect()` inside the pipelines, so
+   run as a script it needs the environment sourced first — hence the
+   `set -a`. That is a defect in its own right and is not fixed here.
+
+3. **After.** The acceptance criteria, each a number rather than a
+   direction:
+
+   | | expected |
+   |---|---|
+   | `price_to_fcf` served in `screener.universe` | **438** rows |
+   | rows publishing on an unstated currency (P7) | **0** |
+   | minimum published ratio | **≥ 0.005** |
+   | `price_to_fcf` on foreign reporters | **0** |
+   | `fcf_yield` on foreign reporters | **167**, unchanged |
+   | R1 / R2 reconciliation failures | **0** |
+
+   The last two together are finding 17 made visible: the same companies,
+   one column declining and its reciprocal publishing.
 
 ## Not closed by this release
 
 - **Finding 17** — `fcf_yield` carries the same unit mismatch, is
-  reachable by gate 1b, and is a factor-model constituent. Fixing it
-  changes scores under a frozen version name, so it needs V4. Deferred
-  deliberately, with the measurement written first.
-- **The asymmetry it leaves.** Until V4, the site declines Price/FCF for
-  foreign reporters while publishing its reciprocal for the same
-  companies. Recorded rather than hidden by withdrawing the safer one.
+  reachable by gate 1b, and is a factor-model constituent. **Measured:
+  167 of 178 foreign-reporter rows publish it, 78 inside the scored
+  population**, so it moves a ranking rather than merely displaying.
+  Fixing it changes scores under a frozen version name, so it needs V4.
+- **Finding 18** — `price_at` has no floor. Median 0 days, p95 2, **max
+  6,644**; FDR's FY2021 metrics come from a close struck in 2003. Reaches
+  every price-anchored ratio in the table, not this one. Its own release.
+- **Finding 19** — one reporting currency per company, from the latest
+  snapshot, applied to all history. Not fixable from this source.
+- **Finding 20** — the P/E-publishes-where-Price/FCF-does-not
+  inconsistency this release deliberately creates. Needs V4, with 17.

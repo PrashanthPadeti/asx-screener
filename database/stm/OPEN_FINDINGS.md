@@ -1845,6 +1845,147 @@ foreign reporters while publishing its reciprocal for the same companies
 — a real inconsistency, recorded here rather than hidden by withdrawing
 the safer of the two.
 
+## 18. `price_at` can anchor a fiscal year to a price years older than it
+
+Found 14 Nov 2026 while measuring Price/FCF, because the review asked
+for the **actual date** `price_at` selects rather than for the rule it
+follows. The rule looked unobjectionable; the dates do not.
+
+```python
+def price_at(prices, target_date):
+    """Last close on or before target_date from pre-fetched Series."""
+    subset = prices[prices.index <= tgt]
+    return float(subset.iloc[-1]) if not subset.empty else None
+```
+
+"On or before" has no floor. For a company whose price history stops —
+suspended, delisted, or simply absent from the feed after some date —
+every later fiscal year anchors to the same final close, however old.
+
+### Measured over 33,864 yearly rows
+
+| | days between `period_end_date` and the close selected |
+|---|---|
+| median | 0 |
+| p95 | 2 |
+| max | **6,644** |
+| rows > 7 days | 402 of 26,338 |
+
+The tail is not a long thin one, it is a small set of companies with many
+years each:
+
+```
+FDR  FY2021   6,644 days   close of 2003-10-23
+FDR  FY2020   6,279 days   close of 2003-10-23
+FDR  FY2019   5,913 days   close of 2003-10-23
+VTA  FY2025   4,761 days   close of 2012-12-18
+CDR  FY2020   4,529 days   close of 2008-08-07
+SGH  FY2024   4,231 days   close of 2012-11-29
+```
+
+FDR's 2021 metrics are computed from a price struck in 2003.
+
+### Why this is bigger than the finding that produced it
+
+`px` is the input to `market_cap`, and `market_cap` is the numerator or
+the denominator of nearly every valuation figure this producer writes:
+
+```
+pe_ratio  pb_ratio  ps_ratio  ev_ebitda  ev_ebit  ev_revenue
+earnings_yield  fcf_yield  graham_number  market_cap  p_fcf_ratio
+```
+
+So this is **not a Price/FCF defect**. Price/FCF is where it was seen.
+
+### Status
+
+**OPEN.** Not fixed in v11.2.86, deliberately: a floor on price age
+changes every ratio in the table at once, which is a release of its own
+with its own population to measure. v11.2.86 adds no new exposure — it
+restores one column that inherits the same `px` as its eleven siblings.
+
+The fix is a maximum age, not a tighter window: a company reporting in
+June whose last trade was in May is normal and must still publish. The
+threshold needs measuring against the distribution above, and a declined
+row needs a reason the customer can see, which an ungoverned column
+cannot carry (see the limitation recorded in finding 6b's repair).
+
+---
+
+## 19. The reporting currency is one value per company, applied to all history
+
+Found 14 Nov 2026, from the review question *"confirm that the currency
+comes from the financial statement being calculated."* It does not.
+
+`staging_au.fundamentals` is `UNIQUE (asx_code)`. One row per company,
+holding one `reporting_currency`, read by the loader from whichever of
+`Income_Statement` / `Balance_Sheet` / `Cash_Flow` first carries a
+`currency_symbol` **in the latest snapshot**. There is no per-period
+currency anywhere in the source.
+
+Both consumers therefore judge every historical fiscal year by the
+company's current presentation currency:
+
+- applicability gate 1b, for its eight ratios
+- `yearly_compute`'s Price/FCF guard, from v11.2.86
+
+A company that restated from AUD into USD has its pre-restatement years
+suppressed although they were AUD — a coverage loss. A company that
+restated **from** USD **into** AUD has its pre-restatement years
+published although they were USD — a wrong number. The second direction
+is the one that matters.
+
+### Status
+
+**OPEN, and not fixable from this source.** Recorded rather than
+disguised: the fetch is documented to return a company-level,
+latest-snapshot fact, and the producer's comment says it is applied to
+every year. A per-row lookup against the same single-row table would
+look per-period and would not be.
+
+Closing it needs a per-period currency at ingestion — EODHD states
+`currency_symbol` per financial section, and whether it varies by period
+within a section has not been checked. That check is the next step and
+has not been taken.
+
+---
+
+## 20. Price/FCF is stricter than its own peers on an unstated currency
+
+The deliberate cost of the silence rule decided on 14 Nov 2026, recorded
+so it is a known property and not a surprise.
+
+From v11.2.86 `p_fcf_ratio` publishes only on a **stated AUD**.
+`applicability.unit_gate` publishes on silence for the eight ratios it
+covers. So one company-year can show a P/E, a P/B, a P/S and an
+EV/EBITDA while showing no Price/FCF, for the identical reason.
+
+**Measured: 1,261 yearly rows** — 18% of the 6,938 that were publishable
+under the permissive rule. Roughly 13% of statement-bearing ASX
+companies report in a foreign currency, so about 160 of those 1,261 were
+wrong by an exchange rate, with nothing in the row to say so.
+
+### Why it was resolved in this direction
+
+The source contract is explicit — `add_reporting_currency.sql`: *"NULL is
+meaningful and is NOT a default of 'AUD'"* — and the permissive producer
+was reading it as one. Publishing a ratio asserts its unit; silence
+establishes no unit. 1,261 rows of coverage is recoverable; 160 wrong
+ratios are wrong.
+
+The inconsistency runs in the **conservative** direction, and new code
+does not join a known defect in order to look tidy.
+
+### Status
+
+**OPEN by construction.** Resolving it means applying the same rule in
+`unit_gate`, whose eight ratios are governed model constituents:
+changing them moves composite scores under a version name 13 finalised
+runs reference. That needs **FACTOR_MODEL_V4** and is the same release
+that must settle finding 17.
+
+---
+
 ## Tracking
 
 | # | Finding | Table | Status |

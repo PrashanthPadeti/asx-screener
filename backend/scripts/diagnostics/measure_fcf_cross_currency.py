@@ -86,7 +86,14 @@ SELECT
     COUNT(ev_to_ebitda)   AS ev_to_ebitda,
     COUNT(ev_to_ebit)     AS ev_to_ebit,
     COUNT(altman_z_score) AS altman_z_score,
-    COUNT(bvps)           AS bvps
+    -- `book_value_per_share`, NOT `bvps`. The first version of this query
+    -- said `bvps`, which is what CROSS_CURRENCY's key is called and what
+    -- market.yearly_metrics calls the column; screener.universe calls it
+    -- something else. The control crashed with UndefinedColumn after Q2 and
+    -- Q3 had already printed, so the finding's exposure was measured and the
+    -- check on the gate was not. A column name assumed rather than read --
+    -- the same class of defect the control exists to look for.
+    COUNT(book_value_per_share) AS book_value_per_share
 FROM screener.universe
 WHERE reporting_currency IS NOT NULL
   AND UPPER(TRIM(reporting_currency)) <> 'AUD'

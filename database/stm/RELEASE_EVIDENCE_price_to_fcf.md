@@ -303,6 +303,42 @@ FROM screener.compute_run_stages s JOIN u ON u.run_id = s.run_id
 WHERE s.stage_name='yearly_compute' AND s.status='success';
 ```
 
+### The scope check: does a served Price/FCF sit outside the run?
+
+Equal counts reconcile attribution totals; they do not say **which** rows
+belong to the run. And being outside scoring does not put a row outside
+Price/FCF publication — the mechanism is confirmed rather than assumed:
+
+`app/core/row_projection.py` nulls a row's metrics by iterating
+`GOVERNED_METRICS[model_version]`. **`price_to_fcf` is not governed**, so
+on a row with no `compute_run_id` it is served **untouched** — no null,
+no metric state, no cause. The snapshot machinery cannot reach it.
+
+Measured 16 Nov 2026, before deployment:
+
+| | |
+|---|---|
+| unattributed universe rows | 452 |
+| of those, having any `yearly_metrics` row | 279 |
+| of those, latest FY with positive `fcf_yield` (publishability proxy) | **44** |
+| unattributed rows currently serving a `price_to_fcf` | 0 |
+
+The zero is only because v11.2.85 emptied the column. **About 44 served
+Price/FCF values are expected to land on unattributed rows**, outside the
+publishing run's fingerprint coverage, so their provenance has to be
+established before the release closes.
+
+**And `market.yearly_metrics` carries no run id — only `computed_at`.**
+So for those rows provenance cannot be a reference; it can only be the
+run's own coverage proof (`yearly_compute` reports whether every sourced
+yearly row was rewritten by that run) together with `computed_at` falling
+inside the run's window. That is evidence, not a pointer, and it is
+weaker than a pointer. Recorded as **finding 23**.
+
+The full-universe row reconciliation stays as it is, so an extra
+published ratio on an unattributed row cannot escape the comparison by
+sitting outside the scored set.
+
 **`COUNT(DISTINCT compute_run_id)` is not the attribution check.** It
 ignores NULLs, so "one distinct run id" passes while any number of rows
 carry no attribution at all — and 452 of the universe's 2,571 rows do,

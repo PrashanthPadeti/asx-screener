@@ -66,7 +66,7 @@ BASE_CURRENCY`; the producer went strict and the copy did not. That is
 now one function, `yearly_compute.currency_is_coherent`, called by both.
 A predicate with two implementations has two answers.
 
-## The six guards
+## The seven guards
 
 ```python
 currency_coherent = currency_is_coherent(reporting_currency)
@@ -103,6 +103,9 @@ ev_ebitda, ev_ebit, ev_revenue), and Price/FCF matches them deliberately
 rather than protecting its column. **7 rows.**
 
 **Below 0.005.** See the corrected diagnosis below. **7 rows.**
+
+**A price no more than 7 calendar days before the period end.** Product
+policy, decided 16 Nov 2026. See its own section below.
 
 ## The silence rule
 
@@ -292,20 +295,41 @@ universe must be rebuilt **through the canonical driver**.
    run as a script it needs the environment sourced first — hence the
    `set -a`. That is a defect in its own right and is not fixed here.
 
-3. **After.** The acceptance criteria, each a number rather than a
-   direction:
+3. **After.** Acceptance is **per row, not per count**:
+
+   ```
+   ... measure_p_fcf_populations.py --env-file ... \
+       --verify /tmp/pfcf/expected.csv
+   ```
+
+   It reconciles the emitted expectation against what
+   `screener.universe` actually serves, by instrument, fiscal period and
+   **value**, and exits 1 on any missing, extra or differing row. A
+   matching count over differing rows is the failure this mode exists to
+   catch — and a single number was never safe here anyway: 438 on 15
+   Nov became 471 on 16 Nov with no change to the producer.
+
+   The invariants that are not snapshot-dependent:
 
    | | expected |
    |---|---|
-   | `price_to_fcf` served in `screener.universe` | **438** rows |
-   | rows publishing on an unstated currency (P7) | **0** |
+   | expected-vs-served row reconciliation | **0** missing, **0** extra, **0** differing |
+   | served rows publishing on an unstated currency (P7) | **0** |
+   | served rows above the 7-day freshness limit (P11) | **0** — a contract violation if not |
    | minimum published ratio | **≥ 0.005** |
    | `price_to_fcf` on foreign reporters | **0** |
-   | `fcf_yield` on foreign reporters | **167**, unchanged |
-   | R1 / R2 reconciliation failures | **0** |
+   | `fcf_yield` on foreign reporters | **unchanged** |
+   | R1 / R2 / R3 reconciliation failures | **0** |
+   | the first canonical run | reports schema 1 → 2 not comparable, refuses reuse, **recomputes** |
 
-   The last two together are finding 17 made visible: the same companies,
-   one column declining and its reciprocal publishing.
+   The two currency rows together are finding 17 made visible: the same
+   companies, one column declining and its reciprocal publishing. The
+   last row is the outstanding **production execution evidence** for the
+   fingerprint bump — the code path is verified, the run is not.
+
+   Gate and measurement evidence for this release is retained at
+   `/var/backups/p0a/gates/` on the production host, since `/tmp` is not
+   a record.
 
 ## Finding 18 reaches this column. There is no predicate that stops it.
 
@@ -362,22 +386,68 @@ companies whose price feed stopped; the served row is a company's *latest*
 fiscal year, and a company with a recent year and positive free cash flow
 is still trading, so its price history reaches its period end.
 
-So: the mechanism is present and the exposure is nil. A scoped rule would
-cost nothing and would also protect nothing today — unexercised machinery
-in the release's critical path, deepening the asymmetry of finding 20 for
-no measured benefit. **Recommendation: do not add it in this release.**
-P11 is now a standing instrument output, so a non-zero appears the moment
-one exists, and finding 18's real repair is table-wide.
+### The policy, decided 16 Nov 2026
+
+I recommended not adding a guard, on the grounds that it would protect
+nothing today. That was overruled, correctly: **zero exclusions
+establishes the guard's current coverage cost, not its value.** The rows
+it protects are the ones a *later* run produces, when a company stops
+trading while its last statements stay inside the window the universe
+selects — and the measurement above is exactly the evidence that adding
+it costs nothing.
+
+```
+publish only when the price date is known and
+    0 <= fiscal period end - price date <= 7 calendar days
+```
+
+**Explicit product policy, not a vendor guarantee.** Nothing in the feed
+promises a quote within a week of any period end; seven days is the age
+at which we decline to call a market capitalisation current. It applies
+to historical and latest-year rows alike — the predicate is inside the
+per-row loop, not a post-filter. Missing, future-dated and older prices
+all produce NULL, and the upsert clears any previously stored ratio.
+
+Seven, against `return_windows.HIGH_LOW_GRACE = 14`. That grace absorbs
+exchange closures across a multi-year window, where a fortnight is a
+rounding error; this one anchors a market capitalisation to a single
+period end, where it *is* the measurement. A test asserts both numbers so
+neither is mistaken for the other.
+
+**One selector, not two.** The guard needs the price date and `price_at`
+returns the value; those must be the same observation, or the guard
+judges a price the producer never used. `_price_observation` returns
+`(close, date)`, `price_at` delegates to it, and a test asserts they
+agree — the same hazard the currency predicate already demonstrated.
+
+Boundary pinned with independent cases: same day, 3 days, **7 inclusive
+(publishes)**, **8 (withheld)**, 31, 731, a missing series, a future
+date, and the transition itself — one company, one fiscal period,
+publishing at 7 and withheld at 8.
+
+Mutation: removing the guard, making the boundary exclusive, admitting a
+future price, moving 7 to 14, and reading absence as fresh are **all
+killed**.
+
+Finding 18 stays **open** for the eleven price-anchored siblings, which
+remain unbounded. Bounding them is its own release with its own
+population.
 
 ### Currency provenance of the served rows: INFERRED, not established
 
 For all 471. `staging_au.fundamentals` is `UNIQUE (asx_code)`: one row,
 one `reporting_currency`, read from whichever of Income_Statement /
 Balance_Sheet / Cash_Flow first carries a `currency_symbol` **in the
-latest snapshot**, applied to every fiscal year. Measured alongside it:
-**0** served rows have a fiscal year older than the company's most recent
-reported year, so the inference spans no gap on the served set today —
-but it is still an inference. Finding 19.
+latest snapshot**, applied to every fiscal year. Measured alongside it: **0** served rows have a
+fiscal year older than the company's most recent reported year.
+
+**That does not establish statement-level currency**, and an earlier
+draft of this note implied it did. Matching the latest reported year only
+means the served row and the snapshot describe the same *year*; it says
+nothing about which currency that year's statements were actually filed
+in, because the source carries no per-period currency to compare against.
+The provenance is inferred, the gap it spans is unmeasured, and finding 19
+is what closes it.
 
 ## What "the gate result" does and does not establish
 

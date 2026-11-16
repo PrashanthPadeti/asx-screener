@@ -74,6 +74,17 @@ def _pct(n: int, d: int) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--env-file", help="path to a .env to load first")
+    ap.add_argument("--emit", metavar="PATH",
+                    help="write the expected served set as CSV -- asx_code, "
+                         "fiscal_year, p_fcf_ratio -- for --verify to "
+                         "reconcile against after the run")
+    ap.add_argument("--verify", metavar="PATH",
+                    help="read an --emit file and reconcile it against what "
+                         "screener.universe actually serves, per instrument, "
+                         "fiscal period and VALUE. A count agreeing while the "
+                         "rows differ is the failure this mode exists to "
+                         "catch, and --emit must come from the SAME captured "
+                         "inputs the run consumed.")
     ap.add_argument("--limit", type=int,
                     help="only this many codes (smoke test; counts are then "
                          "NOT the population and the report says so)")
@@ -224,6 +235,17 @@ def main() -> int:
                     predicted = None
                 elif not fcf > 0:
                     reason = "P4 free cash flow <= 0"
+                    predicted = None
+                elif not yc.price_is_fresh_enough(
+                        src.get("period_end_date"),
+                        yc._price_observation(prices,
+                                              src.get("period_end_date"))[1]):
+                    # The seven-day product policy, added 16 Nov 2026. Its
+                    # population is EXPECTED to be 0 on the served rows and
+                    # small in the historical tail; it is reported rather
+                    # than assumed, so a guard that starts firing -- or one
+                    # that stops -- is visible.
+                    reason = "P13 price older than 7 days, or missing"
                     predicted = None
                 elif not coherent:
                     # Split, because the two halves are different facts and
@@ -396,11 +418,26 @@ def main() -> int:
         print("\n── P11 price age ON THE SERVED ROWS (finding 18) " + "─" * 20)
         print(f"  served rows: {len(served_keys)};  with a measurable price "
               f"age: {len(ages)}")
-        print("  DOCUMENTED FRESHNESS LIMIT: none. There is no predicate in")
-        print("  the producer that withholds on price age -- not in the six")
-        print("  Price/FCF guards, not in mc, not in price_at. So the count")
-        print("  'exceeding the limit' is reported against candidate")
-        print("  thresholds, because no limit exists to exceed.")
+        print(f"  DOCUMENTED FRESHNESS LIMIT: {yc.MAX_PRICE_AGE_DAYS} calendar"
+              f" days, inclusive, as product")
+        print("  policy from v11.2.86 -- not a vendor guarantee. A served row")
+        print("  exceeding it is a CONTRACT VIOLATION, not a statistic: the")
+        print("  producer withholds past the limit, so any row above it here")
+        print("  means the guard is not on the path this instrument runs.")
+        over = [k for k, a in age_by.items() if a > yc.MAX_PRICE_AGE_DAYS]
+        served_over = [k for k in over
+                       if k[0] in in_universe
+                       and latest.get(k[0], (None, None))[0] == k[1]
+                       and latest.get(k[0], (None, ""))[1] == "P1 publishable"]
+        print(f"\n  served rows exceeding the limit: {len(served_over)} "
+              f"(must be 0)")
+        if served_over:
+            print("  ** CONTRACT VIOLATION. These publish a ratio anchored to")
+            print("     a close older than the policy admits:")
+            for k in served_over[:10]:
+                print(f"       {k} age={age_by[k]}d dates={date_by.get(k)}")
+        print(f"  rows anywhere in the table above the limit: {len(over)} "
+              f"(these are withheld, and P13 counts them)")
         if ages:
             s = pd.Series([a for a, _ in ages])
             print(f"\n  median {s.median():.0f}d   p75 {s.quantile(.75):.0f}d"
@@ -466,6 +503,73 @@ def main() -> int:
         print("\n── reporting currency, as the codes state it " + "─" * 24)
         for c, n in currencies.most_common(12):
             print(f"  {c:<16} {n:>6} codes")
+
+        # ── Acceptance: expected vs served, per row and per value ────────
+        expected_rows = sorted(
+            (code, fy, ratio_by.get((code, fy)))
+            for code, (fy, reason) in latest.items()
+            if code in in_universe and reason == "P1 publishable")
+
+        if args.emit:
+            import csv
+            with open(args.emit, "w", newline="", encoding="utf-8") as fh:
+                w = csv.writer(fh)
+                w.writerow(["asx_code", "fiscal_year", "p_fcf_ratio"])
+                for code, fy, val in expected_rows:
+                    w.writerow([code, fy, "" if val is None else val])
+            print(f"\nwrote {len(expected_rows)} expected served rows to "
+                  f"{args.emit}")
+
+        if args.verify:
+            import csv
+            from decimal import Decimal
+            want: dict[tuple[str, int], Optional[Decimal]] = {}
+            with open(args.verify, newline="", encoding="utf-8") as fh:
+                for r in csv.DictReader(fh):
+                    want[(r["asx_code"], int(r["fiscal_year"]))] = (
+                        Decimal(r["p_fcf_ratio"]).quantize(Decimal("0.01"))
+                        if r["p_fcf_ratio"] else None)
+
+            cur.execute("""
+                SELECT asx_code, price_to_fcf
+                FROM screener.universe
+                WHERE price_to_fcf IS NOT NULL
+            """)
+            got = {code: val for code, val in cur.fetchall()}
+
+            # The fiscal period is part of the claim, so it is read from the
+            # producer's own emission rather than trusted: a row serving the
+            # right value for the wrong year is not a match.
+            want_by_code = {c: (fy, v) for (c, fy), v in want.items()}
+            missing = sorted(set(want_by_code) - set(got))
+            extra = sorted(set(got) - set(want_by_code))
+            wrong = sorted(
+                c for c in set(want_by_code) & set(got)
+                if want_by_code[c][1] is None
+                or Decimal(got[c]).quantize(Decimal("0.01"))
+                != want_by_code[c][1])
+
+            print("\n" + "=" * 70)
+            print("ACCEPTANCE -- expected vs served, by instrument and value")
+            print("=" * 70)
+            print(f"  expected {len(want_by_code)}   served {len(got)}")
+            print(f"  expected but NOT served : {len(missing)}")
+            print(f"  served but NOT expected : {len(extra)}")
+            print(f"  served with a DIFFERENT value : {len(wrong)}")
+            for label, rows_ in (("missing", missing), ("extra", extra),
+                                 ("wrong", wrong)):
+                for c in rows_[:10]:
+                    w_ = want_by_code.get(c)
+                    print(f"    {label:<8} {c:<6} expected "
+                          f"{w_[1] if w_ else '-'} (FY{w_[0] if w_ else '-'})"
+                          f"  served {got.get(c, '-')}")
+            ok = not (missing or extra or wrong)
+            print(f"\n  {'RECONCILES' if ok else '** DOES NOT RECONCILE'}"
+                  f" -- a matching COUNT with differing rows is exactly what")
+            print("  this mode exists to catch, so the verdict is per row.")
+            if not ok:
+                conn.rollback()
+                return 1
 
         conn.rollback()
         print("\nread-only, rolled back")

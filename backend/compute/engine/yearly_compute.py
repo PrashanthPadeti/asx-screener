@@ -434,13 +434,77 @@ def fetch_all_prices(cur, asx_code: str) -> pd.Series:
     return pd.Series(closes, index=dates, name="close").dropna()
 
 
-def price_at(prices: pd.Series, target_date) -> Optional[float]:
-    """Last close on or before target_date from pre-fetched Series."""
+#: How old the close anchoring a Price/FCF may be, in CALENDAR days.
+#:
+#: PRODUCT POLICY, NOT A VENDOR GUARANTEE. Nothing in the feed promises a
+#: quote within a week of any fiscal period end; this is the age at which we
+#: decline to call a market capitalisation current, decided on 16 Nov 2026.
+#:
+#: Seven, against `return_windows.HIGH_LOW_GRACE = 14`, and the difference is
+#: deliberate. That grace absorbs exchange closures across a multi-year
+#: window, where a fortnight is a rounding error. This one anchors a market
+#: capitalisation to a single fiscal period end, where it is the measurement.
+#: Measured on the 471 served rows before the limit was chosen: median 0 days,
+#: p99 0, max 4 -- so seven is clear of every real observation while still
+#: bounding the 6,644-day anchors finding 18 found in the wider table.
+#:
+#: Scoped to Price/FCF. Its eleven price-anchored siblings remain unbounded,
+#: which is finding 18 and a release of its own.
+MAX_PRICE_AGE_DAYS = 7
+
+
+def _price_observation(prices: pd.Series, target_date):
+    """(close, date) of the last observation on or before target_date.
+
+    ONE SELECTOR. `price_at` returns the value and the Price/FCF freshness
+    guard needs the date, and those must be the same observation -- a second
+    implementation of "last close on or before" would drift from this one the
+    way the currency predicate did, and the guard would then be judging an
+    observation the producer did not use.
+    """
     if prices.empty:
-        return None
+        return (None, None)
     tgt = pd.Timestamp(target_date)
     subset = prices[prices.index <= tgt]
-    return float(subset.iloc[-1]) if not subset.empty else None
+    if subset.empty:
+        return (None, None)
+    return (float(subset.iloc[-1]), subset.index[-1])
+
+
+def price_at(prices: pd.Series, target_date) -> Optional[float]:
+    """Last close on or before target_date from pre-fetched Series."""
+    return _price_observation(prices, target_date)[0]
+
+
+def price_is_fresh_enough(period_end, price_date) -> bool:
+    """Is this close recent enough to anchor a Price/FCF to that period?
+
+        0 <= period_end - price_date <= MAX_PRICE_AGE_DAYS
+
+    Three refusals, and they are not interchangeable:
+
+      price_date is None    no observation was selected at all, so there is
+                            nothing whose age could be judged. Absence is not
+                            freshness.
+      age > 7               the close predates the period end by more than a
+                            week. `price_at` has no floor, so this is the
+                            only thing standing between a fiscal year and a
+                            quote struck years earlier.
+      age < 0               the close is AFTER the period end. Unreachable
+                            through `_price_observation`, which only looks
+                            backwards -- and asserted anyway, because the
+                            predicate is also called with dates this module
+                            did not select, and a future price would mean a
+                            market capitalisation from after the statements
+                            it is divided into.
+
+    Calendar days, not trading days. What the bound absorbs is a weekend or a
+    public holiday at the period end, and those are counted in days.
+    """
+    if period_end is None or price_date is None:
+        return False
+    age = (pd.Timestamp(period_end) - pd.Timestamp(price_date)).days
+    return 0 <= age <= MAX_PRICE_AGE_DAYS
 
 
 def price_window(prices: pd.Series, period_end) -> pd.Series:
@@ -787,7 +851,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         fcf_margin    = _div(fcf, rev)
 
         # ── Price at fiscal year end (in-memory lookup) ────────────────────
-        px = price_at(prices, ped)
+        # The date comes back with the value because the Price/FCF freshness
+        # guard judges the observation this line selected, not a second
+        # lookup of the same rule.
+        px, px_date = _price_observation(prices, ped)
         mc = round(px * shares / 1e6, 2) if (px and shares) else None
 
         # ── Profitability ──────────────────────────────────────────────────
@@ -917,6 +984,41 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         #                              policy choice rather than arithmetic,
         #                              and it was decided on a measurement.
         #
+        #   price older than 7 days   the close anchoring mc predates the
+        #   (or missing, or future)   fiscal period end by more than a week,
+        #                              or no close was selected, or it falls
+        #                              after the period end. `price_at` has
+        #                              no floor -- "last close on or before"
+        #                              reaches back arbitrarily far for a
+        #                              company whose price feed stopped, and
+        #                              finding 18 measured anchors up to
+        #                              6,644 days old in this table. mc is
+        #                              px * shares, so an old px is an old
+        #                              market capitalisation divided into a
+        #                              current cash flow.
+        #
+        #                              Added 16 Nov 2026 as PRODUCT POLICY.
+        #                              Measured cost on the served rows at
+        #                              the time: ZERO at every threshold from
+        #                              7 to 730 days, because a company with
+        #                              a recent fiscal year and positive free
+        #                              cash flow is still trading. The guard
+        #                              is therefore not protecting rows that
+        #                              exist today -- it is protecting
+        #                              SUBSEQUENT runs, when a company stops
+        #                              trading while its last statements stay
+        #                              in the window the universe selects.
+        #                              Its population is expected to be 0 and
+        #                              the instrument reports it, so a
+        #                              non-zero is visible rather than
+        #                              inferred.
+        #
+        #                              Scoped to this column. The eleven
+        #                              price-anchored siblings stay unbounded
+        #                              -- that is finding 18, and bounding
+        #                              them all at once is its own release
+        #                              with its own population.
+        #
         #   |mc / fcf| > 9,999         _clamp declines it. Not an overflow
         #                              guard on THIS column: p_fcf_ratio is
         #                              NUMERIC(10,2) and holds up to
@@ -989,7 +1091,8 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         p_fcf = (_clamp(_div(mc, fcf))
                  if (mc is not None and mc > 0
                      and fcf is not None and fcf > 0
-                     and currency_coherent)
+                     and currency_coherent
+                     and price_is_fresh_enough(ped, px_date))
                  else None)
         # UNDERFLOW, the mirror of _clamp's overflow, AND A CORRECTED
         # DIAGNOSIS.

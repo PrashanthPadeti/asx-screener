@@ -65,6 +65,9 @@ from compute.engine.yearly_compute import (          # noqa: E402
 from compute.engine.applicability import (           # noqa: E402
     BASE_CURRENCY, CROSS_CURRENCY,
 )
+from compute.engine.yearly_compute import (          # noqa: E402
+    MAX_PRICE_AGE_DAYS,
+)
 
 COLUMN = "p_fcf_ratio"
 
@@ -281,6 +284,132 @@ def test_a_market_cap_that_rounds_to_zero_withholds(col_index):
                   idx=col_index) is None, (
         "a market capitalisation that rounded to 0.0 published a ratio of "
         "0.00, which sorts first on 'cheapest'.")
+
+
+# ── Price freshness: the seven-day product policy ────────────────────────
+
+def _prices_ending(last_day: str) -> pd.Series:
+    """A daily series whose final observation is `last_day`.
+
+    The fixture's fiscal period ends 2025-06-30, so the gap between that and
+    `last_day` is the price age the guard judges.
+    """
+    idx = pd.date_range("2024-01-01", last_day, freq="D")
+    return pd.Series(np.full(len(idx), 4.0), index=idx)
+
+
+def _ratio_with_prices(prices, idx):
+    rows = build_yearly_rows("TST", _financials(40.0), prices,
+                             current_shares=100_000_000.0,
+                             reporting_currency=BASE_CURRENCY)
+    assert rows, "the fixture produced no row at all"
+    return rows[0][idx]
+
+
+@pytest.mark.parametrize("last_day,age,expect_published", [
+    ("2025-06-30", 0, True),    # same day
+    ("2025-06-27", 3, True),    # a weekend
+    ("2025-06-23", 7, True),    # the boundary, inclusive
+    ("2025-06-22", 8, False),   # one day past it
+    ("2025-05-30", 31, False),  # a month
+    ("2023-06-30", 731, False),  # two years, the finding-18 shape
+])
+def test_the_seven_day_boundary(col_index, last_day, age, expect_published):
+    """Independent cases, one per side of the policy and on it.
+
+    The boundary is INCLUSIVE at seven. Stated as a parametrised table so
+    "same day", "the boundary" and "one day past" are three separate recorded
+    facts rather than one assertion that happens to cover them.
+    """
+    value = _ratio_with_prices(_prices_ending(last_day), col_index)
+    if expect_published:
+        assert value is not None, (
+            f"a price {age} days before the period end withheld the ratio; "
+            f"the policy admits up to {MAX_PRICE_AGE_DAYS} days inclusive.")
+    else:
+        assert value is None, (
+            f"a price {age} days before the period end published {value!r}. "
+            f"mc is px * shares, so this divides an old market "
+            f"capitalisation into a current cash flow.")
+
+
+def test_a_row_that_was_eligible_becomes_ineligible(col_index):
+    """The transition, on one company and one fiscal period.
+
+    Same inputs, same period, two price series: the ratio publishes at seven
+    days and is withheld at eight. This is what a company whose feed stops
+    looks like between two runs, and it is the case the store then has to
+    CLEAR -- proved end to end by
+    tests/fixtures/prove_retired_columns_are_emptied.py, which drives the
+    real INSERT and asserts that an incoming NULL removes a stored value.
+    """
+    assert _ratio_with_prices(_prices_ending("2025-06-23"), col_index) is not None
+    assert _ratio_with_prices(_prices_ending("2025-06-22"), col_index) is None
+
+
+def test_no_price_at_all_withholds(col_index):
+    """An empty series selects no observation, so there is no age to judge.
+
+    Absence is not freshness. Asserted separately from "old", because the two
+    reach the guard by different routes -- `_price_observation` returns
+    (None, None) here, and a missing date must refuse on its own rather than
+    by arithmetic on None.
+    """
+    empty = pd.Series(dtype=float, index=pd.DatetimeIndex([]))
+    assert _ratio_with_prices(empty, col_index) is None
+
+
+def test_the_freshness_predicate_rejects_a_future_price():
+    """Unreachable through the producer, asserted anyway.
+
+    `_price_observation` only looks backwards, so the producer cannot hand the
+    guard a date after the period end. The predicate is nonetheless called
+    with dates this module did not select, and a future price would mean a
+    market capitalisation struck after the statements it is divided into.
+
+    Specified independently of the producer path, so the guard's rule is
+    pinned rather than the one route that happens to exercise it.
+    """
+    from compute.engine.yearly_compute import price_is_fresh_enough as fresh
+    end = pd.Timestamp("2025-06-30")
+    assert fresh(end, pd.Timestamp("2025-06-30")) is True
+    assert fresh(end, pd.Timestamp("2025-06-23")) is True
+    assert fresh(end, pd.Timestamp("2025-06-22")) is False
+    assert fresh(end, pd.Timestamp("2025-07-01")) is False, (
+        "a close struck AFTER the period end was accepted")
+    assert fresh(end, None) is False
+    assert fresh(None, pd.Timestamp("2025-06-30")) is False
+    assert fresh(None, None) is False
+
+
+def test_the_policy_threshold_is_seven_calendar_days():
+    """The number is a decision, so it is asserted rather than assumed.
+
+    Changing it has to be a deliberate edit to a test that says what it is
+    for, not a quiet constant change. Seven, against return_windows'
+    HIGH_LOW_GRACE of 14 — a different bound for a different job, and the
+    comparison is recorded so neither is mistaken for the other.
+    """
+    from compute.engine.return_windows import HIGH_LOW_GRACE
+    assert MAX_PRICE_AGE_DAYS == 7
+    assert HIGH_LOW_GRACE == 14, (
+        "the return-window grace moved; the Price/FCF policy is independent "
+        "of it but the comment contrasting them is now wrong")
+
+
+def test_the_selector_has_one_implementation():
+    """`price_at` and the date the guard judges come from one observation.
+
+    The currency predicate had two implementations and they disagreed. The
+    price selection is the same hazard: a second "last close on or before"
+    would drift, and the guard would judge an observation the producer did
+    not use. `price_at` delegates, and this asserts they agree.
+    """
+    from compute.engine.yearly_compute import _price_observation, price_at
+    prices = _prices_ending("2025-06-23")
+    value, when = _price_observation(prices, pd.Timestamp("2025-06-30"))
+    assert value == price_at(prices, pd.Timestamp("2025-06-30"))
+    assert when == pd.Timestamp("2025-06-23")
 
 
 def test_the_stored_scale_matches_the_column_it_describes():

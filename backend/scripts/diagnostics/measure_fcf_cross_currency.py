@@ -100,6 +100,33 @@ WHERE reporting_currency IS NOT NULL
   AND compute_run_id IS NOT NULL
 """
 
+#: THE POPULATIONS HAVE TO RECONCILE BEFORE THE CONTROL MEANS ANYTHING.
+#:
+#: The control ran on rows with `compute_run_id IS NOT NULL` (attributed to a
+#: finalised run, which is where gate 1b's verdicts are recorded) while
+#: fcf_yield's exposure was counted over ALL foreign-reporter rows. 164 vs
+#: 178. Treating "zero guarded ratios on 164 rows" as a control for a finding
+#: measured on 178 compares two populations and calls it one.
+#:
+#: So: what are the 14, and what do they publish? If an unattributed row
+#: publishes a guarded ratio, the gate is not covering it either, and the
+#: control's scope is narrower than the finding's.
+UNATTRIBUTED = """
+SELECT
+    COUNT(*)                         AS unattributed_rows,
+    COUNT(fcf_yield)                 AS publishing_yield,
+    COUNT(price_to_fcf)              AS publishing_p_fcf,
+    COUNT(pe_ratio)                  AS pe_ratio,
+    COUNT(price_to_book)             AS price_to_book,
+    COUNT(ev_to_ebitda)              AS ev_to_ebitda,
+    COUNT(altman_z_score)            AS altman_z_score,
+    COUNT(book_value_per_share)      AS book_value_per_share
+FROM screener.universe
+WHERE reporting_currency IS NOT NULL
+  AND UPPER(TRIM(reporting_currency)) <> 'AUD'
+  AND compute_run_id IS NULL
+"""
+
 
 def _table(cur, sql: str) -> tuple[list[str], list[tuple]]:
     cur.execute(sql)
@@ -146,6 +173,31 @@ def main() -> int:
         cols, crows = _table(cur, CONTROL)
         _show("Q4  CONTROL -- the eight ratios gate 1b already guards",
               cols, crows)
+
+        ucols, urows = _table(cur, UNATTRIBUTED)
+        _show("Q5  RECONCILIATION -- the rows the control did NOT cover",
+              ucols, urows)
+        n_unattr = urows[0][0]
+        print(f"\n  {attributed} attributed + {n_unattr} unattributed = "
+              f"{attributed + n_unattr}, against {foreign} foreign rows "
+              f"{'(reconciles)' if attributed + n_unattr == foreign else '** DOES NOT RECONCILE'}")
+        print("  The control below covers only the attributed rows, because")
+        print("  that is where a finalised run's gate verdicts are recorded.")
+        print("  fcf_yield's exposure was counted over ALL foreign rows, so")
+        print("  the two numbers describe different populations until this")
+        print("  reconciles. Any guarded ratio publishing on an unattributed")
+        print("  row means the control's scope is narrower than the")
+        print("  finding's, and the finding is measured on the wider one.")
+        u_leak = [c for c, v in zip(ucols[3:], urows[0][3:]) if v]
+        if u_leak:
+            print(f"\n  ** the {n_unattr} unattributed rows publish guarded "
+                  f"ratios: {u_leak}")
+            print("     Gate 1b does not reach them. The control holds only")
+            print("     for the attributed subset; say so when citing it.")
+        else:
+            print(f"\n  the {n_unattr} unattributed rows publish no guarded")
+            print("  ratio either, so the control's conclusion extends to the")
+            print("  full foreign-reporter population after all.")
 
         leaking = [c for c, v in zip(cols, crows[0]) if v]
         print()

@@ -96,6 +96,46 @@ def main() -> int:
     I_PFCF = cols.index("p_fcf_ratio")
     I_YLD = cols.index("fcf_yield")
 
+    # ── R3  AN INDEPENDENTLY SPECIFIED EXPECTATION ───────────────────────
+    #
+    # R1 compares this instrument's attribution against the producer's
+    # output. Once both call the SAME currency predicate, R1 can detect
+    # DRIFT between them and cannot detect a WRONG RULE: if
+    # currency_is_coherent started returning True for "USD", the producer
+    # would publish, the instrument would predict publishing, and R1 would
+    # report zero failures over 33,864 rows.
+    #
+    # Sharing the predicate was the right fix for drift and it removed a
+    # check. This puts the check back at a level the sharing cannot reach:
+    # a table of expectations written out here, by hand, against the rule
+    # as decided -- not derived from the implementation.
+    EXPECTED_COHERENCE = {
+        "AUD": True,     # the only unit an AUD market quantity divides into
+        None: False,     # silence establishes no unit (decided 14 Nov 2026)
+        "": False,       # an empty string is silence that survived a strip
+        "USD": False, "NZD": False, "CAD": False, "GBP": False,
+        "EUR": False, "SGD": False, "PGK": False, "IDR": False,
+        "HKD": False, "MYR": False,
+        "aud": False,    # normalisation happens at the FETCH, not here
+        "AU": False, "A$": False,
+    }
+    wrong = {k: yc.currency_is_coherent(k)
+             for k, want in EXPECTED_COHERENCE.items()
+             if yc.currency_is_coherent(k) is not want}
+    if wrong:
+        print("** R3 FAILED. The shared currency predicate does not match the")
+        print("   rule this instrument was written against:")
+        for k, got in wrong.items():
+            print(f"     currency_is_coherent({k!r}) -> {got}, "
+                  f"expected {EXPECTED_COHERENCE[k]}")
+        print("   R1 cannot catch this: the producer and this script call the")
+        print("   same function, so they agree while both being wrong. Either")
+        print("   the rule changed deliberately -- update the table above and")
+        print("   say why -- or it changed by accident.")
+        return 1
+    print(f"R3 holds: the shared currency predicate matches "
+          f"{len(EXPECTED_COHERENCE)} independently specified expectations")
+
     conn = psycopg2.connect(get_database_url_sync())
     try:
         cur = conn.cursor()

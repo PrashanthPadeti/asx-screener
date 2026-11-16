@@ -256,6 +256,87 @@ the writing proof passing while a ratio computed when the company was
 profitable stayed on screen forever — finding 6b returning through the
 column that repaired it.
 
+## Deployment sequence, in this order and no other
+
+The ordering matters and an earlier draft had it wrong. The baseline must
+be emitted by the **candidate** producer against the inputs the canonical
+run consumes. Emitting it from the deployed tree beforehand would record
+the *old* producer's digest, and `--verify` would then correctly reject
+its own baseline after deployment.
+
+```
+1. merge -> main, annotated tag v11.2.86, push both       (release boundary)
+2. on the host:  cd /opt/asx-screener && ./deploy.sh      (owns deployment)
+3. canonical run                                          (recomputes)
+4. --emit   from the DEPLOYED candidate, current inputs    (expectation)
+5. --verify against screener.universe                      (acceptance)
+```
+
+Steps 4 and 5 run back to back so no ingestion falls between them. They
+are not circular: `--emit` recomputes every row by running the producer
+in process over the inputs, and `--verify` compares that against what the
+universe *serves*. If the fingerprint moves between them, `--verify`
+refuses and both are repeated.
+
+The pre-deployment measurement of **471** is the forecast, kept as the
+snapshot it was. It is not the acceptance target; the row-level
+reconciliation is.
+
+## The three-way fingerprint comparison (manual this release)
+
+Adjacent `--emit` and `--verify` protect the interval between themselves.
+They do **not** prove those inputs are the ones the canonical run
+consumed. That link is made explicitly, and the comparison is manual for
+v11.2.86 with its values, run id and result retained here. Automating it
+is follow-up work, not a condition of this release.
+
+**Tied to the run that published the universe being verified**, not to
+the latest successful stage:
+
+```sql
+WITH u AS (SELECT DISTINCT compute_run_id AS run_id
+           FROM screener.universe WHERE compute_run_id IS NOT NULL)
+SELECT s.run_id,
+       s.details->'yearly_source_fingerprint'->>'schema_version',
+       s.details->'yearly_source_fingerprint'->>'aggregate'
+FROM screener.compute_run_stages s JOIN u ON u.run_id = s.run_id
+WHERE s.stage_name='yearly_compute' AND s.status='success';
+```
+
+The distinction is not academic even though it currently makes no
+difference. `proven_by_latest_yearly` answers with the newest successful
+stage; today that is also run 54, so a check built on it would have
+looked correct and been wrong the first time the two diverged. The
+universe must also carry exactly **one** distinct `compute_run_id`, or
+the surface is a mixture and there is no single fingerprint to tie to.
+
+**Before state, recorded 16 Nov 2026:**
+
+| | |
+|---|---|
+| distinct `compute_run_id` on the universe | 1 |
+| universe run id | **54** |
+| that run's recorded schema | **1** |
+| that run's recorded aggregate | `98170b83c84298115a1c5ea5dd90d6f5…` |
+
+**What must hold after:** schema **2** across the artifact header, the
+publishing run's recorded stage, and the live inputs, with the
+**aggregates equal** across those three.
+
+A *different* aggregate from run 54 is **not** independent evidence that
+anything moved, and an earlier draft implied it was. `aggregate_digest`
+hashes `{"v": schema_version, …}`, so the version sits inside the
+aggregate and the bump alone guarantees a new value with byte-identical
+data. What must prevent reuse is the **version mismatch itself**, which
+`check_yearly_reuse` tests *before* the aggregate — deliberately, so the
+diagnosis reads "projection changed" instead of "the fundamentals
+moved".
+
+If the input snapshot cannot be held stable across steps 3–5, the
+completed run's recorded fingerprint is what post-run expectations are
+validated against, and any mismatch invalidates that verification
+attempt rather than being reported as a row difference.
+
 ## Deployment handoff
 
 Nothing changes until a yearly run rewrites the rows, and then the

@@ -323,17 +323,42 @@ Measured 16 Nov 2026, before deployment:
 | of those, latest FY with positive `fcf_yield` (publishability proxy) | **44** |
 | unattributed rows currently serving a `price_to_fcf` | 0 |
 
-The zero is only because v11.2.85 emptied the column. **About 44 served
-Price/FCF values are expected to land on unattributed rows**, outside the
-publishing run's fingerprint coverage, so their provenance has to be
-established before the release closes.
+The zero is only because v11.2.85 emptied the column.
 
-**And `market.yearly_metrics` carries no run id — only `computed_at`.**
-So for those rows provenance cannot be a reference; it can only be the
-run's own coverage proof (`yearly_compute` reports whether every sourced
-yearly row was rewritten by that run) together with `computed_at` falling
-inside the run's window. That is evidence, not a pointer, and it is
-weaker than a pointer. Recorded as **finding 23**.
+**44 is a candidate population, not a forecast.** A positive `fcf_yield`
+establishes none of the seven guards — not strict AUD, not price
+freshness, not a positive market capitalisation, not the ratio bounds.
+The published figure comes from the forecast measurement, which runs the
+producer; this proxy only bounds where to look.
+
+**And missing `compute_run_id` is a missing POINTER, not exclusion from
+the fingerprint** — an earlier draft of this section said otherwise and
+was wrong. Every `financials.*` and `staging_au.*` projection is
+whole-table (`""`, no WHERE clause), and the two bounded projections are
+bounded per company by date. Scoring coverage and yearly-computation
+coverage are different populations, and a row absent from the first can
+be fully inside the second.
+
+`market.yearly_metrics` carries only `computed_at`, so for any
+unattributed row that **does** publish, three things must hold, and a
+timestamp inside the run window is corroboration for none of them:
+
+1. its source inputs are inside the publishing run's fingerprint — which
+   the whole-table projections give, per company;
+2. its exact `(asx_code, fiscal_year)` is covered by the recomputation
+   evidence. The coverage proof is keyed at precisely that grain —
+   `expected_rows = {f"{code}:{year}"}` from `financials.annual_pnl`,
+   compared against the rows written — so "every sourced row was
+   rewritten" is a claim about those exact pairs and not a generic
+   assertion;
+3. its served value equals the independent expectation at storage
+   precision, which the full-universe row reconciliation already covers
+   because it reads every non-NULL `price_to_fcf`.
+
+If that holds, the release goes out with **finding 23** documenting the
+missing durable pointer. If it cannot be established for some row, the
+safeguard is a **scoped publication rule** withholding those rows —
+changing factor-model membership is not required for it.
 
 The full-universe row reconciliation stays as it is, so an extra
 published ratio on an unattributed row cannot escape the comparison by

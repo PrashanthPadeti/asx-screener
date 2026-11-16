@@ -9,11 +9,20 @@ Candidate `3ab4bcb` · baseline `a2d11a2` (main) · branch
 it. The filter, the sort column, the CSV column "P/FCF" and the
 company-detail field all return values once a yearly run has executed.
 
-**Predicted served count: 438 universe rows**, down from the 580 the
-frozen column held before. That number is not a forecast from the inputs
-that happen to be stored — it is the producer's own output over the
-universe's own selection rule, measured before this was written. The
-v11.2.84 forecast missed by 542 rows by doing the opposite.
+**Predicted served count: 471 universe rows** on 16 Nov's data, against
+the 580 the frozen column held before. It is the producer's own output
+over the universe's own selection rule — `ORDER BY fiscal_year DESC LIMIT
+1`, intersected with universe membership — not a forecast from whichever
+inputs happen to be stored. The v11.2.84 forecast missed by 542 rows by
+doing the opposite.
+
+**And the number moves.** The same instrument on the same producer gave
+**438** on 15 Nov and **471** on 16 Nov, because `weekly_pipeline` ran a
+FULL canonical run on Sunday 15 Nov at 21:00 UTC and moved the
+fundamentals underneath it. A served-row count is a function of data that
+changes weekly, so it is only an acceptance criterion against a baseline
+measured **immediately before** the run it gates. Quoting 438 two days
+later would have produced a miss and an explanation.
 
 ## The populations, measured over all 33,864 yearly rows
 
@@ -228,7 +237,7 @@ becomes assessable — so the rule gets **moved** rather than duplicated.
 
 | | |
 |---|---|
-| **Gate** | candidate 147 files — 145 passed, 2 failed, **0 inconclusive**; baseline 146 files — 144 passed, 2 failed. **INTRODUCED: none.** Both failures pre-existing at the baseline. P0 primary-feature contracts hold. `EXIT=0` |
+| **Gate** | **no detected regression under this gate** — see the paragraph below for what that does and does not establish |
 | **Contract** | `test_price_to_fcf_contract.py` 26/26 under pytest **and** 26/26 as a standalone script |
 | **Statement** | `test_yearly_upsert_empties_retired_columns.py` 12/12. `p_fcf_ratio` in the written list and **not** in the NULL list; both halves asserted |
 | **Behaviour** | the fixture distinguishes **four** outcomes now: 12.34 preserved, NULL still retired, 7.5 written — and a second act proves an incoming NULL **clears** a stored 7.5 |
@@ -298,6 +307,131 @@ universe must be rebuilt **through the canonical driver**.
    The last two together are finding 17 made visible: the same companies,
    one column declining and its reciprocal publishing.
 
+## Finding 18 reaches this column. There is no predicate that stops it.
+
+I wrote that finding 18 was "not a Price/FCF defect". That is
+indefensible and withdrawn:
+
+```
+p_fcf = mc / fcf
+mc    = px * shares
+px    = price_at(prices, period_end)
+```
+
+**There is no freshness predicate anywhere in this producer** — not in
+the six Price/FCF guards, not in `mc`, not in `price_at`. A stale price
+reaches the restored ratio exactly as it reaches P/E. The only
+defensible claim is the narrower one: this release adds no *new*
+exposure, because the column inherits the same `px` as its eleven
+siblings. An exclusion must be shown by a predicate, and there is none.
+
+**Documented freshness limit: none.** So "the count exceeding the limit"
+is reported against candidate thresholds rather than answered with a
+figure that would imply a limit exists.
+
+### Measured on the 471 served rows
+
+| | |
+|---|---|
+| median | 0 days |
+| p75 / p95 / p99 | 0 / 0 / 0 days |
+| **max** | **4 days** |
+
+The four oldest, with the ratio each produced:
+
+```
+PMM  FY2025  period end 2025-06-30  price 2025-06-26   4d   37.0
+CTD  FY2024  period end 2024-06-30  price 2024-06-28   2d   15.9105
+IME  FY2025  period end 2025-12-31  price 2025-12-30   1d   85.375
+JMS  FY2026  period end 2026-02-28  price 2026-02-27   1d   42.1558
+```
+
+### Coverage impact of a scoped withholding rule
+
+| threshold | withheld | remaining | % lost |
+|---|---|---|---|
+| 7d | 0 | 471 | 0.0% |
+| 30d | 0 | 471 | 0.0% |
+| 90d | 0 | 471 | 0.0% |
+| 180d | 0 | 471 | 0.0% |
+| 365d | 0 | 471 | 0.0% |
+| 730d | 0 | 471 | 0.0% |
+
+**Zero at every threshold.** The 6,644-day cases are old fiscal years of
+companies whose price feed stopped; the served row is a company's *latest*
+fiscal year, and a company with a recent year and positive free cash flow
+is still trading, so its price history reaches its period end.
+
+So: the mechanism is present and the exposure is nil. A scoped rule would
+cost nothing and would also protect nothing today — unexercised machinery
+in the release's critical path, deepening the asymmetry of finding 20 for
+no measured benefit. **Recommendation: do not add it in this release.**
+P11 is now a standing instrument output, so a non-zero appears the moment
+one exists, and finding 18's real repair is table-wide.
+
+### Currency provenance of the served rows: INFERRED, not established
+
+For all 471. `staging_au.fundamentals` is `UNIQUE (asx_code)`: one row,
+one `reporting_currency`, read from whichever of Income_Statement /
+Balance_Sheet / Cash_Flow first carries a `currency_symbol` **in the
+latest snapshot**, applied to every fiscal year. Measured alongside it:
+**0** served rows have a fiscal year older than the company's most recent
+reported year, so the inference spans no gap on the served set today —
+but it is still an inference. Finding 19.
+
+## What "the gate result" does and does not establish
+
+**It establishes no detected regression under this gate.** It does not
+establish correctness, and "gated clean" overstated it.
+
+| | candidate | baseline |
+|---|---|---|
+| files | 147 | 146 |
+| passed | 145 | 144 |
+| failed | 2 | 2 |
+| inconclusive | **0** | 0 |
+
+INTRODUCED: none. REPAIRED: none. UNVERIFIABLE: none. P0 primary-feature
+contracts hold. `EXIT=0`.
+
+The two failures, by name, relevance and disposition:
+
+**`test_company_reads_are_current.py::test_no_new_ingestion_script_joins_the_base_table`**
+— `scripts/stm/universe_prose.py` and `scripts/stm/universe_sidecars.py`
+read `market.companies` unbounded and are not in the frozen legacy set.
+Relevance to this release: **none** — both are STM documentation
+generators, and the test's own docstring explains that an unbounded
+worklist read "costs a repeated download, not a wrong number".
+Disposition: pre-existing at the baseline, unchanged by this candidate,
+not touched by it.
+
+**`test_no_bindparam_followed_by_cast.py::test_no_bind_parameter_is_followed_by_a_double_colon_cast`**
+— one offender, `scripts/stm/census_unwritten.py:85`, `SELECT
+%s::regclass::oid`. **This is a false positive.** The matcher is
+`BAD = r':[a-zA-Z_]\w*::[a-zA-Z]'`, which matches `:regclass::o` inside a
+psycopg2 **double cast**; the script uses `%s` placeholders and has no
+named bind parameter at all. The suite's own docstring warns about this
+class — "a matcher reading its own explanation as the offence it warns
+about" — and the executable AST-based property in the same file passes.
+Disposition: pre-existing, a textual-matcher false positive in
+diagnostics tooling, not a defect in the product and not blocking.
+
+**The two Markdown-only commits were not re-gated separately.** The
+executable tree is identical: `git diff --stat` between the gated SHA and
+HEAD touches `database/stm/OPEN_FINDINGS.md` and this file only.
+
+## The fingerprint bump recomputes rather than refuses — verified in code
+
+`run_plans.check_yearly_reuse` returns `ReuseDecision(False, ...)` on a
+schema mismatch, with the diagnosis *"fingerprint projection changed
+(schema 1 → 2); the recorded fingerprint is not comparable and says
+nothing about whether the sources moved"*. A refusal of **reuse**, not a
+run failure — so `DAILY_CANONICAL` promotes to the full plan and
+recomputes. The version is checked before the aggregate purely so the
+message does not send someone looking for a source correction that never
+happened. **Still to be confirmed in production** on the first run after
+deploy; it is an acceptance criterion, not a settled fact.
+
 ## Not closed by this release
 
 - **Finding 17** — `fcf_yield` carries the same unit mismatch, is
@@ -305,9 +439,9 @@ universe must be rebuilt **through the canonical driver**.
   167 of 178 foreign-reporter rows publish it, 78 inside the scored
   population**, so it moves a ranking rather than merely displaying.
   Fixing it changes scores under a frozen version name, so it needs V4.
-- **Finding 18** — `price_at` has no floor. Median 0 days, p95 2, **max
-  6,644**; FDR's FY2021 metrics come from a close struck in 2003. Reaches
-  every price-anchored ratio in the table, not this one. Its own release.
+- **Finding 18** — `price_at` has no floor. See the section above: the
+  mechanism reaches Price/FCF, the measured exposure on served rows is
+  nil, and the sibling-wide repair is its own release.
 - **Finding 19** — one reporting currency per company, from the latest
   snapshot, applied to all history. Not fixable from this source.
 - **Finding 20** — the P/E-publishes-where-Price/FCF-does-not

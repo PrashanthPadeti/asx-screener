@@ -53,6 +53,9 @@ from app.core.db import get_database_url_sync  # noqa: E402
 # Pure period arithmetic, kept out of this module so it can be
 # exercised without a database credential.
 from compute.engine.periods import average_over  # noqa: E402
+# The one definition of the base currency. Imported rather than restated so a
+# Price/FCF guard here cannot drift from applicability gate 1b's "AUD".
+from compute.engine.applicability import BASE_CURRENCY  # noqa: E402
 
 
 # Cast PostgreSQL NUMERIC → Python float automatically
@@ -328,6 +331,74 @@ def fetch_current_shares(cur, asx_code: str) -> Optional[float]:
     return float(row[0]) if row and row[0] is not None else None
 
 
+#: Decimal places `market.yearly_metrics.p_fcf_ratio` stores.
+#: NUMERIC(10,2) — database/migrations/008_compute_metrics_tables.sql.
+#: Asserted against that DDL by the Price/FCF contract, so the constant
+#: cannot drift from the column it describes.
+P_FCF_STORED_SCALE = 2
+
+#: The smallest Price/FCF the column can hold without rounding to zero.
+#: A positive ratio below this is withheld, never stored as 0.00: a
+#: fabricated zero sorts first on "cheapest" and is indistinguishable from
+#: a measured one.
+P_FCF_MIN_REPRESENTABLE = 0.5 * 10 ** -P_FCF_STORED_SCALE   # 0.005
+
+
+def currency_is_coherent(reporting_currency: Optional[str]) -> bool:
+    """Can an AUD market quantity be divided by this company's statements?
+
+    Only a stated AUD. A foreign currency has no common unit with an AUD
+    market capitalisation, and an unstated one establishes no unit at all --
+    see THE SILENCE RULE in build_yearly_rows for the measurement that decided
+    the second half.
+
+    IT IS A FUNCTION BECAUSE IT HAD BEEN RESTATED. The predicate lived inline
+    in build_yearly_rows and a copy of it lived in
+    measure_p_fcf_populations.py. When the rule changed, the producer went
+    strict and the instrument stayed permissive; the instrument's own
+    reconciliation caught it and voided its report, which is the good outcome
+    of a bad arrangement. A predicate with two implementations has two
+    answers. There is now one, and everything that needs it calls this.
+    """
+    return reporting_currency == BASE_CURRENCY
+
+
+def fetch_reporting_currency(cur, asx_code: str) -> Optional[str]:
+    """The currency the STATEMENTS are stated in, upper-cased, or None.
+
+    Not the listing currency: ``General.CurrencyCode`` reads AUD for BHP,
+    whose financials are in USD. This is the same column and the same source
+    the universe build reads for applicability gate 1b.
+
+    ``None`` means the source stated nothing, which is NOT read as AUD here.
+    Silence and a stated foreign currency have opposite consequences, so they
+    stay distinguishable at this boundary; what the CALLER does with silence is
+    the caller's rule, not this function's.
+
+    ONE ROW PER COMPANY, AND ONE CURRENCY FOR ALL OF ITS HISTORY.
+    ``staging_au.fundamentals`` is ``UNIQUE (asx_code)``, so this returns the
+    only row there is -- but the value describes the LATEST snapshot's
+    statements, and the caller applies it to every fiscal year that company
+    has. The source carries no per-period currency, so there is nothing better
+    to read; the limitation is real and is recorded as a finding rather than
+    disguised. ``ORDER BY asx_code`` makes the single-row assumption explicit
+    instead of resting on a bare ``LIMIT 1``, which reads as "any row will do"
+    and would quietly pick one at random if that uniqueness ever lapsed.
+    """
+    cur.execute("""
+        SELECT reporting_currency
+        FROM staging_au.fundamentals
+        WHERE asx_code = %s
+        ORDER BY asx_code
+        LIMIT 1
+    """, [asx_code])
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    text = str(row[0]).strip().upper()
+    return text or None
+
+
 def fetch_all_prices(cur, asx_code: str) -> pd.Series:
     """
     Fetch ALL daily closing prices for a stock in a SINGLE query.
@@ -363,13 +434,77 @@ def fetch_all_prices(cur, asx_code: str) -> pd.Series:
     return pd.Series(closes, index=dates, name="close").dropna()
 
 
-def price_at(prices: pd.Series, target_date) -> Optional[float]:
-    """Last close on or before target_date from pre-fetched Series."""
+#: How old the close anchoring a Price/FCF may be, in CALENDAR days.
+#:
+#: PRODUCT POLICY, NOT A VENDOR GUARANTEE. Nothing in the feed promises a
+#: quote within a week of any fiscal period end; this is the age at which we
+#: decline to call a market capitalisation current, decided on 16 Nov 2026.
+#:
+#: Seven, against `return_windows.HIGH_LOW_GRACE = 14`, and the difference is
+#: deliberate. That grace absorbs exchange closures across a multi-year
+#: window, where a fortnight is a rounding error. This one anchors a market
+#: capitalisation to a single fiscal period end, where it is the measurement.
+#: Measured on the 471 served rows before the limit was chosen: median 0 days,
+#: p99 0, max 4 -- so seven is clear of every real observation while still
+#: bounding the 6,644-day anchors finding 18 found in the wider table.
+#:
+#: Scoped to Price/FCF. Its eleven price-anchored siblings remain unbounded,
+#: which is finding 18 and a release of its own.
+MAX_PRICE_AGE_DAYS = 7
+
+
+def _price_observation(prices: pd.Series, target_date):
+    """(close, date) of the last observation on or before target_date.
+
+    ONE SELECTOR. `price_at` returns the value and the Price/FCF freshness
+    guard needs the date, and those must be the same observation -- a second
+    implementation of "last close on or before" would drift from this one the
+    way the currency predicate did, and the guard would then be judging an
+    observation the producer did not use.
+    """
     if prices.empty:
-        return None
+        return (None, None)
     tgt = pd.Timestamp(target_date)
     subset = prices[prices.index <= tgt]
-    return float(subset.iloc[-1]) if not subset.empty else None
+    if subset.empty:
+        return (None, None)
+    return (float(subset.iloc[-1]), subset.index[-1])
+
+
+def price_at(prices: pd.Series, target_date) -> Optional[float]:
+    """Last close on or before target_date from pre-fetched Series."""
+    return _price_observation(prices, target_date)[0]
+
+
+def price_is_fresh_enough(period_end, price_date) -> bool:
+    """Is this close recent enough to anchor a Price/FCF to that period?
+
+        0 <= period_end - price_date <= MAX_PRICE_AGE_DAYS
+
+    Three refusals, and they are not interchangeable:
+
+      price_date is None    no observation was selected at all, so there is
+                            nothing whose age could be judged. Absence is not
+                            freshness.
+      age > 7               the close predates the period end by more than a
+                            week. `price_at` has no floor, so this is the
+                            only thing standing between a fiscal year and a
+                            quote struck years earlier.
+      age < 0               the close is AFTER the period end. Unreachable
+                            through `_price_observation`, which only looks
+                            backwards -- and asserted anyway, because the
+                            predicate is also called with dates this module
+                            did not select, and a future price would mean a
+                            market capitalisation from after the statements
+                            it is divided into.
+
+    Calendar days, not trading days. What the bound absorbs is a weekend or a
+    public holiday at the period end, and those are counted in days.
+    """
+    if period_end is None or price_date is None:
+        return False
+    age = (pd.Timestamp(period_end) - pd.Timestamp(price_date)).days
+    return 0 <= age <= MAX_PRICE_AGE_DAYS
 
 
 def price_window(prices: pd.Series, period_end) -> pd.Series:
@@ -570,7 +705,8 @@ def consecutive_div_years(df: pd.DataFrame) -> int:
 
 def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
                       prices: pd.Series,
-                      current_shares: Optional[float] = None) -> list[tuple]:
+                      current_shares: Optional[float] = None,
+                      reporting_currency: Optional[str] = None) -> list[tuple]:
     """
     For each fiscal_year row, compute all metrics.
     prices:         full daily close history fetched once by caller.
@@ -578,6 +714,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
                     when annual_balance_sheet.shares_outstanding is NULL —
                     EODHD does not provide per-share data for ASX income
                     statements, so we approximate EPS from net_profit / shares.
+    reporting_currency: the unit the statements are stated in, or None when
+                    the source stated nothing. Read by p_fcf_ratio only; see
+                    the Price/FCF block for why that metric needs it and the
+                    other ratios here do not.
     """
     if fin.empty:
         return []
@@ -711,7 +851,10 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         fcf_margin    = _div(fcf, rev)
 
         # ── Price at fiscal year end (in-memory lookup) ────────────────────
-        px = price_at(prices, ped)
+        # The date comes back with the value because the Price/FCF freshness
+        # guard judges the observation this line selected, not a second
+        # lookup of the same rule.
+        px, px_date = _price_observation(prices, ped)
         mc = round(px * shares / 1e6, 2) if (px and shares) else None
 
         # ── Profitability ──────────────────────────────────────────────────
@@ -756,6 +899,225 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         ev_ebit   = _clamp(_div(ev,  ebit))
         ev_rev    = _clamp(_div(ev,  rev))
         fcf_yield = _clamp(_div(_div(fcf, shares / 1e6 if shares else None), px))
+
+        # ── Price / FCF ───────────────────────────────────────────────────
+        #
+        # Restored in v11.2.86. Every value this column held before was
+        # written by a code path that no longer exists, so the repair emptied
+        # it and this is what fills it again.
+        #
+        # ONE PAIR, NOT ONE DERIVED FROM THE OTHER. p_fcf is the reciprocal
+        # of fcf_yield above -- both are fcf against mc -- so it is computed
+        # from the same mc and fcf rather than as 1/fcf_yield. _div rounds to
+        # 4dp, so a yield of 0.00003 stores as 0.0000, and a reciprocal taken
+        # from the stored value would divide by zero on exactly the companies
+        # whose ratio is largest. Reading a rounded output as an input is how
+        # a presentation becomes a second producer.
+        #
+        # They are both anchored to the fiscal year end, not to today: px is
+        # price_at(prices, ped) and fcf is the annual cash-flow figure for the
+        # same period. There is no period mismatch to disclose.
+        #
+        # FIVE WAYS TO DECLINE, and they are different facts:
+        #
+        #   fcf is None / mc is None   an input is missing. Nothing to divide.
+        #
+        #   mc <= 0                    a PRESENT input that cannot be a
+        #                              numerator. mc is px * shares, and the
+        #                              truthiness test that builds it already
+        #                              drops px == 0 and shares == 0, so this
+        #                              can only fire on a negative price or a
+        #                              negative share count -- both impossible
+        #                              as facts and both representable in the
+        #                              source. The guard is explicit because
+        #                              `mc is not None` was NOT the stated
+        #                              policy: the policy is a positive market
+        #                              capitalisation, and a condition that
+        #                              happens to coincide with the policy
+        #                              through two other expressions' internals
+        #                              is not the policy being enforced.
+        #
+        #   fcf <= 0                   NOT a missing input -- a reported one
+        #                              that makes the ratio meaningless. A
+        #                              company burning cash gets a NEGATIVE
+        #                              Price/FCF, which sorts FIRST on a
+        #                              "cheapest" ascending screen while
+        #                              describing a company with no free cash
+        #                              flow at all. fcf_yield publishes the
+        #                              same fact safely because -4% reads as
+        #                              bad; -4x reads as cheap.
+        #
+        #                              Zero is excluded TWICE and the
+        #                              duplication is deliberate. `_div`
+        #                              returns None on a zero denominator, so
+        #                              `fcf > 0` is redundant for exactly
+        #                              fcf == 0 -- mutating it to `>= 0`
+        #                              changes no output, and the mutation run
+        #                              records that survivor as equivalent
+        #                              rather than as a gap. The explicit test
+        #                              stays because it carries the INTENT:
+        #                              zero free cash flow is declined for the
+        #                              same reason negative is, and a reader
+        #                              should not have to know _div's internals
+        #                              to see that. test_div_returns_none_on_
+        #                              zero_denominator pins the second
+        #                              guarantee so it cannot quietly become
+        #                              the only one.
+        #
+        #   non-AUD reporting currency an AUD market capitalisation over a
+        #                              foreign-currency cash flow has no unit.
+        #                              Gate 1b suppresses exactly this for
+        #                              eight other ratios, but it only runs on
+        #                              governed metrics and model
+        #                              constituents; p_fcf_ratio is neither,
+        #                              and FACTOR_MODEL_V3 is frozen by 13
+        #                              finalised runs, so it cannot become one
+        #                              without a V4. Declaring it in
+        #                              CROSS_CURRENCY would have been inert.
+        #                              The guard therefore lives HERE, where
+        #                              it is reached, and the value is never
+        #                              computed rather than computed and
+        #                              masked downstream.
+        #
+        #   no currency stated         DECLINED TOO -- see THE SILENCE RULE
+        #                              below. This is the one guard that is a
+        #                              policy choice rather than arithmetic,
+        #                              and it was decided on a measurement.
+        #
+        #   price older than 7 days   the close anchoring mc predates the
+        #   (or missing, or future)   fiscal period end by more than a week,
+        #                              or no close was selected, or it falls
+        #                              after the period end. `price_at` has
+        #                              no floor -- "last close on or before"
+        #                              reaches back arbitrarily far for a
+        #                              company whose price feed stopped, and
+        #                              finding 18 measured anchors up to
+        #                              6,644 days old in this table. mc is
+        #                              px * shares, so an old px is an old
+        #                              market capitalisation divided into a
+        #                              current cash flow.
+        #
+        #                              Added 16 Nov 2026 as PRODUCT POLICY.
+        #                              Measured cost on the served rows at
+        #                              the time: ZERO at every threshold from
+        #                              7 to 730 days, because a company with
+        #                              a recent fiscal year and positive free
+        #                              cash flow is still trading. The guard
+        #                              is therefore not protecting rows that
+        #                              exist today -- it is protecting
+        #                              SUBSEQUENT runs, when a company stops
+        #                              trading while its last statements stay
+        #                              in the window the universe selects.
+        #                              Its population is expected to be 0 and
+        #                              the instrument reports it, so a
+        #                              non-zero is visible rather than
+        #                              inferred.
+        #
+        #                              Scoped to this column. The eleven
+        #                              price-anchored siblings stay unbounded
+        #                              -- that is finding 18, and bounding
+        #                              them all at once is its own release
+        #                              with its own population.
+        #
+        #   |mc / fcf| > 9,999         _clamp declines it. Not an overflow
+        #                              guard on THIS column: p_fcf_ratio is
+        #                              NUMERIC(10,2) and holds up to
+        #                              99,999,999.99. 9,999 is the editorial
+        #                              threshold every NUMERIC(10,2) valuation
+        #                              ratio in this function already uses
+        #                              (pe, pb, ps, ev_ebitda, ev_ebit,
+        #                              ev_revenue), and p_fcf uses it to match
+        #                              them rather than to protect the column.
+        #                              _clamp SUPPRESSES -- it returns None, it
+        #                              does not substitute a boundary value, so
+        #                              no customer ever sees 9,999.00 standing
+        #                              in for something larger. The name is
+        #                              misleading and the behaviour is the one
+        #                              documented here.
+        #
+        #                              It bites asymmetrically against
+        #                              fcf_yield, which is NUMERIC(8,4): a
+        #                              company whose ratio exceeds 9,999 has a
+        #                              yield under 0.0001, which rounds to
+        #                              0.0000 and publishes. So at the extreme
+        #                              the pair disagrees -- a near-zero yield
+        #                              shown, no ratio. Recorded, measured, and
+        #                              not silently reconciled.
+        #
+        # THE SILENCE RULE (decided 14 Nov 2026, on the measurement).
+        #
+        # Publishing requires a STATED AUD. An unstated currency withholds.
+        #
+        # The first candidate published on silence, arguing that an unknown
+        # currency is not evidence of a mismatch. True, and beside the point:
+        # publishing a ratio asserts its unit, and silence establishes no
+        # unit. The source contract says so in writing --
+        # backend/migrations/add_reporting_currency.sql: "NULL is meaningful
+        # and is NOT a default of 'AUD'". The producer was reading it as one.
+        #
+        # Measured over 33,864 rows before the rule was chosen: 1,261 of the
+        # 6,938 publishable rows (18%) published ONLY because the currency was
+        # unstated, and roughly 13% of statement-bearing ASX companies report
+        # in a foreign currency -- so about 160 of those 1,261 were wrong by
+        # an exchange rate, with nothing in the row to say so. Withholding
+        # 1,261 rows of coverage is recoverable; 160 wrong ratios are wrong.
+        #
+        # THE COST IS AN INCONSISTENCY, AND IT IS DELIBERATE. unit_gate makes
+        # the permissive choice for the eight ratios it covers, so Price/FCF
+        # is now withheld on rows where P/E publishes for the identical
+        # reason. Those eight are governed model constituents: changing them
+        # moves composite scores under a version name 13 finalised runs
+        # reference, which needs FACTOR_MODEL_V4 and is a separate release.
+        # The inconsistency is in the conservative direction, it is recorded
+        # as a finding rather than resolved by relaxing the safer side, and
+        # new code does not join a known defect to look tidy.
+        #
+        # SCOPE OF THE CURRENCY FACT. The source states one currency per
+        # COMPANY, read from whichever of Income_Statement / Balance_Sheet /
+        # Cash_Flow first carries a currency_symbol, in the latest snapshot.
+        # There is no per-fiscal-year currency anywhere in the source, so this
+        # one value is applied to every historical year of that company. A
+        # company that changed presentation currency has its earlier years
+        # judged by its current one. That is a limit of the source, it is the
+        # same limit gate 1b has for all eight ratios it covers, and it is
+        # recorded as a finding rather than hidden behind a per-row lookup that
+        # would only look per-row.
+        #
+        # Every route produces NULL. The reason is not machine-readable,
+        # because an ungoverned column has no sidecar to carry a cause -- that
+        # is a real limit of restoring this without a model version, and it is
+        # recorded as such rather than papered over.
+        currency_coherent = currency_is_coherent(reporting_currency)
+        p_fcf = (_clamp(_div(mc, fcf))
+                 if (mc is not None and mc > 0
+                     and fcf is not None and fcf > 0
+                     and currency_coherent
+                     and price_is_fresh_enough(ped, px_date))
+                 else None)
+        # UNDERFLOW, the mirror of _clamp's overflow, AND A CORRECTED
+        # DIAGNOSIS.
+        #
+        # Found by measuring the published distribution rather than the count:
+        # the minimum published ratio printed as 0.00. A zero sorts ahead of
+        # EVERYTHING on an ascending "cheapest first" screen -- further
+        # forward than the negatives the fcf <= 0 guard exists to keep out --
+        # and it is not a measurement, it is a real ratio that fell below the
+        # stored precision.
+        #
+        # The first guard here tested `p_fcf == 0`, on the theory that _div's
+        # 4dp rounding produced the zero. IT DID NOT, and the guard caught
+        # nothing: over 33,864 rows, zero rows had _div return 0.0, while the
+        # published minimum was still under 0.005. The rounding that destroys
+        # the value happens at the COLUMN -- p_fcf_ratio is NUMERIC(10,2), so
+        # _div's 0.0001 is stored as 0.00. The guard was built on an
+        # explanation of the mechanism, the explanation was wrong, and a
+        # guard built on a wrong explanation passes while the defect ships.
+        #
+        # So the threshold is the column's, not _div's: anything that would
+        # round to zero at 2dp is withheld rather than stored as a fabricated
+        # 0.00, for the same reason _clamp substitutes nothing at the top end.
+        if p_fcf is not None and p_fcf < P_FCF_MIN_REPRESENTABLE:
+            p_fcf = None
         earn_yld  = _clamp(_div(eps, px))
         div_yld   = _clamp(_div(dps, px))
         payout    = _clamp(_div(dps, eps) if (eps and eps > 0) else None)
@@ -1010,7 +1372,8 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
             px, mc,
             int(shares) if shares and np.isfinite(shares) else None,
             # Valuation
-            pe, pb, ps, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield, graham,
+            pe, pb, ps, ev, ev_eb, ev_ebit, ev_rev, earn_yld, fcf_yield,
+            p_fcf, graham,
             # Per share
             eps, _f(row.get("eps_diluted")), bvps, dps, fpc,
             # Dividend
@@ -1083,7 +1446,7 @@ INSERT_SQL = """
         market_cap, shares_outstanding,
         pe_ratio, pb_ratio, ps_ratio,
         enterprise_value, ev_ebitda, ev_ebit, ev_revenue,
-        earnings_yield, fcf_yield, graham_number,
+        earnings_yield, fcf_yield, p_fcf_ratio, graham_number,
         eps, eps_diluted, bvps, dps, franking_pct,
         dividend_yield, franked_yield, payout_ratio,
         dividend_cagr_3y, dividend_cagr_5y, dividend_consecutive_yrs,
@@ -1138,6 +1501,7 @@ INSERT_SQL = """
         ev_revenue              = EXCLUDED.ev_revenue,
         earnings_yield          = EXCLUDED.earnings_yield,
         fcf_yield               = EXCLUDED.fcf_yield,
+        p_fcf_ratio             = EXCLUDED.p_fcf_ratio,
         graham_number           = EXCLUDED.graham_number,
         eps                     = EXCLUDED.eps,
         eps_diluted             = EXCLUDED.eps_diluted,
@@ -1286,7 +1650,10 @@ INSERT_SQL = """
         -- default, verified against the schema snapshot, so a new row
         -- already arrives NULL. Only the conflict path was preserving them.
         pcf_ratio                 = NULL,
-        p_fcf_ratio               = NULL,
+        -- p_fcf_ratio left this list in v11.2.86. It is written again, from
+        -- the Price/FCF block in build_yearly_rows, and so appears in the
+        -- EXCLUDED assignments above instead. The partition test is what
+        -- keeps the two lists from both claiming it.
         ev_fcf                    = NULL,
         peg_ratio                 = NULL,
         ncavps                    = NULL,
@@ -1556,7 +1923,11 @@ def main():
             # ── Current shares (proxy for historical EPS derivation) ───────
             current_shares = fetch_current_shares(cur, asx_code)
 
-            rows = build_yearly_rows(asx_code, fin, prices, current_shares)
+            # ── Reporting currency (the Price/FCF unit guard) ──────────────
+            reporting_currency = fetch_reporting_currency(cur, asx_code)
+
+            rows = build_yearly_rows(asx_code, fin, prices, current_shares,
+                                     reporting_currency)
             if not rows:
                 skipped += 1
                 continue

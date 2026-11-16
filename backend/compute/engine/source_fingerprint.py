@@ -37,6 +37,7 @@ off the code, not guessed:
     financials.annual_cashflow       LEFT JOIN on (asx_code, fiscal_year)
     market.dividends                 LATERAL, for derived DPS and franking
     staging_au.shares_stats          the per-share proxy
+    staging_au.fundamentals          reporting_currency, the Price/FCF unit
     market.daily_prices              per-fiscal-year price metrics
 
 A fingerprint of `annual_pnl` alone would certify stale yearly output after a
@@ -94,7 +95,17 @@ from typing import Mapping, Optional
 #: a reason that has nothing to do with the data, and reuse would be refused --
 #: or, far worse if a projection ever narrows, wrongly permitted. The version
 #: is part of the aggregate, so a mismatch is visible rather than mysterious.
-FINGERPRINT_SCHEMA_VERSION = 1
+#:
+#: 1 → 2 in v11.2.86: staging_au.fundamentals (reporting_currency) joined the
+#: projections, because p_fcf_ratio made the currency an input. Without the
+#: bump, `differences()` would report the new table as "present in only one
+#: fingerprint" -- true, but it reads as a data movement when in fact the
+#: FUNCTION changed, and the two aggregates were never measuring the same
+#: thing. OPERATIONAL CONSEQUENCE: the first canonical run after this deploys
+#: compares against a version-1 fingerprint, correctly reports "not
+#: comparable", refuses to reuse market.yearly_metrics, and recomputes. That
+#: refusal is the designed behaviour and not a fault.
+FINGERPRINT_SCHEMA_VERSION = 2
 
 #: Field separator inside a row projection. A unit separator cannot occur in a
 #: code, a date or a rendered number, so two different rows can never render
@@ -210,6 +221,23 @@ PROJECTIONS: dict[str, tuple[list[str], str]] = {
     ], "WHERE ex_date <= " + _LATEST_PERIOD_END.format(alias="market.dividends")),
 
     "staging_au.shares_stats": (["asx_code", "shares_outstanding"], ""),
+
+    # Added v11.2.86, when p_fcf_ratio made yearly_compute read a currency.
+    # TWO COLUMNS ONLY, and the narrowness is the point: this table also holds
+    # `raw_json`, `snapshot_date`, `loaded_at` and `checksum`, every one of
+    # which moves on a fundamentals reload whether or not a single consumed
+    # value changed. Projecting the table would make DAILY_CANONICAL promote
+    # itself to the full plan after every load -- the exact failure the two
+    # scoped tables below are shaped to avoid. Projecting the pair the
+    # computation actually consumes makes reuse refuse when, and only when,
+    # a company's stated reporting currency moves.
+    #
+    # It has to be here at all because the currency is an INPUT to Price/FCF,
+    # not a presentation of it. A company that restates from USD to AUD
+    # changes the correct value of every p_fcf_ratio row it has, and without
+    # this entry the fingerprint would match, reuse would be granted, and the
+    # stored ratios would stay as they were computed under the old currency.
+    "staging_au.fundamentals": (["asx_code", "reporting_currency"], ""),
 
     "market.daily_prices": ([
         "asx_code",

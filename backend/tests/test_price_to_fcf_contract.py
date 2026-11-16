@@ -1,0 +1,805 @@
+"""
+Price/FCF publishes under one contract, or not at all
+=====================================================
+`p_fcf_ratio` was emptied in v11.2.85 because every value it held came from
+a code path that no longer existed. v11.2.86 gives it a producer again, and
+this file is the contract that producer must satisfy.
+
+The contract has one publishing case and three declining ones, and the
+three are NOT interchangeable:
+
+    fcf > 0, inputs present, AUD     publish mc / fcf
+    an input is missing              NULL -- nothing to divide
+    fcf <= 0                         NULL -- a REPORTED input that makes
+                                     the ratio meaningless, not a missing
+                                     one
+    reporting currency is foreign    NULL -- an AUD market capitalisation
+                                     over a foreign cash flow has no unit
+
+WHY fcf <= 0 IS THE INTERESTING ONE
+
+A negative Price/FCF is not merely odd, it is actively misleading in the
+one place customers meet it. The screener sorts this column, and ascending
+order means "cheapest first". A company that burned $40m of cash against a
+$400m market capitalisation gets -10.0, which sorts AHEAD of a genuinely
+cheap company at 4.0. The worse the cash burn, the closer to zero and the
+cheaper it looks; a company that burned almost nothing sorts worst of all.
+
+`fcf_yield` publishes the same fact safely, because -10% reads as bad to
+everyone and -10x reads as cheap. That asymmetry is why these two
+reciprocal metrics do NOT share a guard, and the test below pins it so a
+later "consistency" refactor cannot quietly align them.
+
+WHY THE CURRENCY GUARD IS HERE AND NOT IN CROSS_CURRENCY
+
+Applicability gate 1b suppresses exactly this mismatch for eight ratios.
+It runs on `governed | model_constituents`, and p_fcf_ratio is neither.
+FACTOR_MODEL_V3 is frozen by finalised production runs, so it cannot join
+GOVERNED_METRICS without a V4. Declaring it in CROSS_CURRENCY would have
+been an entry no code path reads -- declared, not enforced. So the guard
+lives in the producer, where it is reached, and the test asserts the
+BEHAVIOUR rather than the declaration.
+"""
+
+import os
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+BACKEND = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(BACKEND))
+
+# yearly_compute resolves DATABASE_URL_SYNC at MODULE scope, so importing
+# build_yearly_rows -- a pure function over a DataFrame -- needs the variable
+# to exist. setdefault, never an assignment: on the gate and in CI a real URL
+# is already present and must win. Nothing here opens a connection.
+os.environ.setdefault("DATABASE_URL_SYNC",
+                      "postgresql://unused@127.0.0.1:1/unused")
+
+from compute.engine.yearly_compute import (          # noqa: E402
+    INSERT_SQL, build_yearly_rows,
+)
+from compute.engine.applicability import (           # noqa: E402
+    BASE_CURRENCY, CROSS_CURRENCY,
+)
+from compute.engine.yearly_compute import (          # noqa: E402
+    MAX_PRICE_AGE_DAYS,
+)
+
+COLUMN = "p_fcf_ratio"
+
+
+# ── The column position, derived not assumed ─────────────────────────────
+
+def _insert_columns() -> list[str]:
+    """The INSERT column list, in order, read from the real statement."""
+    head = INSERT_SQL.split("VALUES", 1)[0]
+    inner = head[head.index("(") + 1: head.rindex(")")]
+    return [c.strip() for c in inner.replace("\n", " ").split(",") if c.strip()]
+
+
+def _col_index() -> int:
+    cols = _insert_columns()
+    assert COLUMN in cols, (
+        f"{COLUMN} is not in the INSERT column list. The producer writes a "
+        f"value the statement never carries, so nothing below can be true.")
+    return cols.index(COLUMN)
+
+
+@pytest.fixture(scope="module")
+def col_index() -> int:
+    """A thin fixture over a plain function.
+
+    The body lives in `_col_index` so the __main__ runner at the bottom can
+    call it. A pytest fixture cannot be invoked directly, and this suite has
+    to run both under pytest AND as a standalone script, because the release
+    gate executes `python tests/<file>.py` -- see that block for what happened
+    when this file could not.
+    """
+    return _col_index()
+
+
+# ── A minimal company that CAN produce a ratio ───────────────────────────
+
+def _financials(fcf: float | None,
+                shares: float | None = 100_000_000.0) -> pd.DataFrame:
+    """One fiscal year with every input p_fcf needs, and fcf set by caller.
+
+    Deliberately minimal: if a future change makes p_fcf depend on another
+    column, these rows stop producing a value and the publishing test fails
+    rather than silently testing a different expression.
+    """
+    return pd.DataFrame([{
+        "fiscal_year": 2025,
+        "period_end_date": pd.Timestamp("2025-06-30"),
+        "revenue": 500.0, "gross_profit": 200.0, "ebitda": 90.0,
+        "ebit": 70.0, "interest_expense": 5.0,
+        "net_profit": 50.0, "eps": None, "eps_diluted": None,
+        "dps": None, "dps_franking_pct": None,
+        "gpm": None, "opm": None, "npm": None, "ebitda_margin": None,
+        "total_assets": 900.0, "total_equity": 400.0,
+        "total_current_assets": 300.0, "total_current_liab": 150.0,
+        "total_debt": 200.0, "net_debt": 150.0,
+        "cash_equivalents": 50.0, "long_term_debt": 120.0,
+        "retained_earnings": 100.0, "working_capital": 150.0,
+        "book_value_per_share": None, "shares_outstanding": shares,
+        "trade_receivables": 60.0, "inventory": 40.0,
+        "cfo": 110.0, "capex": -30.0, "fcf": fcf,
+        "equity_raised": 0.0, "cfi": -30.0, "dividends_paid": -10.0,
+        "derived_dps": None, "derived_franking_pct": None,
+    }])
+
+
+def _prices() -> pd.Series:
+    idx = pd.date_range("2024-07-01", "2025-06-30", freq="D")
+    return pd.Series(np.full(len(idx), 4.0), index=idx)
+
+
+def _ratio(fcf, currency=None, shares=100_000_000.0, idx=None):
+    rows = build_yearly_rows("TST", _financials(fcf, shares), _prices(),
+                             current_shares=shares,
+                             reporting_currency=currency)
+    assert rows, "the fixture produced no row at all; the inputs are wrong"
+    return rows[0][idx]
+
+
+# ── The publishing case ──────────────────────────────────────────────────
+
+def test_positive_fcf_publishes_the_ratio(col_index):
+    """mc / fcf, from the same pair fcf_yield uses."""
+    # price 4.00 x 100m shares / 1e6 = 400.0 (AUD millions); fcf 40.0
+    # The currency must be passed explicitly: `_ratio`'s default is None, and
+    # None withholds. Leaving it defaulted is what this test did before the
+    # silence rule was decided, and it failed the moment the rule changed --
+    # which is the behaviour wanted from a default that asserts nothing.
+    value = _ratio(40.0, currency=BASE_CURRENCY, idx=col_index)
+    assert value == pytest.approx(10.0), (
+        f"expected mc/fcf = 400/40 = 10.0, got {value!r}")
+
+
+def test_the_ratio_is_the_reciprocal_of_the_yield(col_index):
+    """Both describe one pair, so their product is 1 within rounding.
+
+    Not an aesthetic check. If a later change computes p_fcf from different
+    inputs than fcf_yield -- a different price anchor, a per-share path, a
+    TTM cash flow -- the site would publish two numbers that cannot both be
+    right, and the screener would sort on one while the company page showed
+    the other.
+    """
+    cols = _insert_columns()
+    rows = build_yearly_rows("TST", _financials(40.0), _prices(),
+                             current_shares=100_000_000.0,
+                             reporting_currency=BASE_CURRENCY)
+    row = rows[0]
+    p_fcf = row[cols.index("p_fcf_ratio")]
+    yld = row[cols.index("fcf_yield")]
+    assert p_fcf is not None and yld is not None
+    assert p_fcf * yld == pytest.approx(1.0, rel=1e-3), (
+        f"p_fcf={p_fcf} and fcf_yield={yld} are not reciprocal; their "
+        f"product is {p_fcf * yld}. They no longer describe one pair.")
+
+
+# ── The three declining cases ────────────────────────────────────────────
+
+def test_div_returns_none_on_zero_denominator():
+    """The second of the two guarantees that exclude fcf == 0.
+
+    `fcf > 0` in the producer and `_div`'s zero-denominator rule both
+    decline a zero free cash flow, so mutating `> 0` to `>= 0` changes no
+    output -- an equivalent mutant, recorded as such in the mutation run
+    rather than chased.
+
+    Equivalent only while BOTH hold. This pins the half that lives
+    somewhere else, so a change to _div cannot silently make the producer's
+    test the only thing standing between a zero denominator and a division.
+    """
+    from compute.engine.yearly_compute import _div
+    assert _div(400.0, 0.0) is None
+    assert _div(400.0, 0) is None
+    assert _div(400.0, None) is None
+
+
+@pytest.mark.parametrize("fcf", [-40.0, -0.01, 0.0])
+def test_non_positive_fcf_withholds(col_index, fcf):
+    """Zero and negative both decline, and for the same stated reason.
+
+    Negative would publish a number that sorts as cheap while meaning the
+    opposite. Zero has no finite ratio at all.
+    """
+    assert _ratio(fcf, currency=BASE_CURRENCY, idx=col_index) is None, (
+        f"fcf={fcf} produced a ratio. On an ascending 'cheapest first' "
+        f"sort this value ranks ahead of genuinely cheap companies.")
+
+
+def test_negative_fcf_still_publishes_the_yield():
+    """The asymmetry is deliberate and must survive refactoring.
+
+    fcf_yield reports a cash burn as a negative percentage, which reads as
+    bad. p_fcf reports it as a negative multiple, which reads as cheap. A
+    later change that gave them one shared guard would either lose a true
+    fact or keep a misleading one.
+    """
+    cols = _insert_columns()
+    rows = build_yearly_rows("TST", _financials(-40.0), _prices(),
+                             current_shares=100_000_000.0,
+                             reporting_currency=BASE_CURRENCY)
+    row = rows[0]
+    assert row[cols.index("p_fcf_ratio")] is None
+    assert row[cols.index("fcf_yield")] is not None, (
+        "fcf_yield was withheld on negative FCF. A negative free cash flow "
+        "yield is a reportable fact, and withholding it loses information "
+        "the customer had before.")
+
+
+def test_missing_fcf_withholds(col_index):
+    assert _ratio(None, currency=BASE_CURRENCY, idx=col_index) is None
+
+
+def test_missing_shares_withholds_via_market_cap(col_index):
+    """No shares means no market capitalisation, so no numerator."""
+    assert _ratio(40.0, currency=BASE_CURRENCY, shares=None,
+                  idx=col_index) is None
+
+
+@pytest.mark.parametrize("shares", [0.0, -100_000_000.0])
+def test_non_positive_market_cap_withholds(col_index, shares):
+    """The numerator must be POSITIVE, not merely present.
+
+    `mc = px * shares / 1e6 if (px and shares) else None` already drops a zero
+    price and a zero share count through truthiness, so for shares == 0 this
+    test and the `mc > 0` guard agree by two routes. A NEGATIVE share count
+    reaches the guard and nothing else: it produces a negative market
+    capitalisation, a negative ratio, and a company at the top of a "cheapest
+    first" sort -- the same customer-visible failure as negative FCF, arriving
+    from the numerator instead.
+
+    Both parameters are impossible as facts and representable in the source,
+    which is the only reason the guard is explicit. A condition that holds
+    only through two other expressions' internals is not the policy being
+    enforced, it is the policy being coincided with.
+    """
+    assert _ratio(40.0, currency=BASE_CURRENCY, shares=shares,
+                  idx=col_index) is None, (
+        f"shares={shares} produced a ratio from a non-positive market "
+        f"capitalisation.")
+
+
+def test_a_market_cap_that_rounds_to_zero_withholds(col_index):
+    """The one input that distinguishes `mc > 0` from `mc >= 0`.
+
+    mc is rounded to 2dp, so a tiny-but-positive market capitalisation becomes
+    exactly 0.0 -- here one share at $4.00 gives round(4e-6, 2) == 0.0. The
+    truthiness test that builds mc cannot catch this: both px and shares are
+    truthy, and the zero appears in the rounding.
+
+    Under `mc >= 0` the producer would divide 0.0 by the cash flow and publish
+    a Price/FCF of 0.0, which is the CHEAPEST value the column can hold and
+    sorts above every real company on an ascending screen. That is why the
+    comparison is strict, and this is the row that proves it.
+    """
+    assert _ratio(40.0, currency=BASE_CURRENCY, shares=1.0,
+                  idx=col_index) is None, (
+        "a market capitalisation that rounded to 0.0 published a ratio of "
+        "0.00, which sorts first on 'cheapest'.")
+
+
+# ── Price freshness: the seven-day product policy ────────────────────────
+
+def _prices_ending(last_day: str) -> pd.Series:
+    """A daily series whose final observation is `last_day`.
+
+    The fixture's fiscal period ends 2025-06-30, so the gap between that and
+    `last_day` is the price age the guard judges.
+    """
+    idx = pd.date_range("2024-01-01", last_day, freq="D")
+    return pd.Series(np.full(len(idx), 4.0), index=idx)
+
+
+def _ratio_with_prices(prices, idx):
+    rows = build_yearly_rows("TST", _financials(40.0), prices,
+                             current_shares=100_000_000.0,
+                             reporting_currency=BASE_CURRENCY)
+    assert rows, "the fixture produced no row at all"
+    return rows[0][idx]
+
+
+@pytest.mark.parametrize("last_day,age,expect_published", [
+    ("2025-06-30", 0, True),    # same day
+    ("2025-06-27", 3, True),    # a weekend
+    ("2025-06-23", 7, True),    # the boundary, inclusive
+    ("2025-06-22", 8, False),   # one day past it
+    ("2025-05-30", 31, False),  # a month
+    ("2023-06-30", 731, False),  # two years, the finding-18 shape
+])
+def test_the_seven_day_boundary(col_index, last_day, age, expect_published):
+    """Independent cases, one per side of the policy and on it.
+
+    The boundary is INCLUSIVE at seven. Stated as a parametrised table so
+    "same day", "the boundary" and "one day past" are three separate recorded
+    facts rather than one assertion that happens to cover them.
+    """
+    value = _ratio_with_prices(_prices_ending(last_day), col_index)
+    if expect_published:
+        assert value is not None, (
+            f"a price {age} days before the period end withheld the ratio; "
+            f"the policy admits up to {MAX_PRICE_AGE_DAYS} days inclusive.")
+    else:
+        assert value is None, (
+            f"a price {age} days before the period end published {value!r}. "
+            f"mc is px * shares, so this divides an old market "
+            f"capitalisation into a current cash flow.")
+
+
+def test_a_row_that_was_eligible_becomes_ineligible(col_index):
+    """The transition, on one company and one fiscal period.
+
+    Same inputs, same period, two price series: the ratio publishes at seven
+    days and is withheld at eight. This is what a company whose feed stops
+    looks like between two runs, and it is the case the store then has to
+    CLEAR -- proved end to end by
+    tests/fixtures/prove_retired_columns_are_emptied.py, which drives the
+    real INSERT and asserts that an incoming NULL removes a stored value.
+    """
+    assert _ratio_with_prices(_prices_ending("2025-06-23"), col_index) is not None
+    assert _ratio_with_prices(_prices_ending("2025-06-22"), col_index) is None
+
+
+def test_no_price_at_all_withholds(col_index):
+    """An empty series selects no observation, so there is no age to judge.
+
+    Absence is not freshness. Asserted separately from "old", because the two
+    reach the guard by different routes -- `_price_observation` returns
+    (None, None) here, and a missing date must refuse on its own rather than
+    by arithmetic on None.
+    """
+    empty = pd.Series(dtype=float, index=pd.DatetimeIndex([]))
+    assert _ratio_with_prices(empty, col_index) is None
+
+
+def test_the_freshness_predicate_rejects_a_future_price():
+    """Unreachable through the producer, asserted anyway.
+
+    `_price_observation` only looks backwards, so the producer cannot hand the
+    guard a date after the period end. The predicate is nonetheless called
+    with dates this module did not select, and a future price would mean a
+    market capitalisation struck after the statements it is divided into.
+
+    Specified independently of the producer path, so the guard's rule is
+    pinned rather than the one route that happens to exercise it.
+    """
+    from compute.engine.yearly_compute import price_is_fresh_enough as fresh
+    end = pd.Timestamp("2025-06-30")
+    assert fresh(end, pd.Timestamp("2025-06-30")) is True
+    assert fresh(end, pd.Timestamp("2025-06-23")) is True
+    assert fresh(end, pd.Timestamp("2025-06-22")) is False
+    assert fresh(end, pd.Timestamp("2025-07-01")) is False, (
+        "a close struck AFTER the period end was accepted")
+    assert fresh(end, None) is False
+    assert fresh(None, pd.Timestamp("2025-06-30")) is False
+    assert fresh(None, None) is False
+
+
+def test_the_policy_threshold_is_seven_calendar_days():
+    """The number is a decision, so it is asserted rather than assumed.
+
+    Changing it has to be a deliberate edit to a test that says what it is
+    for, not a quiet constant change. Seven, against return_windows'
+    HIGH_LOW_GRACE of 14 — a different bound for a different job, and the
+    comparison is recorded so neither is mistaken for the other.
+    """
+    from compute.engine.return_windows import HIGH_LOW_GRACE
+    assert MAX_PRICE_AGE_DAYS == 7
+    assert HIGH_LOW_GRACE == 14, (
+        "the return-window grace moved; the Price/FCF policy is independent "
+        "of it but the comment contrasting them is now wrong")
+
+
+def test_the_selector_has_one_implementation():
+    """`price_at` and the date the guard judges come from one observation.
+
+    The currency predicate had two implementations and they disagreed. The
+    price selection is the same hazard: a second "last close on or before"
+    would drift, and the guard would judge an observation the producer did
+    not use. `price_at` delegates, and this asserts they agree.
+    """
+    from compute.engine.yearly_compute import _price_observation, price_at
+    prices = _prices_ending("2025-06-23")
+    value, when = _price_observation(prices, pd.Timestamp("2025-06-30"))
+    assert value == price_at(prices, pd.Timestamp("2025-06-30"))
+    assert when == pd.Timestamp("2025-06-23")
+
+
+def test_the_producer_digest_covers_every_imported_module():
+    """The expectation artifact's digest must span the logic that decides it.
+
+    `measure_p_fcf_populations.py` records a sha256 over a DECLARED SET of
+    modules and `--verify` refuses when it moves. A digest over
+    yearly_compute.py alone would have proved that file's identity while
+    BASE_CURRENCY -- which decides whether a Price/FCF publishes at all --
+    moved underneath it in applicability.py.
+
+    So the set is checked against the producer's actual module-scope imports
+    from `compute.engine`, read from the AST rather than by matching text: a
+    regex over import lines reads its own docstring, and this repo has made
+    that mistake often enough to have a rule about it.
+
+    Function-local imports are excluded deliberately. `source_fingerprint`,
+    `run_stages` and `runtime_envelope` are imported inside `main()` and are
+    orchestration and instrumentation -- they do not compute a row's values.
+    If one of them ever moves to module scope, this test fails and the
+    judgement gets made again rather than inherited.
+
+    What the digest proves is file identity of that set. The interpreter,
+    pandas, psycopg2 and the database schema are outside it, so a matching
+    digest means "the same code was read from disk", NOT "the same execution".
+    The artifact header says so, and `--candidate` stays labelled an operator
+    assertion for the same reason.
+    """
+    import ast
+    import re
+
+    src = (BACKEND / "compute" / "engine" / "yearly_compute.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+
+    imported: set[str] = set()
+    for node in tree.body:                      # module scope ONLY
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.startswith("compute.engine."):
+                imported.add(node.module.split(".")[-1] + ".py")
+            elif node.module == "compute.engine":
+                imported.update(a.name + ".py" for a in node.names)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name.startswith("compute.engine."):
+                    imported.add(a.name.split(".")[-1] + ".py")
+
+    instrument = (BACKEND / "scripts" / "diagnostics"
+                  / "measure_p_fcf_populations.py").read_text(encoding="utf-8")
+    m = re.search(r"PRODUCER_MODULES\s*=\s*\(([^)]*)\)", instrument)
+    assert m, ("PRODUCER_MODULES was not found in the instrument; the digest "
+               "this test is about no longer exists in a form it can read.")
+    declared = set(re.findall(r'"([^"]+)"', m.group(1)))
+
+    assert "yearly_compute.py" in declared, (
+        "the producer's own file is not in the digest set")
+    missing = imported - declared
+    assert not missing, (
+        f"yearly_compute imports {sorted(missing)} at module scope, and the "
+        f"expectation digest does not cover them. A change there would alter "
+        f"published values while the recorded digest stayed put, so --verify "
+        f"would reconcile against a stale expectation and report the "
+        f"difference as a defect. Add them to PRODUCER_MODULES.")
+
+
+def test_the_stored_scale_matches_the_column_it_describes():
+    """The threshold is the COLUMN's precision, so read the column.
+
+    P_FCF_MIN_REPRESENTABLE is derived from P_FCF_STORED_SCALE, and a constant
+    that describes a schema is a constant that can drift from it. This reads
+    the declared scale out of the migration that creates the column, so
+    changing NUMERIC(10,2) without changing the constant fails here instead of
+    silently moving the threshold the producer applies.
+    """
+    import re
+    from compute.engine.yearly_compute import (
+        P_FCF_MIN_REPRESENTABLE, P_FCF_STORED_SCALE,
+    )
+    ddl = (BACKEND.parent / "database" / "migrations"
+           / "008_compute_metrics_tables.sql").read_text(encoding="utf-8")
+    m = re.search(r"\bp_fcf_ratio\s+NUMERIC\(\s*\d+\s*,\s*(\d+)\s*\)",
+                  ddl, re.IGNORECASE)
+    assert m, ("p_fcf_ratio's NUMERIC declaration was not found in "
+               "008_compute_metrics_tables.sql; the constant below is "
+               "describing a column this test can no longer see.")
+    assert int(m.group(1)) == P_FCF_STORED_SCALE, (
+        f"the column stores {m.group(1)} decimal places and "
+        f"P_FCF_STORED_SCALE says {P_FCF_STORED_SCALE}")
+    assert P_FCF_MIN_REPRESENTABLE == 0.005
+
+
+def test_a_ratio_below_the_stored_precision_withholds(col_index):
+    """The underflow end, with the diagnosis corrected.
+
+    The first version of this test asserted that _div's 4dp rounding produced
+    the zero, and the guard it pinned tested `p_fcf == 0`. Both were wrong.
+    Over 33,864 production rows, NO row had _div return 0.0 -- and the
+    published minimum was still below 0.005. The rounding that destroys the
+    value happens at the COLUMN: p_fcf_ratio is NUMERIC(10,2), so _div's
+    0.0001 is stored as 0.00.
+
+    The guard had been built on an explanation of the mechanism, the
+    explanation was wrong, and it passed while the defect shipped. This test
+    now asserts against the stored scale instead.
+
+    A stored 0.00 sorts ahead of every company on an ascending "cheapest
+    first" screen -- further forward than the negatives the fcf <= 0 guard
+    exists to exclude -- from two positive inputs and no arithmetic failure.
+    """
+    from compute.engine.yearly_compute import _div
+
+    # mc = 4.00 x 25,000 / 1e6 = 0.1 (AUD millions) against fcf 1,000.
+    raw = _div(0.1, 1_000.0)
+    assert raw == 0.0001 and raw != 0, (
+        f"_div returned {raw!r}; the premise of this test is that the ratio "
+        f"survives _div and dies at the column, so check that first.")
+    assert round(raw, 2) == 0, "the premise is wrong: this does not store as 0"
+
+    value = _ratio(1_000.0, currency=BASE_CURRENCY, shares=25_000.0,
+                   idx=col_index)
+    assert value is None, (
+        f"a ratio of {value!r} published. It stores as 0.00, which sorts "
+        f"first on 'cheapest', ahead of every real company and ahead of the "
+        f"negatives this contract already excludes.")
+
+
+def test_the_underflow_boundary_is_inclusive_of_what_postgres_keeps(col_index):
+    """Exactly 0.005 PUBLISHES, because PostgreSQL rounds half away from zero.
+
+    Verified against the server, not assumed:
+
+        SELECT 0.005::numeric(10,2)   ->  0.01
+        SELECT 0.0049::numeric(10,2)  ->  0.00
+
+    So 0.005 is representable and must not be withheld. Python disagrees --
+    round(0.005, 2) is 0.0 under banker's rounding on a binary float -- which
+    is exactly why the threshold was checked against the database rather than
+    against the language the producer is written in.
+
+    Mutating `<` to `<=` survived the contract until this test existed: it
+    withholds a value the column can hold, which is a coverage loss with no
+    reason behind it.
+    """
+    # mc = 4.00 x 125,000 / 1e6 = 0.5 against fcf 100 -> exactly 0.005
+    value = _ratio(100.0, currency=BASE_CURRENCY, shares=125_000.0,
+                   idx=col_index)
+    assert value == pytest.approx(0.005), (
+        f"expected the boundary value 0.005 to publish, got {value!r}. "
+        f"PostgreSQL stores it as 0.01, so withholding it loses a row the "
+        f"column can represent.")
+
+
+def test_the_clamp_suppresses_rather_than_substituting(col_index):
+    """A ratio over 9,999 is withheld, NOT stored as 9,999.
+
+    `_clamp` reads like it bounds a value and it does not -- it returns None
+    above the threshold. That distinction is the whole customer-facing
+    question: a substituted boundary value would put a fabricated 9,999.00
+    into a sort column, indistinguishable from a company whose ratio really is
+    9,999.
+
+    The threshold is NOT an overflow guard on this column. p_fcf_ratio is
+    NUMERIC(10,2) and holds 99,999,999.99; 9,999 is the editorial threshold
+    every NUMERIC(10,2) valuation ratio in this producer already uses, and
+    p_fcf matches them deliberately. Asserted here so that changing the
+    threshold for this column alone has to be a decision, not an edit.
+    """
+    from compute.engine.yearly_compute import _clamp
+    assert _clamp(9_999.0) == 9_999.0
+    assert _clamp(10_000.0) is None, (
+        "_clamp substituted a boundary value instead of withholding")
+
+    # price 4.00 x 100m shares / 1e6 = 400.0 against fcf 0.02 -> 20,000
+    assert _ratio(0.02, currency=BASE_CURRENCY, idx=col_index) is None, (
+        "a ratio of 20,000 published; the threshold the sibling ratios use "
+        "is not being applied to this one")
+
+
+def test_the_pair_disagrees_at_the_extreme_and_that_is_recorded():
+    """The _clamp threshold is not symmetric across the two presentations.
+
+    A ratio above 9,999 is a yield below 0.0001, which rounds to 0.0000 in
+    NUMERIC(8,4) and publishes. So the reciprocal pair disagrees at the
+    extreme: no ratio, a near-zero yield. This is a consequence of two column
+    types, not of a policy, and it is pinned here so it is a known property
+    rather than a surprise found in production.
+    """
+    cols = _insert_columns()
+    rows = build_yearly_rows("TST", _financials(0.02), _prices(),
+                             current_shares=100_000_000.0,
+                             reporting_currency=BASE_CURRENCY)
+    row = rows[0]
+    assert row[cols.index("p_fcf_ratio")] is None
+    assert row[cols.index("fcf_yield")] is not None, (
+        "fcf_yield was also withheld, so the asymmetry this test records no "
+        "longer exists -- delete the test and the comment that explains it")
+
+
+@pytest.mark.parametrize("currency", ["USD", "NZD", "usd", " usd "])
+def test_foreign_reporting_currency_withholds(col_index, currency):
+    """An AUD market cap over a foreign cash flow has no unit.
+
+    Case and whitespace included: the producer upper-cases and strips at
+    the fetch, and a guard that only matched an exact "USD" would publish
+    for every source that wrote it differently.
+    """
+    normalised = currency.strip().upper()
+    assert _ratio(40.0, currency=normalised, idx=col_index) is None, (
+        f"reporting_currency={currency!r} published a ratio mixing an AUD "
+        f"market capitalisation with a {normalised} cash flow.")
+
+
+def test_aud_publishes(col_index):
+    assert _ratio(40.0, currency=BASE_CURRENCY, idx=col_index) is not None
+
+
+def test_unstated_currency_withholds(col_index):
+    """Publishing requires a STATED AUD. Silence is not a unit.
+
+    The first candidate published here, arguing that an unknown currency is
+    not evidence of a mismatch. True, and beside the point: publishing a ratio
+    asserts its unit, and silence establishes none. The source contract says
+    so in writing -- backend/migrations/add_reporting_currency.sql: "NULL is
+    meaningful and is NOT a default of 'AUD'" -- and the producer was reading
+    it as one.
+
+    Decided 14 Nov 2026 on a measurement, not an argument. Over 33,864 rows,
+    1,261 of the 6,938 publishable rows published only because the currency
+    was unstated, and about 13% of statement-bearing ASX companies report in a
+    foreign currency: roughly 160 of those were wrong by an exchange rate.
+    1,261 rows of coverage is recoverable; 160 wrong ratios are wrong.
+
+    This leaves Price/FCF stricter than its own peers. applicability.unit_gate
+    publishes on silence for the eight ratios it covers, so the same row can
+    show a P/E and no Price/FCF. Those eight are governed model constituents
+    and cannot change under a frozen FACTOR_MODEL_V3. The inconsistency is in
+    the conservative direction and is recorded as a finding -- it is not a
+    reason to relax the safer side.
+    """
+    assert _ratio(40.0, currency=None, idx=col_index) is None, (
+        "an unstated reporting currency published a ratio. Silence is not "
+        "AUD; the source contract says so explicitly, and this is the guard "
+        "that reads it correctly.")
+
+
+def test_the_currency_predicate_has_exactly_one_implementation():
+    """A predicate with two implementations has two answers.
+
+    The rule lived inline in build_yearly_rows and was RESTATED in
+    scripts/diagnostics/measure_p_fcf_populations.py. When it went strict the
+    producer changed and the instrument did not, so the instrument classified
+    1,261 rows as publishable that the producer withheld. Its own
+    reconciliation caught the disagreement and voided its report -- the good
+    outcome of a bad arrangement, and only because that reconciliation exists.
+
+    This asserts the exported predicate directly, so the instrument and the
+    producer are tested against the same object they both call.
+    """
+    from compute.engine.yearly_compute import currency_is_coherent
+    assert currency_is_coherent("AUD") is True
+    assert currency_is_coherent(None) is False
+    assert currency_is_coherent("USD") is False
+    assert currency_is_coherent("") is False
+
+
+def test_only_a_stated_aud_publishes(col_index):
+    """The whole currency rule in one assertion, stated positively.
+
+    Written as an allow-list rather than as three separate denials, because
+    the denials can all pass while a fourth input nobody enumerated publishes.
+    The property is "AUD and nothing else", and that is what this asserts.
+    """
+    assert _ratio(40.0, currency="AUD", idx=col_index) is not None
+    for other in (None, "", "USD", "NZD", "CAD", "GBP", "EUR", "SGD", "PGK",
+                  "IDR", "HKD", "MYR", "aud ", "AU", "A$"):
+        assert _ratio(40.0, currency=other, idx=col_index) is None, (
+            f"reporting_currency={other!r} published a ratio. Only an exact, "
+            f"normalised 'AUD' establishes the unit -- note that 'aud ' is "
+            f"included because normalisation happens at the FETCH, so a "
+            f"caller passing raw text must not get a free pass here.")
+
+
+# ── The guard is enforced here BECAUSE it cannot be enforced there ───────
+
+def test_the_declaration_route_is_still_closed():
+    """Pins the reason this guard lives in the producer.
+
+    If p_fcf_ratio ever becomes assessable -- a V4, or a model that names it
+    as a constituent -- then CROSS_CURRENCY becomes the right home and this
+    producer-side guard becomes a second implementation of one rule. This
+    test fails at that moment, which is when someone should move it.
+    """
+    from compute.engine.factor_applicability import _model_constituents
+    from compute.engine.metric_states import (
+        GOVERNED_METRICS, LATEST_MODEL_VERSION,
+    )
+    assessable = (set(GOVERNED_METRICS[LATEST_MODEL_VERSION])
+                  | _model_constituents(LATEST_MODEL_VERSION))
+    for name in ("p_fcf_ratio", "price_to_fcf"):
+        assert name not in assessable, (
+            f"{name} is now assessable under {LATEST_MODEL_VERSION}, so "
+            f"gate 1b can reach it. Move the currency rule into "
+            f"CROSS_CURRENCY and delete the producer-side guard -- keeping "
+            f"both is how one rule drifts into two answers.")
+        assert name not in CROSS_CURRENCY, (
+            f"{name} is declared in CROSS_CURRENCY but is not assessable, "
+            f"so nothing reads that entry. It is a declaration without "
+            f"enforcement, which reads as a guard and is not one.")
+
+
+if __name__ == "__main__":
+    # THE RELEASE GATE RUNS THIS FILE AS A SCRIPT, NOT UNDER PYTEST.
+    #
+    # `gate_full_suite.sh` executes `python tests/<file>.py` and requires the
+    # "N/M passed" line below as positive evidence of execution. Without this
+    # block the file defines its functions, runs nothing, and exits 0 -- which
+    # the gate reports as INCONCLUSIVE, and which an earlier gate would have
+    # counted as a pass.
+    #
+    # That is exactly what happened to the FIRST candidate of this release.
+    # All 21 tests passed locally under pytest and NONE of them ran in the
+    # gate: the suite written to certify the restoration could not certify
+    # anything, and the gate said so. The contract is only a contract where
+    # it executes.
+    #
+    # This runner expands @pytest.mark.parametrize itself and injects the
+    # col_index fixture by name, then CHECKS ITS OWN COVERAGE: the number of
+    # invocations must equal the number the marks imply, and a test whose
+    # signature asks for something this runner cannot supply is an ERROR, not
+    # a skip. A runner that silently skipped such a test would reproduce the
+    # defect one level up -- a count that looks complete while a case never
+    # ran.
+    import inspect
+    import sys as _sys
+
+    def _cases(fn):
+        """(kwargs, label) per invocation, from the function's own marks."""
+        marks = [m for m in getattr(fn, "pytestmark", [])
+                 if m.name == "parametrize"]
+        cases = [({}, "")]
+        for m in marks:
+            names = [n.strip() for n in m.args[0].split(",")]
+            expanded = []
+            for base, label in cases:
+                for value in m.args[1]:
+                    values = value if len(names) > 1 else (value,)
+                    kw = dict(base, **dict(zip(names, values)))
+                    expanded.append((kw, f"{label}[{value!r}]"))
+            cases = expanded
+        return cases
+
+    FIXTURES = {"col_index": _col_index()}
+
+    tests = [(n, f) for n, f in sorted(globals().items())
+             if n.startswith("test_") and callable(f)]
+    expected = sum(len(_cases(f)) for _, f in tests)
+    ran = 0
+    failures: list[str] = []
+
+    for name, fn in tests:
+        wanted = set(inspect.signature(fn).parameters)
+        for kwargs, label in _cases(fn):
+            missing = wanted - set(kwargs) - set(FIXTURES)
+            if missing:
+                failures.append(name)
+                ran += 1
+                print(f"  ERROR {name}{label}  - this runner cannot supply "
+                      f"{sorted(missing)}; add it to FIXTURES rather than "
+                      f"letting the case go unrun")
+                continue
+            call = dict(kwargs)
+            for f_name in wanted & set(FIXTURES):
+                call[f_name] = FIXTURES[f_name]
+            try:
+                fn(**call)
+                ran += 1
+                print(f"  PASS  {name}{label}")
+            except AssertionError as e:
+                ran += 1
+                failures.append(name)
+                print(f"  FAIL  {name}{label}  - {e}")
+            except Exception as e:                            # noqa: BLE001
+                ran += 1
+                failures.append(name)
+                print(f"  ERROR {name}{label}  - {type(e).__name__}: {e}")
+
+    if ran != expected:
+        print(f"\n  ** COVERAGE: ran {ran} of {expected} expected cases. The "
+              f"count below is not a verdict on this contract.")
+        failures.append("runner-coverage")
+
+    print(f"\n{ran - len(failures)}/{expected} passed")
+    _sys.exit(1 if failures else 0)

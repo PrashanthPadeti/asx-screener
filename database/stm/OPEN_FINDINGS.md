@@ -1763,6 +1763,234 @@ more conservative than a screen. But it is currently **incidental rather
 than declared**, and nothing would catch a fifth appearing. That is a
 product decision and is recorded here rather than taken.
 
+## 17. `fcf_yield` mixes AUD with the reporting currency, unguarded
+
+Found while restoring Price/FCF in v11.2.86, by asking whether the
+restored column could join applicability gate 1b. It could not — and the
+same question revealed that its reciprocal, which **is** reachable by the
+gate, was never added to it.
+
+### The shape
+
+`CROSS_CURRENCY` suppresses eight ratios when `reporting_currency` is
+positively known to differ from AUD, on one stated principle: *an AUD
+market capitalisation over a figure stated in another currency has no
+unit until one side is converted*. `ev_ebitda` is in that list for
+exactly this reason.
+
+```
+fcf_yield = free cash flow (reporting currency) / market cap (AUD)
+```
+
+Identical shape. Not in the list.
+
+This is not a ratio of two statement figures — those are deliberately
+absent from `CROSS_CURRENCY`, because `roe` and `gross_margin` are
+currency-invariant and suppressing them would delete correct numbers. One
+side of `fcf_yield` is a market price.
+
+### Why it matters more than a display defect
+
+`fcf_yield` is a declared constituent of the factor model's Value signal
+(`factor_model.py:260`). A number with incoherent units does not merely
+appear on a page; it contributes a z-score to a ranking that orders the
+whole exchange.
+
+It is also a registered screener filter, a sort column, a CSV column
+labelled "FCF Yield %", a company-detail field, and the sort key of a
+shipped example screen.
+
+### Why it is reachable, and `price_to_fcf` is not
+
+```
+  fcf_yield      assessable=True   governed=False
+  price_to_fcf   assessable=False  governed=False
+```
+
+`factor_applicability` assesses `governed | model_constituents`, so being
+a model constituent is enough — gate 1b **would** fire on `fcf_yield` the
+moment the entry exists. That is what makes this a one-line fix and also
+what makes it not one.
+
+### The fix needs a model version, which is the whole decision
+
+Suppressing a constituent changes the Value signal, which changes
+composite scores, under a version name that **13 finalised production
+runs already reference**. The freeze rule exists for exactly that: two
+runs labelled `FACTOR_MODEL_V3` that mean different things is the state
+versioning prevents.
+
+So the honest fix is `FACTOR_MODEL_V4`, carrying both this entry and
+`price_to_fcf` into `GOVERNED_METRICS` so the producer-side guard added
+in v11.2.86 can be deleted rather than lived with. That is a larger piece
+of work than a register line, and it was explicitly deferred rather than
+taken.
+
+### Measure before deciding
+
+`scripts/diagnostics/measure_fcf_cross_currency.py` answers how many rows
+this is, how many are inside the scored population, **and** runs the eight
+already-guarded ratios as a control on the same rows. The control is the
+part that matters: a count of an unguarded metric means nothing without
+evidence that the gate works where it is applied. If any of the eight
+publishes on a foreign reporter, this finding is wrong before it starts.
+
+### Not to be confused with the v11.2.86 guard
+
+`price_to_fcf` **is** guarded, from the producer, because gate 1b cannot
+reach it. `test_price_to_fcf_contract.py` fails the moment that column
+becomes assessable, so the rule moves into `CROSS_CURRENCY` rather than
+existing in two places. Until then the site declines Price/FCF for
+foreign reporters while publishing its reciprocal for the same companies
+— a real inconsistency, recorded here rather than hidden by withdrawing
+the safer of the two.
+
+| 21 | TOOLING. `scripts/stm/universe_prose.py` and `scripts/stm/universe_sidecars.py` read `market.companies` unbounded and are not in the frozen legacy set, so `test_no_new_ingestion_script_joins_the_base_table` fails at both `main` and every candidate. Both are STM documentation generators; the test's own docstring says an unbounded worklist read "costs a repeated download, not a wrong number" | `scripts/stm/` | **OPEN — separate tooling finding.** Pre-existing at the baseline, reproduced without introduced failures by gates 3–8 |
+| 22 | TOOLING, AND A FALSE POSITIVE. `test_no_bind_parameter_is_followed_by_a_double_colon_cast` flags `scripts/stm/census_unwritten.py:85`, `SELECT %s::regclass::oid`. The matcher is `BAD = r':[a-zA-Z_]\w*::[a-zA-Z]'`, which matches `:regclass::o` inside a psycopg2 **double cast**; the script uses `%s` placeholders and has no named bind parameter at all. The executable AST-based property in the same file passes. The suite's own docstring warns about this exact class — "a matcher reading its own explanation as the offence it warns about" | `tests/test_no_bindparam_followed_by_cast.py` | **OPEN — separate tooling finding.** Fix the matcher (require a bind that is not preceded by `%s` or another `:`), not the script |
+
+| 23 | An UNGOVERNED served column has no snapshot discipline. `app/core/row_projection.py` nulls a row's metrics by iterating `GOVERNED_METRICS[model_version]`, and `price_to_fcf` is not in it, so on a universe row with no `compute_run_id` the ratio is served **untouched** — no null, no metric state, no cause. Measured 16 Nov: 452 of 2,571 universe rows are unattributed, 279 of them have a `yearly_metrics` row, and **44 are a CANDIDATE population** — positive `fcf_yield` establishes none of the seven Price/FCF guards, so the published count will be lower and comes from the forecast, not from this proxy. Compounding it, `market.yearly_metrics` carries no run id at all — only `computed_at` — so these rows have no direct attribution **pointer**. That is NOT exclusion from the yearly input fingerprint: every `financials.*` and `staging_au.*` projection is whole-table (`""`, no WHERE), and the two bounded ones are bounded per company by date, so scoring coverage and yearly-computation coverage are simply different populations | `screener.universe`, `market.yearly_metrics`, `app/core/row_projection.py` | **OPEN** — v11.2.86 establishes provenance per publishing row by evidence (inputs in the run's fingerprint; exact `(asx_code, fiscal_year)` in the coverage proof, which is keyed at that grain; served value matching the independent expectation at storage precision). If that fails for any row, the safeguard is a **scoped publication rule**, not factor-model membership. Durable fix: a run id on `yearly_metrics` |
+
+## 18. `price_at` can anchor a fiscal year to a price years older than it
+
+Found 14 Nov 2026 while measuring Price/FCF, because the review asked
+for the **actual date** `price_at` selects rather than for the rule it
+follows. The rule looked unobjectionable; the dates do not.
+
+```python
+def price_at(prices, target_date):
+    """Last close on or before target_date from pre-fetched Series."""
+    subset = prices[prices.index <= tgt]
+    return float(subset.iloc[-1]) if not subset.empty else None
+```
+
+"On or before" has no floor. For a company whose price history stops —
+suspended, delisted, or simply absent from the feed after some date —
+every later fiscal year anchors to the same final close, however old.
+
+### Measured over 33,864 yearly rows
+
+| | days between `period_end_date` and the close selected |
+|---|---|
+| median | 0 |
+| p95 | 2 |
+| max | **6,644** |
+| rows > 7 days | 402 of 26,338 |
+
+The tail is not a long thin one, it is a small set of companies with many
+years each:
+
+```
+FDR  FY2021   6,644 days   close of 2003-10-23
+FDR  FY2020   6,279 days   close of 2003-10-23
+FDR  FY2019   5,913 days   close of 2003-10-23
+VTA  FY2025   4,761 days   close of 2012-12-18
+CDR  FY2020   4,529 days   close of 2008-08-07
+SGH  FY2024   4,231 days   close of 2012-11-29
+```
+
+FDR's 2021 metrics are computed from a price struck in 2003.
+
+### Why this is bigger than the finding that produced it
+
+`px` is the input to `market_cap`, and `market_cap` is the numerator or
+the denominator of nearly every valuation figure this producer writes:
+
+```
+pe_ratio  pb_ratio  ps_ratio  ev_ebitda  ev_ebit  ev_revenue
+earnings_yield  fcf_yield  graham_number  market_cap  p_fcf_ratio
+```
+
+So this is **not a Price/FCF defect**. Price/FCF is where it was seen.
+
+### Status
+
+**OPEN.** Not fixed in v11.2.86, deliberately: a floor on price age
+changes every ratio in the table at once, which is a release of its own
+with its own population to measure. v11.2.86 adds no new exposure — it
+restores one column that inherits the same `px` as its eleven siblings.
+
+The fix is a maximum age, not a tighter window: a company reporting in
+June whose last trade was in May is normal and must still publish. The
+threshold needs measuring against the distribution above, and a declined
+row needs a reason the customer can see, which an ungoverned column
+cannot carry (see the limitation recorded in finding 6b's repair).
+
+---
+
+## 19. The reporting currency is one value per company, applied to all history
+
+Found 14 Nov 2026, from the review question *"confirm that the currency
+comes from the financial statement being calculated."* It does not.
+
+`staging_au.fundamentals` is `UNIQUE (asx_code)`. One row per company,
+holding one `reporting_currency`, read by the loader from whichever of
+`Income_Statement` / `Balance_Sheet` / `Cash_Flow` first carries a
+`currency_symbol` **in the latest snapshot**. There is no per-period
+currency anywhere in the source.
+
+Both consumers therefore judge every historical fiscal year by the
+company's current presentation currency:
+
+- applicability gate 1b, for its eight ratios
+- `yearly_compute`'s Price/FCF guard, from v11.2.86
+
+A company that restated from AUD into USD has its pre-restatement years
+suppressed although they were AUD — a coverage loss. A company that
+restated **from** USD **into** AUD has its pre-restatement years
+published although they were USD — a wrong number. The second direction
+is the one that matters.
+
+### Status
+
+**OPEN, and not fixable from this source.** Recorded rather than
+disguised: the fetch is documented to return a company-level,
+latest-snapshot fact, and the producer's comment says it is applied to
+every year. A per-row lookup against the same single-row table would
+look per-period and would not be.
+
+Closing it needs a per-period currency at ingestion — EODHD states
+`currency_symbol` per financial section, and whether it varies by period
+within a section has not been checked. That check is the next step and
+has not been taken.
+
+---
+
+## 20. Price/FCF is stricter than its own peers on an unstated currency
+
+The deliberate cost of the silence rule decided on 14 Nov 2026, recorded
+so it is a known property and not a surprise.
+
+From v11.2.86 `p_fcf_ratio` publishes only on a **stated AUD**.
+`applicability.unit_gate` publishes on silence for the eight ratios it
+covers. So one company-year can show a P/E, a P/B, a P/S and an
+EV/EBITDA while showing no Price/FCF, for the identical reason.
+
+**Measured: 1,261 yearly rows** — 18% of the 6,938 that were publishable
+under the permissive rule. Roughly 13% of statement-bearing ASX
+companies report in a foreign currency, so about 160 of those 1,261 were
+wrong by an exchange rate, with nothing in the row to say so.
+
+### Why it was resolved in this direction
+
+The source contract is explicit — `add_reporting_currency.sql`: *"NULL is
+meaningful and is NOT a default of 'AUD'"* — and the permissive producer
+was reading it as one. Publishing a ratio asserts its unit; silence
+establishes no unit. 1,261 rows of coverage is recoverable; 160 wrong
+ratios are wrong.
+
+The inconsistency runs in the **conservative** direction, and new code
+does not join a known defect in order to look tidy.
+
+### Status
+
+**OPEN by construction.** Resolving it means applying the same rule in
+`unit_gate`, whose eight ratios are governed model constituents:
+changing them moves composite scores under a version name 13 finalised
+runs reference. That needs **FACTOR_MODEL_V4** and is the same release
+that must settle finding 17.
+
+---
+
 ## Tracking
 
 | # | Finding | Table | Status |
@@ -1775,7 +2003,7 @@ product decision and is recorded here rather than taken.
 | 4c | Liquidity filter is twenty DOLLARS — smallest panel constituent A$2.7M | `market.mover_snapshots` | **CONFIRMED by effect** |
 | 5 | `stock_count` 189/277 against nominal 200/300 | `market.index_snapshots` | OPEN — unexplained |
 | 6a | Dead schema: `peg_ratio`, `beta_1y` never populated | `market.yearly_metrics` | CONFIRMED |
-| 6b | Frozen values restamped today. **Measured 13 Nov: 580 universe rows (22.6%) serve a frozen `price_to_fcf`**, confirmed from both sides; all 7,656 carriers stamped on one date | `market.yearly_metrics` | **FIXED on branch** — 64 columns emptied on conflict; costs 580 rows of `price_to_fcf` coverage |
+| 6b | Frozen values restamped today. **Measured 13 Nov: 580 universe rows (22.6%) serve a frozen `price_to_fcf`**, confirmed from both sides; all 7,656 carriers stamped on one date | `market.yearly_metrics` | **FIXED** (v11.2.85, deployed) — 64 columns emptied on conflict. `price_to_fcf` **restored under a producer in v11.2.86**, predicted to serve **438** rows against the 580 frozen ones, the gap being six measured decline populations |
 | 6c | Census complete: 27 dead, 37 frozen | `market.yearly_metrics` | CONFIRMED |
 | 6d | Frozen values produced by the SUPERSEDED `_avg` (window inversions prove it) | `market.yearly_metrics` | **CONFIRMED** |
 | 7a | Dynamic write: 29 conditional columns keep prior values on re-run | `market.computed_metrics` | OPEN — structural fix needs no measurement |
@@ -1789,3 +2017,7 @@ product decision and is recorded here rather than taken.
 | 14 | Dead `weekly_metrics` lateral in the publishing statement; no column reads it | `screener.universe` | CONFIRMED — wasteful, not wrong |
 | 15 | Boolean columns written as pandas comparisons against NaN, so unknown was stored as a measured FALSE. Measured: **1,751 flag-rows** across five flags (547 each for `above_sma200`/`golden_cross`/`death_cross`), and the conflation was total — wherever a daily row existed and the input was absent, the flag was FALSE, no exceptions. **Measured: 611 instruments (23.8%) carry at least one**; 547 carry three or more, 507 exactly three. Corrects finding 10's claim that this table writes NULL | `market.daily_metrics` | **FIXED** — twelve signals masked; 6 mutants killed; production verification pending |
 | 16 | `rsi_overbought`, `rsi_oversold`, `macd_bullish_cross`, `macd_bearish_cross` have no writer — NULL on every row, and two are registered screener filters. Census: **four working consumers all derive from `rsi_14` directly**, with three different overbought cutoffs (70, 75, 75). The presets named after these columns do not use them | `market.daily_metrics` | CONFIRMED — recommend **withdrawing** the columns, not writing them; a writer would be a fifth definition |
+| 17 | `fcf_yield` is a free cash flow over an AUD market capitalisation, the same shape as the eight ratios applicability gate 1b suppresses for foreign reporters — and it is **not in `CROSS_CURRENCY`**. It is served today: a registered filter, a sort column, a CSV column, a company-detail field and a constituent of the factor model's Value signal, so the mismatch does not merely display, it moves a ranking | `screener.universe`, `market.yearly_metrics` | **OPEN — MEASURED 16 Nov**: 167 of 178 foreign-reporter universe rows publish it, **78 of them carry a composite score**, so it moves a ranking. Control holds: all eight gate-1b ratios are 0 on the same rows. Needs FACTOR_MODEL_V4 |
+| 18 | `price_at` is "last close on or before period_end" with **no floor**, so a company whose price history stops anchors every later fiscal year to the same old close. Measured over 33,864 rows: median 0 days, p95 2, **max 6,644** — FDR's FY2021 metrics come from a close struck 2003-10-23; 402 of 26,338 rows more than 7 days stale. `px` feeds `market_cap`, so this reaches `pe_ratio`, `pb_ratio`, `ps_ratio`, `ev_*`, `earnings_yield`, `fcf_yield`, `graham_number` — **not** just Price/FCF | `market.yearly_metrics`, `screener.universe` | **OPEN for the eleven siblings.** Price/FCF was bounded at **7 calendar days** in v11.2.86 as explicit product policy — measured cost 0 rows at every threshold from 7d to 730d, so the guard protects subsequent runs rather than today's rows. The siblings stay unbounded; a floor for all of them is its own release |
+| 19 | The reporting currency is **one value per company**, read from the latest snapshot, and applied to every historical fiscal year — by gate 1b for its eight ratios and by Price/FCF from v11.2.86. A company that restated **from** USD **into** AUD has its pre-restatement years published although they were USD | `staging_au.fundamentals` | **OPEN, not fixable from this source** — needs a per-period currency at ingestion; whether EODHD's `currency_symbol` varies by period is unchecked |
+| 20 | Price/FCF is stricter than its own peers on an unstated currency: from v11.2.86 it requires a stated AUD while `unit_gate` publishes on silence, so **1,261 yearly rows** show a P/E and no Price/FCF for the identical reason. Deliberate and conservative — the source contract says NULL is not AUD, and ~160 of those rows were wrong by an exchange rate | `screener.universe`, `market.yearly_metrics` | **OPEN by construction** — resolving it means changing `unit_gate`'s governed constituents, i.e. FACTOR_MODEL_V4, with finding 17 |

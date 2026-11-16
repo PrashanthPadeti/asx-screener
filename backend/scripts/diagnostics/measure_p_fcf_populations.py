@@ -74,6 +74,13 @@ def _pct(n: int, d: int) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--env-file", help="path to a .env to load first")
+    ap.add_argument("--candidate", metavar="SHA",
+                    help="the candidate commit this expectation was produced "
+                         "from. Required with --emit. Recorded in the "
+                         "artifact header; it is an ASSERTION by the "
+                         "operator, which is why the producer's own digest "
+                         "is recorded beside it and is what --verify "
+                         "actually enforces.")
     ap.add_argument("--emit", metavar="PATH",
                     help="write the expected served set as CSV -- asx_code, "
                          "fiscal_year, p_fcf_ratio -- for --verify to "
@@ -510,25 +517,129 @@ def main() -> int:
             for code, (fy, reason) in latest.items()
             if code in in_universe and reason == "P1 publishable")
 
+        # ── Provenance of the expectation ────────────────────────────────
+        #
+        # An expected-row artifact without its inputs is a number with no
+        # claim attached. Three things are recorded, and two of them are
+        # ENFORCED by --verify rather than merely printed:
+        #
+        #   candidate SHA     asserted by the operator. Not enforceable --
+        #                     the instrument runs from an archive extract
+        #                     with no .git -- so it is recorded for the
+        #                     record and the producer digest is what bites.
+        #   producer digest   sha256 of yearly_compute.py. Self-proving: if
+        #                     the producer changed between emit and verify,
+        #                     the expectation describes different code.
+        #   input fingerprint source_fingerprint's aggregate over every
+        #                     table the producer reads. If ingestion moved
+        #                     the inputs, the expectation is void and the
+        #                     baseline must be regenerated -- which is
+        #                     exactly what happened between 438 and 471.
+        import hashlib
+        from compute.engine import source_fingerprint as sfp
+        producer_path = BACKEND / "compute" / "engine" / "yearly_compute.py"
+        producer_digest = hashlib.sha256(
+            producer_path.read_bytes()).hexdigest()
+        fp = sfp.compute(cur)
+        measured_at = __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc).isoformat(timespec="seconds")
+
+        HEADER = {
+            "candidate": args.candidate or "(unrecorded)",
+            "producer_sha256": producer_digest,
+            "fingerprint_schema": str(fp.schema_version),
+            "fingerprint_aggregate": fp.aggregate,
+            "measured_at_utc": measured_at,
+            "expected_rows": str(len(expected_rows)),
+        }
+
         if args.emit:
             import csv
+            if not args.candidate:
+                print("\n** --emit requires --candidate: an expectation that "
+                      "does not say which code produced it cannot be "
+                      "reconciled against anything.")
+                conn.rollback()
+                return 1
             with open(args.emit, "w", newline="", encoding="utf-8") as fh:
+                for k, v in HEADER.items():
+                    fh.write(f"# {k}: {v}\n")
+                fh.write("# identity: market.yearly_metrics is UNIQUE "
+                         "(asx_code, fiscal_year) by declared constraint; "
+                         "screener.universe is PRIMARY KEY (asx_code). isin "
+                         "is carried for corroboration only -- it is absent "
+                         "on part of the population, so it cannot be the "
+                         "key.\n")
                 w = csv.writer(fh)
-                w.writerow(["asx_code", "fiscal_year", "p_fcf_ratio"])
+                w.writerow(["asx_code", "fiscal_year", "p_fcf_ratio", "isin"])
+                cur.execute("SELECT asx_code, isin FROM screener.universe")
+                isins = dict(cur.fetchall())
                 for code, fy, val in expected_rows:
-                    w.writerow([code, fy, "" if val is None else val])
+                    w.writerow([code, fy, "" if val is None else val,
+                                isins.get(code) or ""])
             print(f"\nwrote {len(expected_rows)} expected served rows to "
                   f"{args.emit}")
+            for k, v in HEADER.items():
+                print(f"    {k}: {v}")
 
         if args.verify:
             import csv
             from decimal import Decimal
             want: dict[tuple[str, int], Optional[Decimal]] = {}
+            recorded: dict[str, str] = {}
             with open(args.verify, newline="", encoding="utf-8") as fh:
-                for r in csv.DictReader(fh):
-                    want[(r["asx_code"], int(r["fiscal_year"]))] = (
-                        Decimal(r["p_fcf_ratio"]).quantize(Decimal("0.01"))
-                        if r["p_fcf_ratio"] else None)
+                lines = fh.read().splitlines()
+            for line in lines:
+                if line.startswith("#") and ":" in line:
+                    k, _, v = line[1:].partition(":")
+                    recorded[k.strip()] = v.strip()
+            for r in csv.DictReader(
+                    [ln for ln in lines if not ln.startswith("#")]):
+                want[(r["asx_code"], int(r["fiscal_year"]))] = (
+                    Decimal(r["p_fcf_ratio"]).quantize(Decimal("0.01"))
+                    if r["p_fcf_ratio"] else None)
+
+            # ── The expectation's inputs must still be the run's inputs ──
+            print("\n" + "=" * 70)
+            print("PROVENANCE of the expectation being verified")
+            print("=" * 70)
+            for k in ("candidate", "producer_sha256", "fingerprint_schema",
+                      "fingerprint_aggregate", "measured_at_utc",
+                      "expected_rows"):
+                print(f"  recorded {k}: {recorded.get(k, '(absent)')}")
+
+            drift = []
+            if recorded.get("producer_sha256") not in (None, producer_digest):
+                drift.append(
+                    f"the producer changed: yearly_compute.py is now "
+                    f"{producer_digest[:16]}…, the expectation was produced "
+                    f"by {recorded['producer_sha256'][:16]}…")
+            if recorded.get("fingerprint_aggregate") not in (None, fp.aggregate):
+                drift.append(
+                    f"the inputs moved: fingerprint is now "
+                    f"{fp.aggregate[:16]}…, the expectation was measured "
+                    f"against {recorded['fingerprint_aggregate'][:16]}…")
+            if recorded.get("fingerprint_schema") not in (
+                    None, str(fp.schema_version)):
+                drift.append(
+                    f"the fingerprint projection changed: schema is now "
+                    f"{fp.schema_version}, recorded "
+                    f"{recorded['fingerprint_schema']}")
+            if drift:
+                print("\n  ** THE EXPECTATION IS VOID. Verifying against it")
+                print("     would compare a measurement of one state to a")
+                print("     different state and call the difference a defect:")
+                for d in drift:
+                    print(f"       - {d}")
+                print("\n     Regenerate the baseline with --emit against the")
+                print("     current inputs, then re-run the canonical run and")
+                print("     verify. An ingestion between emit and verify is")
+                print("     exactly how 438 became 471 on an unchanged")
+                print("     producer.")
+                conn.rollback()
+                return 1
+            print("\n  provenance holds: same producer, same input "
+                  "fingerprint, same projection.")
 
             cur.execute("""
                 SELECT asx_code, price_to_fcf

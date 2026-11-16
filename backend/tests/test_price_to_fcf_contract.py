@@ -412,6 +412,69 @@ def test_the_selector_has_one_implementation():
     assert when == pd.Timestamp("2025-06-23")
 
 
+def test_the_producer_digest_covers_every_imported_module():
+    """The expectation artifact's digest must span the logic that decides it.
+
+    `measure_p_fcf_populations.py` records a sha256 over a DECLARED SET of
+    modules and `--verify` refuses when it moves. A digest over
+    yearly_compute.py alone would have proved that file's identity while
+    BASE_CURRENCY -- which decides whether a Price/FCF publishes at all --
+    moved underneath it in applicability.py.
+
+    So the set is checked against the producer's actual module-scope imports
+    from `compute.engine`, read from the AST rather than by matching text: a
+    regex over import lines reads its own docstring, and this repo has made
+    that mistake often enough to have a rule about it.
+
+    Function-local imports are excluded deliberately. `source_fingerprint`,
+    `run_stages` and `runtime_envelope` are imported inside `main()` and are
+    orchestration and instrumentation -- they do not compute a row's values.
+    If one of them ever moves to module scope, this test fails and the
+    judgement gets made again rather than inherited.
+
+    What the digest proves is file identity of that set. The interpreter,
+    pandas, psycopg2 and the database schema are outside it, so a matching
+    digest means "the same code was read from disk", NOT "the same execution".
+    The artifact header says so, and `--candidate` stays labelled an operator
+    assertion for the same reason.
+    """
+    import ast
+    import re
+
+    src = (BACKEND / "compute" / "engine" / "yearly_compute.py").read_text(
+        encoding="utf-8")
+    tree = ast.parse(src)
+
+    imported: set[str] = set()
+    for node in tree.body:                      # module scope ONLY
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.startswith("compute.engine."):
+                imported.add(node.module.split(".")[-1] + ".py")
+            elif node.module == "compute.engine":
+                imported.update(a.name + ".py" for a in node.names)
+        elif isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name.startswith("compute.engine."):
+                    imported.add(a.name.split(".")[-1] + ".py")
+
+    instrument = (BACKEND / "scripts" / "diagnostics"
+                  / "measure_p_fcf_populations.py").read_text(encoding="utf-8")
+    m = re.search(r"PRODUCER_MODULES\s*=\s*\(([^)]*)\)", instrument)
+    assert m, ("PRODUCER_MODULES was not found in the instrument; the digest "
+               "this test is about no longer exists in a form it can read.")
+    declared = set(re.findall(r'"([^"]+)"', m.group(1)))
+
+    assert "yearly_compute.py" in declared, (
+        "the producer's own file is not in the digest set")
+    missing = imported - declared
+    assert not missing, (
+        f"yearly_compute imports {sorted(missing)} at module scope, and the "
+        f"expectation digest does not cover them. A change there would alter "
+        f"published values while the recorded digest stayed put, so --verify "
+        f"would reconcile against a stale expectation and report the "
+        f"difference as a defect. Add them to PRODUCER_MODULES.")
+
+
 def test_the_stored_scale_matches_the_column_it_describes():
     """The threshold is the COLUMN's precision, so read the column.
 

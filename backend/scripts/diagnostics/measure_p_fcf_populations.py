@@ -537,16 +537,38 @@ def main() -> int:
         #                     exactly what happened between 438 and 471.
         import hashlib
         from compute.engine import source_fingerprint as sfp
-        producer_path = BACKEND / "compute" / "engine" / "yearly_compute.py"
-        producer_digest = hashlib.sha256(
-            producer_path.read_bytes()).hexdigest()
+
+        # A DECLARED SET, not one file. yearly_compute.py alone would have
+        # missed BASE_CURRENCY, which lives in applicability.py and decides
+        # whether a Price/FCF publishes at all, and average_over in
+        # periods.py, which computes written columns. A digest over the
+        # producer file only proves that file's identity while the logic it
+        # calls moves underneath it.
+        #
+        # The set is pinned by the contract: test_the_producer_digest_covers_
+        # every_imported_module AST-parses yearly_compute's module-scope
+        # imports from compute.engine and fails if one is not listed here.
+        # A new import therefore either joins the digest or breaks the gate.
+        #
+        # It proves FILE IDENTITY of that set, and nothing more. The
+        # interpreter, pandas, psycopg2 and the schema are outside it, so
+        # "same digest" is not "same execution" -- it is "same code read from
+        # disk".
+        PRODUCER_MODULES = ("yearly_compute.py", "periods.py",
+                            "applicability.py")
+        h = hashlib.sha256()
+        for name in PRODUCER_MODULES:
+            h.update(name.encode())
+            h.update((BACKEND / "compute" / "engine" / name).read_bytes())
+        producer_digest = h.hexdigest()
         fp = sfp.compute(cur)
         measured_at = __import__("datetime").datetime.now(
             __import__("datetime").timezone.utc).isoformat(timespec="seconds")
 
         HEADER = {
             "candidate": args.candidate or "(unrecorded)",
-            "producer_sha256": producer_digest,
+            "producer_set": ",".join(PRODUCER_MODULES),
+            "producer_set_sha256": producer_digest,
             "fingerprint_schema": str(fp.schema_version),
             "fingerprint_aggregate": fp.aggregate,
             "measured_at_utc": measured_at,
@@ -603,17 +625,26 @@ def main() -> int:
             print("\n" + "=" * 70)
             print("PROVENANCE of the expectation being verified")
             print("=" * 70)
-            for k in ("candidate", "producer_sha256", "fingerprint_schema",
+            for k in ("candidate", "producer_set", "producer_set_sha256",
+                      "fingerprint_schema",
                       "fingerprint_aggregate", "measured_at_utc",
                       "expected_rows"):
                 print(f"  recorded {k}: {recorded.get(k, '(absent)')}")
 
             drift = []
-            if recorded.get("producer_sha256") not in (None, producer_digest):
+            if recorded.get("producer_set") not in (
+                    None, ",".join(PRODUCER_MODULES)):
                 drift.append(
-                    f"the producer changed: yearly_compute.py is now "
-                    f"{producer_digest[:16]}…, the expectation was produced "
-                    f"by {recorded['producer_sha256'][:16]}…")
+                    f"the declared producer set changed: now "
+                    f"{','.join(PRODUCER_MODULES)}, recorded "
+                    f"{recorded['producer_set']}")
+            if recorded.get("producer_set_sha256") not in (
+                    None, producer_digest):
+                drift.append(
+                    f"the producer code changed: the declared set now "
+                    f"digests to {producer_digest[:16]}…, the expectation "
+                    f"was produced by "
+                    f"{recorded['producer_set_sha256'][:16]}…")
             if recorded.get("fingerprint_aggregate") not in (None, fp.aggregate):
                 drift.append(
                     f"the inputs moved: fingerprint is now "

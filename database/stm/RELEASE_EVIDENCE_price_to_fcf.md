@@ -303,6 +303,26 @@ FROM screener.compute_run_stages s JOIN u ON u.run_id = s.run_id
 WHERE s.stage_name='yearly_compute' AND s.status='success';
 ```
 
+**`COUNT(DISTINCT compute_run_id)` is not the attribution check.** It
+ignores NULLs, so "one distinct run id" passes while any number of rows
+carry no attribution at all — and 452 of the universe's 2,571 rows do,
+legitimately, because they sit outside the scored population. The
+sufficient check is three parts: exactly one distinct **non-NULL** run
+id, the NULL count stated rather than skipped, and the attributed count
+equal to that run's own `rows_written`.
+
+Validated 16 Nov 2026, before it was needed:
+
+| | |
+|---|---|
+| universe rows | 2,571 |
+| attributed | 2,119 |
+| unattributed (NULL) | 452 |
+| distinct non-NULL run ids | 1 |
+| run id | 54 |
+| that run's `rows_written` | 2,119 |
+| attributed = `rows_written` | **YES** |
+
 The distinction is not academic even though it currently makes no
 difference. `proven_by_latest_yearly` answers with the newest successful
 stage; today that is also run 54, so a check built on it would have

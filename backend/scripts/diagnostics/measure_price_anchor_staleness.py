@@ -104,21 +104,38 @@ def main() -> int:
             # One differential run per company is enough to reveal the set;
             # doing it for every company would double the whole measurement
             # for no extra information, so it stops once the set stabilises.
+            # THE ANCHOR IS NULLED, NOT THE SERIES.
+            #
+            # The first version of this truncated `prices` to end 8 days
+            # before the period end. That moved the anchor AND shortened the
+            # 12-month price window `price_window` / `sharpe_drawdown_vol`
+            # read, so it reported sharpe_1y, volatility_1y and
+            # max_drawdown_1y as anchor-dependent. They are not: they take
+            # the series directly and never touch the anchor.
+            #
+            # Replacing `_price_observation` isolates it exactly. The series
+            # the window functions see is untouched; only the single
+            # observation the anchor resolves to disappears, which is what a
+            # freshness bound withholds. Restored in a finally so a raised
+            # exception cannot leave the producer stubbed for later codes.
             if n <= 40 and not prices.empty:
-                ped = src.get(latest_fy[code], {}).get("period_end_date")
-                if ped is not None:
-                    cut = pd.Timestamp(ped) - pd.Timedelta(days=BOUND_DAYS + 1)
-                    truncated = prices[prices.index <= cut]
-                    if not truncated.empty:
-                        alt = yc.build_yearly_rows(code, fin, truncated,
-                                                   shares, currency)
-                        alt_by = {int(r[I_FY]): r for r in alt}
-                        base = by_fy.get(latest_fy[code])
-                        other = alt_by.get(latest_fy[code])
-                        if base and other:
-                            for i, name in enumerate(cols):
-                                if base[i] != other[i]:
-                                    anchor_dependent.add(name)
+                real = yc._price_observation
+                try:
+                    yc._price_observation = lambda *_a, **_k: (None, None)
+                    alt = yc.build_yearly_rows(code, fin, prices, shares,
+                                               currency)
+                finally:
+                    yc._price_observation = real
+                alt_by = {int(r[I_FY]): r for r in alt}
+                base = by_fy.get(latest_fy[code])
+                other = alt_by.get(latest_fy[code])
+                if base and other:
+                    for i, name in enumerate(cols):
+                        # computed_at is the run clock, not a metric.
+                        if name == "computed_at":
+                            continue
+                        if base[i] != other[i]:
+                            anchor_dependent.add(name)
 
             # ── The rows whose anchor is already stale in production ─────
             for fy, row in by_fy.items():
@@ -139,6 +156,13 @@ def main() -> int:
                     worst.append((age, code, fy, str(pd.Timestamp(ped).date()),
                                   str(pd.Timestamp(when).date())))
                 for i, name in enumerate(cols):
+                    # Only the anchor-dependent columns: a stale row also
+                    # carries window metrics and identifiers that a
+                    # freshness bound has no business withholding, and
+                    # counting those would inflate the cost of the fix.
+                    if name in ("computed_at", "asx_code", "fiscal_year",
+                                "period_end_date"):
+                        continue
                     if row[i] is not None:
                         published[name] += 1
                         if served:
@@ -170,10 +194,16 @@ def main() -> int:
         print("\n── what a 7-day bound would withhold, per column " + "─" * 24)
         print(f"    {'column':<26} {'all rows':>9} {'SERVED':>8}")
         print(f"    {'-' * 26} {'-' * 9} {'-' * 8}")
-        for name in sorted(anchor_dependent | set(published_served)):
+        for name in sorted(anchor_dependent):
             a, s = published[name], published_served[name]
-            if a or s:
-                print(f"    {name:<26} {a:>9} {s:>8}")
+            print(f"    {name:<26} {a:>9} {s:>8}")
+        other = {n for n in published if n not in anchor_dependent}
+        if other:
+            print()
+            print(f"    not anchor-dependent, so NOT withheld by a bound "
+                  f"({len(other)} columns):")
+            print("      " + ", ".join(sorted(other)[:12])
+                  + (" ..." if len(other) > 12 else ""))
 
         if worst:
             print("\n── the served rows at risk, oldest anchor first " + "─" * 25)

@@ -850,11 +850,50 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         ocf_margin    = _div(cfo, rev)
         fcf_margin    = _div(fcf, rev)
 
-        # ── Price at fiscal year end (in-memory lookup) ────────────────────
-        # The date comes back with the value because the Price/FCF freshness
-        # guard judges the observation this line selected, not a second
-        # lookup of the same rule.
-        px, px_date = _price_observation(prices, ped)
+        # ── Price at fiscal year end, and the freshness gate ──────────────
+        #
+        # ONE GATE, FIFTEEN COLUMNS. `price_at` is "last close on or before
+        # the period end" with no floor, so a company whose price feed stops
+        # anchors every later fiscal year to the same final close. Measured
+        # over 33,864 rows: median 0 days, p95 2, MAX 6,644 -- FDR's FY2021
+        # metrics were computed from a close struck in October 2003.
+        #
+        # v11.2.86 bounded Price/FCF alone. That was the narrow fix, and
+        # narrow was wrong: `px` is the input to `mc`, and `mc` reaches
+        # fourteen other published columns. Bounding them one at a time means
+        # discovering this fifteen times.
+        #
+        # The gate is here, at the single point of derivation, so everything
+        # downstream declines through the None handling it already has:
+        #
+        #   price_at_compute  market_cap  enterprise_value
+        #   pe_ratio  pb_ratio  ps_ratio  ev_ebitda  ev_ebit  ev_revenue
+        #   earnings_yield  dividend_yield  franked_yield  fcf_yield
+        #   p_fcf_ratio
+        #
+        # THAT SET IS DERIVED, NOT ASSERTED. Reading the source gave eleven
+        # columns; running the producer twice -- once with the anchor nulled
+        # -- gave fifteen. `franked_yield` is reached through
+        # `dividend_yield`, and `altman_z_score` through `market_cap`. See
+        # scripts/diagnostics/measure_price_anchor_staleness.py.
+        #
+        # `altman_z_score` is the one exception and is NOT withheld: it falls
+        # back from market value to BOOK equity for its X4 term when the
+        # market cap is absent. So a stale anchor silently re-bases it rather
+        # than removing it. That fallback predates this change and its
+        # semantics are a separate question; it is recorded in finding 18
+        # rather than altered here.
+        #
+        # `price_at_compute` IS withheld, deliberately. A column named "the
+        # price at compute" holding a price that nothing was computed from
+        # asserts something false, and a consumer could divide by it. The
+        # rejected observation stays visible through the instrument and the
+        # run log, which is where provenance belongs -- not in a served
+        # column that reads as a measurement.
+        px_observed, px_date = _price_observation(prices, ped)
+        px = (px_observed
+              if price_is_fresh_enough(ped, px_date)
+              else None)
         mc = round(px * shares / 1e6, 2) if (px and shares) else None
 
         # ── Profitability ──────────────────────────────────────────────────
@@ -984,8 +1023,25 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         #                              policy choice rather than arithmetic,
         #                              and it was decided on a measurement.
         #
-        #   price older than 7 days   the close anchoring mc predates the
-        #   (or missing, or future)   fiscal period end by more than a week,
+        #   price older than 7 days   NOW ENFORCED BY THE ANCHOR GATE, not
+        #   (or missing, or future)   here. v11.2.87 moved it to the single
+        #                              point where `px` is derived, so all
+        #                              fifteen anchor-dependent columns obey
+        #                              it instead of this one. The condition
+        #                              was removed from this expression
+        #                              rather than left as a second
+        #                              application of the same predicate: mc
+        #                              is already None when the anchor is
+        #                              stale, so it could never fire, and a
+        #                              guard that cannot fire reads as
+        #                              protection while providing none.
+        #                              The contract tests below still pin the
+        #                              behaviour; they now kill the anchor
+        #                              gate instead of this clause, which the
+        #                              mutation run confirms.
+        #
+        #                              The close anchoring mc predates the
+        #                              fiscal period end by more than a week,
         #                              or no close was selected, or it falls
         #                              after the period end. `price_at` has
         #                              no floor -- "last close on or before"
@@ -1091,8 +1147,7 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         p_fcf = (_clamp(_div(mc, fcf))
                  if (mc is not None and mc > 0
                      and fcf is not None and fcf > 0
-                     and currency_coherent
-                     and price_is_fresh_enough(ped, px_date))
+                     and currency_coherent)
                  else None)
         # UNDERFLOW, the mirror of _clamp's overflow, AND A CORRECTED
         # DIAGNOSIS.

@@ -366,7 +366,14 @@ def main() -> int:
             # expected when the snapshot was emitted from the candidate
             # BEFORE deploying it, which is how v11.2.86 was accepted. So the
             # check is identity against the INTENDED candidate.
-            problems = []
+            # VOID is not FAILED, and the two must not share a verdict line.
+            # A failed comparison says the gate is wrong. A void one says
+            # this comparison cannot answer the question -- the inputs moved
+            # under it -- and leaves the verification OPEN. Both are
+            # non-success; conflating them would let "recapture and repeat"
+            # read as "the release is broken", or worse, the reverse.
+            problems: list[str] = []
+            voids: list[str] = []
             if intended is None or deployed_digest is None:
                 problems.append("a digest is missing, so deployment identity "
                                 "cannot be established at all")
@@ -425,18 +432,17 @@ def main() -> int:
             print("  live input aggregate         : "
                   + live_fp.aggregate[:32])
             if cap_agg is None:
-                problems.append(
+                voids.append(
                     "the snapshot recorded no input fingerprint, so the "
                     "retention claims cannot be qualified -- recapture")
             elif cap_agg != live_fp.aggregate:
-                problems.append(
+                voids.append(
                     "THE INPUTS MOVED between capture and now (capture "
                     + cap_agg[:16] + ", live " + live_fp.aggregate[:16]
-                    + "). The retention comparison is VOID, not failed: a "
-                    "changed eligible value may be correct. Recapture and "
-                    "repeat.")
+                    + "). A changed eligible value may be correct. Recapture "
+                    "and repeat against consistent inputs.")
             elif str(cap_schema) != str(live_fp.schema_version):
-                problems.append(
+                voids.append(
                     "the fingerprint projection changed (capture schema "
                     + str(cap_schema) + ", live " + str(live_fp.schema_version)
                     + "), so the two aggregates are not comparable")
@@ -510,6 +516,18 @@ def main() -> int:
             if not_cleared or retained_moved or window_moved or missing:
                 problems.append("rows did not reconcile")
             print()
+            if voids:
+                # Exit 2, distinct from a failure, and the row results above
+                # are retained as evidence rather than suppressed -- they are
+                # just not a verdict.
+                print("  ** VOID -- verification remains OPEN, not failed")
+                for v in voids:
+                    print("     - " + v)
+                if problems:
+                    print("     (also, independent of the void: "
+                          + "; ".join(problems) + ")")
+                conn.rollback()
+                return 2
             if problems:
                 print("  ** DOES NOT RECONCILE")
                 for pr in problems:

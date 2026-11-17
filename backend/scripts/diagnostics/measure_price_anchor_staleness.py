@@ -61,6 +61,13 @@ def main() -> int:
                          "anchor-dependent columns must now be NULL, window "
                          "metrics must be unchanged, and every row is "
                          "checked by identity and value, not by count")
+    ap.add_argument("--deployed-root",
+                    default="/opt/asx-screener/backend",
+                    help="the DEPLOYED tree, read to establish "
+                         "deployment identity. Digest inequality "
+                         "proves only that code changed; the check "
+                         "is identity against the intended "
+                         "candidate.")
     ap.add_argument("--candidate", metavar="SHA",
                     help="recorded in the snapshot header; an operator "
                          "assertion, which is why the producer digest is "
@@ -231,90 +238,173 @@ def main() -> int:
             print("  for the runs where a company stops trading while its")
             print("  statements stay inside the window the universe selects.")
 
-        # ── Production acceptance: emit / verify over the stale rows ─────
+        # ── Production acceptance ────────────────────────────────────────
         #
-        # Counts prove the producer withholds. They do NOT prove the STORE
-        # was cleared, and they say nothing about the columns a bound must
-        # leave alone. So the snapshot carries both groups:
+        # Three groups, because they have three different expectations and
+        # one of them is "nothing may change":
         #
-        #   WITHHELD  the 15 anchor-dependent columns, which must become
-        #             NULL -- price_at_compute and altman_z_score included
-        #   UNCHANGED the 3 series-based risk metrics, which must not move,
-        #             because an early version of this very instrument
-        #             reported them as anchor-dependent and a gate that
-        #             reached them would cost coverage for no reason
+        #   WITHHELD   the anchor-dependent columns ON STALE ROWS. Must
+        #              become NULL -- price_at_compute and altman_z_score
+        #              included.
+        #   RETAINED   the SAME columns on ELIGIBLE rows. Must not move. The
+        #              Price/FCF reconciliation could never establish this:
+        #              it compares one column. A bound that wrongly withheld
+        #              an eligible row would pass every check written so far.
+        #   UNCHANGED  the series-based risk metrics, on every row. Must not
+        #              move. An early version of this instrument reported
+        #              them as anchor-dependent, so "did not move" is an
+        #              assertion here, not an assumption.
         #
-        # Checked by identity and value per row. A count agreeing while the
-        # rows differ is the failure this exists to catch.
+        # Stale rows carry VALUES, because change there is expected and must
+        # be readable. Eligible rows carry a per-row DIGEST of the same
+        # columns -- 33,000 rows of values would be unwieldy, and a digest
+        # still names the row that moved, after which the values can be
+        # re-read. Scoped, not sampled: every yearly row is covered.
         WITHHELD = sorted(anchor_dependent)
-        UNCHANGED = ["sharpe_1y", "volatility_1y", "max_drawdown_1y"]
+        UNCHANGED = [c for c in ("sharpe_1y", "volatility_1y",
+                                 "max_drawdown_1y") if c in cols]
         stale_keys = sorted((c, fy) for c, fys in per_code_stale.items()
                             for fy in fys)
 
-        def _snapshot():
-            if not stale_keys:
-                return {}
-            want = [c for c in WITHHELD + UNCHANGED
-                    if c in set(cols) or True]
-            sel = ", ".join(f'"{c}"' for c in want)
-            cur.execute(
-                f"SELECT asx_code, fiscal_year, {sel} "
-                f"FROM market.yearly_metrics "
-                f"WHERE (asx_code, fiscal_year) IN %s",
-                (tuple(stale_keys),))
-            out = {}
+        def _acceptance_state():
+            """(stale values, per-row digests) over every yearly row."""
+            import hashlib as _h
+            want = WITHHELD + UNCHANGED
+            sel = ", ".join('"' + c + '"' for c in want)
+            cur.execute("SELECT asx_code, fiscal_year, " + sel +
+                        " FROM market.yearly_metrics")
+            stale_vals, digests = {}, {}
+            stale_set = set(stale_keys)
             for row in cur.fetchall():
-                out[(row[0], int(row[1]))] = dict(zip(want, row[2:]))
-            return out
+                key = (row[0], int(row[1]))
+                vals = dict(zip(want, row[2:]))
+                flat = "|".join("" if vals[c] is None else str(vals[c])
+                                for c in want)
+                digests[key[0] + ":" + str(key[1])] = _h.sha256(
+                    flat.encode()).hexdigest()[:16]
+                if key in stale_set:
+                    stale_vals[key[0] + ":" + str(key[1])] = {
+                        c: (None if vals[c] is None else str(vals[c]))
+                        for c in want}
+            return stale_vals, digests
+
+        def _digest_of(root):
+            """sha256 over the producer set in a given tree, or None."""
+            import hashlib as _h
+            h = _h.sha256()
+            for name in ("yearly_compute.py", "periods.py",
+                         "applicability.py"):
+                f = root / "compute" / "engine" / name
+                if not f.is_file():
+                    return None
+                h.update(name.encode())
+                h.update(f.read_bytes())
+            return h.hexdigest()
 
         if args.emit or args.verify:
-            import hashlib
             import json
-            producer = (BACKEND / "compute" / "engine" / "yearly_compute.py")
-            digest = hashlib.sha256(producer.read_bytes()).hexdigest()
-            snap = _snapshot()
+            candidate_digest = _digest_of(BACKEND)
+            deployed_digest = _digest_of(Path(args.deployed_root))
 
         if args.emit:
+            stale_vals, digests = _acceptance_state()
             payload = {
                 "candidate": args.candidate or "(unrecorded)",
-                "producer_sha256": digest,
+                # The tree this instrument is RUNNING from: the code whose
+                # behaviour these expectations describe.
+                "intended_candidate_digest": candidate_digest,
+                # The tree DEPLOYED when the before-values were captured, so
+                # the baseline is identified rather than assumed and a verify
+                # can tell "not deployed yet" from "deployed something else".
+                "baseline_deployed_digest": deployed_digest,
                 "bound_days": BOUND_DAYS,
                 "withheld_columns": WITHHELD,
                 "unchanged_columns": UNCHANGED,
                 "stale_rows": len(stale_keys),
-                "rows": {f"{c}:{fy}": {k: (str(v) if v is not None else None)
-                                       for k, v in vals.items()}
-                         for (c, fy), vals in snap.items()},
+                "stale_values": stale_vals,
+                "row_digests": digests,
             }
-            Path(args.emit).write_text(json.dumps(payload, indent=1),
-                                       encoding="utf-8")
-            print(f"\nwrote a snapshot of {len(snap)} stale rows to "
-                  f"{args.emit}")
-            print(f"    producer_sha256: {digest}")
-            print(f"    withheld columns: {len(WITHHELD)}   "
-                  f"unchanged columns: {len(UNCHANGED)}")
+            Path(args.emit).write_text(json.dumps(payload), encoding="utf-8")
+            print("\nwrote an acceptance snapshot to " + args.emit)
+            print("    intended candidate digest : "
+                  + (candidate_digest or "(none)")[:32])
+            print("    baseline deployed digest  : "
+                  + (deployed_digest or "(none)")[:32])
+            print("    stale rows with values    : " + str(len(stale_vals)))
+            print("    rows with a digest        : " + str(len(digests)))
 
         if args.verify:
             import json
             prior = json.loads(Path(args.verify).read_text(encoding="utf-8"))
-            print("\n" + "=" * 72)
-            print("ACCEPTANCE -- the stale rows, by identity and value")
-            print("=" * 72)
-            print(f"  snapshot candidate      : {prior.get('candidate')}")
-            print(f"  snapshot producer_sha256: "
-                  f"{prior.get('producer_sha256', '')[:32]}…")
-            print(f"  this producer_sha256    : {digest[:32]}…")
-            if prior.get("producer_sha256") == digest:
-                print("\n  ** The producer has NOT changed since the snapshot.")
-                print("     Verifying would compare a state to itself. Emit "
-                       "the snapshot BEFORE deploying.")
-                conn.rollback()
-                return 1
+            stale_vals, digests = _acceptance_state()
 
-            not_cleared, moved, missing = [], [], []
-            for key, before in prior.get("rows", {}).items():
-                code, _, fy = key.partition(":")
-                now = snap.get((code, int(fy)))
+            print("\n" + "=" * 72)
+            print("ACCEPTANCE -- deployment identity, then rows")
+            print("=" * 72)
+            intended = prior.get("intended_candidate_digest")
+            baseline = prior.get("baseline_deployed_digest")
+            print("  intended candidate (snapshot) : "
+                  + (intended or "(none)")[:32])
+            print("  baseline deployed (snapshot)  : "
+                  + (baseline or "(none)")[:32])
+            print("  deployed NOW                  : "
+                  + (deployed_digest or "(none)")[:32])
+
+            # Digest INEQUALITY proves nothing -- it says some code changed,
+            # not that the right code is running. And equality is correct and
+            # expected when the snapshot was emitted from the candidate
+            # BEFORE deploying it, which is how v11.2.86 was accepted. So the
+            # check is identity against the INTENDED candidate.
+            problems = []
+            if intended is None or deployed_digest is None:
+                problems.append("a digest is missing, so deployment identity "
+                                "cannot be established at all")
+            elif deployed_digest != intended:
+                problems.append(
+                    "the deployed producer is not the intended candidate: "
+                    "deployed " + deployed_digest[:16] + ", intended "
+                    + intended[:16])
+            else:
+                print("\n  deployment identity holds: the running producer IS "
+                      "the intended candidate.")
+
+            cur.execute("""
+                WITH a AS (SELECT DISTINCT compute_run_id AS run_id
+                           FROM screener.universe
+                           WHERE compute_run_id IS NOT NULL)
+                SELECT (SELECT count(*) FROM a),
+                       (SELECT max(run_id) FROM a),
+                       (SELECT s.details->'yearly_source_fingerprint'
+                                 ->>'schema_version'
+                        FROM screener.compute_run_stages s JOIN a
+                          ON a.run_id = s.run_id
+                        WHERE s.stage_name='yearly_compute'
+                          AND s.status='success'),
+                       (SELECT left(s.details->'yearly_source_fingerprint'
+                                 ->>'aggregate', 32)
+                        FROM screener.compute_run_stages s JOIN a
+                          ON a.run_id = s.run_id
+                        WHERE s.stage_name='yearly_compute'
+                          AND s.status='success')
+            """)
+            n_runs, run_id, fp_schema, fp_agg = cur.fetchone()
+            print("\n  publishing run id            : " + str(run_id)
+                  + "  (" + str(n_runs) + " distinct non-NULL)")
+            print("  its recorded yearly schema   : " + str(fp_schema))
+            print("  its recorded input aggregate : " + str(fp_agg))
+            if n_runs != 1:
+                problems.append(
+                    str(n_runs) + " distinct run ids attribute the universe; "
+                    "there is no single publication to tie this to")
+            if fp_agg is None:
+                problems.append(
+                    "the publishing run recorded no yearly fingerprint -- it "
+                    "reused yearly output, so this cannot be tied to the run "
+                    "that produced these values (finding 24)")
+
+            not_cleared, retained_moved, window_moved, missing = [], [], [], []
+            for key, before in prior.get("stale_values", {}).items():
+                now = stale_vals.get(key)
                 if now is None:
                     missing.append(key)
                     continue
@@ -322,29 +412,50 @@ def main() -> int:
                     if now.get(col) is not None:
                         not_cleared.append((key, col, now[col]))
                 for col in prior.get("unchanged_columns", []):
-                    b = before.get(col)
-                    a = now.get(col)
-                    if (b is None) != (a is None) or (
-                            b is not None and str(a) != b):
-                        moved.append((key, col, b, a))
+                    if before.get(col) != now.get(col):
+                        window_moved.append((key, col, before.get(col),
+                                             now.get(col)))
 
-            print(f"\n  stale rows in the snapshot : "
-                  f"{len(prior.get('rows', {}))}")
-            print(f"  rows no longer stale/absent : {len(missing)}")
-            print(f"  anchor columns NOT cleared  : {len(not_cleared)}")
-            print(f"  window metrics that MOVED   : {len(moved)}")
-            for r in not_cleared[:10]:
-                print(f"    not cleared  {r[0]:<12} {r[1]:<20} = {r[2]}")
-            for r in moved[:10]:
-                print(f"    moved        {r[0]:<12} {r[1]:<18} "
-                      f"{r[2]} -> {r[3]}")
-            ok = not (not_cleared or moved)
-            print(f"\n  {'RECONCILES' if ok else '** DOES NOT RECONCILE'}")
-            print("  A rejected anchor must clear every affected value and")
-            print("  must not touch the series-based metrics beside them.")
-            if not ok:
+            stale_set = set(prior.get("stale_values", {}))
+            for key, d in prior.get("row_digests", {}).items():
+                if key in stale_set:
+                    continue
+                now = digests.get(key)
+                if now is None:
+                    missing.append(key)
+                elif now != d:
+                    retained_moved.append((key, d, now))
+
+            print("\n  stale rows in the snapshot   : "
+                  + str(len(prior.get("stale_values", {}))))
+            print("  eligible rows digested       : "
+                  + str(len(prior.get("row_digests", {})) - len(stale_set)))
+            print("  rows now absent              : " + str(len(missing)))
+            print("  STALE: columns not cleared   : " + str(len(not_cleared)))
+            print("  ELIGIBLE: rows that moved    : "
+                  + str(len(retained_moved)))
+            print("  window metrics that moved    : " + str(len(window_moved)))
+            for r in not_cleared[:8]:
+                print("    not cleared  " + r[0] + "  " + r[1] + " = "
+                      + str(r[2]))
+            for r in retained_moved[:8]:
+                print("    moved        " + r[0] + "  " + r[1] + " -> " + r[2])
+            for r in window_moved[:8]:
+                print("    window       " + r[0] + "  " + r[1] + "  "
+                      + str(r[2]) + " -> " + str(r[3]))
+
+            if not_cleared or retained_moved or window_moved or missing:
+                problems.append("rows did not reconcile")
+            print()
+            if problems:
+                print("  ** DOES NOT RECONCILE")
+                for pr in problems:
+                    print("     - " + pr)
                 conn.rollback()
                 return 1
+            print("  RECONCILES: the intended candidate is deployed, a single")
+            print("  run published, every stale row cleared, every eligible")
+            print("  row unmoved, and the risk metrics untouched.")
 
         conn.rollback()
         print("\nread-only, rolled back")

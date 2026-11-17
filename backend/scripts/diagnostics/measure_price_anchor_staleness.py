@@ -51,6 +51,20 @@ def main() -> int:
     ap.add_argument("--env-file")
     ap.add_argument("--limit", type=int,
                     help="smoke test; counts are then NOT the population")
+    ap.add_argument("--emit", metavar="PATH",
+                    help="snapshot every stale row's stored values -- the 15 "
+                         "anchor-dependent columns AND the 3 window metrics "
+                         "-- so --verify can prove the first group cleared "
+                         "and the second did not move")
+    ap.add_argument("--verify", metavar="PATH",
+                    help="reconcile an --emit snapshot against the store: "
+                         "anchor-dependent columns must now be NULL, window "
+                         "metrics must be unchanged, and every row is "
+                         "checked by identity and value, not by count")
+    ap.add_argument("--candidate", metavar="SHA",
+                    help="recorded in the snapshot header; an operator "
+                         "assertion, which is why the producer digest is "
+                         "recorded beside it")
     args = ap.parse_args()
 
     if args.env_file:
@@ -216,6 +230,121 @@ def main() -> int:
             print("  withhold nothing a customer currently sees, and exists")
             print("  for the runs where a company stops trading while its")
             print("  statements stay inside the window the universe selects.")
+
+        # ── Production acceptance: emit / verify over the stale rows ─────
+        #
+        # Counts prove the producer withholds. They do NOT prove the STORE
+        # was cleared, and they say nothing about the columns a bound must
+        # leave alone. So the snapshot carries both groups:
+        #
+        #   WITHHELD  the 15 anchor-dependent columns, which must become
+        #             NULL -- price_at_compute and altman_z_score included
+        #   UNCHANGED the 3 series-based risk metrics, which must not move,
+        #             because an early version of this very instrument
+        #             reported them as anchor-dependent and a gate that
+        #             reached them would cost coverage for no reason
+        #
+        # Checked by identity and value per row. A count agreeing while the
+        # rows differ is the failure this exists to catch.
+        WITHHELD = sorted(anchor_dependent)
+        UNCHANGED = ["sharpe_1y", "volatility_1y", "max_drawdown_1y"]
+        stale_keys = sorted((c, fy) for c, fys in per_code_stale.items()
+                            for fy in fys)
+
+        def _snapshot():
+            if not stale_keys:
+                return {}
+            want = [c for c in WITHHELD + UNCHANGED
+                    if c in set(cols) or True]
+            sel = ", ".join(f'"{c}"' for c in want)
+            cur.execute(
+                f"SELECT asx_code, fiscal_year, {sel} "
+                f"FROM market.yearly_metrics "
+                f"WHERE (asx_code, fiscal_year) IN %s",
+                (tuple(stale_keys),))
+            out = {}
+            for row in cur.fetchall():
+                out[(row[0], int(row[1]))] = dict(zip(want, row[2:]))
+            return out
+
+        if args.emit or args.verify:
+            import hashlib
+            import json
+            producer = (BACKEND / "compute" / "engine" / "yearly_compute.py")
+            digest = hashlib.sha256(producer.read_bytes()).hexdigest()
+            snap = _snapshot()
+
+        if args.emit:
+            payload = {
+                "candidate": args.candidate or "(unrecorded)",
+                "producer_sha256": digest,
+                "bound_days": BOUND_DAYS,
+                "withheld_columns": WITHHELD,
+                "unchanged_columns": UNCHANGED,
+                "stale_rows": len(stale_keys),
+                "rows": {f"{c}:{fy}": {k: (str(v) if v is not None else None)
+                                       for k, v in vals.items()}
+                         for (c, fy), vals in snap.items()},
+            }
+            Path(args.emit).write_text(json.dumps(payload, indent=1),
+                                       encoding="utf-8")
+            print(f"\nwrote a snapshot of {len(snap)} stale rows to "
+                  f"{args.emit}")
+            print(f"    producer_sha256: {digest}")
+            print(f"    withheld columns: {len(WITHHELD)}   "
+                  f"unchanged columns: {len(UNCHANGED)}")
+
+        if args.verify:
+            import json
+            prior = json.loads(Path(args.verify).read_text(encoding="utf-8"))
+            print("\n" + "=" * 72)
+            print("ACCEPTANCE -- the stale rows, by identity and value")
+            print("=" * 72)
+            print(f"  snapshot candidate      : {prior.get('candidate')}")
+            print(f"  snapshot producer_sha256: "
+                  f"{prior.get('producer_sha256', '')[:32]}…")
+            print(f"  this producer_sha256    : {digest[:32]}…")
+            if prior.get("producer_sha256") == digest:
+                print("\n  ** The producer has NOT changed since the snapshot.")
+                print("     Verifying would compare a state to itself. Emit "
+                       "the snapshot BEFORE deploying.")
+                conn.rollback()
+                return 1
+
+            not_cleared, moved, missing = [], [], []
+            for key, before in prior.get("rows", {}).items():
+                code, _, fy = key.partition(":")
+                now = snap.get((code, int(fy)))
+                if now is None:
+                    missing.append(key)
+                    continue
+                for col in prior.get("withheld_columns", []):
+                    if now.get(col) is not None:
+                        not_cleared.append((key, col, now[col]))
+                for col in prior.get("unchanged_columns", []):
+                    b = before.get(col)
+                    a = now.get(col)
+                    if (b is None) != (a is None) or (
+                            b is not None and str(a) != b):
+                        moved.append((key, col, b, a))
+
+            print(f"\n  stale rows in the snapshot : "
+                  f"{len(prior.get('rows', {}))}")
+            print(f"  rows no longer stale/absent : {len(missing)}")
+            print(f"  anchor columns NOT cleared  : {len(not_cleared)}")
+            print(f"  window metrics that MOVED   : {len(moved)}")
+            for r in not_cleared[:10]:
+                print(f"    not cleared  {r[0]:<12} {r[1]:<20} = {r[2]}")
+            for r in moved[:10]:
+                print(f"    moved        {r[0]:<12} {r[1]:<18} "
+                      f"{r[2]} -> {r[3]}")
+            ok = not (not_cleared or moved)
+            print(f"\n  {'RECONCILES' if ok else '** DOES NOT RECONCILE'}")
+            print("  A rejected anchor must clear every affected value and")
+            print("  must not touch the series-based metrics beside them.")
+            if not ok:
+                conn.rollback()
+                return 1
 
         conn.rollback()
         print("\nread-only, rolled back")

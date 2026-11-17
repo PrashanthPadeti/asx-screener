@@ -769,3 +769,56 @@ path remains verified only by reading `check_yearly_reuse`.
 because run 56 reused and recorded no comparison. Finding 24. The tie
 used instead is run 55's recorded fingerprint plus the live-input match
 at verification time — stronger per row, and not the same claim.
+
+
+---
+
+# CLOSED — 17 Nov 2026
+
+v11.2.86 is closed on the user's decision, with the two unmet criteria
+accepted as exceptions rather than argued into compliance. Recording them
+here is the point: a release closed over a known gap is only safe if the
+gap stays legible afterwards.
+
+## What the closure rests on
+
+| criterion | result |
+|---|---|
+| gate on the released candidate | `d815637`: 0 introduced, 0 inconclusive, P0 holds, `EXIT=0` |
+| recomputation completed | run 55, `Coverage: every sourced yearly_metrics row was rewritten by this run` |
+| row-level reconciliation at storage precision | 471/471, **0 missing, 0 extra, 0 differing** |
+| stale values cleared | `served but NOT expected: 0` — nothing serves a ratio the producer calls NULL |
+| freshness-ineligible withheld | P11 served over the limit **0**; P13 withheld **44** |
+| unstated-currency publishers | **0** |
+| attribution | one non-NULL run id; 2,120 attributed = `rows_written`; 451 unattributed, stated |
+| provenance of the expectation | enforced — same producer digest, same input fingerprint, same projection |
+
+## The two exceptions, carried forward
+
+**1. The v1-reuse rejection was never demonstrated in production.** The
+FULL plan reuses nothing, so it never exercised the refusal, and the
+window closed before a `DAILY_CANONICAL` precondition check was run. The
+substance is covered — everything was recomputed and coverage proved — so
+no v1-era yearly output survived. The *mechanism* is evidenced only by
+reading `check_yearly_reuse`. **Next schema bump: run the precondition
+check BEFORE the first run, not after.** That is the whole lesson and it
+cost nothing to have done right.
+
+**2. A reusing run cannot be tied to a fingerprint by its own record** —
+**finding 24**, open. The verified surface was published by run 56, a
+DAILY plan, which has no `yearly_compute` stage and recorded nothing
+about the comparison it made. The tie used was run 55's recorded
+schema-2 fingerprint plus the live-input match at verification time.
+
+## What this release opened
+
+Findings **18, 19, 20, 21, 22, 23, 24** — all new, none fixed here. 18
+(unbounded `price_at` on the eleven sibling ratios) and 24 are the two
+that matter most; 17 remains open with measured exposure and needs
+FACTOR_MODEL_V4 alongside 20.
+
+## Evidence retained
+
+`/var/backups/p0a/gates/` on the production host: gates 3–11, the
+forecast, both verification runs, the expected-row artifact, and the
+`DAILY_CANONICAL` precondition log.

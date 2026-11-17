@@ -606,7 +606,18 @@ def main() -> int:
 
         if args.verify:
             import csv
-            from decimal import Decimal
+            # POSTGRES ROUNDS HALF AWAY FROM ZERO; Python's Decimal
+            # defaults to ROUND_HALF_EVEN. With the default, an expected
+            # 28.725 quantizes to 28.72 while NUMERIC(10,2) stores 28.73,
+            # and the comparison reports a defect in a correct value.
+            #
+            # Found on the v11.2.86 acceptance run: 0 missing, 0 extra, and
+            # exactly 2 of 471 rows "differing" -- SGM 28.725 and VCX 17.505,
+            # both exact halves at the 2dp boundary. This file already carried
+            # a contract test asserting Postgres's behaviour at that boundary
+            # for the underflow guard, and the comparison was then written
+            # with the other mode anyway. Knowing a rule is not applying it.
+            from decimal import Decimal, ROUND_HALF_UP
             want: dict[tuple[str, int], Optional[Decimal]] = {}
             recorded: dict[str, str] = {}
             with open(args.verify, newline="", encoding="utf-8") as fh:
@@ -618,7 +629,8 @@ def main() -> int:
             for r in csv.DictReader(
                     [ln for ln in lines if not ln.startswith("#")]):
                 want[(r["asx_code"], int(r["fiscal_year"]))] = (
-                    Decimal(r["p_fcf_ratio"]).quantize(Decimal("0.01"))
+                    Decimal(r["p_fcf_ratio"]).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP)
                     if r["p_fcf_ratio"] else None)
 
             # ── The expectation's inputs must still be the run's inputs ──
@@ -688,7 +700,8 @@ def main() -> int:
             wrong = sorted(
                 c for c in set(want_by_code) & set(got)
                 if want_by_code[c][1] is None
-                or Decimal(got[c]).quantize(Decimal("0.01"))
+                or Decimal(got[c]).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP)
                 != want_by_code[c][1])
 
             print("\n" + "=" * 70)

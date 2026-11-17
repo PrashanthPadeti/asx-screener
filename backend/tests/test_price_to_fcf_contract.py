@@ -475,6 +475,37 @@ def test_the_producer_digest_covers_every_imported_module():
         f"difference as a defect. Add them to PRODUCER_MODULES.")
 
 
+def test_the_acceptance_comparison_uses_postgres_rounding():
+    """The reconciliation must round the way the column rounds.
+
+    PostgreSQL NUMERIC rounds half away from zero; Python's Decimal defaults
+    to ROUND_HALF_EVEN. On the v11.2.86 acceptance run that difference
+    reported 2 of 471 rows as defects in correct values -- SGM 28.725 and VCX
+    17.505, both exact halves at the 2dp boundary, stored as 28.73 and 17.51
+    and expected as 28.72 and 17.50.
+
+    This file already asserted Postgres's behaviour at that boundary for the
+    underflow guard, and the comparison was written with the other mode
+    anyway. Knowing a rule is not applying it, so the rule is now asserted
+    where the comparison lives rather than only where the guard does.
+    """
+    import re
+    from decimal import Decimal, ROUND_HALF_EVEN, ROUND_HALF_UP
+
+    assert Decimal("28.725").quantize(Decimal("0.01"), ROUND_HALF_UP)         == Decimal("28.73")
+    assert Decimal("28.725").quantize(Decimal("0.01"), ROUND_HALF_EVEN)         == Decimal("28.72"), "the two modes no longer differ on this value"
+
+    src = (BACKEND / "scripts" / "diagnostics"
+           / "measure_p_fcf_populations.py").read_text(encoding="utf-8")
+    quantizes = re.findall(r"\.quantize\(\s*Decimal\(\"0\.01\"\)([^)]*)\)", src)
+    assert quantizes, "no 2dp quantize found in the acceptance comparison"
+    for tail in quantizes:
+        assert "ROUND_HALF_UP" in tail, (
+            "a 2dp quantize in the acceptance comparison does not name "
+            "ROUND_HALF_UP, so it uses Python's banker's rounding and will "
+            "report correct values as differences at exact halves")
+
+
 def test_the_stored_scale_matches_the_column_it_describes():
     """The threshold is the COLUMN's precision, so read the column.
 

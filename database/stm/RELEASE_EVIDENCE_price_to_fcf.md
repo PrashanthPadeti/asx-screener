@@ -678,3 +678,147 @@ deploy; it is an acceptance criterion, not a settled fact.
   snapshot, applied to all history. Not fixable from this source.
 - **Finding 20** — the P/E-publishes-where-Price/FCF-does-not
   inconsistency this release deliberately creates. Needs V4, with 17.
+
+
+---
+
+# Production verification, 16–17 Nov 2026
+
+## Deployment
+
+| | |
+|---|---|
+| tag | **v11.2.86**, annotated, pushed |
+| deployed HEAD | `4ec1d06`, `git describe` → `v11.2.86`, branch `main` |
+| deployed schema version | `FINGERPRINT_SCHEMA_VERSION = 2` |
+| deployed producer digest | `965fcec8…` — **identical** to the forecast artifact's `producer_set_sha256` |
+| smoke | 13 ok, 0 failed, 1 skipped (AI Query reported NOT VERIFIED by that run) |
+
+## The runs
+
+| run | plan | at (UTC) | rows |
+|---|---|---|---|
+| 55 | `FULL_FUNDAMENTALS_CANONICAL` | 16 Nov 03:03 | 2,119, 0 violations |
+| 56 | `DAILY_CANONICAL` | 16 Nov 09:11 | 2,120, universe rebuilt 09:57 |
+
+Run 55 reported `Coverage: every sourced yearly_metrics row was rewritten
+by this run` and recorded `yearly_source_fingerprint` schema **2**,
+aggregate `c7ae712444f234ec…` — **the forecast artifact's own
+aggregate**, unchanged from open to publication.
+
+Run 56 is the run that published the surface verified. It **reused**
+yearly output, so it has no `yearly_compute` stage and recorded nothing
+about the reuse comparison it made — **finding 24**.
+
+## Row-level acceptance — PASSES
+
+Verified 16 Nov 12:03 against the live surface, from the pre-run
+artifact, with provenance enforced:
+
+```
+provenance holds: same producer, same input fingerprint, same projection
+expected 471   served 471
+expected but NOT served : 0
+served but NOT expected : 0
+served with a DIFFERENT value : 0
+RECONCILES
+```
+
+`served but NOT expected: 0` is also the clearing evidence at the
+universe level: no row serves a ratio the producer says should be NULL.
+
+**The first attempt failed and the failure was mine.** It reported 2 of
+471 differing — SGM 28.72/28.73, VCX 17.50/17.51. The raw expectations
+were `28.725` and `17.505`, exact halves at the 2dp boundary: PostgreSQL
+rounds half away from zero, Python's `Decimal` defaults to
+`ROUND_HALF_EVEN`. The served values were correct. This contract already
+asserted Postgres's behaviour at that boundary for the underflow guard,
+and the comparison was written with the other mode anyway. Fixed on
+`fix/verify-rounding-mode` with a test that reads the comparison's source
+and fails if a 2dp quantize omits `ROUND_HALF_UP` — diagnostics only, the
+deployed artifact untouched, so the artifact stayed valid and was
+re-verified rather than regenerated.
+
+## The other invariants
+
+| | result |
+|---|---|
+| R1 / R2 / R3 reconciliation failures | **0** (R1 over 33,864 rows) |
+| served rows publishing on an unstated currency (P7) | **0** |
+| served rows above the 7-day freshness limit (P11) | **0** |
+| rows withheld by the freshness guard (P13) | **44** — the guard fires in the historical tail |
+| minimum published ratio | **0.0065** (≥ 0.005) |
+| distinct non-NULL `compute_run_id` | 1 (run 56) |
+| attributed / unattributed | 2,120 / 451 |
+| attributed = that run's `rows_written` | **2,120 = 2,120** |
+
+## Two criteria NOT evidenced
+
+**The v1-reuse rejection was never captured.**
+`FULL_FUNDAMENTALS_CANONICAL` reuses nothing by design, so run 55 never
+exercised the refusal. By the time a `DAILY_CANONICAL` precondition check
+was run (04:18), run 55 had already recorded schema 2 and the comparison
+was 2-against-2: it returned *"reuse PERMITTED: yearly source fingerprint
+is unchanged"*. The substance holds — run 55 recomputed everything and
+proved coverage, so no v1-era yearly output survived — but the
+**production demonstration of the rejection mechanism is missing, and
+the window was closed by not checking before starting the run.** The code
+path remains verified only by reading `check_yearly_reuse`.
+
+**The publishing run cannot be tied to a fingerprint by its own record**,
+because run 56 reused and recorded no comparison. Finding 24. The tie
+used instead is run 55's recorded fingerprint plus the live-input match
+at verification time — stronger per row, and not the same claim.
+
+
+---
+
+# CLOSED — 17 Nov 2026
+
+v11.2.86 is closed on the user's decision, with the two unmet criteria
+accepted as exceptions rather than argued into compliance. Recording them
+here is the point: a release closed over a known gap is only safe if the
+gap stays legible afterwards.
+
+## What the closure rests on
+
+| criterion | result |
+|---|---|
+| gate on the released candidate | `d815637`: 0 introduced, 0 inconclusive, P0 holds, `EXIT=0` |
+| recomputation completed | run 55, `Coverage: every sourced yearly_metrics row was rewritten by this run` |
+| row-level reconciliation at storage precision | 471/471, **0 missing, 0 extra, 0 differing** |
+| stale values cleared | `served but NOT expected: 0` — nothing serves a ratio the producer calls NULL |
+| freshness-ineligible withheld | P11 served over the limit **0**; P13 withheld **44** |
+| unstated-currency publishers | **0** |
+| attribution | one non-NULL run id; 2,120 attributed = `rows_written`; 451 unattributed, stated |
+| provenance of the expectation | enforced — same producer digest, same input fingerprint, same projection |
+
+## The two exceptions, carried forward
+
+**1. The v1-reuse rejection was never demonstrated in production.** The
+FULL plan reuses nothing, so it never exercised the refusal, and the
+window closed before a `DAILY_CANONICAL` precondition check was run. The
+substance is covered — everything was recomputed and coverage proved — so
+no v1-era yearly output survived. The *mechanism* is evidenced only by
+reading `check_yearly_reuse`. **Next schema bump: run the precondition
+check BEFORE the first run, not after.** That is the whole lesson and it
+cost nothing to have done right.
+
+**2. A reusing run cannot be tied to a fingerprint by its own record** —
+**finding 24**, open. The verified surface was published by run 56, a
+DAILY plan, which has no `yearly_compute` stage and recorded nothing
+about the comparison it made. The tie used was run 55's recorded
+schema-2 fingerprint plus the live-input match at verification time.
+
+## What this release opened
+
+Findings **18, 19, 20, 21, 22, 23, 24** — all new, none fixed here. 18
+(unbounded `price_at` on the eleven sibling ratios) and 24 are the two
+that matter most; 17 remains open with measured exposure and needs
+FACTOR_MODEL_V4 alongside 20.
+
+## Evidence retained
+
+`/var/backups/p0a/gates/` on the production host: gates 3–11, the
+forecast, both verification runs, the expected-row artifact, and the
+`DAILY_CANONICAL` precondition log.

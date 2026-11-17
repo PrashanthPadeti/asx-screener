@@ -303,8 +303,16 @@ def main() -> int:
 
         if args.emit or args.verify:
             import json
+            from compute.engine import source_fingerprint as sfp
             candidate_digest = _digest_of(BACKEND)
             deployed_digest = _digest_of(Path(args.deployed_root))
+            # The INPUTS at capture time. Retention claims -- "eligible rows
+            # kept their values", "risk metrics did not move" -- are only
+            # meaningful if the recomputation read the same inputs. An
+            # ingestion between capture and run makes a changed value correct
+            # and the comparison void, so the fingerprint is recorded and
+            # compared rather than hoped for.
+            live_fp = sfp.compute(cur)
 
         if args.emit:
             stale_vals, digests = _acceptance_state()
@@ -317,6 +325,9 @@ def main() -> int:
                 # the baseline is identified rather than assumed and a verify
                 # can tell "not deployed yet" from "deployed something else".
                 "baseline_deployed_digest": deployed_digest,
+                # The inputs these before-values were captured against.
+                "capture_fingerprint_schema": live_fp.schema_version,
+                "capture_fingerprint_aggregate": live_fp.aggregate,
                 "bound_days": BOUND_DAYS,
                 "withheld_columns": WITHHELD,
                 "unchanged_columns": UNCHANGED,
@@ -402,6 +413,34 @@ def main() -> int:
                     "reused yearly output, so this cannot be tied to the run "
                     "that produced these values (finding 24)")
 
+            # INPUT STABILITY. Retention is only a claim about the gate if
+            # the recomputation read the inputs the snapshot was captured
+            # against. If an ingestion intervened, a moved value is correct
+            # and the comparison is void -- which must invalidate the
+            # verification rather than be reported as a defect.
+            cap_schema = prior.get("capture_fingerprint_schema")
+            cap_agg = prior.get("capture_fingerprint_aggregate")
+            print("  capture input aggregate      : "
+                  + (cap_agg or "(none recorded)")[:32])
+            print("  live input aggregate         : "
+                  + live_fp.aggregate[:32])
+            if cap_agg is None:
+                problems.append(
+                    "the snapshot recorded no input fingerprint, so the "
+                    "retention claims cannot be qualified -- recapture")
+            elif cap_agg != live_fp.aggregate:
+                problems.append(
+                    "THE INPUTS MOVED between capture and now (capture "
+                    + cap_agg[:16] + ", live " + live_fp.aggregate[:16]
+                    + "). The retention comparison is VOID, not failed: a "
+                    "changed eligible value may be correct. Recapture and "
+                    "repeat.")
+            elif str(cap_schema) != str(live_fp.schema_version):
+                problems.append(
+                    "the fingerprint projection changed (capture schema "
+                    + str(cap_schema) + ", live " + str(live_fp.schema_version)
+                    + "), so the two aggregates are not comparable")
+
             not_cleared, retained_moved, window_moved, missing = [], [], [], []
             for key, before in prior.get("stale_values", {}).items():
                 now = stale_vals.get(key)
@@ -425,6 +464,30 @@ def main() -> int:
                     missing.append(key)
                 elif now != d:
                     retained_moved.append((key, d, now))
+
+            # POPULATION EQUALITY, both directions. The loops above walk the
+            # SNAPSHOT's keys, so they can only ever find rows that vanished.
+            # A row the recomputation ADDED is invisible to them -- and a
+            # deleted row would be, too, if the snapshot were ever the newer
+            # side. Compare the key sets themselves.
+            prior_keys = set(prior.get("row_digests", {}))
+            now_keys = set(digests)
+            extra = sorted(now_keys - prior_keys)
+            vanished = sorted(prior_keys - now_keys)
+            print("  rows in snapshot / now       : "
+                  + str(len(prior_keys)) + " / " + str(len(now_keys)))
+            print("  rows ADDED by the run        : " + str(len(extra)))
+            print("  rows REMOVED by the run      : " + str(len(vanished)))
+            for k in extra[:8]:
+                print("    added    " + k)
+            for k in vanished[:8]:
+                print("    removed  " + k)
+            if extra or vanished:
+                problems.append(
+                    "the yearly-row population changed (" + str(len(extra))
+                    + " added, " + str(len(vanished)) + " removed). A "
+                    "value comparison over matching keys alone would have "
+                    "reported this as clean.")
 
             print("\n  stale rows in the snapshot   : "
                   + str(len(prior.get("stale_values", {}))))

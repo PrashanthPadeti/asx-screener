@@ -822,3 +822,92 @@ FACTOR_MODEL_V4 alongside 20.
 `/var/backups/p0a/gates/` on the production host: gates 3–11, the
 forecast, both verification runs, the expected-row artifact, and the
 `DAILY_CANONICAL` precondition log.
+
+
+---
+
+# v11.2.87 — one price-anchor bound, fifteen columns. CLOSED 17 Nov 2026
+
+Finding 18, closed on production evidence.
+
+## What was wrong
+
+`price_at` is "last close on or before the fiscal period end" with no
+floor. A company whose price feed stops anchors every later fiscal year
+to the same final close. **Ten served rows** were affected:
+
+```
+VTA  FY2025  period end 2025-12-31  anchor 2012-12-18   4,761d
+MNE  FY2025  period end 2025-06-30  anchor 2017-11-27   2,772d
+BPG  FY2026  period end 2026-03-31  anchor 2020-01-31   2,251d
+FEL 1,236d   RAP 642d   PNM 353d   PGL 325d   HXL 249d
+AFT 188d     SAN 25d
+```
+
+VTA was serving a market capitalisation, P/E, P/B and yields computed
+from a 2012 price. I first reported "no served row is affected" from a
+60-code smoke test; over all 1,879 there were ten. A sample is not a
+population.
+
+## The fix
+
+One gate where `px` is derived, so all fifteen anchor-dependent columns
+decline through the None handling they already have. **The set was
+derived, not asserted**: reading the source gave eleven, running the
+producer twice with the anchor nulled gave fifteen — `franked_yield`
+reached through `dividend_yield`, `altman_z_score` through `market_cap`.
+
+`altman_z_score` is withheld on a **rejected** anchor and keeps its
+book-equity fallback on an **absent** one, so the repair does not
+silently re-base 275 rows under the same field name.
+
+## Gate
+
+`eb7d755` vs `80cf51c`: **148 files, 148 passed, 0 failed, 0
+inconclusive. INTRODUCED none. REPAIRED 2** (findings 21 and 22). P0
+contracts hold. `EXIT=0`.
+`/var/backups/p0a/gates/v11.2.87_gate_FINAL_eb7d755.log`
+
+## Production verification
+
+| | |
+|---|---|
+| deployed digest / intended candidate | `f0de25ee…` / `f0de25ee…` — **equal** |
+| baseline deployed, recorded pre-deploy | `965fcec8…` (v11.2.86) |
+| publishing run | **58**, 1 distinct non-NULL, schema **2** |
+| run / capture / live aggregates | `c7ae7124…` three ways **equal** |
+| population | 33,864 = 33,864, **0 added, 0 removed** |
+| stale rows: columns not cleared | **0** of 402 × 15 |
+| eligible rows moved | **0** of 33,462 |
+| risk metrics moved | **0** |
+| verdict | **RECONCILES, EXIT=0** |
+
+The eligible-row and risk-metric claims are valid rather than void
+because the run's input fingerprint equalled the capture fingerprint:
+nothing ingested in between.
+
+## What this release got wrong on the way
+
+- **"No served row is affected"** — from a 60-code sample. Ten were.
+- **The measuring instrument truncated the price series**, shortening the
+  12-month window, and so reported `sharpe_1y`, `volatility_1y` and
+  `max_drawdown_1y` as anchor-dependent. A test now asserts the gate does
+  **not** reach them, and production confirms 0 moved.
+- **The class test reported Altman as basis-stable**, because the fixture
+  set `total_equity` to the same number as the market cap and X4 was
+  identical either way. A fixture coincidence reads exactly like a
+  missing behaviour.
+- **`--verify` refused when the producer digest matched**, which is
+  backwards: a match is correct when the snapshot is emitted from the
+  candidate before deploying, and inequality proves only that *some* code
+  changed. Replaced with an explicit identity chain.
+- **The reconciliation compared only matching keys**, so an added row was
+  invisible. Population equality is now checked both directions.
+- **Four process failures**: launches chained behind wait-loops and lost;
+  `rm -rf` on a tree a running measurement was reading; `sed -i` log
+  renames that silently did not apply, so two gates wrote into a third's
+  filename; and a status check that reported a **missing file as
+  "running"**. Gates 14 and 15 produced no evidence and their results
+  were withdrawn. The runner now takes its log path as an argument,
+  retains evidence the moment the gate exits, and the status check
+  distinguishes DONE / RUNNING / DEAD / MISSING.

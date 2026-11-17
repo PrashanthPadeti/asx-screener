@@ -367,11 +367,23 @@ def main() -> int:
             # BEFORE deploying it, which is how v11.2.86 was accepted. So the
             # check is identity against the INTENDED candidate.
             # VOID is not FAILED, and the two must not share a verdict line.
-            # A failed comparison says the gate is wrong. A void one says
-            # this comparison cannot answer the question -- the inputs moved
-            # under it -- and leaves the verification OPEN. Both are
-            # non-success; conflating them would let "recapture and repeat"
-            # read as "the release is broken", or worse, the reverse.
+            #
+            # A FAILED comparison establishes a MISMATCH REQUIRING
+            # INVESTIGATION. It does not say the producer is wrong, and an
+            # earlier version of this comment did. v11.2.86 proved the
+            # difference: --verify reported two of 471 rows differing, and
+            # the fault was in the COMPARATOR -- it quantized with Python's
+            # banker's rounding while the column rounds half away from zero.
+            # The served values were correct. A mismatch names a
+            # disagreement between an independently computed expectation and
+            # the store; which side is wrong -- expectation, comparator,
+            # store or producer -- is what the investigation determines.
+            #
+            # A VOID comparison says this comparison cannot answer the
+            # question, because the inputs moved under it, and leaves the
+            # verification OPEN. Both are non-success; conflating them would
+            # let "recapture and repeat" read as "the release is broken", or
+            # worse, the reverse.
             problems: list[str] = []
             voids: list[str] = []
             if intended is None or deployed_digest is None:

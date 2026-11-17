@@ -891,9 +891,15 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # run log, which is where provenance belongs -- not in a served
         # column that reads as a measurement.
         px_observed, px_date = _price_observation(prices, ped)
-        px = (px_observed
-              if price_is_fresh_enough(ped, px_date)
-              else None)
+        anchor_fresh = price_is_fresh_enough(ped, px_date)
+        px = px_observed if anchor_fresh else None
+
+        # REJECTED is not the same as ABSENT, and altman_z_score is the only
+        # column where the difference shows. An observation that existed and
+        # failed the freshness bound is a rejection; no observation at all --
+        # no price history, no shares -- is the pre-existing missing-price
+        # case its book-equity fallback was written for.
+        anchor_rejected = px_observed is not None and not anchor_fresh
         mc = round(px * shares / 1e6, 2) if (px and shares) else None
 
         # ── Profitability ──────────────────────────────────────────────────
@@ -1388,7 +1394,24 @@ def build_yearly_rows(asx_code: str, fin: pd.DataFrame,
         # UNAVAILABLE / COMPUTATION_UNSUPPORTED — so the absence says "nobody
         # can compute this" rather than "this company has no value".
         f_score = None
-        z_score = altman_z_score(row, mc)
+        # ── Altman: withheld on a REJECTED anchor, not on an absent one ───
+        #
+        # The X4 term is a market value of equity over total liabilities, and
+        # it falls back to BOOK equity when the market cap is absent. That
+        # fallback predates this release and stays for the cases it was
+        # written for: a company with no price history, or no share count.
+        #
+        # What this release must not do is activate it as a side effect. The
+        # anchor gate newly makes `mc` None for 402 rows whose price failed
+        # the freshness bound, and letting the fallback fire there would
+        # publish a DIFFERENT MODEL BASIS under the same field name, with
+        # nothing in the row to say so -- a quieter failure than a NULL and
+        # the exact defect class finding 13 was. 275 rows, 4 of them served,
+        # would have changed basis silently.
+        #
+        # So a rejected anchor withholds the score. An absent one still
+        # re-bases, unchanged and separately reviewable.
+        z_score = None if anchor_rejected else altman_z_score(row, mc)
 
         # ── Div consecutive (only for latest FY — expensive) ─────────────
         div_consec = consecutive_div_years(fin) if i == len(yearly) - 1 else None

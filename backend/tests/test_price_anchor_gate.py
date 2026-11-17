@@ -81,8 +81,20 @@ ANCHOR_DEPENDENT = {
     "altman_z_score",
 }
 
-#: Changes basis rather than declining. See the module docstring.
-REBASED_NOT_WITHHELD = {"altman_z_score"}
+#: Nothing. Every anchor-dependent column declines on a REJECTED anchor.
+#:
+#: altman_z_score was briefly in here. Its X4 term falls back from market
+#: value to book equity when the market cap is absent, so the anchor gate
+#: made it re-base rather than decline -- publishing a different model basis
+#: under the same field name, on 275 rows, 4 of them served, with nothing to
+#: say so. A pre-existing fallback is not a licence to activate it as a side
+#: effect of an unrelated repair. Decided 18 Nov 2026: a rejected anchor
+#: withholds it.
+#:
+#: The fallback itself is untouched for the case it was written for -- no
+#: price history at all -- which test_the_fallback_survives_an_absent_anchor
+#: pins, so this release does not quietly also change that.
+REBASED_NOT_WITHHELD: set[str] = set()
 
 PERIOD_END = pd.Timestamp("2025-06-30")
 
@@ -155,6 +167,15 @@ def test_the_moving_set_is_exactly_the_declared_set():
     If some future column starts reading `px` or `mc`, it joins the class
     automatically in the producer -- and this test makes someone confirm that
     was intended.
+    WHAT THIS DOES NOT ESTABLISH. It proves dependency coverage for the
+    columns THIS FIXTURE exercises. A derivation on an unexercised branch,
+    or one whose two values coincide, is invisible to it -- which is not
+    hypothetical: altman_z_score read as basis-stable here until the fixture
+    stopped setting total_equity to the same number as the market cap. So
+    this is a ratchet against silent additions, not a proof of completeness,
+    and the production differential in
+    scripts/diagnostics/measure_price_anchor_staleness.py is what measures
+    the real set.
     """
     cols = _insert_columns()
     fresh, stale = _fresh_and_stale()
@@ -191,24 +212,54 @@ def test_every_anchor_dependent_column_declines():
             f"current statements.")
 
 
-def test_altman_rebases_rather_than_declining():
-    """The documented exception, pinned so it cannot change silently.
+def test_altman_is_withheld_on_a_rejected_anchor():
+    """A rejected anchor must not silently switch the model basis.
 
-    Altman's X4 falls back from market value to book equity. A stale anchor
-    therefore changes the number instead of removing it -- which is a quieter
-    failure than a NULL, and the reason finding 18 records it.
+    Altman's X4 is a MARKET value of equity over total liabilities, with a
+    fallback to BOOK equity when the market cap is absent. The anchor gate
+    makes the market cap absent for 402 rows, so without this the fallback
+    would fire there and publish a different basis under the same field --
+    275 rows, 4 of them served, none of them saying so.
+
+    A pre-existing fallback is not a licence to activate it as a side effect
+    of an unrelated repair.
     """
     cols = _insert_columns()
     i = cols.index("altman_z_score")
     fresh, stale = _fresh_and_stale()
-    assert fresh[i] is not None and stale[i] is not None, (
-        "altman_z_score now declines on a stale anchor. If that is "
-        "deliberate, move it out of REBASED_NOT_WITHHELD -- the fallback to "
-        "book equity is what this test records.")
-    assert fresh[i] != stale[i], (
-        "altman_z_score did not change when the anchor was withheld, so the "
-        "X4 market-value term is not reaching it and its membership of the "
-        "anchor-dependent set is wrong")
+    assert fresh[i] is not None, (
+        "altman_z_score is NULL even with a fresh anchor, so this fixture "
+        "does not cover it")
+    assert stale[i] is None, (
+        f"altman_z_score published {stale[i]!r} on a rejected anchor. Its X4 "
+        f"term has silently moved from market value to book equity.")
+
+
+def test_the_fallback_survives_an_absent_anchor():
+    """REJECTED is not ABSENT, and only this distinction keeps the fallback.
+
+    No price history at all is the case the book-equity fallback was written
+    for, and this release must not change it. So an empty series still
+    publishes a score, while a series whose only observation is too old does
+    not. If these two ever agree, one of the two decisions has been lost.
+    """
+    cols = _insert_columns()
+    i = cols.index("altman_z_score")
+
+    empty = build_yearly_rows("TST", _financials(),
+                              pd.Series(dtype=float,
+                                        index=pd.DatetimeIndex([])),
+                              current_shares=100_000_000.0,
+                              reporting_currency=BASE_CURRENCY)
+    assert empty, "no row produced for an empty price series"
+    assert empty[0][i] is not None, (
+        "altman_z_score was withheld with NO price observation at all. That "
+        "is the pre-existing missing-price case its book-equity fallback "
+        "exists for, and this release was not supposed to touch it.")
+
+    assert _row("2025-06-22")[i] is None, (
+        "a rejected anchor published a score, so the two cases now agree "
+        "and the distinction between rejected and absent has been lost")
 
 
 def test_the_boundary_is_the_same_seven_days():
@@ -229,7 +280,12 @@ def test_a_series_that_reaches_nothing_withholds():
                              current_shares=100_000_000.0,
                              reporting_currency=BASE_CURRENCY)
     assert rows
-    for name in sorted(ANCHOR_DEPENDENT - REBASED_NOT_WITHHELD):
+    # altman_z_score is excluded HERE and only here. An empty series is the
+    # ABSENT case, where its book-equity fallback is deliberately preserved;
+    # test_the_fallback_survives_an_absent_anchor asserts that side, and
+    # test_altman_is_withheld_on_a_rejected_anchor asserts the other. Every
+    # other column has one rule for both cases.
+    for name in sorted(ANCHOR_DEPENDENT - {"altman_z_score"}):
         assert rows[0][cols.index(name)] is None, (
             f"{name} published with no price observation at all")
 

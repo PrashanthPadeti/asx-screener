@@ -87,6 +87,28 @@ LEGACY_WORKLIST_OFFENDERS = {
 #: market.companies" -- which is a report about prose, not about a query.
 _SQL_REF = re.compile(r"\b(from|join)\s+market\.companies\b", re.IGNORECASE)
 
+#: A string constant is only a QUERY if it contains a SQL verb.
+#:
+#: The AST already confines this scan to string constants, which keeps
+#: comments and docstrings out. What it cannot do is tell a DOCUMENTATION
+#: string from a SQL string -- and `_SQL_REF` matches the English word
+#: "from". So `"Admin tags (from market.companies)"`, a dict key in an STM
+#: prose generator, was reported as an unbounded read and failed this suite
+#: at every commit for weeks.
+#:
+#: Requiring a verb trades a known false-positive class for a possible
+#: false-negative one: a bare `"FROM market.companies"` fragment
+#: concatenated into a larger query would no longer be seen. Accepted
+#: deliberately, and bounded by test_the_scan_covers_the_modules_it_claims_to
+#: (the scan must still have a population) together with
+#: test_no_module_reads_the_base_table_unbounded over the real queries.
+#:
+#: Same root cause as the `::` matcher in
+#: test_no_bindparam_followed_by_cast.py: a matcher that cannot tell the
+#: thing it looks for from prose that resembles it.
+_SQL_VERB = re.compile(r"\b(select|insert|update|delete|with|merge)\b",
+                       re.IGNORECASE)
+
 #: Statements that legitimately address the base table. Writers maintain the
 #: history -- closing a row by setting is_current = FALSE is precisely a write
 #: that must NOT be confined to current rows.
@@ -123,6 +145,9 @@ def _offending_literals(source: str):
         text = node.value
         low = text.lower()
         if "market.companies" not in low:
+            continue
+        # Prose naming the table is not a read of it. See _SQL_VERB.
+        if not _SQL_VERB.search(low):
             continue
         # companies_current is the correct read and must not be flagged by the
         # prefix it shares with the base table.

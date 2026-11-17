@@ -50,8 +50,28 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parents[1]
 BACKEND = _HERE if (_HERE / "app").is_dir() else Path.cwd()
 
-#: A colon-prefixed name immediately followed by a Postgres cast.
-BAD = re.compile(r':[a-zA-Z_][a-zA-Z0-9_]*::[a-zA-Z]')
+#: A BIND PARAMETER immediately followed by a Postgres cast.
+#:
+#: The lookbehind is the whole fix. Without it this matched `:regclass::o`
+#: inside psycopg2's `SELECT %s::regclass::oid` -- a DOUBLE CAST containing
+#: no bind parameter at all -- and so failed at every commit, on
+#: scripts/stm/census_unwritten.py:85, for weeks. A permanently red test is
+#: worse than no test: it teaches everyone to read a gate failure as noise,
+#: and this one sat in the gate output of eight consecutive release gates.
+#:
+#: A bind's colon is never preceded by another colon, by a word character,
+#: or by the `%s` of a psycopg2 placeholder. Verified against:
+#:
+#:   %s::regclass::oid    no    psycopg2 double cast
+#:   a::text::int         no    plain double cast, no bind
+#:   $1::regclass::oid    no    asyncpg positional
+#:   :meta::jsonb         YES   the defect this suite exists for
+#:   :name::text          YES
+#:
+#: This is the same root cause as the prose-reading false positive in
+#: test_company_reads_are_current.py: a text matcher that cannot tell the
+#: thing it is looking for from something that merely looks like it.
+BAD = re.compile(r'(?<![:\w%]):[a-zA-Z_][a-zA-Z0-9_]*::[a-zA-Z]')
 
 #: An asyncpg positional placeholder in compiled output.
 PLACEHOLDER = re.compile(r'\$\d+')

@@ -327,6 +327,21 @@ FACTOR_MODELS: dict[str, dict[str, FactorSpec]] = {
     "FACTOR_MODEL_V1": FACTOR_MODEL_V1,
     "FACTOR_MODEL_V2": FACTOR_MODEL_V2,
     "FACTOR_MODEL_V3": FACTOR_MODEL_V2,
+    # V4 shares V2's specification for the same reason V3 does: the FACTORS
+    # did not change. What changed is which values reach them -- fcf_yield
+    # joins the governed registry and applicability gate 1b's currency
+    # ruleset, so a foreign reporter's Value factor reweights around it
+    # instead of ranking on a figure whose units do not cancel.
+    #
+    # A VERSION IS DECLARED IN TWO REGISTRIES AND BOTH ARE LOAD-BEARING.
+    # V4 was added to GOVERNED_METRICS first and omitted here, which left it
+    # half-existing: `cross_currency_for("FACTOR_MODEL_V4")` resolved, every
+    # unit test passed, and the real entry point raised
+    # `unknown factor model version 'FACTOR_MODEL_V4'` the moment it was
+    # driven end to end. The unit tests could not see it because they called
+    # `assess()` directly; only
+    # test_the_version_reaches_the_gate_through_apply_applicability did.
+    "FACTOR_MODEL_V4": FACTOR_MODEL_V2,
 }
 
 #: The headline composite, declared with the same machinery as a factor.

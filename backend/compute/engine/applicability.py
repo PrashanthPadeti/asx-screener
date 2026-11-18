@@ -430,9 +430,62 @@ CROSS_CURRENCY: dict[str, str] = {
 #: Metrics that are unit-sensitive at all.
 UNIT_SENSITIVE = frozenset(CROSS_CURRENCY)
 
+#: `fcf_yield` joins the ruleset in FACTOR_MODEL_V4, and not before.
+#:
+#: It has the shape this dict exists for -- a free cash flow stated in the
+#: reporting currency over an AUD market capitalisation -- and was never in
+#: it. Measured 16 Nov 2026: 167 of 178 foreign-reporter universe rows
+#: publish it, 78 of them inside the scored population, so the mismatch moves
+#: a ranking rather than merely displaying.
+#:
+#: WHY IT IS NOT SIMPLY ADDED ABOVE. Gating it changes composite scores, and
+#: FACTOR_MODEL_V3 is referenced by finalised production runs whose contract
+#: cannot be rewritten -- the freeze doctrine this module's callers already
+#: follow for GOVERNED_METRICS. Measured before the rule was written: 18 of
+#: 2,120 composites move, value_score moves for 169, the other four factors
+#: do not move at all, and no stock shifts more than 27 rank places.
+V4_ADDITIONS: dict[str, str] = {
+    "fcf_yield":
+        "free cash flow is stated in {currency} and the market "
+        "capitalisation it is divided by is quoted in AUD; the ratio has no "
+        "unit until one side is converted",
+}
+
+#: The ruleset each model version is gated by.
+#:
+#: VERSION-KEYED BECAUSE OTHERWISE THE BUMP IS COSMETIC. A single global dict
+#: would apply a new rule retroactively to every version, which is the one
+#: thing a pinned version exists to prevent: a run finalised under V3 claimed
+#: V3's suppression rules, and reading it back under V4's would mean the
+#: contract had been rewritten after publication.
+#:
+#: Versions absent from this map fall back to the frozen set, so a caller
+#: that passes no version -- or an older one -- gets the V1-V3 behaviour
+#: unchanged rather than an error or a silent upgrade.
+CROSS_CURRENCY_BY_VERSION: dict[str, dict[str, str]] = {
+    "FACTOR_MODEL_V1": CROSS_CURRENCY,
+    "FACTOR_MODEL_V2": CROSS_CURRENCY,
+    "FACTOR_MODEL_V3": CROSS_CURRENCY,
+    "FACTOR_MODEL_V4": {**CROSS_CURRENCY, **V4_ADDITIONS},
+}
+
+
+def cross_currency_for(model_version: Optional[str]) -> dict[str, str]:
+    """The currency ruleset in force for a model version.
+
+    Falls back to the frozen V1-V3 set, which is what an unversioned caller
+    should get: this gate predates version-keying, and several call sites
+    assess values that carry no version at all.
+    """
+    if model_version is None:
+        return CROSS_CURRENCY
+    return CROSS_CURRENCY_BY_VERSION.get(model_version, CROSS_CURRENCY)
+
 
 def unit_gate(metric: str,
-              reporting_currency: Optional[str]) -> Optional[tuple[Applicability, str]]:
+              reporting_currency: Optional[str],
+              model_version: Optional[str] = None,
+              ) -> Optional[tuple[Applicability, str]]:
     """Gate 1b. Returns None when the metric's units are coherent.
 
     Fires only on a currency we positively know to differ. ``None`` means the
@@ -441,7 +494,7 @@ def unit_gate(metric: str,
     evidence of a mismatch. Treating it as one would suppress half the
     exchange to fix 160 companies.
     """
-    reason = CROSS_CURRENCY.get(metric)
+    reason = cross_currency_for(model_version).get(metric)
     if reason is None or not reporting_currency:
         return None
     stated = reporting_currency.strip().upper()
@@ -672,7 +725,8 @@ UNSUPPORTED_COMPUTATION: dict[str, str] = {
 
 
 def assess(metric: str, value: Optional[float], domain: Domain,
-           obs: Optional[Observation] = None) -> Assessment:
+           obs: Optional[Observation] = None,
+           model_version: Optional[str] = None) -> Assessment:
     """Run both gates, in order, before the value reaches anything downstream.
 
     Domain runs first and deliberately outranks availability: a metric that is
@@ -690,7 +744,11 @@ def assess(metric: str, value: Optional[float], domain: Domain,
     # domain reason is the more informative of the two. But units outrank
     # availability for the same reason domain does -- a present number with
     # incoherent units is what causes the harm, not a missing one.
-    gate1b = unit_gate(metric, obs.reporting_currency if obs else None)
+    # The version is threaded so gate 1b can resolve the ruleset the row's
+    # own model claims. Passing None keeps the frozen V1-V3 behaviour, which
+    # is correct for the callers that assess values carrying no version.
+    gate1b = unit_gate(metric, obs.reporting_currency if obs else None,
+                       model_version)
     if gate1b is not None:
         state, reason = gate1b
         return Assessment(metric, state, None, reason, domain, observed=value,

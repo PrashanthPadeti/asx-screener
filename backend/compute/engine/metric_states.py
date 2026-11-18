@@ -504,21 +504,39 @@ GOVERNED_METRICS["FACTOR_MODEL_V4"] = (
     GOVERNED_METRICS["FACTOR_MODEL_V3"] | CURRENCY_GATED_YIELDS
 )
 
-# ── V3 REMAINS THE CANONICAL CANDIDATE ───────────────────────────────────────
+# ── V4 BECOMES THE CANONICAL CANDIDATE (v11.2.89) ────────────────────────────
 #
-# V4 is DECLARED above and NOT IN FORCE. The flip is a separate, sequenced
-# step, for the reason V3's own comment gives: flipping before the producers
-# can satisfy the new contract makes every absent value a violation, the
-# read-back fails, the publish refuses, and the pipeline stops.
+# Everything before this point built V4 and left it inert, under v11.2.88.
+# This line is the activation, and it is the step that makes every absent
+# governed value a contract violation -- so the two prerequisites V3's own
+# comment demanded were established first, not assumed.
 #
-# What has to be true before this line changes:
-#   * a suppressed fcf_yield must carry a sidecar reason on every served row,
-#     which means a canonical run under V4 has written metric_states -- so
-#     any backfill comes BEFORE the first V4 run, not after, exactly as V3
-#     sequenced it;
-#   * the 18 composite and 169 value-score movements must be accepted as the
-#     intended effect rather than discovered as a regression.
-LATEST_MODEL_VERSION = "FACTOR_MODEL_V3"
+# 1. NO SIDECAR BACKFILL IS REQUIRED, and the reason is execution order, not
+#    the detector. `violations()` does report missing_governed for a row whose
+#    sidecar has no fcf_yield entry, so the state a transition could leave
+#    behind is visible. But `commit_canonical` runs
+#
+#        require_stages -> verify_storage -> write_all -> verify_population
+#
+#    and `write_all` writes each row's values AND its sidecar across the
+#    serving population before `verify_population` compares intended against
+#    held, per row, for every row. A V3-era sidecar can neither survive the
+#    first V4 run nor be the thing validated. Asserted from the AST in
+#    test_the_run_rewrites_the_sidecar_before_it_validates, which names the
+#    consequence if that order is ever reversed.
+#
+# 2. THE MOVEMENT IS ACCEPTED AS INTENDED, having been measured before the
+#    rule was written, by running the real scoring path twice: 18 of 2,120
+#    composites move, 169 value scores move, the other four factors do not
+#    move at all, and no stock shifts more than 27 rank places. Nothing is
+#    withheld and nothing is gained.
+#
+# What this does NOT carry: the strict silence rule, finding 20. An unstated
+# reporting currency still publishes under V4. That change withholds 102
+# value scores and moves eight stocks more than 100 rank places -- an order
+# of magnitude larger, its own release, and V5 if it would alter a V4
+# contract that finalised runs already reference.
+LATEST_MODEL_VERSION = "FACTOR_MODEL_V4"
 
 #: Sentinel for "this caller is not validating a version at all" — the
 #: in-memory, pre-write check, where no version has been assigned yet.

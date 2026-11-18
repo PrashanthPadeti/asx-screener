@@ -188,8 +188,16 @@ def verify_schema(cur) -> None:
 #: is now 80 governed metrics. The refusal that forced this edit is the design
 #: working: v11.2.63 moved LATEST_MODEL_VERSION and the driver declined to
 #: publish under a contract nobody had confirmed.
-EXPECTED_MODEL = "FACTOR_MODEL_V3"
-EXPECTED_GOVERNED = 80
+#:
+#: Re-pinned for FACTOR_MODEL_V4 (v11.2.89). V4 adds fcf_yield to V3's 80, so
+#: 81. The design worked a second time, and more usefully: flipping
+#: LATEST_MODEL_VERSION made this driver refuse with PRECONDITION FAILED and
+#: create nothing, which is how the activation was forced to be deliberate
+#: rather than a constant edit nobody confirmed. It also surfaced that a
+#: version is declared in THREE places -- GOVERNED_METRICS, FACTOR_MODELS and
+#: here -- and this is the one that fails closed.
+EXPECTED_MODEL = "FACTOR_MODEL_V4"
+EXPECTED_GOVERNED = 81
 #: The static REQUIRED_STAGES tuple is no longer what publication uses -- each
 #: plan carries its own required set -- so asserting equality against it would
 #: be a tripwire on something the driver has stopped consulting.

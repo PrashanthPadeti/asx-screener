@@ -933,9 +933,10 @@
    "column": "fcf_yield",
    "insert_expr": "COALESCE(cm.fcf_yield,        ym.fcf_yield)              AS fcf_yield",
    "refreshed_on_conflict": true,
-   "governed": false,
+   "governed": true,
    "writers": [
-    "build_screener_universe.py (INSERT)"
+    "build_screener_universe.py (INSERT)",
+    "universe_writer.py (canonical UPDATE, governed)"
    ],
    "unclaimed": false
   },

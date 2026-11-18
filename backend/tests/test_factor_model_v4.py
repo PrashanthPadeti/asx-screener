@@ -243,6 +243,90 @@ def test_unit_sensitive_describes_the_frozen_set_only():
     assert "fcf_yield" in cross_currency_for(V4)
 
 
+# ── 4. The transition: does V4 need a backfill? ─────────────────────────
+
+def test_a_stale_sidecar_would_be_rejected_under_v4():
+    """Half of the question: the detector DOES reject it.
+
+    A row whose sidecar predates V4 has no entry for fcf_yield, and
+    `violations` reports `missing_governed` for exactly that. On its own this
+    says a backfill might be needed -- it does not establish that it IS,
+    because the detector only ever sees what a run wrote. The other half is
+    the execution order, below.
+    """
+    from compute.engine.metric_states import violations
+
+    values = {"pe_ratio": 12.0}          # a row from before fcf_yield joined
+    states = {"pe_ratio": {"state": "APPLICABLE"}}
+
+    # The governed set is derived from the version inside violations().
+    under_v3 = violations(values, states, V3)
+    assert not [v for v in under_v3 if v.metric == "fcf_yield"], (
+        "fcf_yield is reported missing under V3, where it is not governed")
+
+    under_v4 = violations(values, states, V4)
+    missing = [v for v in under_v4
+               if v.metric == "fcf_yield" and v.kind == "missing_governed"]
+    assert missing, (
+        "a sidecar with no fcf_yield entry was NOT reported missing_governed "
+        "under V4, so the detector cannot see the very state a transition "
+        "would leave behind")
+
+
+def test_the_run_rewrites_the_sidecar_before_it_validates():
+    """The other half, and the half that decides it: EXECUTION ORDER.
+
+    A detector rejection establishes nothing about whether a backfill is
+    required. What decides it is whether the first V4 run regenerates the
+    sidecar before anything validates it. In `commit_canonical` the order is:
+
+        require_stages -> verify_storage -> write_all -> verify_population
+
+    `write_all` writes each row's values AND its sidecar, keyed per asx_code
+    over the serving population; `verify_population` then compares what the
+    run INTENDED against what the database holds, per row, for every row. So
+    a sidecar predating V4 cannot survive the run, and cannot be the thing
+    validated -- which is why no backfill is needed.
+
+    Asserted structurally, from the AST, rather than trusted to a comment: if
+    someone reorders these so validation precedes the write, the first V4 run
+    would validate yesterday's sidecars and this conclusion would silently
+    stop holding.
+    """
+    import ast
+
+    src = (BACKEND / "compute" / "engine"
+           / "universe_writer.py").read_text(encoding="utf-8")
+    fn = next((n for n in ast.walk(ast.parse(src))
+               if isinstance(n, ast.FunctionDef)
+               and n.name == "commit_canonical"), None)
+    assert fn is not None, "commit_canonical not found"
+
+    order = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", None) or getattr(
+                node.func, "attr", None)
+            if name in ("write_all", "verify_population", "verify_storage",
+                        "require_stages"):
+                order.append((node.lineno, name))
+    seq = [n for _, n in sorted(order)]
+
+    for required in ("write_all", "verify_population"):
+        assert required in seq, (
+            f"{required} is no longer called in commit_canonical; the "
+            f"transition argument rests on it")
+    assert seq.index("write_all") < seq.index("verify_population"), (
+        f"validation now precedes the write ({seq}). The first V4 run would "
+        f"validate sidecars written under V3, so a backfill WOULD be "
+        f"required -- re-decide the transition before shipping this.")
+    if "verify_storage" in seq:
+        assert seq.index("verify_storage") < seq.index("write_all"), (
+            "the schema check no longer precedes the write, so a version "
+            "promising a column that does not exist would write first and "
+            "discover it afterwards")
+
+
 if __name__ == "__main__":
     # The release gate runs suites as `python tests/<file>.py` and requires
     # the "N/M passed" line as evidence of execution.

@@ -465,6 +465,59 @@ GOVERNED_METRICS["FACTOR_MODEL_V3"] = (
 # honest and it is not a defect -- but it is the state of every row until the
 # backfill has run, so the backfill comes before the first canonical run under
 # V3, not after.
+#: The metrics FACTOR_MODEL_V4 adds, and why there is a V4 at all.
+#:
+#: `fcf_yield` is a free cash flow stated in the reporting currency over an
+#: AUD market capitalisation -- the exact shape applicability gate 1b exists
+#: to suppress -- and it was never in CROSS_CURRENCY. Measured 16 Nov 2026:
+#: 167 of 178 foreign-reporter universe rows publish it, 78 of them inside
+#: the scored population, so the mismatch moves a ranking and does not
+#: merely display. That is finding 17.
+#:
+#: WHY GOVERNED AND NOT MERELY GATED. It is already assessable, as a
+#: constituent of the model's Value factor, so adding it to CROSS_CURRENCY
+#: alone would suppress it -- and `fcf_yield` is a SERVED column. An
+#: ungoverned metric has no sidecar entry, so the customer would get a null
+#: with no recorded reason: the unexplained-null defect this registry exists
+#: to prevent, introduced by the change meant to improve correctness.
+#: Governing it means the suppression carries NOT_MEANINGFUL and a cause.
+#:
+#: WHY NOT IN V3. Gating it changes composite scores -- measured at 18 of
+#: 2,120 composites, 169 value scores, no movement in the other four factors,
+#: and no stock shifting more than 27 rank places. V3 is referenced by
+#: finalised production runs carrying an immutable trigger, so amending it
+#: would rewrite a contract after publication. V1 and V2 both declined that
+#: shortcut above and this one does too.
+#:
+#: WHAT IS DELIBERATELY NOT HERE. The strict silence rule -- treating an
+#: unstated reporting currency as a mismatch, finding 20 -- belongs to a
+#: later version and was measured alongside this one to decide that: it
+#: withholds 102 value scores outright, moves a second factor by up to 21
+#: points, shifts eight stocks more than 100 rank places, and reaches a
+#: maximum of 152. An order of magnitude larger, and a separate decision
+#: about whether that withholding is acceptable. Bundling the two would have
+#: made one release unverifiable by hiding the small change inside the large
+#: one.
+CURRENCY_GATED_YIELDS: frozenset[str] = frozenset({"fcf_yield"})
+
+GOVERNED_METRICS["FACTOR_MODEL_V4"] = (
+    GOVERNED_METRICS["FACTOR_MODEL_V3"] | CURRENCY_GATED_YIELDS
+)
+
+# ── V3 REMAINS THE CANONICAL CANDIDATE ───────────────────────────────────────
+#
+# V4 is DECLARED above and NOT IN FORCE. The flip is a separate, sequenced
+# step, for the reason V3's own comment gives: flipping before the producers
+# can satisfy the new contract makes every absent value a violation, the
+# read-back fails, the publish refuses, and the pipeline stops.
+#
+# What has to be true before this line changes:
+#   * a suppressed fcf_yield must carry a sidecar reason on every served row,
+#     which means a canonical run under V4 has written metric_states -- so
+#     any backfill comes BEFORE the first V4 run, not after, exactly as V3
+#     sequenced it;
+#   * the 18 composite and 169 value-score movements must be accepted as the
+#     intended effect rather than discovered as a regression.
 LATEST_MODEL_VERSION = "FACTOR_MODEL_V3"
 
 #: Sentinel for "this caller is not validating a version at all" — the

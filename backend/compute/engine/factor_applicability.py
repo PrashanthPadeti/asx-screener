@@ -279,8 +279,13 @@ def apply_applicability(df: pd.DataFrame,
                 a = unhealthy(canon, feed_reason, result.domain)
                 row_failed = True
             else:
+                # model_version reaches gate 1b from here, so the currency
+                # ruleset resolved is the one this row's declared model
+                # claims. Without it the gate would apply the newest rules to
+                # every version, which is what freezing a version forbids.
                 a = assess(canon, None if value is None else float(value),
-                           result.domain, observation)
+                           result.domain, observation,
+                           model_version=model_version)
 
             assessments.append(a)
             if not a.ok:

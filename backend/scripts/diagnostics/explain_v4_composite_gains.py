@@ -163,6 +163,23 @@ def main() -> int:
 
         for code in gained:
             print(f"\n  {code}:  composite {a_comp[code]} -> {b_comp[code]}")
+            # THE FACTOR SCORES, because factor ELIGIBILITY turned out not to
+            # explain the gain. A factor can report usable=True with a full
+            # effective weight and still produce a NaN score, if a constituent
+            # COUNTED as surviving contributes no usable number. The composite
+            # is then NaN not because a factor was refused but because a
+            # usable factor had no value -- and declaring that constituent
+            # NOT_MEANINGFUL drops it from the weighting, so the factor
+            # becomes computable and the composite appears. Printed rather
+            # than inferred: the first hypothesis also sounded right.
+            for f in FACTORS:
+                col = f"{f}_score"
+                if col in a_frame.columns and col in b_frame.columns:
+                    av, bv = a_frame.at[code, col], b_frame.at[code, col]
+                    flag = ("  <-- SCORE APPEARED"
+                            if (pd.isna(av) and not pd.isna(bv)) else "")
+                    print(f"      {col:<16} A: {av!r:<10} B: {bv!r}{flag}")
+
             crossed = []
             for f in FACTORS:
                 da = _describe(a_states, f, code)

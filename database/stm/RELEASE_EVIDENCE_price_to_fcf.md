@@ -911,3 +911,99 @@ nothing ingested in between.
   were withdrawn. The runner now takes its log path as an argument,
   retains evidence the moment the gate exits, and the status check
   distinguishes DONE / RUNNING / DEAD / MISSING.
+
+
+---
+
+# v11.2.88 + v11.2.89 — FACTOR_MODEL_V4. Finding 17 CLOSED 19 Nov 2026
+
+`fcf_yield` is a free cash flow stated in the reporting currency over an AUD
+market capitalisation. It was never in applicability gate 1b's ruleset, and
+167 of 178 foreign-reporter rows published it — 78 inside the scored
+population, so it moved rankings.
+
+## Staged on a measurement, not a guess
+
+Scoring is percentile-rank, so suppressing a value changes that metric's
+percentile for everyone who still has one. Running the real scoring path
+three times settled the scope:
+
+| | finding 17 | finding 20 |
+|---|---|---|
+| composites moved | **18** of 2,120 | 128, **5 gained** |
+| value scores | 169, max Δ 1.00 | 373, **102 withheld** |
+| other factors | **none** | quality: 276, max Δ **21** |
+| max rank shift | **27 places** | **152**, eight over 100 |
+
+So V4 carried finding 17 alone. Bundling them would have hidden the small
+change inside the large one and made neither verifiable.
+
+## Shape
+
+`V4 = V3 | {fcf_yield}` — **governed**, not merely gated, because it is a
+*served* column: gating alone would null it with no sidecar reason, the
+unexplained-null defect introduced by the change meant to improve
+correctness. The currency ruleset is **version-keyed**, so V3's finalised
+runs keep V3's rules; an unversioned or unknown version falls **back** to the
+frozen eight, never forward.
+
+v11.2.88 declared it **inert**. v11.2.89 flipped `LATEST_MODEL_VERSION`.
+
+## Three prerequisites the flip surfaced
+
+Local failures went 64 → 71, and all seven were prerequisites.
+
+1. **A customer-facing blocker.** `fcf_yield` was displayed twice in the
+   company page's Key Statistics strip with no `field:`, so the 167
+   suppressed rows would have rendered **a bare dash with no reason**. The
+   test's own justification: *"a plain dash and an explained dash are
+   indistinguishable in a screenshot."*
+2. **Stale generated evidence**, and regenerating the sidecars alone did not
+   fix it — the YAML derives from the evidence, which is where the governed
+   count lives. `universe_attrib.py` then `universe_sidecars.py`; the
+   evidence now reports governed 81.
+3. **The driver failed closed.** `p0a_canonical_run.py` pins the contract
+   independently and would have refused with `PRECONDITION FAILED`, creating
+   nothing. A version is declared in **three** places —
+   `GOVERNED_METRICS`, `FACTOR_MODELS` and the driver — and only the third
+   refuses rather than degrades.
+
+## No backfill was required, and the reason is execution order
+
+`violations()` *does* report `missing_governed` for a sidecar with no
+`fcf_yield` entry. But `commit_canonical` runs `require_stages →
+verify_storage → write_all → verify_population`: the sidecar is rewritten
+before anything validates it, and the validation compares intended against
+held per row. Asserted from the AST, with the test naming the consequence if
+that order is ever reversed.
+
+## Production verification
+
+| | |
+|---|---|
+| deployed digest = intended candidate | ✓ `80225068…` |
+| publishing run | **60**, 1 distinct non-NULL, **`FACTOR_MODEL_V4`** |
+| run / capture input aggregate | ✓ `c7ae7124…` |
+| population | 2,120 = 2,120, **0 added, 0 removed** |
+| rows differing | **0** |
+| null `fcf_yield` with no sidecar reason | **0** of 720 |
+| runs 1–59 | **byte-identical** |
+| verdict | **RECONCILES, EXIT=0** |
+
+## Three comparator defects, none in the producer
+
+The first verification exited 1 on two problems, both mine: the frozen-runs
+digest hashed *every* row — so the activation run's own record changed it,
+while the error message said *"a CHANGED digest over the SAME ids"* — and the
+population check compared the scored frame (2,120) against the whole universe
+(2,578), which is the exact defect that check exists to catch.
+
+With v11.2.86's rounding mode, that is **three times in one release sequence**
+that a failed reconciliation was the comparator. A mismatch establishes a
+disagreement requiring investigation; it does not locate the fault.
+
+## Not carried
+
+The strict silence rule — **finding 20**. An unstated reporting currency still
+publishes under V4. Policy adopted, cost measured, and it now needs **V5**,
+because run 60 has finalised under V4.

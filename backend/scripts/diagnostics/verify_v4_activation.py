@@ -92,13 +92,28 @@ def _capture(cs, conn):
     return grabbed["frame"]
 
 
-def _runs_digest(cur):
-    """A digest of every finalised run record, so activation cannot rewrite
-    what published runs claimed."""
-    cur.execute("""
-        SELECT id, run_at, factor_model_version, rows_written, plan_name
-        FROM screener.compute_runs ORDER BY id
-    """)
+def _runs_digest(cur, max_id=None):
+    """A digest of the finalised run records, so activation cannot rewrite
+    what published runs claimed.
+
+    SCOPED TO THE IDS THAT EXISTED AT CAPTURE, which the first version was
+    not: it hashed every row, so the activation run's own record -- the whole
+    point of the release -- necessarily changed the digest and the comparison
+    reported a defect in correct behaviour. The error message said the right
+    thing ("new runs are expected, a CHANGED digest over the SAME ids is
+    not") while the code hashed all of them, which is a comment describing an
+    intention the implementation did not have.
+    """
+    if max_id is None:
+        cur.execute("""
+            SELECT id, run_at, factor_model_version, rows_written, plan_name
+            FROM screener.compute_runs ORDER BY id
+        """)
+    else:
+        cur.execute("""
+            SELECT id, run_at, factor_model_version, rows_written, plan_name
+            FROM screener.compute_runs WHERE id <= %s ORDER BY id
+        """, (max_id,))
     rows = cur.fetchall()
     h = hashlib.sha256()
     for r in rows:
@@ -113,6 +128,13 @@ def main() -> int:
     ap.add_argument("--verify", metavar="PATH")
     ap.add_argument("--candidate", metavar="SHA")
     ap.add_argument("--deployed-root", default="/opt/asx-screener/backend")
+    ap.add_argument("--frozen-max-id", type=int,
+                    help="the highest run id that existed when the "
+                         "expectation was captured. Needed only for an "
+                         "expectation emitted BEFORE the snapshot started "
+                         "recording frozen_runs_max_id -- the value comes "
+                         "from that emit run's own log, not from a guess. "
+                         "Newer snapshots carry it and this flag is unused.")
     args = ap.parse_args()
     if not (args.emit or args.verify):
         print("nothing to do: pass --emit or --verify")
@@ -170,6 +192,9 @@ def main() -> int:
                 "capture_fingerprint_aggregate": live_fp.aggregate,
                 "frozen_runs_digest": runs_hash,
                 "frozen_runs_count": runs_n,
+                # The high-water mark, so a verify can re-digest the SAME ids
+                # rather than all of them and call a new run a defect.
+                "frozen_runs_max_id": (runs_ids[-1] if runs_ids else None),
                 "producer_modules": list(PRODUCER_MODULES),
                 "rows": rows,
             }
@@ -242,6 +267,10 @@ def main() -> int:
                 f"({run_agg[:16]} vs {(cap_agg or '')[:16]})")
 
         # V1-V3 finalised records must be untouched.
+        frozen_max = prior.get("frozen_runs_max_id") or args.frozen_max_id
+        if frozen_max is not None:
+            runs_hash, runs_n, _ = _runs_digest(cur, frozen_max)
+            print(f"  re-digested runs <= {frozen_max}: {runs_n} rows")
         if prior.get("frozen_runs_digest") != runs_hash:
             problems.append(
                 f"the finalised run records changed: "
@@ -252,11 +281,23 @@ def main() -> int:
             print("  finalised run records unchanged.")
 
         # Per-row reconciliation.
+        # THE SAME POPULATION THE EXPECTATION DESCRIBES.
+        #
+        # --emit captures the SCORED frame -- the rows composite_score
+        # actually scores, 2,120 of them. The first version of this query read
+        # every universe row, 2,578, and reported the 458 unattributed ones as
+        # "added by the run". Two different populations compared as one, which
+        # is the defect the population check exists to catch, committed by the
+        # check itself.
+        #
+        # compute_run_id IS NOT NULL is that population: it is exactly what
+        # the publishing run attributed, and the run reported the same count.
         cur.execute("""
             SELECT asx_code, value_score, quality_score, growth_score,
                    momentum_score, income_score, composite_score, fcf_yield,
                    metric_states
             FROM screener.universe
+            WHERE compute_run_id IS NOT NULL
         """)
         served = {}
         sidecars = {}

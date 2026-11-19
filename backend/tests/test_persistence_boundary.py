@@ -855,14 +855,40 @@ V2_GOVERNED_COUNT = 72
 V3_GOVERNED_COUNT = 80
 
 
-def test_v3_is_the_canonical_contract():
-    """Was test_v2_is_the_canonical_candidate until v11.2.63.
+def test_v4_is_the_canonical_contract():
+    """Was test_v3_is_the_canonical_contract until v11.2.89.
 
-    Updated rather than deleted. This assertion is how the codebase states
-    which contract production actually runs under, and a flip that silently
-    removed it would make the next flip unremarkable.
+    Updated rather than deleted, as its predecessor was. This assertion is how
+    the codebase states which contract production actually runs under, and a
+    flip that silently removed it would make the next flip unremarkable.
     """
-    assert LATEST_MODEL_VERSION == "FACTOR_MODEL_V3"
+    assert LATEST_MODEL_VERSION == "FACTOR_MODEL_V4"
+
+
+def test_activating_v4_did_not_move_v3():
+    """V3 is frozen by production, not by convention.
+
+    Runs 31 onward reference it, through run 58 (18 Nov 2026), and
+    screener.compute_runs carries an immutable trigger -- so what those runs
+    claimed cannot be revised. Rows still attributed to V3 are validated
+    against this set; changing it would retroactively alter the contract they
+    were written under, which is why V4 exists rather than an amendment.
+
+    Pinned by size and by the boundary that moved: V3 must not have acquired
+    fcf_yield, which is exactly what V4 added.
+    """
+    v3 = GOVERNED_METRICS["FACTOR_MODEL_V3"]
+    from compute.engine.metric_states import CURRENCY_GATED_YIELDS
+
+    assert len(v3) == 80, (
+        f"V3 governs {len(v3)} metrics, not 80. A frozen version changed "
+        f"size, so every run finalised under it now validates against a "
+        f"different contract than it claimed.")
+    leaked = v3 & CURRENCY_GATED_YIELDS
+    assert not leaked, (
+        f"V3 acquired {sorted(leaked)} -- the metrics V4 added. Rows written "
+        f"under V3 would now be required to carry a sidecar entry their run "
+        f"never produced.")
 
 
 def test_activating_v3_did_not_move_v2():

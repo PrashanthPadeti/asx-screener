@@ -537,7 +537,7 @@ function OverviewTab({ o, code, anomalyFlags }: { o: CompanyOverview; code: stri
             { label: 'Div Yield',     value: formatRatio(o.dividend_yield), field: 'dividend_yield' },
             { label: 'Grossed-Up',    value: formatRatio(o.grossed_up_yield), field: 'grossed_up_yield' },
             { label: 'D/E Ratio',     value: fmtX(o.debt_to_equity), field: 'debt_to_equity' },
-            { label: 'FCF Yield',     value: formatRatio(o.fcf_yield) },
+            { label: 'FCF Yield',     value: formatRatio(o.fcf_yield), field: 'fcf_yield' },
             { label: 'Rev Growth 1Y', value: signedPct(o.revenue_growth_1y) },
             { label: 'Net Margin',    value: formatRatio(o.net_margin), field: 'net_margin' },
             { label: 'ROE',           value: formatRatio(o.roe), field: 'roe' },
@@ -1554,6 +1554,7 @@ function KeyMetricsPanel({ o }: { o: CompanyOverview }) {
     { label: 'Franking', field: 'franking_pct',          value: o.franking_pct != null ? `${o.franking_pct.toFixed(0)}%` : '—',
       highlight: o.franking_pct === 100 ? 'green' : 'neutral' },
     { label: 'FCF Yield',         value: o.fcf_yield != null ? `${(o.fcf_yield * 100).toFixed(2)}%` : '—',
+      field: 'fcf_yield',
       highlight: o.fcf_yield != null && o.fcf_yield > 0.04 ? 'green' : o.fcf_yield != null && o.fcf_yield < 0 ? 'red' : 'neutral' },
   ]
 

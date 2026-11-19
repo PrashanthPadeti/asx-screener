@@ -209,25 +209,54 @@ def test_v4_persists_fcf_yield_and_v3_does_not():
 
 # ── 3. Declared, not in force ───────────────────────────────────────────
 
-def test_v4_is_not_yet_the_canonical_version():
-    """Deliberate. Read the sequencing before changing this.
+def test_v4_is_the_canonical_version():
+    """Activated in v11.2.89, after both prerequisites were established.
 
-    LATEST_MODEL_VERSION stays V3 until:
-      * a canonical run under V4 has written metric_states for every served
-        row, so a suppressed fcf_yield carries a reason -- which means any
-        backfill comes BEFORE the first V4 run, as V3's did;
-      * the measured movement is accepted as intended: 18 of 2,120
-        composites, 169 value scores, no movement in the other four factors,
-        no stock shifting more than 27 rank places.
+    This test asserted the opposite until activation, which is the point of
+    having it: flipping LATEST_MODEL_VERSION is the step that makes every
+    absent governed value a contract violation, so it could not be a quiet
+    constant change. Changing this line required saying what had been
+    established, and here it is:
 
-    If you are flipping it, update this test in the same commit and say which
-    of the two above you established.
+    1. NO BACKFILL WAS REQUIRED, decided by execution order rather than by
+       the detector. commit_canonical runs require_stages -> verify_storage
+       -> write_all -> verify_population, so the first V4 run rewrites every
+       served row's sidecar before anything validates one. The detector
+       would have rejected a stale sidecar -- it reports missing_governed for
+       a row with no fcf_yield entry -- but it never sees one, because the
+       run replaced it. Both halves are asserted above.
+
+    2. THE MOVEMENT WAS MEASURED AND ACCEPTED, not discovered: 18 of 2,120
+       composites, 169 value scores, no movement in the other four factors,
+       no stock shifting more than 27 rank places, nothing withheld and
+       nothing gained.
+
+    If V4 is ever superseded, this becomes the frozen-version assertion and a
+    new one takes its place -- the pattern V1, V2 and V3 all follow.
     """
-    assert LATEST_MODEL_VERSION == V3, (
-        f"LATEST_MODEL_VERSION is {LATEST_MODEL_VERSION}. If V4 is now in "
-        f"force, the backfill and the accepted score movement must be "
-        f"recorded with it -- flipping this line is the step that makes "
-        f"every absent governed value a contract violation.")
+    assert LATEST_MODEL_VERSION == V4, (
+        f"LATEST_MODEL_VERSION is {LATEST_MODEL_VERSION}, not V4. If this is "
+        f"a deliberate rollback, the V4 runs already finalised reference a "
+        f"contract this build would no longer apply -- say which runs and "
+        f"why in the same commit.")
+
+
+def test_the_frozen_versions_are_still_reachable_after_activation():
+    """Activation must not make V1-V3 unreadable.
+
+    Finalised runs reference them, and `project_row` resolves a version per
+    row: mixed-version rows are the designed-for case, not an edge. If
+    activation had dropped the older entries, reading a V3 row back would
+    raise UnsupportedModelVersion and the run's own evidence would become
+    unreadable.
+    """
+    from compute.engine.factor_model import FACTOR_MODELS
+    for older in ("FACTOR_MODEL_V1", "FACTOR_MODEL_V2", V3):
+        assert older in GOVERNED_METRICS, f"{older} left the registry"
+        assert older in FACTOR_MODELS, f"{older} left the factor models"
+        assert cross_currency_for(older) is CROSS_CURRENCY, (
+            f"{older} no longer resolves the frozen ruleset, so its "
+            f"finalised runs would read back under V4's rules")
 
 
 def test_unit_sensitive_describes_the_frozen_set_only():

@@ -826,7 +826,7 @@ columns:
         the named row; WHERE asx_code = c.asx_code ORDER BY time DESC LIMIT 1 | LEFT JOIN LATERAL (market.yearly_metrics)
         AS ym: ORDER BY fiscal_year DESC LIMIT 1 -> the named row; WHERE asx_code = c.asx_code ORDER BY
         fiscal_year DESC LIMIT 1'
-      writer_job: build_screener_universe.py (INSERT)
+      writer_job: build_screener_universe.py (INSERT); universe_writer.py (canonical UPDATE, governed)
     roic:
       transformation_rule: Carried from market.valuation_snapshot and market.computed_metrics, with COALESCE
         chains falling back to market.yearly_metrics. The chain order IS the precedence and the row does

@@ -117,20 +117,24 @@ def test_no_two_price_metrics_claim_one_column():
 
 # ── Sequencing ──────────────────────────────────────────────────────────────
 
-def test_v3_is_live_and_its_producer_exists():
+def test_the_live_contract_has_a_producer_for_every_governed_price_metric():
     """The order of operations, as a test rather than as a note.
 
-    This asserted the opposite until step 5: that LATEST_MODEL_VERSION was
-    still V2, because flipping it before technical_compute emitted
-    assessments would make every absent return a contract violation on the
-    next canonical run -- violations() flags them, the read-back fails, the
-    publish refuses, and the daily pipeline stops.
+    This asserted V2 was live until V3's step 5, then V3 until V4's
+    activation in v11.2.89. Rewritten each time rather than deleted, per its
+    own instruction, because the rule it encodes does not change: flipping
+    LATEST_MODEL_VERSION before the producers can satisfy the contract makes
+    every absent value a violation, the read-back fails, the publish refuses,
+    and the pipeline stops.
 
-    Rewritten rather than deleted, per its own instruction. The guard is now
-    the other half of the same rule: V3 is live, so every governed price
-    metric must have a producer that can assess it.
+    The version assertion now lives in test_persistence_boundary and in the
+    V4 suite. What stays here is the half specific to this module: whatever
+    contract is live, every governed price metric must have a producer that
+    can assess it. Asserting against LATEST rather than a pinned name means
+    this keeps holding at the next flip instead of needing another edit.
     """
-    assert LATEST_MODEL_VERSION == V3
+    assert LATEST_MODEL_VERSION in GOVERNED_METRICS, (
+        f"{LATEST_MODEL_VERSION} is live and not in the governed registry")
 
     from compute.engine.window_states import (
         EXTREME_COLUMNS, window_assessment)

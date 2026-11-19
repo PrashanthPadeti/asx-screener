@@ -87,11 +87,29 @@ def _describe(states, factor, code):
     eff = (states.get(factor) or {}).get(code)
     if eff is None:
         return "no state recorded"
-    usable = getattr(eff, "usable", None)
     weights = getattr(eff, "weights", None) or {}
     total = sum(weights.values()) if weights else 0.0
-    return (f"usable={usable}  surviving={len(weights)}  "
-            f"weight={total:.2f}")
+    # THE STATE, not just `usable`. `usable` is a property derived from it --
+    # `state is APPLICABLE` -- so two factors can both read usable=False and
+    # reach the composite completely differently:
+    #
+    #   UNAVAILABLE      effective_weights rule 2: the signal applies and we
+    #                    do not have it, so the composite REFUSES. No
+    #                    renormalisation, because a score computed without it
+    #                    is a different model wearing this one's name.
+    #   NOT_MEANINGFUL   rule 4: every constituent is out of domain, so the
+    #                    factor itself is NM and the composite MAY drop it and
+    #                    renormalise within its floor.
+    #
+    # Printing only `usable` made those indistinguishable, which is why two
+    # hypotheses about the composite gains both looked unsupported by data
+    # that in fact contained the answer.
+    state = getattr(getattr(eff, "state", None), "name", None)
+    cause = getattr(getattr(eff, "cause", None), "name", None)
+    dropped = getattr(eff, "dropped_for_domain", ()) or ()
+    return (f"state={state:<15} cause={str(cause):<14} "
+            f"surviving={len(weights)} weight={total:.2f}"
+            + (f" dropped={list(dropped)}" if dropped else ""))
 
 
 def main() -> int:

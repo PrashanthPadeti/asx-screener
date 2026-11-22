@@ -183,12 +183,24 @@ class ReuseDecision:
     reason: str
     proven_by_run: Optional[int] = None
     differences: list = field(default_factory=list)
+    #: THE FINGERPRINT THE DECISION WAS MADE ON, carried rather than
+    #: discarded. Finding 24: a reusing run published a surface whose inputs
+    #: could not be tied to it by its own record, because this comparison
+    #: happens before the run exists and kept neither side of what it
+    #: compared. "unchanged" is a verdict; the value is the evidence, and
+    #: without it a later reader has to re-derive the inputs and hope nothing
+    #: moved in between.
+    aggregate: Optional[str] = None
+    schema_version: Optional[int] = None
 
     def lines(self) -> list:
         head = ("reuse PERMITTED" if self.permitted else "reuse REFUSED")
         out = [f"{head}: {self.reason}"]
         if self.proven_by_run is not None:
             out.append(f"  proven by run {self.proven_by_run}")
+        if self.aggregate is not None:
+            out.append(f"  on fingerprint schema {self.schema_version} "
+                       f"aggregate {self.aggregate[:16]}")
         out.extend(f"  {d}" for d in self.differences)
         return out
 
@@ -222,16 +234,22 @@ def check_yearly_reuse(cur) -> ReuseDecision:
             f"{proven.schema_version} → {current.schema_version}); the "
             f"recorded fingerprint is not comparable and says nothing about "
             f"whether the sources moved",
-            run_id, current.differences(proven))
+            run_id, current.differences(proven),
+            aggregate=current.aggregate,
+            schema_version=current.schema_version)
 
     if current.aggregate == proven.aggregate:
         return ReuseDecision(
-            True, "yearly source fingerprint is unchanged", run_id)
+            True, "yearly source fingerprint is unchanged", run_id,
+            aggregate=current.aggregate,
+            schema_version=current.schema_version)
 
     return ReuseDecision(
         False,
         "yearly output no longer represents current fundamentals",
-        run_id, current.differences(proven))
+        run_id, current.differences(proven),
+        aggregate=current.aggregate,
+        schema_version=current.schema_version)
 
 
 class PublicationRefused(RuntimeError):
@@ -294,12 +312,22 @@ def verify_yearly_currency_at_publication(cur, plan: RunPlan, run_id: int):
         failure_class)
 
 
-def open_plan(cur, plan: RunPlan, log) -> None:
+def open_plan(cur, plan: RunPlan, log) -> Optional[ReuseDecision]:
     """Evaluate a plan's preconditions. Raises rather than creating a run.
 
     Called before create_run, deliberately. A precondition failure must leave
     no trace in the run table: the condition was knowable without computing
     anything, and an abandoned run id would later read as a failed computation.
+
+    RETURNS THE REUSE DECISION so the caller can record it once a run exists,
+    and None when the plan reuses nothing.
+
+    That ordering is why finding 24 existed rather than being an oversight:
+    the decision is necessarily made BEFORE there is a run id to attach it
+    to, so carrying it forward has to be deliberate. Re-deciding after the
+    run opens would record a SECOND decision, which could differ from the one
+    that actually authorised the run -- and the authorising one is the only
+    one worth keeping.
     """
     log.info("plan %s — %s", plan.name, plan.description)
     log.info("  stages   : %s", ", ".join(plan.stages))
@@ -307,7 +335,7 @@ def open_plan(cur, plan: RunPlan, log) -> None:
     log.info("  reuses   : %s", ", ".join(plan.reuses) or "nothing")
 
     if "yearly_compute" not in plan.reuses:
-        return
+        return None
 
     decision = check_yearly_reuse(cur)
     for line in decision.lines():
@@ -318,3 +346,5 @@ def open_plan(cur, plan: RunPlan, log) -> None:
             f"{plan.name} cannot open: {decision.reason}. "
             f"Run {FULL_FUNDAMENTALS_CANONICAL.name} instead, which computes "
             f"yearly output for itself. No run was created.")
+
+    return decision

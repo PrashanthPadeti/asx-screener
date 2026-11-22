@@ -595,7 +595,12 @@ def _run() -> int:
         # here so a stale reused prerequisite prevents the run from opening at
         # all, rather than leaving an abandoned run id behind for a condition
         # that was knowable without computing anything.
-        open_plan(cur, plan, log)
+        # The decision is CAPTURED, not just logged. A reusing run published
+        # a surface whose inputs could not be tied to it by its own record
+        # (finding 24), because this evaluation happens before the run exists
+        # and the verdict only ever reached the log. It is recorded as a
+        # stage once there is a run id to attach it to.
+        reuse_decision = open_plan(cur, plan, log)
         health = assess_source_health(cur)
         log.info("  source health: %s",
                  "healthy" if health.healthy
@@ -616,6 +621,47 @@ def _run() -> int:
     conn.commit()
     log.info("run %s created under %s / plan %s",
              run.run_id, LATEST_MODEL_VERSION, plan.name)
+
+    # ── Finding 24: the reuse decision becomes part of the record ───────────
+    #
+    # A reusing plan has no yearly_compute stage, so until now its published
+    # surface could not be tied to an input fingerprint by its own record:
+    # the tie had to go through the earlier FULL run whose output it inherited,
+    # and the comparison that authorised the inheritance was unevidenced.
+    # Run 61 is the concrete case -- DAILY_CANONICAL under V4, 2,123 rows,
+    # reusing yearly output, and nothing in compute_run_stages saying against
+    # which fingerprint.
+    #
+    # Recorded as `yearly_reuse`, deliberately NOT as `yearly_compute`:
+    # proven_by_latest_yearly() selects stage_name='yearly_compute' AND
+    # status='success' to find the fingerprint a reuse may be checked against,
+    # so writing this under that name would make a run that computed nothing
+    # the authority for the next run's reuse. The populations are equal
+    # because this is an IDENTITY record, not a coverage claim -- it says
+    # which run's output was inherited and on what evidence, not how many
+    # entities were covered.
+    if reuse_decision is not None:
+        from compute.engine.run_stages import StageResult, record_stage
+        token = f"yearly_compute@run:{reuse_decision.proven_by_run}"
+        record_stage(cur, run.run_id, StageResult(
+            stage_name="yearly_reuse",
+            expected=frozenset({token}),
+            written=frozenset({token}),
+            grain="reused_run_id",
+            details={
+                "permitted": reuse_decision.permitted,
+                "reason": reuse_decision.reason,
+                "proven_by_run": reuse_decision.proven_by_run,
+                "fingerprint_schema": reuse_decision.schema_version,
+                "fingerprint_aggregate": reuse_decision.aggregate,
+                "differences": list(reuse_decision.differences),
+            },
+        ))
+        conn.commit()
+        log.info("  recorded yearly_reuse: inherited run %s on schema %s "
+                 "aggregate %s",
+                 reuse_decision.proven_by_run, reuse_decision.schema_version,
+                 (reuse_decision.aggregate or "")[:16])
 
     try:
         # The plan's producers, in the plan's order, which comes from the

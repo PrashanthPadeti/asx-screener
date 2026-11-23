@@ -649,7 +649,7 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
     # Index snapshots
     idx_rows = (await db.execute(text("""
         SELECT index_code, stock_count, gainers, losers, unchanged,
-               avg_return_1w, total_market_cap_bn
+               no_return, avg_return_1w, total_market_cap_bn
         FROM market.index_snapshots
         WHERE snapshot_date = :d
     """), {"d": snap_date})).mappings().all()
@@ -662,6 +662,10 @@ async def market_dashboard(db: AsyncSession = Depends(get_db)):
             gainers=int(r.get("gainers") or 0),
             losers=int(r.get("losers") or 0),
             unchanged=int(r.get("unchanged") or 0),
+            # `is not None`, not `or 0`. A measured zero and an unmeasured
+            # NULL are different facts and the API is the layer where that
+            # distinction is most often thrown away.
+            no_return=int(r["no_return"]) if r.get("no_return") is not None else None,
             avg_return_1w=float(r["avg_return_1w"]) if r.get("avg_return_1w") is not None else None,
             total_market_cap_bn=float(r["total_market_cap_bn"]) if r.get("total_market_cap_bn") is not None else None,
         )

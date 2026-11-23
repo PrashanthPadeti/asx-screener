@@ -64,6 +64,7 @@ EXDIV_DAYS = 14
 # than only where SQLAlchemy is installed.
 from compute.engine.snapshot_stages import (  # noqa: E402
     RETURN_PERIODS, SnapshotIncomplete, incomplete_stages,
+    index_coverage_refusal, index_partition_gap,
 )
 
 
@@ -113,25 +114,45 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                   AND status = 'active'
             """))).mappings().one()
 
-            # index_snapshots has no column for "we do not know", so there is
-            # nowhere truthful to put these. Today the count is 0 for both
-            # indices. If that changes, the run refuses rather than folding
-            # them into `unchanged` -- which is exactly the destruction the
-            # FILTER above was just repaired to stop. The fix when it fires is
-            # a `no_return` column, not a wider FILTER.
-            if (row["no_return"] or 0) > 0:
-                raise SnapshotIncomplete(
-                    f"{index_code}: {row['no_return']} of {row['stock_count']} "
-                    f"constituents have no return_1w, and index_snapshots has "
-                    f"no column to record that. Add one rather than counting "
-                    f"them as unchanged.")
+            # `no_return` now has somewhere truthful to go (migration 066), so
+            # it is recorded rather than refused. It was refused for three days
+            # from 20 November 2026 -- ASX300 had one constituent without a
+            # 1-week return and the table's widest bucket, `unchanged`,
+            # asserts the price did not move. Stopping was the right answer
+            # while the column did not exist; it is the wrong answer now that
+            # it does.
+            #
+            # Two checks survive, and they fail for different reasons.
+            #
+            # The partition is arithmetic: the four buckets must account for
+            # every constituent exactly once. Until no_return was stored
+            # separately this could not be checked at all -- the sum came out
+            # right while one bucket absorbed another's rows.
+            gap = index_partition_gap(index_code, row)
+            if gap:
+                raise SnapshotIncomplete(gap)
 
-            log.info("%s: %d stocks, gainers=%d, losers=%d, avg_1w=%.2f%%",
+            # Coverage is a statement about the inputs: AVG(return_1w) skips
+            # the unattributed, so beyond a declared fraction the published
+            # number is an average of the subset wearing the index's name.
+            thin = index_coverage_refusal(index_code, row)
+            if thin:
+                raise SnapshotIncomplete(thin)
+
+            # Logged WITH its coverage. "avg_1w=-0.42%" alone does not say how
+            # much of the index that average covers, and a verdict read off a
+            # filtered population has to carry the filter.
+            log.info("%s: %d stocks, gainers=%d, losers=%d, flat=%d, "
+                     "no_return=%d, avg_1w=%.2f%% (over %d of %d)",
                      index_code,
                      row["stock_count"] or 0,
                      row["gainers"] or 0,
                      row["losers"] or 0,
-                     (row["avg_return_1w"] or 0) * 100)
+                     row["unchanged"] or 0,
+                     row["no_return"] or 0,
+                     (row["avg_return_1w"] or 0) * 100,
+                     (row["stock_count"] or 0) - (row["no_return"] or 0),
+                     row["stock_count"] or 0)
 
             # Counted where the stage PRODUCES its row, not where it writes it.
             # Nesting this inside `if not dry_run` made the outcome line report
@@ -146,14 +167,15 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                 await session.execute(text("""
                     INSERT INTO market.index_snapshots
                         (snapshot_date, index_code, stock_count, gainers, losers, unchanged,
-                         avg_return_1w, total_market_cap_bn)
+                         no_return, avg_return_1w, total_market_cap_bn)
                     VALUES
-                        (:d, :ic, :sc, :g, :l, :u, :r1w, :mcap)
+                        (:d, :ic, :sc, :g, :l, :u, :nr, :r1w, :mcap)
                     ON CONFLICT (snapshot_date, index_code) DO UPDATE SET
                         stock_count         = EXCLUDED.stock_count,
                         gainers             = EXCLUDED.gainers,
                         losers              = EXCLUDED.losers,
                         unchanged           = EXCLUDED.unchanged,
+                        no_return           = EXCLUDED.no_return,
                         avg_return_1w       = EXCLUDED.avg_return_1w,
                         total_market_cap_bn = EXCLUDED.total_market_cap_bn,
                         created_at          = NOW()
@@ -164,6 +186,10 @@ async def run(snapshot_date: date, dry_run: bool = False) -> None:
                     "g":    row["gainers"],
                     "l":    row["losers"],
                     "u":    row["unchanged"],
+                    # Written on every run, including when it is 0. A measured
+                    # zero is a value -- it is the difference between "every
+                    # constituent had a return" and "nobody counted".
+                    "nr":   row["no_return"] or 0,
                     "r1w":  row["avg_return_1w"],
                     "mcap": row["total_market_cap_bn"],
                 })

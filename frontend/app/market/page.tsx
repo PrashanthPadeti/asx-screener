@@ -151,7 +151,17 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
         {/* Unchanged is shown, not dropped. The API has always returned it;
             omitting it meant 99 + 80 sat under a count of 199 and the twenty
             flat stocks simply vanished, with nothing on the page accounting
-            for the difference. */}
+            for the difference.
+
+            `no_return` is the same argument one bucket further on. It is the
+            constituents we have no 1-week return for, and it is the last
+            layer at which "we do not know" can still be destroyed: the
+            producer measures it, the store keeps it, the API refuses to
+            coerce it to 0, and here it has to be visible or none of that
+            reached anybody. Three states, not two:
+              null  the snapshot predates the measurement — say so
+              0     measured, and nothing was missing — say nothing
+              > 0   measured, and this many were — say how many */}
         <div>
           <p className="text-xs text-slate-400">Gainers / Flat / Losers</p>
           <p className="font-semibold text-slate-800">
@@ -161,6 +171,13 @@ function IndexCard({ label, snap }: { label: string; snap: MarketDashboard['asx2
             {' / '}
             <span className="text-red-500">{snap.losers}</span>
           </p>
+          {snap.no_return === null ? (
+            <p className="text-xs text-slate-400 mt-0.5">coverage not recorded</p>
+          ) : snap.no_return > 0 ? (
+            <p className="text-xs text-amber-600 mt-0.5">
+              {snap.no_return} no 1W return
+            </p>
+          ) : null}
         </div>
         <div>
           <p className="text-xs text-slate-400">Market Cap</p>

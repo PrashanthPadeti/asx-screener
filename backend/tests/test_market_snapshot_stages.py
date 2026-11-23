@@ -57,6 +57,10 @@ from pathlib import Path
 BACKEND  = Path(__file__).resolve().parents[1]
 ENGINE   = BACKEND / "compute/engine/market_snapshot.py"
 PAGE     = BACKEND.parent / "frontend/app/market/page.tsx"
+API      = BACKEND / "app/api/v1/routes/market.py"
+SCHEMA   = BACKEND / "app/schemas/market.py"
+TYPES    = BACKEND.parent / "frontend/lib/api.ts"
+MIGRATIONS = BACKEND.parent / "database/migrations"
 
 sys.path.insert(0, str(BACKEND))
 
@@ -261,16 +265,142 @@ def test_unchanged_does_not_absorb_missing_returns():
             f"unchanged still counts rows with no return: {line.strip()}")
 
 
-def test_missing_returns_are_counted_and_refused_rather_than_hidden():
-    """There is no column for 'we do not know', so the run must stop instead
-    of folding those rows into a bucket that claims to know."""
+def test_missing_returns_are_counted():
+    """The count has to exist before anything can be done with it."""
     src = ENGINE.read_text(encoding="utf-8")
     assert "AS no_return" in src, (
         "nothing counts constituents with no return_1w, so the condition "
         "that would re-create the defect is invisible")
-    assert re.search(r"no_return.*\n.*SnapshotIncomplete", src) \
-        or "no_return" in src.split("SnapshotIncomplete")[0], \
-        "no_return is counted but never acted on"
+
+
+def test_missing_returns_are_stored_rather_than_refused():
+    """Migration 066 gave them a destination, so the engine must use it.
+
+    From 20 to 23 November 2026 the stage refused: ASX300 had one constituent
+    without a 1-week return, and the only bucket wide enough to hold it was
+    `unchanged`, which asserts the price did not move. Refusing was right
+    while the column did not exist. Now that it does, refusing again would
+    leave the Market Overview page frozen over a fact the table can state.
+    """
+    src = ENGINE.read_text(encoding="utf-8")
+    insert = src[src.index("INSERT INTO market.index_snapshots"):]
+    insert = insert[:insert.index("})")]
+    assert "no_return" in insert, (
+        "the index INSERT does not write no_return, so the measurement is "
+        "taken and then dropped on the floor")
+    assert "no_return           = EXCLUDED.no_return" in insert, (
+        "the ON CONFLICT branch does not update no_return. Re-running a day "
+        "would refresh every other column and leave a stale coverage figure "
+        "beside fresh counts.")
+
+
+def test_the_migration_does_not_default_the_new_column_to_zero():
+    """A DEFAULT 0 would assert 'none were missing' about every historic row.
+
+    The column exists to carry "we do not know". Back-filling it with a
+    confident zero would perform, in the store, exactly the destruction the
+    producer refused to perform.
+    """
+    sql = sorted(MIGRATIONS.glob("*index_snapshot_no_return*.sql"))
+    assert sql, "migration adding index_snapshots.no_return is missing"
+    text_ = sql[-1].read_text(encoding="utf-8")
+    add = re.search(r"ADD COLUMN[^;]*no_return[^;]*;", text_, re.I)
+    assert add, f"{sql[-1].name} does not add a no_return column"
+    assert "DEFAULT" not in add.group(0).upper(), (
+        f"no_return is added with a DEFAULT: {add.group(0).strip()}. Every "
+        f"snapshot written before today would then claim a coverage it never "
+        f"measured.")
+    assert "NOT NULL" not in add.group(0).upper(), (
+        "no_return is NOT NULL, so there is no way to represent a snapshot "
+        "whose coverage was never measured")
+
+
+# ── 4b. The partition, and the coverage bound ────────────────────────────────
+
+def _idx(stock_count, gainers, losers, unchanged, no_return):
+    return {"stock_count": stock_count, "gainers": gainers, "losers": losers,
+            "unchanged": unchanged, "no_return": no_return}
+
+
+def test_the_four_buckets_must_account_for_every_constituent():
+    try:
+        from compute.engine.snapshot_stages import index_partition_gap
+    except ImportError as e:
+        raise Skipped(f"snapshot_stages ({e.name}) — it should need nothing")
+
+    # The real ASX300 row that caused the three-day outage: it partitions.
+    assert index_partition_gap("ASX300", _idx(277, 150, 120, 6, 1)) is None
+
+    # A NaN return satisfies none of > 0, < 0, = 0 or IS NULL, so it falls out
+    # of all four buckets. Nothing detected that before the partition check.
+    gap = index_partition_gap("ASX300", _idx(277, 150, 120, 6, 0))
+    assert gap and "277" in gap, (
+        "a constituent in none of the four buckets was not reported; the "
+        "published row would describe 276 companies under a count of 277")
+
+
+def test_a_bucket_counting_another_bucket_s_rows_is_a_gap():
+    """The original defect's shape: `unchanged` absorbing the unknowns.
+
+    Double-counting makes the sum exceed the total, which is why the check is
+    an equality rather than `summed <= total`.
+    """
+    try:
+        from compute.engine.snapshot_stages import index_partition_gap
+    except ImportError as e:
+        raise Skipped(f"snapshot_stages ({e.name}) — it should need nothing")
+    gap = index_partition_gap("ASX200", _idx(200, 100, 80, 21, 1))
+    assert gap, ("21 flat + 1 unknown out of 200 with 180 directional sums to "
+                 "202 and was accepted; a bucket is counting rows that belong "
+                 "to another")
+
+
+def test_one_missing_constituent_publishes_and_forty_refuse():
+    """Both outcomes of the coverage bound, from the same function.
+
+    A gate with only one tested outcome is the failure mode in
+    engineering_rule_gates_have_two_outcomes: the admitting path never runs.
+    """
+    try:
+        from compute.engine.snapshot_stages import (
+            MAX_UNATTRIBUTED_FRACTION, index_coverage_refusal)
+    except ImportError as e:
+        raise Skipped(f"snapshot_stages ({e.name}) — it should need nothing")
+
+    assert index_coverage_refusal("ASX300", _idx(277, 150, 120, 6, 1)) is None, (
+        "1 of 277 was refused. That is the condition the release exists to "
+        "publish; refusing it leaves the page frozen exactly as before.")
+
+    thin = index_coverage_refusal("ASX300", _idx(277, 130, 100, 7, 40))
+    assert thin and "40" in thin, (
+        "40 of 277 unattributed was published. AVG(return_1w) skips them, so "
+        "the row labels the average of 237 as the return of 277.")
+
+    assert 0 < MAX_UNATTRIBUTED_FRACTION < 1, (
+        f"the bound is {MAX_UNATTRIBUTED_FRACTION}, which either refuses "
+        f"everything or nothing")
+
+
+def test_an_empty_index_is_a_failure_not_a_quiet_market():
+    try:
+        from compute.engine.snapshot_stages import index_coverage_refusal
+    except ImportError as e:
+        raise Skipped(f"snapshot_stages ({e.name}) — it should need nothing")
+    assert index_coverage_refusal("ASX200", _idx(0, 0, 0, 0, 0)), (
+        "an index with no active constituents was accepted; 0/0 must not "
+        "divide to a passing coverage")
+
+
+def test_the_engine_calls_both_checks_and_still_raises():
+    """Asserted at the call site. A pure function nobody calls is a comment."""
+    fn = _run_fn()
+    called = {n.func.id for n in ast.walk(fn)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+    for name in ("index_partition_gap", "index_coverage_refusal"):
+        assert name in called, (
+            f"run() never calls {name}(), so the property it establishes is "
+            f"not established anywhere")
+    assert "SnapshotIncomplete" in ENGINE.read_text(encoding="utf-8")
 
 
 # ── 5. The page shows what the API returns ───────────────────────────────────
@@ -284,6 +414,85 @@ def test_the_market_page_renders_the_unchanged_count():
     assert "snap.unchanged" in src, (
         "the market page renders gainers and losers but not unchanged, so "
         "the three numbers cannot reconcile with stock_count")
+
+
+# ── 6. "We do not know" must survive every layer, not just the producer ──────
+#
+# Four separate tests rather than one, because this unknown has four chances
+# to be destroyed and they are owned by four different files. A producer that
+# measures coverage into a store that cannot hold it, an API that coerces it
+# to zero, or a page that never renders it, each turns the measurement back
+# into the silence it was built to break.
+
+def test_the_store_can_hold_an_unmeasured_coverage():
+    """Covered by the migration tests above; named here so the chain reads."""
+    sql = sorted(MIGRATIONS.glob("*index_snapshot_no_return*.sql"))
+    assert sql, "no migration gives index_snapshots anywhere to put no_return"
+
+
+def test_the_api_selects_and_exposes_no_return():
+    if not API.exists() or not SCHEMA.exists():
+        raise Skipped("the API tree (not present in this checkout)")
+    api_src = API.read_text(encoding="utf-8")
+
+    # EVERY query against the table, not the first one found. This file opens
+    # with a `MAX(snapshot_date) FROM market.index_snapshots` probe, so taking
+    # the first match reads the date lookup and reports the bucket query as
+    # broken -- which is what the first version of this test did.
+    selects = re.findall(r"SELECT(?:(?!SELECT).)*?FROM market\.index_snapshots",
+                         api_src, re.S)
+    assert selects, "nothing queries market.index_snapshots"
+    bucket_queries = [s for s in selects if "unchanged" in s]
+    assert bucket_queries, (
+        "no query reads the index buckets, so the dashboard cannot be "
+        "rendering them from this table")
+    for q in bucket_queries:
+        assert "no_return" in q, (
+            "a query selecting the index buckets omits no_return, so the "
+            "column is written nightly and never read")
+    assert "no_return" in SCHEMA.read_text(encoding="utf-8"), (
+        "IndexSnapshot has no no_return field, so the value cannot leave the "
+        "API even once it is selected")
+
+
+def test_the_api_does_not_coerce_an_unmeasured_coverage_to_zero():
+    """`or 0` here is the whole defect, one layer out.
+
+    Every other integer field in this response uses `int(r.get(x) or 0)`,
+    which is correct for a count that is always measured. For no_return it
+    would turn "this snapshot never counted" into "nothing was missing" --
+    and the page would then show three numbers that do not add up to
+    stock_count with nothing to attribute the difference to.
+    """
+    if not API.exists():
+        raise Skipped("the API tree (not present in this checkout)")
+    src = API.read_text(encoding="utf-8")
+    assigns = [ln.strip() for ln in src.splitlines()
+               if "no_return=" in ln and not ln.strip().startswith("#")]
+    assert assigns, "no_return is never passed to IndexSnapshot"
+    for line in assigns:
+        assert "or 0" not in line, (
+            f"no_return is coerced to zero: {line}. A snapshot that never "
+            f"measured its coverage would report perfect coverage.")
+        assert "is not None" in line, (
+            f"no_return is not guarded on None: {line}")
+
+
+def test_the_page_distinguishes_unmeasured_from_none_missing():
+    """Zero and null must not render the same, or the API's care is wasted."""
+    if not PAGE.exists() or not TYPES.exists():
+        raise Skipped("the frontend tree (not present in this checkout)")
+    assert "no_return: number | null" in TYPES.read_text(encoding="utf-8"), (
+        "the TypeScript type does not admit null, so an unmeasured coverage "
+        "arrives as a number and the distinction is lost before render")
+    src = PAGE.read_text(encoding="utf-8")
+    assert "snap.no_return" in src, (
+        "the market page never renders no_return. The producer measures it, "
+        "the store keeps it and the API refuses to coerce it -- and the "
+        "customer still sees three numbers that do not reconcile.")
+    assert "snap.no_return === null" in src, (
+        "the page does not separate null from 0, so a snapshot with unknown "
+        "coverage renders identically to one with perfect coverage")
 
 
 if __name__ == "__main__":

@@ -57,6 +57,15 @@ class IndexSnapshot(BaseModel):
     gainers: int
     losers: int
     unchanged: int
+    #: Constituents with no 1-week return at snapshot time.
+    #:
+    #: Optional, and None is NOT zero. A snapshot written before migration 066
+    #: has no measurement of its own coverage, and coercing that to 0 here
+    #: would assert "every constituent had a return" about a row that never
+    #: counted. The three numbers above then fail to reconcile with
+    #: stock_count and the page has nothing to blame it on -- which is the
+    #: whole defect, moved one layer out.
+    no_return: Optional[int] = None
     avg_return_1w: Optional[float] = None
     total_market_cap_bn: Optional[float] = None
 

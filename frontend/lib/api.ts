@@ -755,6 +755,9 @@ export interface IndexSnapshot {
   gainers: number
   losers: number
   unchanged: number
+  /** Constituents with no 1-week return. `null` means the snapshot predates
+   *  the measurement — it does not mean none were missing. */
+  no_return: number | null
   avg_return_1w: number | null
   total_market_cap_bn: number | null
 }

@@ -285,9 +285,23 @@ def test_missing_returns_are_stored_rather_than_refused():
     src = ENGINE.read_text(encoding="utf-8")
     insert = src[src.index("INSERT INTO market.index_snapshots"):]
     insert = insert[:insert.index("})")]
-    assert "no_return" in insert, (
-        "the index INSERT does not write no_return, so the measurement is "
-        "taken and then dropped on the floor")
+
+    # The COLUMN LIST specifically, not the statement as a whole. Asserting
+    # `"no_return" in insert` passed a mutation that deleted the column from
+    # the insert while leaving `no_return = EXCLUDED.no_return` in the
+    # ON CONFLICT branch -- the test was satisfied by the clause that cannot
+    # run if the column is not being inserted.
+    columns = insert[:insert.index("VALUES")]
+    assert "no_return" in columns, (
+        "the index INSERT's column list does not include no_return, so the "
+        "measurement is taken and then dropped on the floor")
+
+    # And the value has to be bound, or the column list names a parameter
+    # nothing supplies.
+    values = insert[insert.index("VALUES"):]
+    assert ":nr" in values and '"nr":' in insert, (
+        "no_return is in the column list but no :nr parameter is bound to it")
+
     assert "no_return           = EXCLUDED.no_return" in insert, (
         "the ON CONFLICT branch does not update no_return. Re-running a day "
         "would refresh every other column and leave a stale coverage figure "

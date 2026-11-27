@@ -55,6 +55,31 @@ ROUTE = BACKEND / "app/api/v1/routes/screener.py"
 #: answers a question nobody asked.
 POPULATION = "u.price IS NOT NULL AND u.status = 'active'"
 
+#: Presets accepted as empty, keyed by (preset id, column), with the reason.
+#:
+#: Why an exemption list exists at all: on 27 November 2026 the Piotroski
+#: filter was removed from the nine Pro/Premium presets that carried it,
+#: because the column is NULL for the entire universe and those screens
+#: returned nothing to paying customers. `piotroski_strong` was deliberately
+#: kept -- it is free, and the F-Score is not one criterion among several in
+#: it, it is the whole screen. Without an entry here this check would report a
+#: failure nobody intends to fix, and a check that is permanently red is a
+#: check that gets ignored. That is the failure mode this file was written to
+#: avoid, so the exemption is narrow and it is audited:
+#:
+#:   * keyed by (id, column), so the same preset acquiring a DIFFERENT barren
+#:     column still fails, and another preset acquiring THIS column still
+#:     fails -- which is the regression that would undo today's release;
+#:   * a stale entry fails too. If piotroski_f_score is ever populated, this
+#:     exemption is wrong and the run says so, because the right response is
+#:     to re-decide whether the nine filters come back -- a decision with
+#:     evidence, not a silent revert.
+ACCEPTED_EMPTY = {
+    ("piotroski_strong", "piotroski_f_score"):
+        "free-tier screen whose entire identity is the F-Score; it is "
+        "honestly empty until the producer computes one",
+}
+
 
 def _dsn() -> str:
     """A psycopg2 DSN, resolved here rather than inherited.
@@ -170,16 +195,37 @@ def main() -> int:
     # and it still fails the run -- but calling it "cannot return a row" would
     # now be false, and a checker that says something false about a screen a
     # customer can see working is a checker that gets ignored.
-    empty, unrankable = [], []
+    empty, unrankable, accepted = [], [], []
     for p in presets:
         meta = {"id": p.get("id"), "name": p.get("name"),
                 "premium": bool(p.get("premium"))}
+        pid = p.get("id")
         filtered_on = sorted({f["field"] for f in p.get("filters", [])} & useless)
         if filtered_on:
-            empty.append({**meta, "unsatisfiable_on": filtered_on})
+            # Accepted only if EVERY column emptying it is accepted for this
+            # preset. One unlisted barren column and the preset still fails:
+            # an exemption covers a known, named condition, not the preset.
+            unaccounted = [c for c in filtered_on
+                           if (pid, c) not in ACCEPTED_EMPTY]
+            if unaccounted:
+                empty.append({**meta, "unsatisfiable_on": filtered_on,
+                              "unaccounted_for": unaccounted})
+            else:
+                accepted.append({**meta, "accepted_on": filtered_on,
+                                 "reason": ACCEPTED_EMPTY[(pid, filtered_on[0])]})
         sort_by = p.get("sort_by")
-        if sort_by and sort_by in useless:
+        if sort_by and sort_by in useless and (pid, sort_by) not in ACCEPTED_EMPTY:
             unrankable.append({**meta, "unrankable_on": sort_by})
+
+    # An exemption that is no longer needed is itself a finding. If the column
+    # has values now, keeping the entry hides the fact that the nine filters
+    # removed on 27 Nov 2026 could legitimately come back.
+    stale = sorted((pid, col) for (pid, col) in ACCEPTED_EMPTY
+                   if col in cols and col not in barren)
+    # And one naming a preset or column that no longer exists guards nothing.
+    preset_ids = {p.get("id") for p in presets}
+    orphaned = sorted((pid, col) for (pid, col) in ACCEPTED_EMPTY
+                      if pid not in preset_ids)
 
     if args.json:
         print(json.dumps({"population": population,
@@ -187,7 +233,11 @@ def main() -> int:
                           "empty_columns": sorted(barren),
                           "unknown_fields": unknown,
                           "broken": empty,            # historical key name
-                          "unrankable": unrankable}, indent=2))
+                          "unrankable": unrankable,
+                          "accepted_empty": accepted,
+                          "stale_exemptions": [list(s) for s in stale],
+                          "orphaned_exemptions": [list(o) for o in orphaned],
+                          }, indent=2))
     else:
         print(f"population: {population} active companies")
         print(f"presets:    {len(presets)}")
@@ -206,10 +256,31 @@ def main() -> int:
             for b in unrankable:
                 tag = "PREMIUM" if b["premium"] else "free"
                 print(f"  [{tag:7}] {b['id']:28} sort_by {b['unrankable_on']}")
-        if not empty and not unrankable:
-            print("\nall presets are satisfiable and rankable")
+        if accepted:
+            print(f"\n{len(accepted)} preset(s) accepted as empty "
+                  f"(declared in ACCEPTED_EMPTY, not a failure):")
+            for a in accepted:
+                tag = "PREMIUM" if a["premium"] else "free"
+                print(f"  [{tag:7}] {a['id']:28} {a['accepted_on']}")
+                print(f"            {a['reason']}")
+        if stale:
+            print(f"\n{len(stale)} STALE exemption(s) — the column has values "
+                  f"now, so the exemption is wrong:")
+            for pid, col in stale:
+                print(f"  {pid:28} {col}")
+            print("  Remove the entry and decide deliberately whether the "
+                  "filters removed on 27 Nov 2026 come back.")
+        if orphaned:
+            print(f"\n{len(orphaned)} ORPHANED exemption(s) — no such preset, "
+                  f"so the entry guards nothing:")
+            for pid, col in orphaned:
+                print(f"  {pid:28} {col}")
+        if not empty and not unrankable and not stale and not orphaned:
+            print("\nall presets are satisfiable and rankable"
+                  + (" (apart from the declared exemptions above)"
+                     if accepted else ""))
 
-    return 1 if (empty or unrankable) else 0
+    return 1 if (empty or unrankable or stale or orphaned) else 0
 
 
 if __name__ == "__main__":

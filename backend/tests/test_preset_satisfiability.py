@@ -69,6 +69,23 @@ def _literal(name: str):
     raise AssertionError(f"{name} not found")
 
 
+def _script_literal(name: str):
+    """A module-level literal from assert_presets_satisfiable.py.
+
+    Read from the SCRIPT, not re-declared here. A copy of ACCEPTED_EMPTY in
+    this file would drift from the one the data check actually honours, and
+    then the two halves of this guard would be enforcing different lists.
+    """
+    tree = ast.parse(SCRIPT.read_text(encoding="utf-8"))
+    for node in tree.body:
+        targets = ([node.target] if isinstance(node, ast.AnnAssign)
+                   else node.targets if isinstance(node, ast.Assign) else [])
+        for t in targets:
+            if isinstance(t, ast.Name) and t.id == name:
+                return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} not found in {SCRIPT.name}")
+
+
 def _presets() -> list:
     tree = ast.parse(ROUTE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
@@ -106,6 +123,75 @@ def test_every_preset_filters_on_fields_the_registry_knows():
     assert not offences, (
         "presets reference fields ALLOWED_FIELDS does not define, so they "
         "can never return a row:\n  " + "\n  ".join(offences))
+
+
+def test_no_paid_preset_filters_on_a_column_declared_empty():
+    """The 27 Nov 2026 removal, asserted statically so the gate can hold it.
+
+    `piotroski_f_score` is NULL for the whole universe -- 0 of 33,864 rows in
+    market.yearly_metrics, 0 of 2,585 in screener.fundamentals, 0 of 2,128
+    active companies. Nine Pro/Premium presets filtered on it, so every one
+    of them returned "0 stocks matched" to a paying customer.
+
+    This is the static half. It cannot measure coverage -- the gate's clone
+    has no universe rows, which is why the data half lives in
+    assert_presets_satisfiable.py -- so it asserts the decision instead: a
+    column listed in that script's ACCEPTED_EMPTY is one we have measured as
+    empty, and no PAID preset may filter on it. A free preset may, if it is
+    listed there by name, because an honestly empty free screen was the
+    deliberate outcome here.
+    """
+    accepted_cols = {col for _pid, col in _script_literal("ACCEPTED_EMPTY")}
+    assert accepted_cols, (
+        "ACCEPTED_EMPTY is empty, so this test guards nothing. If the "
+        "exemption was genuinely removed because the column is populated "
+        "again, delete this test deliberately rather than leaving it vacuous.")
+
+    exempt_pairs = set(_script_literal("ACCEPTED_EMPTY"))
+    offences = []
+    for preset in _presets():
+        pid, paid = preset.get("id"), bool(preset.get("premium"))
+        for f in preset.get("filters", []):
+            col = f["field"]
+            if col not in accepted_cols:
+                continue
+            if paid:
+                offences.append(
+                    f"{pid} [paid] filters on {col}, which is declared empty")
+            elif (pid, col) not in exempt_pairs:
+                offences.append(
+                    f"{pid} [free] filters on {col} without an "
+                    f"ACCEPTED_EMPTY entry naming it")
+    assert not offences, (
+        "preset(s) filter on a column measured as empty for the entire "
+        "universe, so they cannot return a row:\n  "
+        + "\n  ".join(offences))
+
+
+def test_no_preset_description_advertises_a_criterion_it_does_not_apply():
+    """Two of the nine named Piotroski in their description text.
+
+    A screen that stops applying a filter but keeps advertising it is a
+    smaller version of the same defect: the customer is told a criterion was
+    used. Only presets that still filter on the column may name it.
+    """
+    accepted_cols = {col for _pid, col in _script_literal("ACCEPTED_EMPTY")}
+    # Column name -> how marketing copy refers to it.
+    prose = {"piotroski_f_score": ("piotroski", "f-score")}
+    offences = []
+    for preset in _presets():
+        text = f"{preset.get('name', '')} {preset.get('description', '')}".lower()
+        fields = {f["field"] for f in preset.get("filters", [])}
+        for col in accepted_cols:
+            words = prose.get(col)
+            if not words:
+                continue
+            if any(w in text for w in words) and col not in fields:
+                offences.append(f"{preset.get('id')}: copy mentions "
+                                f"{col} but no filter uses it")
+    assert not offences, (
+        "preset copy advertises a criterion the screen does not apply:\n  "
+        + "\n  ".join(offences))
 
 
 def test_the_satisfiability_check_exists_and_fails_loudly():

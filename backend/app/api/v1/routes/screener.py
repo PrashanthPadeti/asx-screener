@@ -1859,7 +1859,39 @@ async def get_screener_fields():
 
 @router.get("/presets")
 async def get_screener_presets():
-    """Pre-built screen templates. premium=True presets require Pro plan or higher."""
+    """Pre-built screen templates. premium=True presets require Pro plan or higher.
+
+    WHY NO PAID PRESET FILTERS ON piotroski_f_score
+    -----------------------------------------------
+    It is NULL for the entire universe, and not sparsely -- measured on
+    26 November 2026 across every table that carries it:
+
+        market.yearly_metrics    33,864 rows        0 with a score
+        screener.fundamentals     2,585 rows        0 with a score
+        screener.universe         2,128 active      0 with a score
+
+    A `piotroski_f_score >= 7` filter therefore matches nothing, and nine
+    Pro/Premium presets carried one: every one of them returned "0 stocks
+    matched" to a paying customer, indistinguishable from a screen that was
+    merely strict. `assert_presets_satisfiable.py` has reported exactly this
+    since 30 October 2026.
+
+    The earlier release moved these presets' SORTS off the column but kept the
+    FILTERS, reasoning that the filter "is what the screen is for". That is
+    true of `piotroski_strong`, whose entire identity is the F-Score -- it is
+    free, it stays, and it is honestly empty. It is not true of the other
+    nine: Piotroski was one quality criterion among three to six, and keeping
+    it withheld screens that their remaining criteria can answer today. Each
+    of the nine retains its other filters unchanged; nothing was substituted
+    in, because a replacement nobody measured is how an unmeasured sort was
+    swapped for another one in the last attempt at this.
+
+    The reason the producer never computes the score is a separate open
+    finding. Removing the filter does not fix the metric and does not claim
+    to; it stops nine paid screens asserting a criterion the data cannot
+    answer. If the score is ever populated, re-adding these filters is a
+    deliberate decision with a satisfiability check to back it, not a revert.
+    """
     return {
         "presets": [
             # ── Free presets ──────────────────────────────────────────────────
@@ -1947,7 +1979,10 @@ async def get_screener_presets():
                 "min_plan":    "pro",
                 "filters": [
                     {"field": "pe_ratio",          "operator": "lte", "value": 15},
-                    {"field": "piotroski_f_score", "operator": "gte", "value": 7},
+                    # piotroski_f_score >= 7 removed: NULL for all 2,128
+                    # companies, so this screen matched nothing. See the
+                    # docstring. ROE, net margin and D/E carry the "quality"
+                    # half of the name and are populated.
                     {"field": "roe",               "operator": "gte", "value": 12},
                     {"field": "debt_to_equity",    "operator": "lte", "value": 0.5},
                     {"field": "net_margin",        "operator": "gt",  "value": 5},
@@ -2186,7 +2221,10 @@ async def get_screener_presets():
                 "premium":     True,
                 "min_plan":    "premium",
                 "filters": [
-                    {"field": "piotroski_f_score",  "operator": "gte", "value": 7},
+                    # piotroski_f_score >= 7 removed (NULL for the whole
+                    # universe; see the docstring). The composite model this
+                    # preset mirrors is unaffected -- it is scored in the
+                    # engine, not by this filter list.
                     {"field": "roe",                "operator": "gte", "value": 15},
                     {"field": "earnings_growth_1y", "operator": "gte", "value": 10},
                     {"field": "net_margin",         "operator": "gte", "value": 8},
@@ -2211,7 +2249,10 @@ async def get_screener_presets():
                     {"field": "is_miner",           "operator": "eq",  "value": True},
                     {"field": "pe_ratio",           "operator": "lte", "value": 15},
                     {"field": "pe_ratio",           "operator": "gt",  "value": 0},
-                    {"field": "piotroski_f_score",  "operator": "gte", "value": 6},
+                    # piotroski_f_score >= 6 removed (see the docstring). The
+                    # "strong balance sheet" claim now rests on net_margin
+                    # alone; the description is unchanged because it never
+                    # named the F-Score.
                     {"field": "net_margin",         "operator": "gt",  "value": 0},
                     {"field": "market_cap",         "operator": "gte", "value": 100},
                 ],
@@ -2234,7 +2275,7 @@ async def get_screener_presets():
             {
                 "id":          "franking_optimiser",
                 "name":        "Franking Credit Optimiser",
-                "description": "100% fully-franked stocks with grossed-up yield ≥ 7% and solid Piotroski score",
+                "description": "100% fully-franked stocks with grossed-up yield ≥ 7% from profitable companies",
                 "icon":        "dollar-sign",
                 "premium":     True,
                 "min_plan":    "premium",
@@ -2242,7 +2283,10 @@ async def get_screener_presets():
                     {"field": "franking_pct",       "operator": "eq",  "value": 100},
                     {"field": "grossed_up_yield",   "operator": "gte", "value": 7},
                     {"field": "net_margin",         "operator": "gt",  "value": 0},
-                    {"field": "piotroski_f_score",  "operator": "gte", "value": 5},
+                    # piotroski_f_score >= 5 removed (see the docstring). The
+                    # description said "solid Piotroski score" and has been
+                    # rewritten: a screen must not advertise a criterion it
+                    # does not apply.
                 ],
                 "sort_by": "grossed_up_yield", "sort_dir": "desc",
             },
@@ -2262,7 +2306,7 @@ async def get_screener_presets():
             {
                 "id":          "multi_factor_qm",
                 "name":        "Multi-Factor Quality + Momentum",
-                "description": "Elite compounders — strong ROE, growing revenue, high Piotroski, above 200-day MA with positive 3M return",
+                "description": "Elite compounders — strong ROE, growing revenue, high margins, above 200-day MA with positive 3M return",
                 "icon":        "layers",
                 "premium":     True,
                 "min_plan":    "premium",
@@ -2270,7 +2314,11 @@ async def get_screener_presets():
                     {"field": "roe",                "operator": "gte", "value": 15},
                     {"field": "net_margin",         "operator": "gte", "value": 8},
                     {"field": "revenue_growth_1y",  "operator": "gte", "value": 10},
-                    {"field": "piotroski_f_score",  "operator": "gte", "value": 6},
+                    # piotroski_f_score >= 6 removed (see the docstring). The
+                    # description said "high Piotroski" and has been
+                    # rewritten. ROE and net margin are the quality factors
+                    # that remain; return_3m and above_sma200 are the momentum
+                    # half, so both halves of the name still hold.
                     {"field": "return_3m",          "operator": "gte", "value": 5},
                     {"field": "above_sma200",       "operator": "eq",  "value": True},
                 ],
@@ -2313,7 +2361,10 @@ async def get_screener_presets():
                     {"field": "net_margin",     "operator": "gte", "value": 12},
                     {"field": "revenue_growth_1y", "operator": "gte", "value": 12},
                     {"field": "debt_to_equity", "operator": "lte", "value": 0.3},
-                    {"field": "piotroski_f_score", "operator": "gte", "value": 7},
+                    # piotroski_f_score >= 7 removed (see the docstring). This
+                    # screen is the least affected: ROE >= 20, 5y ROIC >= 15,
+                    # net margin >= 12 and D/E <= 0.3 already make it the
+                    # strictest quality filter in the set.
                     {"field": "market_cap",     "operator": "gte", "value": 500},
                 ],
                 "sort_by": "roe", "sort_dir": "desc",
@@ -2330,7 +2381,10 @@ async def get_screener_presets():
                     {"field": "current_ratio",     "operator": "gte", "value": 2},
                     {"field": "debt_to_equity",    "operator": "lte", "value": 0.5},
                     {"field": "net_margin",        "operator": "gte", "value": 5},
-                    {"field": "piotroski_f_score", "operator": "gte", "value": 6},
+                    # piotroski_f_score >= 6 removed (see the docstring). The
+                    # screen's named signal is altman_z_score >= 3, which IS
+                    # populated -- the Piotroski filter was emptying a screen
+                    # whose own criterion works.
                     {"field": "market_cap",        "operator": "gte", "value": 100},
                 ],
                 "sort_by": "altman_z_score", "sort_dir": "desc",
@@ -2363,7 +2417,9 @@ async def get_screener_presets():
                     {"field": "dividend_yield", "operator": "gte", "value": 3},
                     {"field": "franking_pct",   "operator": "gte", "value": 50},
                     {"field": "net_margin",     "operator": "gt",  "value": 0},
-                    {"field": "piotroski_f_score", "operator": "gte", "value": 5},
+                    # piotroski_f_score >= 5 removed (see the docstring).
+                    # "financially sound" now rests on net_margin > 0; the
+                    # yield and franking criteria are what the screen is for.
                     {"field": "market_cap",     "operator": "gte", "value": 500},
                 ],
                 "sort_by": "grossed_up_yield", "sort_dir": "desc",
@@ -2378,7 +2434,9 @@ async def get_screener_presets():
                 "filters": [
                     {"field": "market_cap",        "operator": "gte", "value": 50},
                     {"field": "market_cap",        "operator": "lte", "value": 500},
-                    {"field": "piotroski_f_score", "operator": "gte", "value": 7},
+                    # piotroski_f_score >= 7 removed (see the docstring).
+                    # "strong fundamentals" remains revenue growth >= 20,
+                    # net margin >= 5 and D/E <= 0.5.
                     {"field": "revenue_growth_1y", "operator": "gte", "value": 20},
                     {"field": "net_margin",        "operator": "gte", "value": 5},
                     {"field": "debt_to_equity",    "operator": "lte", "value": 0.5},

@@ -102,9 +102,23 @@ def main() -> int:
         print("2  no presets selected — measuring nothing")
         return 2
 
+    from compute.engine.screen_sql import resolve_run_scope
+
     conn = psycopg2.connect(_dsn())
     try:
         cur = conn.cursor()
+
+        # The builder refuses to compile a governed read without a validated
+        # run scope, and it is right to: outside a known contract an absent
+        # sidecar entry cannot be read as APPLICABLE. The scope is resolved
+        # through the server's own service call rather than reconstructed
+        # here, for the same reason the SQL is -- "validated" means a
+        # supported model version, a completed recompute and a contract-key
+        # check, and an instrument that approximates that measures a
+        # population the product would not serve.
+        scope = resolve_run_scope(cur)
+        print(f"run scope: {scope}\n")
+
         print(f"{'min_plan':9} {'preset':30} {'rows':>6}  filters")
         print("-" * 78)
         empty = []
@@ -112,7 +126,7 @@ def main() -> int:
             req = ScreenerRequest(filters=p.get("filters", []),
                                   sort_by=p.get("sort_by") or "market_cap",
                                   sort_dir=p.get("sort_dir") or "desc")
-            count_sql, _data_sql, params = build_screener_sql(req)
+            count_sql, _data_sql, params = build_screener_sql(req, scope=scope)
             cur.execute(count_sql, params)
             n = cur.fetchone()[0]
             plan = p.get("min_plan") or "free"
